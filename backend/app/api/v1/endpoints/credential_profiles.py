@@ -18,7 +18,7 @@ _MASKED = "••••••••"
 
 
 def _serialize(p: CredentialProfile, show_names_only: bool = True) -> dict[str, Any]:
-    """Return profile dict — passwords are never included in responses."""
+    """Return profile dict — credentials are never included in responses."""
     return {
         "id": p.id,
         "name": p.name,
@@ -28,7 +28,7 @@ def _serialize(p: CredentialProfile, show_names_only: bool = True) -> dict[str, 
         "ssh_port": p.ssh_port,
         "enable_secret_set": bool(p.enable_secret_enc),
         "snmp_enabled": p.snmp_enabled,
-        "snmp_community": p.snmp_community,
+        "snmp_community_set": bool(p.snmp_community),
         "snmp_version": p.snmp_version,
         "snmp_port": p.snmp_port,
         "snmp_v3_username": p.snmp_v3_username,
@@ -71,13 +71,16 @@ def _apply_fields(p: CredentialProfile, payload: dict):
     if "snmp_v3_priv_protocol" in payload:
         p.snmp_v3_priv_protocol = payload["snmp_v3_priv_protocol"] or None
     if "snmp_v3_auth_passphrase" in payload and payload["snmp_v3_auth_passphrase"]:
-        p.snmp_v3_auth_passphrase = payload["snmp_v3_auth_passphrase"]
+        p.snmp_v3_auth_passphrase = encrypt_credential(payload["snmp_v3_auth_passphrase"])
     if "snmp_v3_priv_passphrase" in payload and payload["snmp_v3_priv_passphrase"]:
-        p.snmp_v3_priv_passphrase = payload["snmp_v3_priv_passphrase"]
+        p.snmp_v3_priv_passphrase = encrypt_credential(payload["snmp_v3_priv_passphrase"])
 
 
 @router.get("")
-async def list_profiles(db: AsyncSession = Depends(get_db)):
+async def list_profiles(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(CredentialProfile).order_by(CredentialProfile.name))
     return [_serialize(p) for p in result.scalars().all()]
 
@@ -85,7 +88,7 @@ async def list_profiles(db: AsyncSession = Depends(get_db)):
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_profile(
     payload: dict,
-    current_user: CurrentUser = None,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     if not payload.get("name"):
@@ -109,7 +112,7 @@ async def create_profile(
 async def update_profile(
     profile_id: int,
     payload: dict,
-    current_user: CurrentUser = None,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(CredentialProfile).where(CredentialProfile.id == profile_id))
@@ -150,8 +153,8 @@ def _serialize_policy(p: RotationPolicy) -> dict:
 @router.get("/{profile_id}/rotation-policy")
 async def get_rotation_policy(
     profile_id: int,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
 ):
     result = await db.execute(
         select(RotationPolicy).where(RotationPolicy.credential_profile_id == profile_id)
@@ -166,8 +169,8 @@ async def get_rotation_policy(
 async def create_rotation_policy(
     profile_id: int,
     payload: dict,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
 ):
     profile = await db.get(CredentialProfile, profile_id)
     if not profile:
@@ -197,8 +200,8 @@ async def create_rotation_policy(
 async def update_rotation_policy(
     profile_id: int,
     payload: dict,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
 ):
     result = await db.execute(
         select(RotationPolicy).where(RotationPolicy.credential_profile_id == profile_id)
@@ -223,8 +226,8 @@ async def update_rotation_policy(
 @router.delete("/{profile_id}/rotation-policy", status_code=204)
 async def delete_rotation_policy(
     profile_id: int,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
 ):
     result = await db.execute(
         select(RotationPolicy).where(RotationPolicy.credential_profile_id == profile_id)
@@ -239,8 +242,8 @@ async def delete_rotation_policy(
 @router.post("/{profile_id}/rotate-now")
 async def rotate_now(
     profile_id: int,
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
 ):
     """Trigger an immediate manual credential rotation for a profile."""
     profile = await db.get(CredentialProfile, profile_id)
@@ -263,8 +266,8 @@ async def rotate_now(
 
 @router.get("/rotation-policies/all")
 async def list_all_rotation_policies(
+    _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
 ):
     """List all rotation policies with profile name for the Settings dashboard."""
     result = await db.execute(select(RotationPolicy))
@@ -282,7 +285,7 @@ async def list_all_rotation_policies(
 @router.delete("/{profile_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_profile(
     profile_id: int,
-    current_user: CurrentUser = None,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(select(CredentialProfile).where(CredentialProfile.id == profile_id))

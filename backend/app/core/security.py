@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import jwt as pyjwt
 from cryptography.fernet import Fernet
-from jose import JWTError, jwt
+from jwt.exceptions import InvalidTokenError as JWTError  # noqa: F401 — re-exported for callers
 from passlib.context import CryptContext
 
 from app.core.config import settings
@@ -33,12 +34,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return pyjwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def decode_access_token(token: str) -> Optional[dict]:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return pyjwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
     except JWTError:
         return None
 
@@ -49,3 +50,14 @@ def encrypt_credential(plaintext: str) -> str:
 
 def decrypt_credential(ciphertext: str) -> str:
     return _get_fernet().decrypt(ciphertext.encode()).decode()
+
+
+def decrypt_credential_safe(value: Optional[str]) -> Optional[str]:
+    """Decrypt a Fernet-encrypted credential; return the original string if it is not
+    encrypted (e.g. values written before encryption was enabled)."""
+    if not value:
+        return None
+    try:
+        return decrypt_credential(value)
+    except Exception:
+        return value

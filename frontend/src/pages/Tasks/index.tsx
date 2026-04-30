@@ -14,6 +14,7 @@ import { tasksApi } from '@/api/tasks'
 import { devicesApi } from '@/api/devices'
 import { useTheme } from '@/contexts/ThemeContext'
 import type { Task, Device } from '@/types'
+import { buildWsUrl } from '@/utils/ws'
 import { TASK_TYPE_OPTIONS } from '@/types'
 import dayjs from 'dayjs'
 
@@ -78,7 +79,7 @@ function TaskProgressModal({ task, onClose, isDark }: { task: Task; onClose: () 
 
   useEffect(() => {
     if (!['pending', 'running'].includes(task.status)) return
-    const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/api/v1/ws/tasks/${task.id}`
+    const wsUrl = buildWsUrl(`/api/v1/ws/tasks/${task.id}`)
     const ws = new WebSocket(wsUrl)
     wsRef.current = ws
     ws.onmessage = (e) => {

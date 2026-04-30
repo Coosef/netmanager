@@ -18,6 +18,7 @@ import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import { devicesApi } from '@/api/devices'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
+import { buildWsUrl } from '@/utils/ws'
 import dayjs from 'dayjs'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -125,11 +126,7 @@ export default function AlertRulesPage() {
   const [wsNewCount, setWsNewCount] = useState(0)
 
   useEffect(() => {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.hostname
-    const port = import.meta.env.DEV ? '8000' : window.location.port
-    const token = localStorage.getItem('token')
-    const url = `${proto}://${host}:${port}/api/v1/ws/events${token ? `?token=${token}` : ''}`
+    const url = buildWsUrl('/api/v1/ws/events')
 
     const connect = () => {
       const ws = new WebSocket(url)

@@ -51,7 +51,7 @@ export interface Device {
   is_readonly: boolean
   approval_required: boolean
   snmp_enabled: boolean
-  snmp_community?: string | null
+  snmp_community_set?: boolean
   snmp_version: string
   snmp_port: number
   snmp_v3_username?: string | null

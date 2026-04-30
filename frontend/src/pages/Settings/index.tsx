@@ -643,7 +643,6 @@ function CredentialProfilesTab() {
       ssh_username: p.ssh_username,
       ssh_port: p.ssh_port,
       snmp_enabled: p.snmp_enabled,
-      snmp_community: p.snmp_community,
       snmp_version: p.snmp_version,
       snmp_port: p.snmp_port,
       snmp_v3_username: p.snmp_v3_username,
@@ -688,7 +687,7 @@ function CredentialProfilesTab() {
       title: 'SNMP', render: (_: any, r: CredentialProfile) => {
         if (!r.snmp_enabled) return <Tag color="default">Devre Dışı</Tag>
         if (r.snmp_version === 'v3') return <Tag color="purple">v3 / {r.snmp_v3_username || '—'}</Tag>
-        return <Tag color="blue">{r.snmp_version} / {r.snmp_community || '—'}</Tag>
+        return <Tag color="blue">{r.snmp_version} / {r.snmp_community_set ? '••••••••' : '—'}</Tag>
       },
     },
     {

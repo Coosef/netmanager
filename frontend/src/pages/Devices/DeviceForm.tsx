@@ -117,7 +117,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         is_readonly: device.is_readonly ?? true,
         approval_required: device.approval_required ?? false,
         snmp_enabled: device.snmp_enabled ?? false,
-        snmp_community: device.snmp_community || '',
+        snmp_community: '',
         snmp_version: device.snmp_version || 'v2c',
         snmp_port: device.snmp_port || 161,
         snmp_v3_username: device.snmp_v3_username || '',

@@ -9,7 +9,7 @@ export interface CredentialProfile {
   ssh_port: number
   enable_secret_set: boolean
   snmp_enabled: boolean
-  snmp_community: string | null
+  snmp_community_set: boolean
   snmp_version: string
   snmp_port: number
   snmp_v3_username: string | null

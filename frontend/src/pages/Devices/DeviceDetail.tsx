@@ -139,7 +139,7 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
         snmp_enabled: true,
         snmp_version: variables.snmp_version,
         snmp_port: variables.snmp_port ?? currentDevice.snmp_port,
-        snmp_community: variables.snmp_community ?? currentDevice.snmp_community,
+        snmp_community_set: variables.snmp_community != null ? true : currentDevice.snmp_community_set,
         snmp_v3_username: variables.snmp_v3_username ?? currentDevice.snmp_v3_username,
         snmp_v3_auth_protocol: variables.snmp_v3_auth_protocol ?? currentDevice.snmp_v3_auth_protocol,
         snmp_v3_priv_protocol: variables.snmp_v3_priv_protocol ?? currentDevice.snmp_v3_priv_protocol,
@@ -1080,7 +1080,7 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
                   </>
                 ) : (
                   <Descriptions.Item label="Community">
-                    <span style={{ fontFamily: 'monospace' }}>{currentDevice.snmp_community ?? '—'}</span>
+                    <span style={{ fontFamily: 'monospace' }}>{currentDevice.snmp_community_set ? '••••••••' : '—'}</span>
                   </Descriptions.Item>
                 )}
               </Descriptions>

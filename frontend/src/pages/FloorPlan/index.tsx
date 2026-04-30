@@ -16,6 +16,7 @@ import { racksApi } from '@/api/racks'
 import type { Device } from '@/types'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
+import { buildWsUrl } from '@/utils/ws'
 
 // ── Canvas constants ──────────────────────────────────────────────────────────
 const CANVAS_W = 1400
@@ -585,11 +586,7 @@ export default function FloorPlanPage() {
   const [selectedRack, setSelectedRack] = useState<string | null>(null)
 
   useEffect(() => {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.hostname
-    const port = (import.meta as any).env?.DEV ? '8000' : window.location.port
-    const token = localStorage.getItem('token')
-    const url = `${proto}://${host}:${port}/api/v1/ws/events${token ? `?token=${token}` : ''}`
+    const url = buildWsUrl('/api/v1/ws/events')
     const connect = () => {
       const ws = new WebSocket(url)
       wsRef.current = ws

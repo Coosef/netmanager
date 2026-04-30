@@ -25,6 +25,7 @@ import { slaApi } from '@/api/sla'
 import { useTranslation } from 'react-i18next'
 import type { NetworkEvent, MonitorStats } from '@/api/monitor'
 import type { Task } from '@/types'
+import { buildWsUrl } from '@/utils/ws'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -483,11 +484,7 @@ export default function DashboardPage() {
 
   // ── WebSocket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host  = window.location.hostname
-    const port  = import.meta.env.DEV ? '8000' : window.location.port
-    const token = localStorage.getItem('token')
-    const url   = `${proto}://${host}:${port}/api/v1/ws/events${token ? `?token=${token}` : ''}`
+    const url = buildWsUrl('/api/v1/ws/events')
     const connect = () => {
       const ws = new WebSocket(url)
       wsRef.current = ws

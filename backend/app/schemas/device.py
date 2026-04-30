@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class DeviceGroupCreate(BaseModel):
@@ -125,7 +125,7 @@ class DeviceResponse(BaseModel):
     is_readonly: bool
     approval_required: bool
     snmp_enabled: bool
-    snmp_community: Optional[str]
+    snmp_community_set: bool = False
     snmp_version: str
     snmp_port: int
     snmp_v3_username: Optional[str]
@@ -137,6 +137,28 @@ class DeviceResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _mask_snmp_community(cls, data):
+        if isinstance(data, dict):
+            community = data.pop("snmp_community", None)
+            data.setdefault("snmp_community_set", bool(community))
+            return data
+        # ORM object — extract fields manually
+        fields = [
+            "id", "hostname", "ip_address", "device_type", "vendor", "os_type",
+            "model", "serial_number", "firmware_version", "location", "description",
+            "tags", "alias", "layer", "site", "building", "floor",
+            "ssh_username", "ssh_port", "agent_id", "fallback_agent_ids",
+            "status", "last_seen", "last_backup", "is_active", "is_readonly",
+            "approval_required", "snmp_enabled", "snmp_version", "snmp_port",
+            "snmp_v3_username", "snmp_v3_auth_protocol", "snmp_v3_priv_protocol",
+            "group_id", "credential_profile_id", "created_at", "updated_at",
+        ]
+        result = {f: getattr(data, f, None) for f in fields}
+        result["snmp_community_set"] = bool(getattr(data, "snmp_community", None))
+        return result
 
 
 class DeviceTestResult(BaseModel):

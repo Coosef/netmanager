@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.security import decrypt_credential_safe
 from app.models.device import Device
 from app.models.snmp_metric import SnmpPollResult
 from app.services import snmp_service
@@ -173,9 +174,9 @@ def _v3_kwargs(device: Device) -> dict:
     return {
         "v3_username": device.snmp_v3_username,
         "v3_auth_protocol": device.snmp_v3_auth_protocol,
-        "v3_auth_passphrase": device.snmp_v3_auth_passphrase,
+        "v3_auth_passphrase": decrypt_credential_safe(device.snmp_v3_auth_passphrase),
         "v3_priv_protocol": device.snmp_v3_priv_protocol,
-        "v3_priv_passphrase": device.snmp_v3_priv_passphrase,
+        "v3_priv_passphrase": decrypt_credential_safe(device.snmp_v3_priv_passphrase),
     }
 
 

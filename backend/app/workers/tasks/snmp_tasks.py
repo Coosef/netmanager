@@ -18,6 +18,7 @@ async def _run():
     from sqlalchemy import or_, select, text
 
     from app.core.database import make_worker_session
+    from app.core.security import decrypt_credential_safe
     from app.models.alert_rule import AlertRule
     from app.models.credential_profile import CredentialProfile
     from app.models.device import Device
@@ -86,9 +87,9 @@ async def _run():
                         src.snmp_port or device.snmp_port,
                         v3_username=getattr(src, "snmp_v3_username", None) or device.snmp_v3_username,
                         v3_auth_protocol=getattr(src, "snmp_v3_auth_protocol", None) or device.snmp_v3_auth_protocol,
-                        v3_auth_passphrase=getattr(src, "snmp_v3_auth_passphrase", None) or device.snmp_v3_auth_passphrase,
+                        v3_auth_passphrase=decrypt_credential_safe(getattr(src, "snmp_v3_auth_passphrase", None)) or decrypt_credential_safe(device.snmp_v3_auth_passphrase),
                         v3_priv_protocol=getattr(src, "snmp_v3_priv_protocol", None) or device.snmp_v3_priv_protocol,
-                        v3_priv_passphrase=getattr(src, "snmp_v3_priv_passphrase", None) or device.snmp_v3_priv_passphrase,
+                        v3_priv_passphrase=decrypt_credential_safe(getattr(src, "snmp_v3_priv_passphrase", None)) or decrypt_credential_safe(device.snmp_v3_priv_passphrase),
                     )
                     return device, ifaces
                 except Exception:

@@ -117,8 +117,9 @@ async def _send_email(config: dict, subject: str, body: str) -> tuple[bool, str 
 
     try:
         if use_tls:
+            import ssl as _ssl
             server = smtplib.SMTP(smtp_host, smtp_port, timeout=10)
-            server.starttls()
+            server.starttls(context=_ssl.create_default_context())
         else:
             server = smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=10)
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { notification } from 'antd'
 import { useQueryClient } from '@tanstack/react-query'
+import { buildWsUrl } from '@/utils/ws'
 
 interface ProgressMsg {
   task_id: number
@@ -29,10 +30,7 @@ export function useTaskProgress(taskId: number | null, options?: {
   useEffect(() => {
     if (!taskId) return
 
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.hostname
-    const port = import.meta.env.DEV ? '8000' : window.location.port
-    const url = `${proto}://${host}:${port}/api/v1/ws/tasks/${taskId}`
+    const url = buildWsUrl(`/api/v1/ws/tasks/${taskId}`)
 
     notification.open({
       key: notifKey,

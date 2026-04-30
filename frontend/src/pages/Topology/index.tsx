@@ -28,6 +28,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import { useTranslation } from 'react-i18next'
 import Topology3D, { type Topology3DHandle } from './Topology3D'
+import { buildWsUrl } from '@/utils/ws'
 
 const nodeTypes = { deviceNode: DeviceNode, ghostNode: GhostNode }
 const edgeTypes = { custom: CustomEdge }
@@ -706,11 +707,7 @@ function TopologyFlow() {
   }, [graph, layout, isDark, filterLayer, filterSite, filterBuilding, filterFloor])
 
   useEffect(() => {
-    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
-    const host = window.location.hostname
-    const port = (import.meta as any).env?.DEV ? '8000' : window.location.port
-    const token = localStorage.getItem('token')
-    const url = `${proto}://${host}:${port}/api/v1/ws/events${token ? `?token=${token}` : ''}`
+    const url = buildWsUrl('/api/v1/ws/events')
     const connect = () => {
       const ws = new WebSocket(url)
       wsRef.current = ws

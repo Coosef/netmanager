@@ -129,6 +129,8 @@ async def assign_group_credential_profile(
     current_user: CurrentUser = None,
 ):
     """Assign (or clear) a credential profile for every device in a group."""
+    if not current_user.has_permission("device:edit"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     group = await db.get(DeviceGroup, group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
@@ -383,9 +385,9 @@ async def create_device(
         snmp_port=payload.snmp_port,
         snmp_v3_username=payload.snmp_v3_username,
         snmp_v3_auth_protocol=payload.snmp_v3_auth_protocol,
-        snmp_v3_auth_passphrase=payload.snmp_v3_auth_passphrase,
+        snmp_v3_auth_passphrase=encrypt_credential(payload.snmp_v3_auth_passphrase) if payload.snmp_v3_auth_passphrase else None,
         snmp_v3_priv_protocol=payload.snmp_v3_priv_protocol,
-        snmp_v3_priv_passphrase=payload.snmp_v3_priv_passphrase,
+        snmp_v3_priv_passphrase=encrypt_credential(payload.snmp_v3_priv_passphrase) if payload.snmp_v3_priv_passphrase else None,
         credential_profile_id=payload.credential_profile_id,
         tenant_id=current_user.tenant_id,
     )
@@ -735,7 +737,13 @@ async def bulk_delete_devices(
     if not device_ids:
         raise HTTPException(status_code=400, detail="No device IDs provided")
 
-    result = await db.execute(select(Device).where(Device.id.in_(device_ids)))
+    from app.models.user import UserRole
+    tenant_clause = (
+        [Device.id.in_(device_ids)]
+        if current_user.role == UserRole.SUPER_ADMIN
+        else [Device.id.in_(device_ids), Device.tenant_id == current_user.tenant_id]
+    )
+    result = await db.execute(select(Device).where(*tenant_clause))
     devices = result.scalars().all()
     if not devices:
         raise HTTPException(status_code=404, detail="No matching devices found")
@@ -1314,9 +1322,9 @@ async def configure_snmp(
     else:
         device.snmp_v3_username = v3_user
         device.snmp_v3_auth_protocol = v3_auth_proto
-        device.snmp_v3_auth_passphrase = v3_auth_pass
+        device.snmp_v3_auth_passphrase = encrypt_credential(v3_auth_pass) if v3_auth_pass else None
         device.snmp_v3_priv_protocol = v3_priv_proto
-        device.snmp_v3_priv_passphrase = v3_priv_pass
+        device.snmp_v3_priv_passphrase = encrypt_credential(v3_priv_pass) if v3_priv_pass else None
 
     await db.commit()
 
