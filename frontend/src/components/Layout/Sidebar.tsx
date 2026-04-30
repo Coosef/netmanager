@@ -169,7 +169,7 @@ export default function Sidebar() {
         {!collapsed && (
           <div>
             <div style={{ color: textPrimary, fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>NetManager</div>
-            <div style={{ color: textSecondary, fontSize: 10 }}>Network Platform</div>
+            <div style={{ color: textSecondary, fontSize: 10 }}>Universal Cloud Network Manager</div>
           </div>
         )}
       </div>
