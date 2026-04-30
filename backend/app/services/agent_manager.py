@@ -69,6 +69,13 @@ class AgentManager:
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
     async def connect(self, agent_id: str, websocket: WebSocket, meta: dict):
+        # Close any existing connection for this agent (e.g. duplicate processes)
+        old = self._connections.get(agent_id)
+        if old is not None and old is not websocket:
+            try:
+                await old.close(1001)
+            except Exception:
+                pass
         self._connections[agent_id] = websocket
         self._meta[agent_id] = {**meta, "connected_at": datetime.now(timezone.utc).isoformat()}
         log.info(f"Agent connected: {agent_id} ({meta.get('hostname', '?')} / {meta.get('platform', '?')})")

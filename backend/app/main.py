@@ -278,8 +278,57 @@ async def lifespan(app: FastAPI):
     import asyncio as _asyncio
     _asyncio.ensure_future(_backfill_mac_oui())
 
+    # Agent-aware device status poller — runs inside FastAPI so agent_manager connections are live
+    _asyncio.ensure_future(_agent_device_status_loop())
+
     yield
     await async_engine.dispose()
+
+
+async def _agent_device_status_loop():
+    """Poll device reachability every 5 minutes using the live ssh_manager (agent-aware)."""
+    import asyncio as _asyncio
+    import logging
+    from datetime import datetime, timezone
+    from sqlalchemy import select, update
+    from app.core.database import AsyncSessionLocal
+    from app.models.device import Device, DeviceStatus
+    from app.services.ssh_manager import ssh_manager
+
+    _log = logging.getLogger("device-status-poller")
+    await _asyncio.sleep(30)  # wait for app to fully start
+
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                devices = (await db.execute(
+                    select(Device).where(Device.is_active == True)
+                )).scalars().all()
+
+            sem = _asyncio.Semaphore(5)
+
+            async def _check(device):
+                async with sem:
+                    try:
+                        result = await ssh_manager.test_connection(device)
+                        new_status = DeviceStatus.ONLINE if result.success else DeviceStatus.OFFLINE
+                        values = {"status": new_status}
+                        if result.success:
+                            values["last_seen"] = datetime.now(timezone.utc)
+                        async with AsyncSessionLocal() as db:
+                            await db.execute(
+                                update(Device).where(Device.id == device.id).values(**values)
+                            )
+                            await db.commit()
+                    except Exception:
+                        pass
+
+            await _asyncio.gather(*[_check(d) for d in devices])
+            _log.debug(f"Device status poll complete: {len(devices)} devices checked")
+        except Exception as exc:
+            logging.getLogger("device-status-poller").warning(f"Poll cycle error: {exc}")
+
+        await _asyncio.sleep(300)  # 5 minutes
 
 
 async def _backfill_mac_oui():

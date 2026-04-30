@@ -1,3 +1,4 @@
+import asyncio
 import json
 import secrets
 import string
@@ -513,7 +514,6 @@ async def agent_websocket(
     # Send initial security config to agent
     cmds = json.loads(agent.allowed_commands) if agent.allowed_commands else []
     try:
-        import asyncio
         await asyncio.wait_for(
             websocket.send_text(json.dumps({
                 "type": "security_config",
@@ -524,6 +524,17 @@ async def agent_websocket(
         )
     except Exception:
         pass
+
+    # Server-side keepalive: send ping to agent every 20s to prevent proxy idle timeouts
+    async def _server_keepalive():
+        while True:
+            await asyncio.sleep(20)
+            try:
+                await websocket.send_text(json.dumps({"type": "ping"}))
+            except Exception:
+                break
+
+    keepalive_task = asyncio.create_task(_server_keepalive())
 
     try:
         async for raw in websocket.iter_text():
@@ -543,25 +554,38 @@ async def agent_websocket(
                 agent.platform = msg.get("platform")
                 agent.machine_hostname = msg.get("hostname")
                 agent.version = msg.get("version")
-                await db.commit()
+                try:
+                    await db.commit()
+                except Exception:
+                    pass
 
             elif msg.get("type") == "heartbeat":
                 agent.last_heartbeat = datetime.now(timezone.utc)
-                await db.commit()
+                try:
+                    await db.commit()
+                except Exception:
+                    pass
 
             await agent_manager.handle_message(agent_id, raw)
 
     except WebSocketDisconnect:
         pass
     finally:
+        keepalive_task.cancel()
         await agent_manager.disconnect(agent_id)
         agent.status = "offline"
         agent.last_disconnected_at = datetime.now(timezone.utc)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception:
+            pass
 
         # Emit offline event
-        await _emit_agent_event(db, agent, "agent_offline")
-        await db.commit()
+        try:
+            await _emit_agent_event(db, agent, "agent_offline")
+            await db.commit()
+        except Exception:
+            pass
 
 
 # ── Installer templates ───────────────────────────────────────────────────────

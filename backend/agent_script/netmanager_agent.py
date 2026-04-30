@@ -18,7 +18,7 @@ import platform
 import sys
 import time
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 try:
     import websockets
@@ -187,21 +187,51 @@ def _build_params(msg):
         "timeout":            60,
         "auth_timeout":       30,
         "session_timeout":    120,
+        "banner_timeout":     30,
+        "blocking_timeout":   40,
         "fast_cli":           False,
-        "global_delay_factor": 2,
+        "global_delay_factor": 3,
     }
     if msg.get("enable_secret"):
         params["secret"] = msg["enable_secret"]
     return params
 
 
+def _get_connection(msg):
+    """Open SSH connection with device-type-specific handling.
+
+    ruijie_os driver calls enable() automatically in session_preparation.
+    When no enable_secret is provided we bypass that to avoid 'Failed to
+    enter enable mode' errors (user may have privilege 15 already, or the
+    device may accept enable without a password in a non-standard way).
+    """
+    params = _build_params(msg)
+    os_type = params["device_type"]
+    enable_secret = msg.get("enable_secret", "")
+
+    if os_type == "ruijie_os" and not enable_secret:
+        # Use auto_connect=False so we can skip the automatic enable() call
+        conn = ConnectHandler(**{**params, "auto_connect": False})
+        conn.establish_connection()
+        conn.set_base_prompt()
+        try:
+            conn.disable_paging(command="terminal length 0")
+        except Exception:
+            pass
+        conn.clear_buffer()
+    else:
+        conn = ConnectHandler(**params)
+        # For non-Ruijie devices the driver doesn't auto-enable; call explicitly
+        if enable_secret and os_type != "ruijie_os":
+            conn.enable()
+
+    return conn
+
+
 def _ssh_test(msg):
     t0 = time.time()
     try:
-        params = _build_params(msg)
-        conn = ConnectHandler(**params)
-        if msg.get("enable_secret"):
-            conn.enable()
+        conn = _get_connection(msg)
         conn.disconnect()
         return {"success": True, "output": "Baglanti basarili", "duration_ms": round((time.time() - t0) * 1000)}
     except NetmikoAuthenticationException as e:
@@ -215,10 +245,7 @@ def _ssh_test(msg):
 def _ssh_command(msg):
     t0 = time.time()
     try:
-        params = _build_params(msg)
-        conn = ConnectHandler(**params)
-        if msg.get("enable_secret"):
-            conn.enable()
+        conn = _get_connection(msg)
         output = conn.send_command(msg["command"], read_timeout=120)
         conn.disconnect()
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
@@ -229,10 +256,7 @@ def _ssh_command(msg):
 def _ssh_config(msg):
     t0 = time.time()
     try:
-        params = _build_params(msg)
-        conn = ConnectHandler(**params)
-        if msg.get("enable_secret"):
-            conn.enable()
+        conn = _get_connection(msg)
         output = conn.send_config_set(msg["commands"], read_timeout=120)
         conn.save_config()
         conn.disconnect()
@@ -267,11 +291,18 @@ async def handle_message(ws, msg, loop):
             await ws.send(json.dumps({"type": "key_rotate_ack", "agent_id": AGENT_ID}))
         return
 
+    async def _send(payload):
+        """Send a message; silently drop if the connection closed mid-operation."""
+        try:
+            await ws.send(json.dumps(payload))
+        except Exception as exc:
+            log.warning("Sonuc gonderilemedi (baglanti kapali): {}".format(exc))
+
     if t == "ssh_test":
         log.info("SSH test -> {}".format(msg.get("device_ip")))
         result = await loop.run_in_executor(None, _ssh_test, msg)
         _record_result(result)
-        await ws.send(json.dumps({"type": "ssh_result", "request_id": rid, **result}))
+        await _send({"type": "ssh_result", "request_id": rid, **result})
 
     elif t == "ssh_command":
         command = msg.get("command", "")
@@ -285,18 +316,18 @@ async def handle_message(ws, msg, loop):
         if not allowed:
             log.warning("Komut engellendi (agent politikasi): {} - {}".format(command[:60], reason))
             _stats["cmd_blocked"] += 1
-            await ws.send(json.dumps({
+            await _send({
                 "type": "security_blocked",
                 "request_id": rid,
                 "command": command,
                 "reason": reason,
-            }))
+            })
             return
 
         log.info("SSH komut -> {} : {}".format(msg.get("device_ip"), command[:60]))
         result = await loop.run_in_executor(None, _ssh_command, msg)
         _record_result(result)
-        await ws.send(json.dumps({"type": "ssh_result", "request_id": rid, **result}))
+        await _send({"type": "ssh_result", "request_id": rid, **result})
 
     elif t == "ssh_config":
         commands = msg.get("commands", [])
@@ -312,25 +343,25 @@ async def handle_message(ws, msg, loop):
                 if not allowed:
                     log.warning("Config komutu engellendi: {} - {}".format(cmd[:60], reason))
                     _stats["cmd_blocked"] += 1
-                    await ws.send(json.dumps({
+                    await _send({
                         "type": "security_blocked",
                         "request_id": rid,
                         "command": cmd,
                         "reason": reason,
-                    }))
+                    })
                     return
 
         log.info("SSH config -> {} ({} komut)".format(msg.get("device_ip"), len(commands)))
         result = await loop.run_in_executor(None, _ssh_config, msg)
         _record_result(result)
-        await ws.send(json.dumps({"type": "ssh_result", "request_id": rid, **result}))
+        await _send({"type": "ssh_result", "request_id": rid, **result})
 
     elif t == "ping":
-        await ws.send(json.dumps({"type": "pong"}))
+        await _send({"type": "pong"})
 
     elif t == "restart":
         log.info("Yeniden baslatma istegi alindi - cikiliyor...")
-        await ws.send(json.dumps({"type": "restart_ack", "agent_id": AGENT_ID}))
+        await _send({"type": "restart_ack", "agent_id": AGENT_ID})
         _restart_requested = True
 
 
@@ -375,7 +406,7 @@ async def run():
                             payload = {
                                 "type":      "heartbeat",
                                 "agent_id":  AGENT_ID,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                                 "metrics":   _get_metrics(),
                             }
                             await ws.send(json.dumps(payload))

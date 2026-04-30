@@ -64,8 +64,10 @@ class SSHManager:
             "timeout": settings.SSH_CONNECT_TIMEOUT,
             "auth_timeout": 30,
             "session_timeout": settings.SSH_COMMAND_TIMEOUT,
+            "banner_timeout": 30,
+            "blocking_timeout": 40,
             "fast_cli": False,
-            "global_delay_factor": 2,
+            "global_delay_factor": 3,
         }
         if enable_enc:
             params["secret"] = decrypt_credential(enable_enc)
