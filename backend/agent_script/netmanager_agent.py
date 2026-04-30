@@ -177,15 +177,18 @@ def _get_metrics():
 # ── SSH islemleri (thread executor'da calisir) ─────────────────────────────
 
 def _build_params(msg):
+    os_type = msg.get("os_type", "cisco_ios")
     params = {
-        "device_type": msg.get("os_type", "cisco_ios"),
-        "host":        msg["device_ip"],
-        "username":    msg["ssh_username"],
-        "password":    msg["ssh_password"],
-        "port":        int(msg.get("ssh_port", 22)),
-        "timeout":     30,
-        "auth_timeout": 20,
-        "fast_cli":    False,
+        "device_type":        os_type,
+        "host":               msg["device_ip"],
+        "username":           msg["ssh_username"],
+        "password":           msg["ssh_password"],
+        "port":               int(msg.get("ssh_port", 22)),
+        "timeout":            60,
+        "auth_timeout":       30,
+        "session_timeout":    120,
+        "fast_cli":           False,
+        "global_delay_factor": 2,
     }
     if msg.get("enable_secret"):
         params["secret"] = msg["enable_secret"]
@@ -216,7 +219,7 @@ def _ssh_command(msg):
         conn = ConnectHandler(**params)
         if msg.get("enable_secret"):
             conn.enable()
-        output = conn.send_command(msg["command"])
+        output = conn.send_command(msg["command"], read_timeout=120)
         conn.disconnect()
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
     except Exception as e:
@@ -230,7 +233,7 @@ def _ssh_config(msg):
         conn = ConnectHandler(**params)
         if msg.get("enable_secret"):
             conn.enable()
-        output = conn.send_config_set(msg["commands"])
+        output = conn.send_config_set(msg["commands"], read_timeout=120)
         conn.save_config()
         conn.disconnect()
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
