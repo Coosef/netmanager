@@ -328,7 +328,6 @@ async def download_installer(
     platform: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,  # now requires auth
     agent_key: str = Query(..., description="Agent key (shown once at creation)"),
     server_url: str = Query(None, description="Public server URL visible to the agent machine"),
 ):
@@ -368,7 +367,7 @@ async def download_installer(
 
 
 @router.get("/download/script")
-async def download_agent_script(_: CurrentUser = None):
+async def download_agent_script():
     """Return the raw agent Python script (requires authentication)."""
     import os
     script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "agent_script", "netmanager_agent.py")
