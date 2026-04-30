@@ -1,0 +1,123 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-netmgr}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netmgr123}
+      POSTGRES_DB: ${POSTGRES_DB:-network_manager}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netmgr}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-delay 3 --timeout-graceful-shutdown 5 --reload-exclude '*.pyc' --reload-exclude '__pycache__' --reload-exclude '*.swp' --reload-exclude '*.tmp' --reload-exclude '.git'
+    volumes:
+      - ./backend:/app
+      - config_backups:/app/backups
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery_worker:
+    build: ./backend
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=30 -Q default,bulk,monitor
+    volumes:
+      - ./backend:/app
+      - config_backups:/app/backups
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery_beat:
+    build: ./backend
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/app
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  flower:
+    build: ./backend
+    command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
+    ports:
+      - "5555:5555"
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      target: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    environment:
+      - VITE_API_URL=http://backend:8000
+      - VITE_WS_URL=ws://backend:8000
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  config_backups:

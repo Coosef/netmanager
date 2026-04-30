@@ -1,0 +1,39 @@
+# Environment & secrets
+.env
+.env.local
+agent/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# Editor
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+
+# Backups
+backend/backups/
+
+# Claude Code
+.claude/settings.local.json

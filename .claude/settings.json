@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -v \"^time\\\\|^$\")",
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(docker exec *)",
+      "Bash(curl -s --max-time 8 -X POST http://localhost:8000/api/v1/auth/login -H \"Content-Type: application/json\" -d '{\"username\":\"admin\",\"password\":\"Admin@1234!\"}')",
+      "Bash(curl -s -X POST http://localhost:8000/api/v1/diagnostics/run -H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzc3MDU4OTg0fQ.5BgMJpu2Khfi1YUmTDNA-qF3k_PFREVC1p03YKx2Xno' -H 'Content-Type: application/json' -d '{\"type\":\"ping\",\"target\":\"8.8.8.8\",\"source\":\"server\",\"count\":3}')",
+      "Bash(python3 -m json.tool)"
+    ]
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true
+  }
+}

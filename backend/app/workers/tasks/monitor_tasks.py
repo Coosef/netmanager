@@ -1,0 +1,372 @@
+import asyncio
+import json
+from datetime import datetime, timezone, timedelta
+
+import redis
+from sqlalchemy import select, update
+
+from app.core.config import settings
+from app.models.device import Device, DeviceStatus
+from app.models.network_event import NetworkEvent
+from app.services.ssh_manager import SSHManager
+from app.workers.celery_app import celery_app
+
+_redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+
+STP_PATTERNS = [
+    ("topology change", "STP Topoloji Değişikliği", "warning"),
+    ("TCN", "STP TCN Algılandı", "warning"),
+    ("inconsistency", "STP Tutarsızlık", "critical"),
+    ("loop guard", "Loop Guard Tetiklendi", "critical"),
+    ("bpdu guard", "BPDU Guard Tetiklendi", "critical"),
+    ("root guard", "Root Guard Tetiklendi", "warning"),
+]
+
+LOOP_PATTERNS = [
+    ("mac address flapping", "MAC Flapping Tespit Edildi", "critical"),
+    ("mac flapping", "MAC Flapping Tespit Edildi", "critical"),
+    ("duplicate mac", "Çift MAC Adresi", "critical"),
+    ("loop detected", "Döngü Tespit Edildi", "critical"),
+    ("storm control", "Storm Control Tetiklendi", "warning"),
+]
+
+PORT_DOWN_PATTERNS = ["changed state to down", "went down", "link down", "err-disabled"]
+PORT_UP_PATTERNS   = ["changed state to up",   "came up",    "link up"]
+
+
+def _run_async(coro):
+    return asyncio.run(coro)
+
+
+def _get_db():
+    from app.core.database import SyncSessionLocal
+    return SyncSessionLocal()
+
+
+def _is_duplicate_event(device_id: int | None, event_type: str, dedup_key: str, ttl: int = 300) -> bool:
+    """Return True if an identical event was saved within `ttl` seconds."""
+    key = f"event:dedup:{device_id}:{event_type}:{dedup_key[:64]}"
+    if _redis.get(key):
+        return True
+    _redis.setex(key, ttl, "1")
+    return False
+
+
+def _save_event(db, device, event_type: str, severity: str, title: str,
+                message: str = "", details: dict = None, dedup_key: str = ""):
+    if dedup_key and _is_duplicate_event(
+        device.id if device else None, event_type, dedup_key or title
+    ):
+        return None
+    event = NetworkEvent(
+        device_id=device.id if device else None,
+        device_hostname=device.hostname if device else None,
+        event_type=event_type,
+        severity=severity,
+        title=title,
+        message=message,
+        details=details or {},
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    payload = {
+        "id": event.id,
+        "device_id": event.device_id,
+        "device_hostname": event.device_hostname,
+        "event_type": event_type,
+        "severity": severity,
+        "title": title,
+        "message": message,
+        "ts": event.created_at.isoformat(),
+    }
+    _redis.publish("network:events", json.dumps(payload))
+    _redis.lpush("network:events:recent", json.dumps(payload))
+    _redis.ltrim("network:events:recent", 0, 499)
+
+    # Fire event-based playbook triggers asynchronously
+    try:
+        from app.workers.tasks.playbook_tasks import trigger_event_playbooks
+        trigger_event_playbooks.apply_async(
+            args=[event_type, device.id if device else None],
+            queue="monitor",
+        )
+    except Exception:
+        pass
+
+    return event
+
+
+def _increment_flap_counter(device_id: int) -> int:
+    """Track status changes per device; return current count in the last hour."""
+    key = f"flap:{device_id}:count"
+    count = _redis.incr(key)
+    if count == 1:
+        _redis.expire(key, 3600)  # reset every hour
+    return count
+
+
+def _correlate_offline_events(db, newly_offline: list) -> None:
+    """When ≥3 devices go offline in one poll, check if they share a common upstream."""
+    if len(newly_offline) < 3:
+        return
+    # Group by location / agent_id as a simple proximity heuristic
+    groups: dict[str, list] = {}
+    for device in newly_offline:
+        key = device.agent_id or device.location or "global"
+        groups.setdefault(key, []).append(device)
+
+    for group_key, group_devices in groups.items():
+        if len(group_devices) < 3:
+            continue
+        # Find the device with the most topology links as the root cause candidate
+        root = group_devices[0]  # simplest heuristic: first offline in group
+        affected_names = ", ".join(d.hostname for d in group_devices[1:5])
+        _save_event(
+            db, root,
+            "correlation_incident", "critical",
+            f"KORELASYON: {root.hostname} offline — {len(group_devices)} cihaz etkilendi",
+            f"Etkilenen cihazlar: {affected_names}{'...' if len(group_devices) > 5 else ''}",
+            details={
+                "root_candidate": root.hostname,
+                "affected_count": len(group_devices),
+                "affected_devices": [{"id": d.id, "hostname": d.hostname} for d in group_devices],
+                "group_key": group_key,
+            },
+            dedup_key=f"correlation:{group_key}:{root.id}",
+        )
+
+
+@celery_app.task(name="app.workers.tasks.monitor_tasks.poll_device_status")
+def poll_device_status():
+    db = _get_db()
+    ssh = SSHManager()
+    newly_offline = []
+    try:
+        devices = db.execute(select(Device).where(Device.is_active == True)).scalars().all()
+        for device in devices:
+            try:
+                prev_status = device.status
+                result = _run_async(ssh.test_connection(device))
+                new_status = DeviceStatus.ONLINE if result.success else DeviceStatus.OFFLINE
+
+                db.execute(update(Device).where(Device.id == device.id).values(
+                    status=new_status,
+                    last_seen=datetime.now(timezone.utc) if result.success else device.last_seen,
+                ))
+                db.commit()
+                _redis.setex(f"device:{device.id}:status", 600,
+                             json.dumps({"status": new_status, "ts": datetime.now(timezone.utc).isoformat()}))
+
+                if prev_status != new_status:
+                    flap_count = _increment_flap_counter(device.id)
+
+                    if new_status == DeviceStatus.OFFLINE:
+                        newly_offline.append(device)
+                        severity = "critical"
+                        extra_msg = ""
+                        if flap_count >= 4:
+                            severity = "critical"
+                            extra_msg = f" [FLAP #{flap_count} — son 1 saatte {flap_count} durum değişikliği]"
+                        _save_event(db, device, "device_offline", severity,
+                                    f"{device.hostname} çevrimdışı{extra_msg}",
+                                    f"SSH bağlantısı başarısız: {result.error}",
+                                    dedup_key=f"offline:{device.id}")
+                        if flap_count >= 4:
+                            _save_event(db, device, "device_flapping", "critical",
+                                        f"FLAP ALGILANDI: {device.hostname} ({flap_count}x/saat)",
+                                        f"{flap_count} durum değişikliği son 1 saatte.",
+                                        dedup_key=f"flap_alert:{device.id}:{flap_count // 4}")
+                    elif new_status == DeviceStatus.ONLINE:
+                        _save_event(db, device, "device_online", "info",
+                                    f"{device.hostname} tekrar çevrimiçi",
+                                    dedup_key=f"online:{device.id}")
+            except Exception:
+                pass
+
+        # Correlate after all devices checked
+        if newly_offline:
+            _correlate_offline_events(db, newly_offline)
+
+    finally:
+        _run_async(ssh.close_all())
+        db.close()
+
+
+@celery_app.task(name="app.workers.tasks.monitor_tasks.check_stp_anomalies")
+def check_stp_anomalies(device_ids: list[int]):
+    db = _get_db()
+    ssh = SSHManager()
+    found = []
+    try:
+        devices = db.execute(select(Device).where(Device.id.in_(device_ids))).scalars().all()
+        for device in devices:
+            try:
+                result = _run_async(ssh.execute_command(device, "show spanning-tree"))
+                if not result.success:
+                    continue
+                output_lower = result.output.lower()
+                for pattern, label, severity in STP_PATTERNS:
+                    if pattern.lower() in output_lower:
+                        ev = _save_event(db, device, "stp_anomaly", severity, label,
+                                         f"Pattern: '{pattern}'",
+                                         {"pattern": pattern, "snippet": result.output[:300]},
+                                         dedup_key=f"stp:{device.id}:{pattern}")
+                        if ev:
+                            found.append(ev.id)
+                            _redis.publish("anomalies", json.dumps({
+                                "device_id": device.id, "hostname": device.hostname,
+                                "type": "stp", "patterns": [pattern],
+                                "ts": datetime.now(timezone.utc).isoformat()}))
+                        break
+            except Exception:
+                pass
+    finally:
+        _run_async(ssh.close_all())
+        db.close()
+    return found
+
+
+@celery_app.task(name="app.workers.tasks.monitor_tasks.check_loop_detection")
+def check_loop_detection(device_ids: list[int]):
+    db = _get_db()
+    ssh = SSHManager()
+    found = []
+    try:
+        devices = db.execute(select(Device).where(Device.id.in_(device_ids))).scalars().all()
+        for device in devices:
+            try:
+                result = _run_async(ssh.execute_command(device, "show log | include flap"))
+                if not result.success:
+                    continue
+                output_lower = result.output.lower()
+                for pattern, label, severity in LOOP_PATTERNS:
+                    if pattern.lower() in output_lower:
+                        ev = _save_event(db, device, "loop_detected", severity, label,
+                                         f"Pattern: '{pattern}'",
+                                         {"pattern": pattern, "snippet": result.output[:300]},
+                                         dedup_key=f"loop:{device.id}:{pattern}")
+                        if ev:
+                            found.append(ev.id)
+                            _redis.publish("anomalies", json.dumps({
+                                "device_id": device.id, "hostname": device.hostname,
+                                "type": "loop", "patterns": [pattern],
+                                "ts": datetime.now(timezone.utc).isoformat()}))
+                        break
+            except Exception:
+                pass
+    finally:
+        _run_async(ssh.close_all())
+        db.close()
+    return found
+
+
+@celery_app.task(name="app.workers.tasks.monitor_tasks.check_port_status")
+def check_port_status(device_ids: list[int]):
+    db = _get_db()
+    ssh = SSHManager()
+    try:
+        devices = db.execute(select(Device).where(Device.id.in_(device_ids))).scalars().all()
+        for device in devices:
+            try:
+                result = _run_async(ssh.execute_command(device, "show log | include changed state"))
+                if not result.success:
+                    continue
+                for line in result.output.splitlines()[-30:]:
+                    ll = line.lower()
+                    line_hash = str(hash(line.strip()))
+                    if any(p in ll for p in PORT_DOWN_PATTERNS):
+                        _save_event(db, device, "port_change", "warning",
+                                    f"{device.hostname} — Port çevrimdışı",
+                                    line.strip(), {"log_line": line.strip()},
+                                    dedup_key=line_hash)
+                    elif any(p in ll for p in PORT_UP_PATTERNS):
+                        _save_event(db, device, "port_change", "info",
+                                    f"{device.hostname} — Port çevrimiçi",
+                                    line.strip(), {"log_line": line.strip()},
+                                    dedup_key=line_hash)
+            except Exception:
+                pass
+    finally:
+        _run_async(ssh.close_all())
+        db.close()
+
+
+@celery_app.task(name="app.workers.tasks.monitor_tasks.check_lldp_changes")
+def check_lldp_changes(device_ids: list[int]):
+    """Detect new LLDP neighbors not yet in topology and generate port_new_device events."""
+    from app.models.topology import TopologyLink
+    from app.services.topology_service import TopologyService, detect_device_type
+
+    db = _get_db()
+    ssh = SSHManager()
+    try:
+        devices = db.execute(select(Device).where(Device.id.in_(device_ids))).scalars().all()
+        for device in devices:
+            try:
+                svc = TopologyService(ssh)
+                neighbors = _run_async(svc.discover_device(device))
+                if not neighbors:
+                    continue
+
+                # Get existing topology links for this device
+                existing_links = db.execute(
+                    select(TopologyLink).where(TopologyLink.device_id == device.id)
+                ).scalars().all()
+                known_neighbors = {
+                    lnk.neighbor_hostname.lower() for lnk in existing_links if lnk.neighbor_hostname
+                }
+
+                for n in neighbors:
+                    nh = (n.neighbor_hostname or "").lower()
+                    if not nh or nh in known_neighbors:
+                        continue
+                    # New neighbor found
+                    ntype = detect_device_type(n.neighbor_platform, n.neighbor_hostname)
+                    _save_event(
+                        db, device,
+                        "new_device_connected", "warning",
+                        f"{device.hostname} — Yeni cihaz bağlandı: {n.neighbor_hostname}",
+                        f"Port: {n.local_port} → {n.neighbor_hostname} ({n.neighbor_ip or '?'})",
+                        {
+                            "local_port": n.local_port,
+                            "neighbor_hostname": n.neighbor_hostname,
+                            "neighbor_ip": n.neighbor_ip,
+                            "neighbor_port": n.neighbor_port,
+                            "device_type": ntype,
+                            "protocol": n.protocol,
+                        },
+                        dedup_key=f"new_neighbor:{device.id}:{nh}",
+                    )
+            except Exception:
+                pass
+    finally:
+        _run_async(ssh.close_all())
+        db.close()
+
+
+@celery_app.task(name="app.workers.tasks.monitor_tasks.cleanup_stale_tasks")
+def cleanup_stale_tasks():
+    """Mark tasks stuck in PENDING/RUNNING for > 2 hours as FAILED."""
+    from app.models.task import Task, TaskStatus
+    from sqlalchemy import or_
+    from sqlalchemy import update as _update
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    db = _get_db()
+    try:
+        db.execute(
+            _update(Task)
+            .where(
+                or_(Task.status == TaskStatus.PENDING, Task.status == TaskStatus.RUNNING),
+                Task.created_at < cutoff,
+            )
+            .values(
+                status=TaskStatus.FAILED,
+                completed_at=datetime.now(timezone.utc),
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
