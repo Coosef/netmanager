@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import {
   App, Button, Drawer, Form, Input, Popconfirm, Select,
-  Space, Table, Tag, Switch, Avatar, Badge,
+  Space, Table, Tag, Switch, Avatar, Badge, Modal,
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
-  TeamOutlined, UserOutlined, SafetyOutlined, ApartmentOutlined,
+  TeamOutlined, UserOutlined, SafetyOutlined, ApartmentOutlined, KeyOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersApi } from '@/api/users'
@@ -82,6 +82,8 @@ export default function UsersPage() {
   const isSA = isSuperAdmin()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
+  const [resetUser, setResetUser] = useState<User | null>(null)
+  const [resetForm] = Form.useForm()
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
@@ -110,6 +112,12 @@ export default function UsersPage() {
   const deleteMutation = useMutation({
     mutationFn: usersApi.delete,
     onSuccess: () => { message.success(t('users.deleted')); queryClient.invalidateQueries({ queryKey: ['users'] }) },
+  })
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ id, password }: { id: number; password: string }) => usersApi.resetPassword(id, password),
+    onSuccess: () => { message.success('Şifre başarıyla sıfırlandı'); setResetUser(null); resetForm.resetFields() },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Şifre sıfırlama başarısız'),
   })
 
   const onSubmit = (values: Record<string, unknown>) => {
@@ -269,7 +277,7 @@ export default function UsersPage() {
             },
             {
               title: '',
-              width: 80,
+              width: 110,
               render: (_, r) => (
                 <Space size={4}>
                   <Button
@@ -277,6 +285,13 @@ export default function UsersPage() {
                     icon={<EditOutlined />}
                     style={{ color: C.muted, borderColor: C.border }}
                     onClick={() => { setEditUser(r); setDrawerOpen(true) }}
+                  />
+                  <Button
+                    size="small"
+                    icon={<KeyOutlined />}
+                    style={{ color: '#f59e0b', borderColor: '#f59e0b50' }}
+                    onClick={() => { setResetUser(r); resetForm.resetFields() }}
+                    title="Şifre Sıfırla"
                   />
                   <Popconfirm
                     title={t('users.delete_confirm', { name: r.username })}
@@ -291,6 +306,55 @@ export default function UsersPage() {
           ]}
         />
       </div>
+
+      <Modal
+        open={!!resetUser}
+        onCancel={() => { setResetUser(null); resetForm.resetFields() }}
+        title={<span style={{ color: C.text }}>Şifre Sıfırla — <b>{resetUser?.username}</b></span>}
+        footer={null}
+        styles={{ content: { background: C.bg }, header: { background: C.bg } }}
+      >
+        <Form
+          form={resetForm}
+          layout="vertical"
+          onFinish={(v) => resetPasswordMutation.mutate({ id: resetUser!.id, password: v.new_password })}
+        >
+          <Form.Item
+            label="Yeni Şifre"
+            name="new_password"
+            rules={[{ required: true, min: 8, message: 'En az 8 karakter' }]}
+          >
+            <Input.Password />
+          </Form.Item>
+          <Form.Item
+            label="Yeni Şifre (Tekrar)"
+            name="confirm"
+            dependencies={['new_password']}
+            rules={[
+              { required: true },
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  if (!value || getFieldValue('new_password') === value) return Promise.resolve()
+                  return Promise.reject('Şifreler eşleşmiyor')
+                },
+              }),
+            ]}
+          >
+            <Input.Password />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={resetPasswordMutation.isPending}
+              icon={<KeyOutlined />}
+            >
+              Şifreyi Sıfırla
+            </Button>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Drawer
         open={drawerOpen}

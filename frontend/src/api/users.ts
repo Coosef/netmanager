@@ -16,4 +16,7 @@ export const usersApi = {
 
   changePassword: (data: { current_password: string; new_password: string }) =>
     client.post('/users/me/change-password', data),
+
+  resetPassword: (id: number, new_password: string) =>
+    client.post(`/users/${id}/reset-password`, { new_password }),
 }

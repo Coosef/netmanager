@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react'
-import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Switch, Popover, Button, Tag, Empty, Spin, Select } from 'antd'
+import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Switch, Popover, Button, Tag, Empty, Spin, Select, Modal, Form } from 'antd'
 import {
-  LogoutOutlined,
+  LogoutOutlined, KeyOutlined,
   BellOutlined, ReloadOutlined, SearchOutlined,
   SunOutlined, MoonOutlined, CheckOutlined,
   WarningOutlined, CloseCircleOutlined, InfoCircleOutlined,
@@ -12,6 +12,7 @@ import { useAuthStore } from '@/store/auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
 import { devicesApi } from '@/api/devices'
+import { usersApi } from '@/api/users'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import { useTranslation } from 'react-i18next'
@@ -48,6 +49,18 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
   const [notifOpen, setNotifOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
+  const [pwModalOpen, setPwModalOpen] = useState(false)
+  const [pwForm] = Form.useForm()
+
+  const changePasswordMutation = useMutation({
+    mutationFn: (data: { current_password: string; new_password: string }) => usersApi.changePassword(data),
+    onSuccess: () => {
+      message.success('Şifre başarıyla değiştirildi')
+      setPwModalOpen(false)
+      pwForm.resetFields()
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Şifre değiştirilemedi'),
+  })
 
   const { data: searchResults, isFetching: searchFetching } = useQuery({
     queryKey: ['header-search', search],
@@ -102,6 +115,8 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
         </span>
       ), disabled: true,
     },
+    { type: 'divider' as const },
+    { key: 'change-password', icon: <KeyOutlined />, label: 'Şifre Değiştir', onClick: () => { pwForm.resetFields(); setPwModalOpen(true) } },
     { type: 'divider' as const },
     { key: 'logout', icon: <LogoutOutlined />, label: t('header.logout'), danger: true, onClick: handleLogout },
   ]
@@ -200,6 +215,47 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
   )
 
   return (
+    <>
+    <Modal
+      open={pwModalOpen}
+      onCancel={() => { setPwModalOpen(false); pwForm.resetFields() }}
+      title="Şifre Değiştir"
+      footer={null}
+    >
+      <Form
+        form={pwForm}
+        layout="vertical"
+        onFinish={(v) => changePasswordMutation.mutate({ current_password: v.current_password, new_password: v.new_password })}
+      >
+        <Form.Item label="Mevcut Şifre" name="current_password" rules={[{ required: true }]}>
+          <Input.Password />
+        </Form.Item>
+        <Form.Item label="Yeni Şifre" name="new_password" rules={[{ required: true, min: 8, message: 'En az 8 karakter' }]}>
+          <Input.Password />
+        </Form.Item>
+        <Form.Item
+          label="Yeni Şifre (Tekrar)"
+          name="confirm"
+          dependencies={['new_password']}
+          rules={[
+            { required: true },
+            ({ getFieldValue }) => ({
+              validator(_, value) {
+                if (!value || getFieldValue('new_password') === value) return Promise.resolve()
+                return Promise.reject('Şifreler eşleşmiyor')
+              },
+            }),
+          ]}
+        >
+          <Input.Password />
+        </Form.Item>
+        <Form.Item style={{ marginBottom: 0 }}>
+          <Button type="primary" htmlType="submit" block loading={changePasswordMutation.isPending} icon={<KeyOutlined />}>
+            Şifreyi Değiştir
+          </Button>
+        </Form.Item>
+      </Form>
+    </Modal>
     <Header style={{
       background: headerBg,
       backdropFilter: isDark ? 'blur(12px)' : undefined,
@@ -397,5 +453,6 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
         </Space>
       </Dropdown>
     </Header>
+    </>
   )
 }

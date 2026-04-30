@@ -7,7 +7,7 @@ from app.core.deps import CurrentUser, require_roles
 from app.core.security import hash_password, verify_password
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole
-from app.schemas.user import UserCreate, UserPasswordChange, UserResponse, UserUpdate
+from app.schemas.user import AdminPasswordReset, UserCreate, UserPasswordChange, UserResponse, UserUpdate
 from app.services.audit_service import log_action
 
 router = APIRouter()
@@ -147,16 +147,41 @@ async def delete_user(
     await log_action(db, current_user, "user_deleted", "user", user_id, user.username, request=request)
 
 
+@router.post("/{user_id}/reset-password", status_code=204)
+async def admin_reset_password(
+    user_id: int,
+    payload: AdminPasswordReset,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+):
+    q = select(User).where(User.id == user_id)
+    if current_user.role != UserRole.SUPER_ADMIN:
+        q = q.where(User.tenant_id == current_user.tenant_id)
+    user = (await db.execute(q)).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if current_user.role == UserRole.ADMIN and user.role == UserRole.SUPER_ADMIN:
+        raise HTTPException(status_code=403, detail="Cannot reset SUPER_ADMIN password")
+
+    user.hashed_password = hash_password(payload.new_password)
+    await db.commit()
+    await log_action(db, current_user, "password_reset", "user", user_id, user.username, request=request)
+
+
 @router.post("/me/change-password", status_code=204)
 async def change_my_password(
     payload: UserPasswordChange,
     request: Request,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
 ):
-    if not verify_password(payload.current_password, current_user.hashed_password):
-        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    # Load user in current session to ensure correct session binding
+    user = (await db.execute(select(User).where(User.id == current_user.id))).scalar_one()
 
-    current_user.hashed_password = hash_password(payload.new_password)
+    if not verify_password(payload.current_password, user.hashed_password):
+        raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
+
+    user.hashed_password = hash_password(payload.new_password)
     await db.commit()
-    await log_action(db, current_user, "password_changed", "user", current_user.id, request=request)
+    await log_action(db, user, "password_changed", "user", user.id, request=request)
