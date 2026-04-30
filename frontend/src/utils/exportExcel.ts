@@ -1,19 +1,34 @@
-import * as XLSX from 'xlsx'
+import ExcelJS from 'exceljs'
 
-export function exportToExcel(
+export async function exportToExcel(
   sheets: { name: string; data: Record<string, unknown>[] }[],
   filename: string,
 ) {
-  const wb = XLSX.utils.book_new()
+  const workbook = new ExcelJS.Workbook()
+
   for (const sheet of sheets) {
     if (!sheet.data.length) continue
-    const ws = XLSX.utils.json_to_sheet(sheet.data)
-    // Auto column widths
-    const cols = Object.keys(sheet.data[0]).map((key) => ({
-      wch: Math.max(key.length, ...sheet.data.map((r) => String(r[key] ?? '').length), 10),
+    const keys = Object.keys(sheet.data[0])
+    const worksheet = workbook.addWorksheet(sheet.name.slice(0, 31))
+
+    worksheet.columns = keys.map((key) => ({
+      header: key,
+      key,
+      width: Math.max(key.length, ...sheet.data.map((r) => String(r[key] ?? '').length), 10),
     }))
-    ws['!cols'] = cols
-    XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31))
+
+    worksheet.getRow(1).font = { bold: true }
+    worksheet.addRows(sheet.data)
   }
-  XLSX.writeFile(wb, `${filename}.xlsx`)
+
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${filename}.xlsx`
+  a.click()
+  URL.revokeObjectURL(url)
 }
