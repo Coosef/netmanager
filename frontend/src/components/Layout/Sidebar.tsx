@@ -8,7 +8,7 @@ import {
   MenuFoldOutlined, MenuUnfoldOutlined, ThunderboltOutlined,
   SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
-  HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined,
+  HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -92,15 +92,15 @@ export default function Sidebar() {
         { key: '/vlan', icon: <BranchesOutlined />, label: t('nav.vlan') },
         { key: '/backups', icon: <CloudOutlined />, label: t('nav.backups') },
         { key: '/compliance', icon: <FileDoneOutlined />, label: t('nav.compliance') },
-        { key: '/racks', icon: <HddOutlined />, label: 'Kabinler' },
-        { key: '/floor-plan', icon: <BuildOutlined />, label: 'Kat Planı' },
+        { key: '/racks', icon: <HddOutlined />, label: t('nav.racks') },
+        { key: '/floor-plan', icon: <BuildOutlined />, label: t('nav.floor_plan') },
       ],
     },
     {
       label: t('nav_group.monitoring'),
       items: [
         { key: '/monitor', icon: <AlertOutlined />, label: t('nav.monitor'), badge: true },
-        { key: '/alert-rules', icon: <AlertOutlined />, label: 'Alert Kuralları' },
+        { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules') },
         { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth') },
         { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence') },
         { key: '/security-audit', icon: <SafetyOutlined />, label: t('nav.security_audit') },
@@ -120,10 +120,11 @@ export default function Sidebar() {
       items: [
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents') },
         { key: '/users', icon: <TeamOutlined />, label: t('nav.users') },
-        { key: '/locations', icon: <EnvironmentOutlined />, label: 'Lokasyonlar' },
-        ...(isSA ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: 'Organizasyonlar' }] : []),
+        { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations') },
+        ...(isSA ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: t('nav.tenants') }] : []),
         { key: '/audit', icon: <AuditOutlined />, label: t('nav.audit') },
-        { key: '/driver-templates', icon: <CodeOutlined />, label: 'Sürücü Şablonları' },
+        { key: '/driver-templates', icon: <CodeOutlined />, label: t('nav.driver_templates') },
+        { key: '/help', icon: <QuestionCircleOutlined />, label: t('nav.help') },
         { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings') },
       ],
     },

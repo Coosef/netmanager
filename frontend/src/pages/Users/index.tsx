@@ -116,8 +116,8 @@ export default function UsersPage() {
 
   const resetPasswordMutation = useMutation({
     mutationFn: ({ id, password }: { id: number; password: string }) => usersApi.resetPassword(id, password),
-    onSuccess: () => { message.success('Şifre başarıyla sıfırlandı'); setResetUser(null); resetForm.resetFields() },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Şifre sıfırlama başarısız'),
+    onSuccess: () => { message.success(t('users.password_reset_success')); setResetUser(null); resetForm.resetFields() },
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('users.password_reset_error')),
   })
 
   const onSubmit = (values: Record<string, unknown>) => {
@@ -167,7 +167,7 @@ export default function UsersPage() {
                 ({userList.length})
               </span>
             </div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Kullanıcı hesapları ve erişim rolleri</div>
+            <div style={{ color: C.muted, fontSize: 12 }}>{t('users.subtitle')}</div>
           </div>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditUser(null); setDrawerOpen(true) }}>
@@ -236,7 +236,7 @@ export default function UsersPage() {
               },
             },
             ...(isSA ? [{
-              title: 'Organizasyon',
+              title: t('users.organization'),
               dataIndex: 'tenant_name',
               width: 160,
               render: (v: string | null) => v
@@ -255,7 +255,7 @@ export default function UsersPage() {
               render: (v) => (
                 <Badge
                   status={v ? 'success' : 'error'}
-                  text={<span style={{ fontSize: 12, color: C.muted }}>{v ? 'Aktif' : 'Pasif'}</span>}
+                  text={<span style={{ fontSize: 12, color: C.muted }}>{v ? t('users.active') : t('users.inactive')}</span>}
                 />
               ),
             },
@@ -291,7 +291,7 @@ export default function UsersPage() {
                     icon={<KeyOutlined />}
                     style={{ color: '#f59e0b', borderColor: '#f59e0b50' }}
                     onClick={() => { setResetUser(r); resetForm.resetFields() }}
-                    title="Şifre Sıfırla"
+                    title={t('users.reset_password')}
                   />
                   <Popconfirm
                     title={t('users.delete_confirm', { name: r.username })}
@@ -310,7 +310,7 @@ export default function UsersPage() {
       <Modal
         open={!!resetUser}
         onCancel={() => { setResetUser(null); resetForm.resetFields() }}
-        title={<span style={{ color: C.text }}>Şifre Sıfırla — <b>{resetUser?.username}</b></span>}
+        title={<span style={{ color: C.text }}>{t('users.reset_password_for', { name: resetUser?.username })}</span>}
         footer={null}
         styles={{ content: { background: C.bg }, header: { background: C.bg } }}
       >
@@ -320,14 +320,14 @@ export default function UsersPage() {
           onFinish={(v) => resetPasswordMutation.mutate({ id: resetUser!.id, password: v.new_password })}
         >
           <Form.Item
-            label="Yeni Şifre"
+            label={t('users.new_password')}
             name="new_password"
-            rules={[{ required: true, min: 8, message: 'En az 8 karakter' }]}
+            rules={[{ required: true, min: 8, message: t('header.password_min_length') }]}
           >
             <Input.Password />
           </Form.Item>
           <Form.Item
-            label="Yeni Şifre (Tekrar)"
+            label={t('users.new_password_confirm')}
             name="confirm"
             dependencies={['new_password']}
             rules={[
@@ -335,7 +335,7 @@ export default function UsersPage() {
               ({ getFieldValue }) => ({
                 validator(_, value) {
                   if (!value || getFieldValue('new_password') === value) return Promise.resolve()
-                  return Promise.reject('Şifreler eşleşmiyor')
+                  return Promise.reject(t('users.passwords_mismatch'))
                 },
               }),
             ]}
@@ -350,7 +350,7 @@ export default function UsersPage() {
               loading={resetPasswordMutation.isPending}
               icon={<KeyOutlined />}
             >
-              Şifreyi Sıfırla
+              {t('users.reset_btn')}
             </Button>
           </Form.Item>
         </Form>
@@ -389,11 +389,11 @@ export default function UsersPage() {
             <Select options={ROLE_OPTIONS_FILTERED} />
           </Form.Item>
           {isSA && (
-            <Form.Item label="Organizasyon (Tenant)" name="tenant_id">
+            <Form.Item label={t('users.organization')} name="tenant_id">
               <Select
                 options={tenantOptions}
                 allowClear
-                placeholder="Tenant seçin"
+                placeholder={t('users.tenant_placeholder')}
               />
             </Form.Item>
           )}

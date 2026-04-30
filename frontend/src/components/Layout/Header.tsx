@@ -55,11 +55,11 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
   const changePasswordMutation = useMutation({
     mutationFn: (data: { current_password: string; new_password: string }) => usersApi.changePassword(data),
     onSuccess: () => {
-      message.success('Şifre başarıyla değiştirildi')
+      message.success(t('header.password_changed'))
       setPwModalOpen(false)
       pwForm.resetFields()
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Şifre değiştirilemedi'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('header.password_change_error')),
   })
 
   const { data: searchResults, isFetching: searchFetching } = useQuery({
@@ -116,7 +116,7 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
       ), disabled: true,
     },
     { type: 'divider' as const },
-    { key: 'change-password', icon: <KeyOutlined />, label: 'Şifre Değiştir', onClick: () => { pwForm.resetFields(); setPwModalOpen(true) } },
+    { key: 'change-password', icon: <KeyOutlined />, label: t('header.change_password'), onClick: () => { pwForm.resetFields(); setPwModalOpen(true) } },
     { type: 'divider' as const },
     { key: 'logout', icon: <LogoutOutlined />, label: t('header.logout'), danger: true, onClick: handleLogout },
   ]
@@ -219,7 +219,7 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
     <Modal
       open={pwModalOpen}
       onCancel={() => { setPwModalOpen(false); pwForm.resetFields() }}
-      title="Şifre Değiştir"
+      title={t('header.change_password')}
       footer={null}
     >
       <Form
@@ -227,14 +227,14 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
         layout="vertical"
         onFinish={(v) => changePasswordMutation.mutate({ current_password: v.current_password, new_password: v.new_password })}
       >
-        <Form.Item label="Mevcut Şifre" name="current_password" rules={[{ required: true }]}>
+        <Form.Item label={t('header.current_password')} name="current_password" rules={[{ required: true }]}>
           <Input.Password />
         </Form.Item>
-        <Form.Item label="Yeni Şifre" name="new_password" rules={[{ required: true, min: 8, message: 'En az 8 karakter' }]}>
+        <Form.Item label={t('header.new_password')} name="new_password" rules={[{ required: true, min: 8, message: t('header.password_min_length') }]}>
           <Input.Password />
         </Form.Item>
         <Form.Item
-          label="Yeni Şifre (Tekrar)"
+          label={t('header.new_password_confirm')}
           name="confirm"
           dependencies={['new_password']}
           rules={[
@@ -242,7 +242,7 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
             ({ getFieldValue }) => ({
               validator(_, value) {
                 if (!value || getFieldValue('new_password') === value) return Promise.resolve()
-                return Promise.reject('Şifreler eşleşmiyor')
+                return Promise.reject(t('header.passwords_mismatch'))
               },
             }),
           ]}
@@ -251,7 +251,7 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
         </Form.Item>
         <Form.Item style={{ marginBottom: 0 }}>
           <Button type="primary" htmlType="submit" block loading={changePasswordMutation.isPending} icon={<KeyOutlined />}>
-            Şifreyi Değiştir
+            {t('header.change_password_btn')}
           </Button>
         </Form.Item>
       </Form>
