@@ -9,6 +9,7 @@ import {
   CodeOutlined, SendOutlined, SaveOutlined, RobotOutlined, DownloadOutlined,
   SwapOutlined, SafetyCertificateOutlined, WarningOutlined,
   ApartmentOutlined, AlertOutlined, HistoryOutlined, ApiOutlined, ScanOutlined,
+  ClockCircleOutlined, LineChartOutlined, FireOutlined, CalendarOutlined,
 } from '@ant-design/icons'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend,
@@ -18,6 +19,7 @@ import { devicesApi } from '@/api/devices'
 import { agentsApi } from '@/api/agents'
 import { topologyApi } from '@/api/topology'
 import { snmpApi } from '@/api/snmp'
+import { intelligenceApi } from '@/api/intelligence'
 import type { Device, ConfigBackup, NetworkInterface, Vlan } from '@/types'
 import SwitchPortPanel, { type PortUtil } from '@/components/SwitchPortPanel'
 import dayjs from 'dayjs'
@@ -384,6 +386,26 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
     queryFn: () => snmpApi.getCpuRam(currentDevice.id),
     enabled: activeTab === 'health' && currentDevice.snmp_enabled,
     retry: false,
+  })
+
+  // ── Intelligence: Risk + MTTR/MTBF + Timeline ────────────────────────────
+  const { data: riskData } = useQuery({
+    queryKey: ['device-risk', currentDevice.id],
+    queryFn: () => intelligenceApi.getDeviceRisk(currentDevice.id),
+    enabled: activeTab === 'intelligence',
+    staleTime: 300_000,
+  })
+  const { data: mttrData } = useQuery({
+    queryKey: ['device-mttr', currentDevice.id],
+    queryFn: () => intelligenceApi.getMttrMtbf(currentDevice.id, 30),
+    enabled: activeTab === 'intelligence',
+    staleTime: 300_000,
+  })
+  const { data: timelineData, isLoading: timelineLoading } = useQuery({
+    queryKey: ['device-timeline', currentDevice.id],
+    queryFn: () => intelligenceApi.getTimeline(currentDevice.id, 30),
+    enabled: activeTab === 'timeline',
+    staleTime: 60_000,
   })
 
   // ── ssh test quick action ─────────────────────────────────────────────────
@@ -1188,6 +1210,153 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
             </div>
           )}
         </Tabs.TabPane>
+
+        {/* ── 12A+12B: Risk & MTTR/MTBF ───────────────────────────────────── */}
+        <Tabs.TabPane tab={<span><FireOutlined /> Risk & SLA</span>} key="intelligence">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+            {/* Risk Score */}
+            {riskData && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+                  <div style={{
+                    width: 60, height: 60, borderRadius: '50%',
+                    background: riskData.level === 'critical' ? '#fee2e2' : riskData.level === 'high' ? '#fef3c7' : riskData.level === 'medium' ? '#ffedd5' : '#dcfce7',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <span style={{
+                      fontSize: 20, fontWeight: 800,
+                      color: riskData.level === 'critical' ? '#dc2626' : riskData.level === 'high' ? '#d97706' : riskData.level === 'medium' ? '#ea580c' : '#16a34a',
+                    }}>{riskData.risk_score}</span>
+                  </div>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>Risk Skoru</div>
+                    <Tag color={riskData.level === 'critical' ? 'red' : riskData.level === 'high' ? 'orange' : riskData.level === 'medium' ? 'gold' : 'green'}>
+                      {riskData.level === 'critical' ? 'Kritik' : riskData.level === 'high' ? 'Yüksek' : riskData.level === 'medium' ? 'Orta' : 'Düşük'}
+                    </Tag>
+                  </div>
+                </div>
+                <Descriptions size="small" column={2} bordered>
+                  <Descriptions.Item label="Uyumluluk">
+                    {riskData.breakdown.compliance.score !== null
+                      ? <><Progress percent={riskData.breakdown.compliance.score} size="small" style={{ maxWidth: 160 }} /><span style={{ color: '#64748b', fontSize: 11 }}> +{riskData.breakdown.compliance.risk_contribution} risk</span></>
+                      : <Tag color="orange">Taranmamış</Tag>
+                    }
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Uptime (7g)">
+                    <Progress
+                      percent={riskData.breakdown.uptime_7d.uptime_pct}
+                      size="small"
+                      strokeColor={riskData.breakdown.uptime_7d.uptime_pct >= 99 ? '#22c55e' : riskData.breakdown.uptime_7d.uptime_pct >= 95 ? '#f59e0b' : '#ef4444'}
+                      style={{ maxWidth: 160 }}
+                    />
+                    <span style={{ color: '#64748b', fontSize: 11 }}> +{riskData.breakdown.uptime_7d.risk_contribution} risk</span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Flapping (7g)">
+                    {riskData.breakdown.flapping_7d.flap_count > 0
+                      ? <Tag color="purple">{riskData.breakdown.flapping_7d.flap_count}× flap</Tag>
+                      : <Tag color="green">Yok</Tag>
+                    }
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Son Yedek">
+                    {riskData.breakdown.backup.last_backup
+                      ? dayjs(riskData.breakdown.backup.last_backup).fromNow()
+                      : <Tag color="red">Hiç alınmamış</Tag>
+                    }
+                  </Descriptions.Item>
+                </Descriptions>
+              </div>
+            )}
+
+            {/* MTTR / MTBF */}
+            {mttrData && (
+              <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: 16 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <LineChartOutlined /> Arıza İstatistikleri — Son 30 Gün
+                </div>
+                {mttrData.currently_offline && (
+                  <Alert type="warning" showIcon message="Cihaz şu an çevrimdışı" style={{ marginBottom: 8 }} />
+                )}
+                <Descriptions size="small" column={2} bordered>
+                  <Descriptions.Item label="Toplam Arıza Sayısı">
+                    <span style={{ fontWeight: 700, color: mttrData.failure_count > 0 ? '#ef4444' : '#22c55e' }}>
+                      {mttrData.failure_count}
+                    </span>
+                  </Descriptions.Item>
+                  <Descriptions.Item label="MTTR (Ort. Kurtarma)">
+                    {mttrData.mttr_human
+                      ? <><ClockCircleOutlined style={{ color: '#f59e0b' }} /> <strong>{mttrData.mttr_human}</strong></>
+                      : <span style={{ color: '#94a3b8' }}>Veri yok</span>
+                    }
+                  </Descriptions.Item>
+                  <Descriptions.Item label="MTBF (Ort. Çalışma)">
+                    {mttrData.mtbf_human
+                      ? <><CalendarOutlined style={{ color: '#22c55e' }} /> <strong>{mttrData.mtbf_human}</strong></>
+                      : <span style={{ color: '#94a3b8' }}>Veri yok</span>
+                    }
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Pencere">
+                    {mttrData.window_days} gün
+                  </Descriptions.Item>
+                </Descriptions>
+              </div>
+            )}
+
+            {!riskData && !mttrData && (
+              <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+                <FireOutlined style={{ fontSize: 32 }} />
+                <div style={{ marginTop: 8 }}>Veri yükleniyor...</div>
+              </div>
+            )}
+          </div>
+        </Tabs.TabPane>
+
+        {/* ── 12C: Zaman Çizelgesi ────────────────────────────────────────── */}
+        <Tabs.TabPane tab={<span><HistoryOutlined /> Zaman Çizelgesi</span>} key="timeline">
+          {timelineLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+          ) : !timelineData || timelineData.items.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>
+              <CalendarOutlined style={{ fontSize: 32 }} />
+              <div style={{ marginTop: 8 }}>Son 30 günde kayıt yok</div>
+            </div>
+          ) : (
+            <div style={{ maxHeight: 520, overflowY: 'auto', paddingRight: 4 }}>
+              {timelineData.items.map((item) => {
+                const sevColor = item.severity === 'critical' ? '#ef4444'
+                  : item.severity === 'warning' ? '#f59e0b'
+                  : item.severity === 'success' ? '#22c55e'
+                  : '#3b82f6'
+                const typeIcon = item.type === 'backup' ? <DatabaseOutlined style={{ color: '#22c55e' }} />
+                  : item.type === 'audit' ? <SafetyCertificateOutlined style={{ color: '#3b82f6' }} />
+                  : <AlertOutlined style={{ color: sevColor }} />
+                return (
+                  <div key={item.id} style={{
+                    display: 'flex', gap: 12, padding: '8px 0',
+                    borderBottom: '1px solid #f1f5f9',
+                  }}>
+                    <div style={{ paddingTop: 2 }}>{typeIcon}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 600, fontSize: 13 }}>{item.title}</span>
+                        {item.correlated_backup && (
+                          <Tag color="orange" style={{ fontSize: 10 }}>{item.correlation_hint}</Tag>
+                        )}
+                      </div>
+                      {item.message && (
+                        <div style={{ color: '#64748b', fontSize: 12, marginTop: 2 }}>{item.message}</div>
+                      )}
+                    </div>
+                    <div style={{ color: '#94a3b8', fontSize: 11, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                      {dayjs(item.ts).format('DD.MM HH:mm')}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </Tabs.TabPane>
+
       </Tabs>
 
       {/* ── SNMP Yapılandır Modal ────────────────────────────────────────────── */}

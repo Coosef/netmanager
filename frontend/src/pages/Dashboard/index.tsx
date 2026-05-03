@@ -22,6 +22,7 @@ import { agentsApi } from '@/api/agents'
 import { topologyApi } from '@/api/topology'
 import { dashboardApi } from '@/api/dashboard'
 import { slaApi } from '@/api/sla'
+import { intelligenceApi } from '@/api/intelligence'
 import { useTranslation } from 'react-i18next'
 import type { NetworkEvent, MonitorStats } from '@/api/monitor'
 import type { Task } from '@/types'
@@ -481,6 +482,7 @@ export default function DashboardPage() {
   const { data: snmpSummary }  = useQuery({ queryKey: ['dashboard-snmp-summary'], queryFn: dashboardApi.getSnmpSummary,   refetchInterval: 60000  })
   const { data: snmpChart }    = useQuery({ queryKey: ['dashboard-snmp-chart'],  queryFn: dashboardApi.getSnmpChart,     refetchInterval: 300000 })
   const { data: sparklineData} = useQuery({ queryKey: ['dashboard-sparklines'],  queryFn: dashboardApi.getSparklines,    refetchInterval: 60000  })
+  const { data: fleetRisk }    = useQuery({ queryKey: ['fleet-risk'],            queryFn: () => intelligenceApi.getFleetRisk(10), refetchInterval: 300000 })
 
   // ── WebSocket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1064,6 +1066,103 @@ export default function DashboardPage() {
                 )}
               </div>
             )}
+          </>
+        )}
+
+        {/* ── Risk Score ───────────────────────────────────────────────────────── */}
+        {fleetRisk && fleetRisk.top_risky.length > 0 && (
+          <>
+            <SectionBar icon={<FireOutlined />} title="Cihaz Risk Analizi" />
+            <Row gutter={[12, 12]}>
+              {/* Özet sayaçlar */}
+              <Col xs={24} lg={8}>
+                <div className="tv-card" style={{ height: '100%' }}>
+                  <CardHead icon={<FireOutlined />} title="Risk Dağılımı" color={N.red}
+                    extra={<span style={{ color: C.dim, fontSize: 11 }}>Ort. {fleetRisk.summary.avg_risk_score}</span>}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0' }}>
+                    {([
+                      { key: 'critical', label: 'Kritik',  color: N.red   },
+                      { key: 'high',     label: 'Yüksek',  color: N.amber },
+                      { key: 'medium',   label: 'Orta',    color: '#f97316' },
+                      { key: 'low',      label: 'Düşük',   color: N.green },
+                    ] as const).map(({ key, label, color }) => {
+                      const count = fleetRisk.summary[key]
+                      const pct = fleetRisk.summary.total_devices > 0
+                        ? Math.round(count / fleetRisk.summary.total_devices * 100) : 0
+                      return (
+                        <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ color: C.dim, fontSize: 11, width: 52 }}>{label}</span>
+                          <div style={{ flex: 1, background: C.border, borderRadius: 4, height: 6, overflow: 'hidden' }}>
+                            <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 4, transition: 'width 0.8s' }} />
+                          </div>
+                          <span style={{ color, fontWeight: 700, fontSize: 13, width: 24, textAlign: 'right' }}>{count}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${C.border}`, color: C.dim, fontSize: 11 }}>
+                    {fleetRisk.summary.total_devices} aktif cihaz · son 7 gün verisi
+                  </div>
+                </div>
+              </Col>
+
+              {/* En riskli cihazlar */}
+              <Col xs={24} lg={16}>
+                <div className="tv-card">
+                  <CardHead icon={<WarningOutlined />} title="En Riskli Cihazlar" color={N.amber}
+                    extra={<span style={{ color: C.dim, fontSize: 11 }}>puan 0–100 (yüksek = riskli)</span>}
+                  />
+                  {fleetRisk.top_risky.slice(0, 8).map((d) => {
+                    const lvlColor = d.level === 'critical' ? N.red : d.level === 'high' ? N.amber : d.level === 'medium' ? '#f97316' : N.green
+                    return (
+                      <div key={d.device_id} style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '6px 0', borderBottom: `1px solid ${C.border}20`,
+                      }}>
+                        <span style={{ color: lvlColor, fontWeight: 700, fontSize: 15, width: 36, textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                          {d.risk_score}
+                        </span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: C.text, fontSize: 12, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{d.hostname}</div>
+                          <div style={{ display: 'flex', gap: 4, marginTop: 2, flexWrap: 'wrap' }}>
+                            {d.breakdown.compliance.score !== null && d.breakdown.compliance.risk_contribution > 5 && (
+                              <Tag style={{ fontSize: 10, padding: '0 4px', margin: 0, background: `${N.red}12`, color: N.red, borderColor: `${N.red}30` }}>
+                                Uyumluluk {d.breakdown.compliance.score}
+                              </Tag>
+                            )}
+                            {d.breakdown.uptime_7d.risk_contribution > 3 && (
+                              <Tag style={{ fontSize: 10, padding: '0 4px', margin: 0, background: `${N.amber}12`, color: N.amber, borderColor: `${N.amber}30` }}>
+                                Uptime %{d.breakdown.uptime_7d.uptime_pct}
+                              </Tag>
+                            )}
+                            {d.breakdown.flapping_7d.flap_count > 0 && (
+                              <Tag style={{ fontSize: 10, padding: '0 4px', margin: 0, background: `${N.purple}12`, color: N.purple, borderColor: `${N.purple}30` }}>
+                                {d.breakdown.flapping_7d.flap_count}× flap
+                              </Tag>
+                            )}
+                            {d.breakdown.backup.last_backup === null && (
+                              <Tag style={{ fontSize: 10, padding: '0 4px', margin: 0, background: `${N.red}12`, color: N.red, borderColor: `${N.red}30` }}>
+                                Yedek yok
+                              </Tag>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ width: 60 }}>
+                          <Progress
+                            percent={d.risk_score}
+                            showInfo={false}
+                            size="small"
+                            strokeColor={lvlColor}
+                            trailColor={`${lvlColor}20`}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </Col>
+            </Row>
           </>
         )}
 

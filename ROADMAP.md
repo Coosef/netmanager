@@ -488,39 +488,31 @@
 
 ---
 
-## SPRINT 12 — Intelligence Fundamentals 🔵
+## SPRINT 12 — Intelligence Fundamentals ✅
 
-> Kaynak: `yenifikir.md` analizi | Tahmini: 2-3 hafta | Öncelik: Yüksek
-> Bu sprint **mevcut veriden yeni anlam** üretiyor — yeni model veya veri toplama yok.
+> Kaynak: `yenifikir.md` analizi | Tamamlandı: 2026-05-04
 
-### 12A. Cihaz Risk Skoru 🔵
-- Mevcut sinyalleri birleştirerek cihaz başına **0–100 risk puanı**:
-  - Compliance skoru (security_audit — mevcut)
-  - SLA uptime % (sla_policy — mevcut)
-  - Son 7 gün flapping sayısı (network_events — mevcut)
-  - Son offline süresi (network_events — mevcut)
-  - Yedek durumu (config_backup — mevcut)
-- `GET /devices/{id}/risk-score` + filo geneli özet endpoint
-- Dashboard widget — en riskli 10 cihaz, risk dağılımı
-- Cihaz tablosunda renk kodlu risk kolonu
+### 12A. Cihaz Risk Skoru ✅
+- ✅ Mevcut sinyalleri birleştirerek cihaz başına **0–100 risk puanı**: compliance (25%) + uptime 7g (30%) + flapping (20%) + yedek tazeliği (25%)
+- ✅ `GET /intelligence/devices/{id}/risk-score` — breakdown dahil
+- ✅ `GET /intelligence/fleet/risk` — filo özeti + en riskli N cihaz
+- ✅ Dashboard "Cihaz Risk Analizi" widget'ı — kritik/yüksek/orta/düşük dağılım + liste
+- ✅ Device detail "Risk & SLA" sekmesi — skor dairesi, Descriptions breakdown
 
-### 12B. MTTR & MTBF Analizi 🔵
-- `device_offline` → sonraki `device_online` çiftlerinden **ortalama kurtarma süresi (MTTR)** hesaplama
-- `device_online` → sonraki `device_offline` aralıklarından **ortalama arıza arası süre (MTBF)** hesaplama
-- `GET /sla/device/{id}/mttr-mtbf` — pencere parametreli
-- Device detail SLA sekmesine eklenir: "Ort. Kurtarma: X dk | Ortalama Çalışma: Y saat"
+### 12B. MTTR & MTBF Analizi ✅
+- ✅ `GET /intelligence/devices/{id}/mttr-mtbf` — pencere parametreli
+- ✅ `device_offline` → `device_online` çiftlerinden MTTR; ardışık online sürelerden MTBF
+- ✅ Device detail "Risk & SLA" sekmesinde arıza istatistikleri kartı
 
-### 12C. Config/Olay Zaman Çizelgesi 🔵
-- Cihaz başına birleşik timeline: config yedekleri + network_events + audit_log
-- "Config değişti → 2 dakika sonra port down oldu → muhtemelen ilişkili" korelasyonu
-- `GET /devices/{id}/timeline?from=...&to=...` — karışık kayıt listesi, zaman sıralı
-- Device detail yeni sekme: zaman çizelgesi görünümü (AntD Timeline bileşeni)
+### 12C. Config/Olay Zaman Çizelgesi ✅
+- ✅ `GET /intelligence/devices/{id}/timeline` — config backup + network_events + audit_log birleşik
+- ✅ Config değişikliği → 10dk içinde olay varsa `correlated_backup: true` + ipucu etiketi
+- ✅ Device detail yeni "Zaman Çizelgesi" sekmesi — ikon, severity rengi, korelasyon badge
 
-### 12D. Topoloji Farkındalıklı Uyarı Bastırma 🔵
-- Upstream cihaz offline olduğunda downstream cihazların "device_offline" uyarıları otomatik bastırılır
-- "KORELASYON: distribution-sw-01 offline — 12 downstream cihaz bildirimi bastırıldı" üst-seviye uyarısı
-- Mevcut `_correlate_offline_events` fonksiyonu gerçek topoloji BFS ile güçlendirilir
-- Alert sayısı dramtik azalır (şu an: N down = N uyarı → N down = 1 root cause uyarısı)
+### 12D. Topoloji Farkındalıklı Uyarı Bastırma ✅
+- ✅ `_correlate_offline_events` gerçek topoloji BFS ile yeniden yazıldı (`topology_links` tablosu)
+- ✅ Cascade child cihazları tespit edilir; tek bir `correlation_incident` root cause event yazılır
+- ✅ Etkilenen cihaz sayısı ve adları event details'te kaydedilir
 
 ---
 

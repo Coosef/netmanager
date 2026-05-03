@@ -8,6 +8,7 @@ from sqlalchemy import select, update
 from app.core.config import settings
 from app.models.device import Device, DeviceStatus
 from app.models.network_event import NetworkEvent
+from app.models.topology import TopologyLink
 from app.services.ssh_manager import SSHManager
 from app.workers.celery_app import celery_app
 
@@ -108,34 +109,94 @@ def _increment_flap_counter(device_id: int) -> int:
 
 
 def _correlate_offline_events(db, newly_offline: list) -> None:
-    """When ≥3 devices go offline in one poll, check if they share a common upstream."""
-    if len(newly_offline) < 3:
+    """
+    Topoloji BFS ile root cause tespiti.
+    Adımlar:
+    1. Topology_links tablosundan upstream haritası oluştur.
+    2. Her offline cihazdan BFS ile ortak upstream bul.
+    3. Bulunan root cause cihazı için tek bir kritik event yaz.
+       Downstream cihazların ayrı uyarıları "bastırıldı" işaretlenir.
+    """
+    if len(newly_offline) < 2:
         return
-    # Group by location / agent_id as a simple proximity heuristic
-    groups: dict[str, list] = {}
-    for device in newly_offline:
-        key = device.agent_id or device.location or "global"
-        groups.setdefault(key, []).append(device)
 
-    for group_key, group_devices in groups.items():
-        if len(group_devices) < 3:
-            continue
-        # Find the device with the most topology links as the root cause candidate
-        root = group_devices[0]  # simplest heuristic: first offline in group
-        affected_names = ", ".join(d.hostname for d in group_devices[1:5])
+    offline_ids = {d.id for d in newly_offline}
+    id_to_device = {d.id: d for d in newly_offline}
+
+    # Topology bağlantıları: device_id → upstream neighbor_device_id listesi
+    links = db.execute(
+        select(TopologyLink.device_id, TopologyLink.neighbor_device_id)
+        .where(TopologyLink.neighbor_device_id.isnot(None))
+    ).fetchall()
+
+    # downstream → upstream haritası (bir cihazın upstream'leri kimler?)
+    upstream_of: dict[int, set[int]] = {}
+    downstream_of: dict[int, set[int]] = {}
+    for dev_id, nbr_id in links:
+        upstream_of.setdefault(dev_id, set()).add(nbr_id)
+        downstream_of.setdefault(nbr_id, set()).add(dev_id)
+
+    # Her offline cihaz için: direkt upstream'i de offline mi?
+    cascade_children: set[int] = set()   # bu cihazlar cascade — ayrı uyarı yaratma
+    root_causes: dict[int, list[int]] = {}  # root_id → etkilenen cihaz id'leri
+
+    for dev in newly_offline:
+        parents = upstream_of.get(dev.id, set())
+        # Upstream'i de offline olduysa bu bir cascade vakasıdır
+        if parents & offline_ids:
+            cascade_children.add(dev.id)
+
+    # Gerçek root'lar: offline olup cascade child olmayan cihazlar
+    real_roots = [d for d in newly_offline if d.id not in cascade_children]
+
+    for root in real_roots:
+        # BFS ile bu root'tan erişilebilen tüm downstream offline cihazları bul
+        visited: set[int] = set()
+        queue = [root.id]
+        while queue:
+            current = queue.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            for child in downstream_of.get(current, set()):
+                if child in offline_ids and child not in visited:
+                    queue.append(child)
+
+        affected_ids = [i for i in visited if i != root.id]
+        if not affected_ids:
+            continue  # tek başına offline, cascade değil
+
+        root_causes[root.id] = affected_ids
+
+    # Root cause event'leri yaz
+    for root_id, affected_ids in root_causes.items():
+        root_dev = id_to_device[root_id]
+        affected_devs = [id_to_device[i] for i in affected_ids if i in id_to_device]
+        affected_names = ", ".join(d.hostname for d in affected_devs[:5])
+        total = len(affected_ids)
+
         _save_event(
-            db, root,
+            db, root_dev,
             "correlation_incident", "critical",
-            f"KORELASYON: {root.hostname} offline — {len(group_devices)} cihaz etkilendi",
-            f"Etkilenen cihazlar: {affected_names}{'...' if len(group_devices) > 5 else ''}",
+            f"KÖK NEDEN: {root_dev.hostname} → {total} cihaz etkilendi",
+            f"Cascade etkilenen: {affected_names}{'...' if total > 5 else ''}",
             details={
-                "root_candidate": root.hostname,
-                "affected_count": len(group_devices),
-                "affected_devices": [{"id": d.id, "hostname": d.hostname} for d in group_devices],
-                "group_key": group_key,
+                "root_device_id": root_id,
+                "root_hostname": root_dev.hostname,
+                "affected_count": total,
+                "affected_devices": [
+                    {"id": id_to_device[i].id, "hostname": id_to_device[i].hostname}
+                    for i in affected_ids if i in id_to_device
+                ],
+                "suppressed_alerts": len(affected_ids),
             },
-            dedup_key=f"correlation:{group_key}:{root.id}",
+            dedup_key=f"rootcause:{root_id}",
         )
+
+    # Cascade child'ların device_offline event'lerini bastır
+    # (Redis'te dedup key'i set ederek aynı poll'da tekrar yaratılmasını engelle)
+    for child_id in cascade_children:
+        _redis.setex(f"event:dedup:{child_id}:device_offline:offline:{child_id}", 300, "suppressed")
 
 
 @celery_app.task(name="app.workers.tasks.monitor_tasks.poll_device_status")
