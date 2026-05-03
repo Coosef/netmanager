@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  App, Alert, Button, Descriptions, Form, Input, Modal, Select,
+  App, Alert, AutoComplete, Button, Descriptions, Form, Input, Modal, Select,
   Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography,
   Tabs, Badge, Switch, Divider,
 } from 'antd'
@@ -21,6 +21,7 @@ import {
   type AgentCommandLog, type AgentSecurityConfig,
   type SnmpGetResult, type SnmpWalkResult,
 } from '@/api/agents'
+import { devicesApi } from '@/api/devices'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -552,13 +553,37 @@ function DiscoveryTab({ agent }: { agent: Agent }) {
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const { message } = App.useApp()
+  const queryClient = useQueryClient()
   const [subnet, setSubnet] = useState('')
   const [isRunning, setIsRunning] = useState(false)
   const [result, setResult] = useState<{hosts: any[]; scanned: number} | null>(null)
+  const [addTarget, setAddTarget] = useState<{ip: string; port: number} | null>(null)
+  const [addForm] = Form.useForm()
 
   const { data: history = [] } = useQuery({
     queryKey: ['agent-discovery-history', agent.id],
     queryFn: () => agentsApi.getDiscoveryHistory(agent.id),
+  })
+
+  const addDeviceMutation = useMutation({
+    mutationFn: (values: any) =>
+      devicesApi.create({
+        hostname: values.hostname,
+        ip_address: addTarget!.ip,
+        vendor: values.vendor,
+        os_type: values.os_type,
+        device_type: 'switch',
+        ssh_username: values.ssh_username || 'admin',
+        ssh_port: addTarget!.port,
+        agent_id: agent.id,
+      }),
+    onSuccess: () => {
+      message.success(`${addTarget!.ip} envantere eklendi`)
+      setAddTarget(null)
+      addForm.resetFields()
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Cihaz eklenemedi'),
   })
 
   const run = async () => {
@@ -615,9 +640,67 @@ function DiscoveryTab({ agent }: { agent: Agent }) {
                 )
               },
               { title: 'Banner', dataIndex: 'banner', ellipsis: true, render: (v: string | null) => v ? <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> : '—' },
-              { title: 'Gecikme', dataIndex: 'response_time_ms', width: 80, render: (v: number) => `${v}ms` },
+              { title: 'Gecikme', dataIndex: 'response_time_ms', width: 72, render: (v: number) => `${v}ms` },
+              {
+                title: '', width: 60, dataIndex: 'ip',
+                render: (ip: string, row: any) => (
+                  <Button
+                    size="small"
+                    type="link"
+                    style={{ fontSize: 11, padding: '0 4px' }}
+                    onClick={() => {
+                      const port = row.open_ports?.includes(22) ? 22 : (row.open_ports?.[0] ?? 22)
+                      setAddTarget({ ip, port })
+                      addForm.setFieldsValue({ hostname: ip, ssh_username: 'admin', vendor: 'cisco', os_type: 'cisco_ios' })
+                    }}
+                  >
+                    + Ekle
+                  </Button>
+                ),
+              },
             ]}
           />
+          <Modal
+            open={!!addTarget}
+            title={`Envantere Ekle — ${addTarget?.ip}`}
+            onCancel={() => { setAddTarget(null); addForm.resetFields() }}
+            onOk={() => addForm.submit()}
+            okText="Ekle"
+            cancelText="İptal"
+            confirmLoading={addDeviceMutation.isPending}
+            styles={{ content: { background: C.bg }, header: { background: C.bg } }}
+          >
+            <Form form={addForm} layout="vertical" size="small" onFinish={v => addDeviceMutation.mutate(v)} style={{ marginTop: 12 }}>
+              <Form.Item name="hostname" label="Hostname" rules={[{ required: true, message: 'Hostname giriniz' }]}>
+                <Input placeholder={addTarget?.ip} />
+              </Form.Item>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Form.Item name="ssh_username" label="SSH Kullanıcı" style={{ flex: 1 }}>
+                  <Input placeholder="admin" />
+                </Form.Item>
+                <Form.Item name="vendor" label="Vendor" style={{ flex: 1 }}>
+                  <Select options={[
+                    { value: 'cisco', label: 'Cisco' },
+                    { value: 'aruba', label: 'Aruba' },
+                    { value: 'ruijie', label: 'Ruijie' },
+                    { value: 'juniper', label: 'Juniper' },
+                    { value: 'hp', label: 'HP' },
+                    { value: 'huawei', label: 'Huawei' },
+                  ]} />
+                </Form.Item>
+                <Form.Item name="os_type" label="OS Tipi" style={{ flex: 1 }}>
+                  <Select options={[
+                    { value: 'cisco_ios', label: 'IOS' },
+                    { value: 'cisco_nxos', label: 'NX-OS' },
+                    { value: 'cisco_xr', label: 'IOS-XR' },
+                    { value: 'aruba_os', label: 'ArubaOS' },
+                    { value: 'ruijie_os', label: 'RuijieOS' },
+                    { value: 'junos', label: 'JunOS' },
+                  ]} />
+                </Form.Item>
+              </div>
+            </Form>
+          </Modal>
         </div>
       )}
 
@@ -656,10 +739,11 @@ function SyslogTab({ agent }: { agent: Agent }) {
   const { message } = App.useApp()
   const [enabled, setEnabled] = useState(false)
   const [port, setPort] = useState(514)
+  const [severityFilter, setSeverityFilter] = useState<number>(7)
 
   const { data: events } = useQuery({
-    queryKey: ['agent-syslog', agent.id],
-    queryFn: () => agentsApi.getSyslogEvents(agent.id, { limit: 100 }),
+    queryKey: ['agent-syslog', agent.id, severityFilter],
+    queryFn: () => agentsApi.getSyslogEvents(agent.id, { limit: 100, severity_max: severityFilter }),
     refetchInterval: enabled ? 5000 : false,
   })
 
@@ -682,7 +766,7 @@ function SyslogTab({ agent }: { agent: Agent }) {
             <strong>Syslog Toplayıcı</strong>
             <div style={{ color: C.muted, fontSize: 11 }}>UDP syslog mesajlarını dinler ve kaydeder</div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Text style={{ fontSize: 11, color: C.muted }}>Port:</Text>
             <Input
               type="number"
@@ -691,6 +775,22 @@ function SyslogTab({ agent }: { agent: Agent }) {
               style={{ width: 70 }}
               size="small"
               disabled={enabled}
+            />
+            <Select
+              size="small"
+              value={severityFilter}
+              onChange={setSeverityFilter}
+              style={{ width: 110 }}
+              options={[
+                { value: 7, label: 'Tümü' },
+                { value: 6, label: '≤ Info' },
+                { value: 5, label: '≤ Notice' },
+                { value: 4, label: '≤ Warning' },
+                { value: 3, label: '≤ Error' },
+                { value: 2, label: '≤ Critical' },
+                { value: 1, label: '≤ Alert' },
+                { value: 0, label: 'Emergency' },
+              ]}
             />
             <Switch
               checked={enabled}
@@ -733,6 +833,9 @@ function SyslogTab({ agent }: { agent: Agent }) {
 
 // ── StreamingTab ──────────────────────────────────────────────────────────────
 
+const STREAM_HISTORY_KEY = (agentId: string) => `nm_stream_history_${agentId}`
+const MAX_HISTORY = 20
+
 function StreamingTab({ agent }: { agent: Agent }) {
   const { isDark } = useTheme()
   const C = mkC(isDark)
@@ -741,13 +844,24 @@ function StreamingTab({ agent }: { agent: Agent }) {
   const [command, setCommand] = useState('')
   const [output, setOutput] = useState('')
   const [isRunning, setIsRunning] = useState(false)
+  const [cmdHistory, setCmdHistory] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(STREAM_HISTORY_KEY(agent.id)) || '[]') } catch { return [] }
+  })
+
+  const saveToHistory = (cmd: string) => {
+    const next = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, MAX_HISTORY)
+    setCmdHistory(next)
+    localStorage.setItem(STREAM_HISTORY_KEY(agent.id), JSON.stringify(next))
+  }
 
   const run = async () => {
     if (!deviceId || !command.trim()) { message.warning('Cihaz ID ve komut giriniz'); return }
     setOutput('')
     setIsRunning(true)
+    const cmd = command.trim()
     try {
-      const res = await agentsApi.startStreamCommand(agent.id, { device_id: Number(deviceId), command: command.trim() })
+      const res = await agentsApi.startStreamCommand(agent.id, { device_id: Number(deviceId), command: cmd })
+      saveToHistory(cmd)
       const apiBase = (window as any).__VITE_API_URL__ || ''
       const evtSource = new EventSource(`${apiBase}/api/v1/stream/${res.request_id}`)
       evtSource.onmessage = (e) => {
@@ -779,13 +893,16 @@ function StreamingTab({ agent }: { agent: Agent }) {
             style={{ width: 110 }}
             type="number"
           />
-          <Input
+          <AutoComplete
             value={command}
-            onChange={e => setCommand(e.target.value)}
-            placeholder="show running-config"
-            onPressEnter={run}
+            onChange={setCommand}
+            onSelect={setCommand}
+            options={cmdHistory.map(c => ({ value: c, label: <Text style={{ fontSize: 11 }}>{c}</Text> }))}
             style={{ flex: 1 }}
-          />
+            filterOption={(input, opt) => (opt?.value as string)?.toLowerCase().includes(input.toLowerCase())}
+          >
+            <Input placeholder="show running-config" onPressEnter={run} />
+          </AutoComplete>
           <Button type="primary" onClick={run} loading={isRunning} disabled={!agent.status || agent.status !== 'online'}>
             Çalıştır
           </Button>
@@ -1217,6 +1334,20 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
                             {(metrics.pool_active_hosts || []).map((h: string) => (
                               <Tag key={h} style={{ fontSize: 10, marginBottom: 2 }}>{h}</Tag>
                             ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {(metrics.queue_size ?? 0) > 0 && (
+                      <div style={{ background: '#451a0320', border: '1px solid #f59e0b50', borderRadius: 8, padding: '10px 14px', marginBottom: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <WarningOutlined style={{ color: '#f59e0b', fontSize: 16 }} />
+                        <div>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#f59e0b' }}>
+                            Çevrimdışı Kuyruk: {metrics.queue_size} komut bekliyor
+                          </div>
+                          <div style={{ fontSize: 11, color: C.muted }}>
+                            Agent bağlandığında otomatik gönderilecek
                           </div>
                         </div>
                       </div>

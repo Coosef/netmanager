@@ -222,6 +222,7 @@ def _get_metrics():
         "python_version": platform.python_version(),
         "pool_size": pool_size,
         "pool_active_hosts": pool_active_hosts,
+        "queue_size": len(_result_queue),
     }
     if _HAS_PSUTIL:
         try:

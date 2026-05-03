@@ -40,6 +40,7 @@ export interface AgentMetrics {
   pool_active_hosts?: string[]
   vault_active?: boolean
   vault_credential_count?: number
+  queue_size?: number
 }
 
 export interface AgentLiveData {
