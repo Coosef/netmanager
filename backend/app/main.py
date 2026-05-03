@@ -260,6 +260,38 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE driver_templates ADD COLUMN IF NOT EXISTS last_failure_at TIMESTAMPTZ"
         ))
 
+        # Agent features v2: syslog, discovery, credential vault
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS syslog_events ("
+            "id SERIAL PRIMARY KEY, agent_id VARCHAR(32) NOT NULL, "
+            "source_ip VARCHAR(45) NOT NULL, facility INTEGER NOT NULL DEFAULT 0, "
+            "severity INTEGER NOT NULL DEFAULT 7, message VARCHAR(4096) NOT NULL DEFAULT '', "
+            "received_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_syslog_agent_received ON syslog_events(agent_id, received_at)"
+        ))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS discovery_results ("
+            "id SERIAL PRIMARY KEY, agent_id VARCHAR(32) NOT NULL, subnet VARCHAR(64) NOT NULL, "
+            "triggered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), completed_at TIMESTAMPTZ, "
+            "status VARCHAR(16) NOT NULL DEFAULT 'completed', "
+            "total_discovered INTEGER NOT NULL DEFAULT 0, scanned_count INTEGER NOT NULL DEFAULT 0, "
+            "results JSONB NOT NULL DEFAULT '[]'::jsonb"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_discovery_results_agent ON discovery_results(agent_id)"
+        ))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS agent_credential_bundles ("
+            "id SERIAL PRIMARY KEY, agent_id VARCHAR(32) NOT NULL UNIQUE, "
+            "agent_aes_key_enc TEXT NOT NULL, bundle_version INTEGER NOT NULL DEFAULT 1, "
+            "last_refreshed TIMESTAMPTZ NOT NULL DEFAULT NOW(), device_count INTEGER NOT NULL DEFAULT 0"
+            ")"
+        ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _seed_builtin_templates()

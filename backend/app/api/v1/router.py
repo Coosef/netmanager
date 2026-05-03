@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, interfaces, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, playbooks, racks, reports, security_audit, sla, snmp, tasks, tenants, topology, users, ws
+from app.api.v1.endpoints import agents, agent_stream, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, interfaces, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, playbooks, racks, reports, security_audit, sla, snmp, tasks, tenants, topology, users, ws
 
 api_router = APIRouter()
 
@@ -12,6 +12,7 @@ api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 api_router.include_router(topology.router, prefix="/topology", tags=["Topology"])
 api_router.include_router(ws.router, prefix="/ws", tags=["WebSocket"])
 api_router.include_router(agents.router, prefix="/agents", tags=["Agents"])
+api_router.include_router(agent_stream.router, prefix="/stream", tags=["Streaming"])
 api_router.include_router(monitor.router, prefix="/monitor", tags=["Monitor"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
 api_router.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])

@@ -452,6 +452,410 @@ async def probe_agent_devices(
     return {"agent_id": agent_id, "probed": len(results), "results": results}
 
 
+# ── WebSocket helper tasks (called on hello) ──────────────────────────────────
+
+async def _push_device_sync_task(agent_id: str, db: AsyncSession):
+    """Push assigned device list to agent for health monitoring."""
+    try:
+        from app.models.device import Device
+        from app.core.security import decrypt_credential
+        from sqlalchemy import select as _select
+        dev_result = await db.execute(
+            _select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
+        )
+        devices = dev_result.scalars().all()
+        if not devices:
+            return
+        payload = [
+            {
+                "id": d.id,
+                "ip": d.ip_address,
+                "port": d.ssh_port or 22,
+                "username": d.ssh_username or "",
+                "password": decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else "",
+                "os_type": d.os_type or "cisco_ios",
+                "enable_secret": decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else "",
+            }
+            for d in devices
+        ]
+        await agent_manager.send_device_sync(agent_id, payload)
+    except Exception as exc:
+        import logging
+        logging.getLogger("agents").debug(f"Device sync push error for {agent_id}: {exc}")
+
+
+async def _push_vault_task(agent_id: str, db: AsyncSession):
+    """Push credential vault bundle to agent (called on hello with vault_support=True)."""
+    try:
+        import os as _os, base64 as _b64
+        from sqlalchemy import select as _select
+        from app.models.device import Device
+        from app.models.agent_credential_bundle import AgentCredentialBundle
+        from app.core.security import decrypt_credential, encrypt_credential
+
+        devices = (await db.execute(
+            _select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
+        )).scalars().all()
+        if not devices:
+            return
+
+        # Check if we have a stored key; reuse it for continuity
+        existing = (await db.execute(
+            _select(AgentCredentialBundle).where(AgentCredentialBundle.agent_id == agent_id)
+        )).scalar_one_or_none()
+
+        if existing:
+            from app.core.security import decrypt_credential as _dec
+            aes_key_b64 = _dec(existing.agent_aes_key_enc)
+            aes_key = _b64.b64decode(aes_key_b64)
+        else:
+            aes_key = _os.urandom(32)
+            aes_key_b64 = _b64.b64encode(aes_key).decode()
+
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+            def _enc(pt: str) -> str:
+                nonce = _os.urandom(12)
+                ct = AESGCM(aes_key).encrypt(nonce, pt.encode(), None)
+                return _b64.b64encode(nonce + ct).decode()
+            has_crypto = True
+        except ImportError:
+            has_crypto = False
+
+        credentials = []
+        for d in devices:
+            pwd = decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else ""
+            enable = decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else ""
+            if has_crypto:
+                credentials.append({
+                    "credential_id": d.id,
+                    "ip": d.ip_address,
+                    "port": d.ssh_port or 22,
+                    "username": d.ssh_username or "",
+                    "password_enc": _enc(pwd),
+                    "enable_enc": _enc(enable) if enable else "",
+                    "os_type": d.os_type or "cisco_ios",
+                })
+            else:
+                credentials.append({
+                    "credential_id": d.id,
+                    "ip": d.ip_address,
+                    "port": d.ssh_port or 22,
+                    "username": d.ssh_username or "",
+                    "password_enc": "",
+                    "password_plain": pwd,
+                    "enable_enc": "",
+                    "enable_plain": enable,
+                    "os_type": d.os_type or "cisco_ios",
+                })
+
+        if not existing:
+            db.add(AgentCredentialBundle(
+                agent_id=agent_id,
+                agent_aes_key_enc=encrypt_credential(aes_key_b64),
+                device_count=len(credentials),
+            ))
+            await db.commit()
+
+        await agent_manager.send_credential_bundle(agent_id, aes_key_b64, credentials)
+    except Exception as exc:
+        import logging
+        logging.getLogger("agents").debug(f"Vault push error for {agent_id}: {exc}")
+
+
+# ── Feature 2: Device sync ────────────────────────────────────────────────────
+
+@router.post("/{agent_id}/device-sync", response_model=dict)
+async def push_device_sync(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Push device list to connected agent so it can run health checks."""
+    if not current_user.has_permission("device:read"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    from app.models.device import Device
+    from app.core.security import decrypt_credential
+    dev_result = await db.execute(
+        select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
+    )
+    devices = dev_result.scalars().all()
+    payload = [
+        {
+            "id": d.id,
+            "ip": d.ip_address,
+            "port": d.ssh_port or 22,
+            "username": d.ssh_username,
+            "password": decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else "",
+            "os_type": d.os_type,
+            "enable_secret": decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else "",
+        }
+        for d in devices
+    ]
+    sent = await agent_manager.send_device_sync(agent_id, payload)
+    return {"sent": sent, "device_count": len(payload)}
+
+
+# ── Feature 5: Discovery ──────────────────────────────────────────────────────
+
+@router.post("/{agent_id}/discover", response_model=dict)
+async def trigger_discovery(
+    agent_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Trigger network discovery on the agent's local subnet."""
+    if not current_user.has_permission("device:read"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    subnet = body.get("subnet", "")
+    if not subnet:
+        raise HTTPException(status_code=400, detail="subnet is required (e.g. 192.168.1.0/24)")
+
+    result_data = await agent_manager.trigger_discovery(agent_id, subnet, body.get("ports"))
+
+    # Persist result
+    from app.models.discovery_result import DiscoveryResult
+    dr = DiscoveryResult(
+        agent_id=agent_id,
+        subnet=subnet,
+        completed_at=datetime.now(timezone.utc),
+        status="completed" if result_data.get("success") else "failed",
+        total_discovered=len(result_data.get("hosts", [])),
+        scanned_count=result_data.get("scanned", 0),
+        results=result_data.get("hosts", []),
+    )
+    db.add(dr)
+    await db.commit()
+
+    return result_data
+
+
+@router.get("/{agent_id}/discover/history", response_model=list[dict])
+async def get_discovery_history(
+    agent_id: str,
+    limit: int = Query(20, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    from app.models.discovery_result import DiscoveryResult
+    rows = (await db.execute(
+        select(DiscoveryResult)
+        .where(DiscoveryResult.agent_id == agent_id)
+        .order_by(DiscoveryResult.triggered_at.desc())
+        .limit(limit)
+    )).scalars().all()
+    return [
+        {
+            "id": r.id,
+            "subnet": r.subnet,
+            "triggered_at": r.triggered_at.isoformat(),
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            "status": r.status,
+            "total_discovered": r.total_discovered,
+            "scanned_count": r.scanned_count,
+            "results": r.results,
+        }
+        for r in rows
+    ]
+
+
+# ── Feature 6: Syslog ─────────────────────────────────────────────────────────
+
+@router.post("/{agent_id}/syslog-config", response_model=dict)
+async def configure_syslog(
+    agent_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Enable or disable syslog collection on the agent."""
+    if not current_user.has_permission("device:update"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    enabled = bool(body.get("enabled", False))
+    bind_port = int(body.get("bind_port", 514))
+    sent = await agent_manager.send_syslog_config(agent_id, enabled, bind_port)
+    return {"sent": sent, "enabled": enabled, "bind_port": bind_port}
+
+
+@router.get("/{agent_id}/syslog-events", response_model=dict)
+async def get_syslog_events(
+    agent_id: str,
+    limit: int = Query(100, le=1000),
+    offset: int = Query(0),
+    severity_max: int = Query(7, ge=0, le=7),
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    from app.models.syslog_event import SyslogEvent
+    from sqlalchemy import desc as _desc
+    q = (
+        select(SyslogEvent)
+        .where(SyslogEvent.agent_id == agent_id, SyslogEvent.severity <= severity_max)
+        .order_by(_desc(SyslogEvent.received_at))
+        .offset(offset)
+        .limit(limit)
+    )
+    rows = (await db.execute(q)).scalars().all()
+    items = [
+        {
+            "id": r.id,
+            "source_ip": r.source_ip,
+            "facility": r.facility,
+            "severity": r.severity,
+            "message": r.message,
+            "received_at": r.received_at.isoformat(),
+        }
+        for r in rows
+    ]
+    return {"items": items, "total": len(items), "offset": offset, "limit": limit}
+
+
+# ── Feature 7: Streaming ──────────────────────────────────────────────────────
+
+@router.post("/{agent_id}/stream-command", response_model=dict)
+async def start_stream_command(
+    agent_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Start a streaming SSH command. Returns request_id for SSE subscription."""
+    if not current_user.has_permission("device:update"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    device_id = body.get("device_id")
+    command = body.get("command", "").strip()
+    if not device_id or not command:
+        raise HTTPException(status_code=400, detail="device_id and command are required")
+
+    from app.models.device import Device
+    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    rid, _ = await agent_manager.execute_ssh_command_stream(agent_id, device, command)
+    return {"request_id": rid, "stream_url": f"/api/v1/stream/{rid}"}
+
+
+# ── Feature 8: Credential Vault ───────────────────────────────────────────────
+
+@router.post("/{agent_id}/refresh-vault", response_model=dict)
+async def refresh_credential_vault(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Regenerate agent AES key and push fresh credential bundle to agent."""
+    if not current_user.has_permission("device:update"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    from app.models.device import Device
+    from app.models.agent_credential_bundle import AgentCredentialBundle
+    from app.core.security import decrypt_credential, encrypt_credential
+    import os as _os, base64 as _b64
+
+    devices = (await db.execute(
+        select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
+    )).scalars().all()
+
+    # Generate new AES-256 key
+    aes_key = _os.urandom(32)
+    aes_key_b64 = _b64.b64encode(aes_key).decode()
+
+    # Encrypt credentials with AES-GCM
+    try:
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        def _enc(plaintext: str) -> str:
+            nonce = _os.urandom(12)
+            ct = AESGCM(aes_key).encrypt(nonce, plaintext.encode(), None)
+            return _b64.b64encode(nonce + ct).decode()
+        has_crypto = True
+    except ImportError:
+        has_crypto = False
+
+    credentials = []
+    for d in devices:
+        pwd = decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else ""
+        enable = decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else ""
+        community = d.snmp_community or ""
+        if has_crypto:
+            credentials.append({
+                "credential_id": d.id,
+                "ip": d.ip_address,
+                "port": d.ssh_port or 22,
+                "username": d.ssh_username or "",
+                "password_enc": _enc(pwd),
+                "enable_enc": _enc(enable) if enable else "",
+                "snmp_community_enc": _enc(community) if community else "",
+                "os_type": d.os_type or "cisco_ios",
+            })
+        else:
+            # Fallback: no crypto — send plaintext (over TLS WS)
+            credentials.append({
+                "credential_id": d.id,
+                "ip": d.ip_address,
+                "port": d.ssh_port or 22,
+                "username": d.ssh_username or "",
+                "password_enc": "",
+                "password_plain": pwd,
+                "enable_enc": "",
+                "enable_plain": enable,
+                "os_type": d.os_type or "cisco_ios",
+            })
+
+    # Persist encrypted AES key
+    existing = (await db.execute(
+        select(AgentCredentialBundle).where(AgentCredentialBundle.agent_id == agent_id)
+    )).scalar_one_or_none()
+    if existing:
+        existing.agent_aes_key_enc = encrypt_credential(aes_key_b64)
+        existing.bundle_version += 1
+        existing.last_refreshed = datetime.now(timezone.utc)
+        existing.device_count = len(credentials)
+    else:
+        db.add(AgentCredentialBundle(
+            agent_id=agent_id,
+            agent_aes_key_enc=encrypt_credential(aes_key_b64),
+            last_refreshed=datetime.now(timezone.utc),
+            device_count=len(credentials),
+        ))
+    await db.commit()
+
+    sent = await agent_manager.send_credential_bundle(agent_id, aes_key_b64, credentials)
+    return {"sent": sent, "credential_count": len(credentials), "encrypted": has_crypto}
+
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @router.websocket("/ws/{agent_id}")
@@ -550,6 +954,9 @@ async def agent_websocket(
                     "version": msg.get("version"),
                     "python_version": msg.get("python_version"),
                     "has_psutil": msg.get("has_psutil", False),
+                    "vault_support": msg.get("vault_support", False),
+                    "has_snmp": msg.get("has_snmp", False),
+                    "has_crypto": msg.get("has_crypto", False),
                 })
                 agent.platform = msg.get("platform")
                 agent.machine_hostname = msg.get("hostname")
@@ -558,6 +965,13 @@ async def agent_websocket(
                     await db.commit()
                 except Exception:
                     pass
+
+                # Push device list for health monitoring
+                asyncio.create_task(_push_device_sync_task(agent_id, db))
+
+                # Push credential vault if agent supports it
+                if msg.get("vault_support"):
+                    asyncio.create_task(_push_vault_task(agent_id, db))
 
             elif msg.get("type") == "heartbeat":
                 agent.last_heartbeat = datetime.now(timezone.utc)

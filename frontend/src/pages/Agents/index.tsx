@@ -12,12 +12,14 @@ import {
   WindowsOutlined, ConsoleSqlOutlined, PoweroffOutlined, ThunderboltOutlined,
   CheckCircleOutlined, CloseCircleOutlined, DashboardOutlined, ApiOutlined,
   SafetyOutlined, HistoryOutlined, KeyOutlined, LockOutlined, UnlockOutlined,
-  WarningOutlined, PlusCircleOutlined,
+  WarningOutlined, PlusCircleOutlined, SearchOutlined, WifiOutlined,
+  DatabaseOutlined, SafetyCertificateOutlined, BugOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   agentsApi, type Agent, type AgentLatencyEntry,
   type AgentCommandLog, type AgentSecurityConfig,
+  type DiscoveryHistoryEntry, type SyslogEvent,
 } from '@/api/agents'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -544,6 +546,342 @@ function CommandLogTab({ agentId }: { agentId: string }) {
   )
 }
 
+// ── DiscoveryTab ──────────────────────────────────────────────────────────────
+
+function DiscoveryTab({ agent }: { agent: Agent }) {
+  const { isDark } = useTheme()
+  const C = mkC(isDark)
+  const { message } = App.useApp()
+  const [subnet, setSubnet] = useState('')
+  const [isRunning, setIsRunning] = useState(false)
+  const [result, setResult] = useState<{hosts: any[]; scanned: number} | null>(null)
+
+  const { data: history = [] } = useQuery({
+    queryKey: ['agent-discovery-history', agent.id],
+    queryFn: () => agentsApi.getDiscoveryHistory(agent.id),
+  })
+
+  const run = async () => {
+    if (!subnet.trim()) { message.warning('Subnet giriniz (örn: 192.168.1.0/24)'); return }
+    setIsRunning(true)
+    try {
+      const res = await agentsApi.discover(agent.id, { subnet: subnet.trim() })
+      setResult(res)
+      message.success(`${res.hosts?.length ?? 0} cihaz keşfedildi (${res.scanned} IP tarandı)`)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Keşif başarısız')
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 10 }}>Ağ Tarama</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Input
+            value={subnet}
+            onChange={e => setSubnet(e.target.value)}
+            placeholder="192.168.1.0/24"
+            onPressEnter={run}
+            style={{ flex: 1 }}
+          />
+          <Button type="primary" loading={isRunning} onClick={run}>
+            {isRunning ? 'Taranıyor...' : 'Tara'}
+          </Button>
+        </div>
+        <Text style={{ fontSize: 11, color: C.muted }}>Maksimum /22 (1024 IP). Tarama ~60-90s sürebilir.</Text>
+      </div>
+
+      {result && (
+        <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 8 }}>
+            Sonuçlar — {result.hosts.length} cihaz / {result.scanned} IP
+          </div>
+          <Table
+            dataSource={result.hosts}
+            rowKey="ip"
+            size="small"
+            pagination={{ pageSize: 10 }}
+            columns={[
+              { title: 'IP', dataIndex: 'ip', width: 130, render: (v: string) => <code style={{ fontSize: 11 }}>{v}</code> },
+              {
+                title: 'Açık Portlar', dataIndex: 'open_ports', width: 140,
+                render: (ports: number[]) => (
+                  <Space size={4} wrap>
+                    {ports.map(p => <Tag key={p} color={p === 22 ? 'green' : p === 23 ? 'orange' : 'default'} style={{ fontSize: 10 }}>{p}</Tag>)}
+                  </Space>
+                )
+              },
+              { title: 'Banner', dataIndex: 'banner', ellipsis: true, render: (v: string | null) => v ? <Text type="secondary" style={{ fontSize: 11 }}>{v}</Text> : '—' },
+              { title: 'Gecikme', dataIndex: 'response_time_ms', width: 80, render: (v: number) => `${v}ms` },
+            ]}
+          />
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 8 }}>Geçmiş Taramalar</div>
+          {history.slice(0, 5).map(h => (
+            <div key={h.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '4px 0', borderBottom: `1px solid ${C.border}` }}>
+              <span><code style={{ fontSize: 11 }}>{h.subnet}</code></span>
+              <span><Tag color={h.status === 'completed' ? 'green' : 'red'} style={{ fontSize: 10 }}>{h.total_discovered} cihaz</Tag></span>
+              <Text type="secondary" style={{ fontSize: 11 }}>{dayjs(h.triggered_at).fromNow()}</Text>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── SyslogTab ─────────────────────────────────────────────────────────────────
+
+const SYSLOG_SEVERITY: Record<number, { label: string; color: string }> = {
+  0: { label: 'Emergency', color: '#ef4444' },
+  1: { label: 'Alert', color: '#f97316' },
+  2: { label: 'Critical', color: '#ef4444' },
+  3: { label: 'Error', color: '#f59e0b' },
+  4: { label: 'Warning', color: '#f59e0b' },
+  5: { label: 'Notice', color: '#3b82f6' },
+  6: { label: 'Info', color: '#22c55e' },
+  7: { label: 'Debug', color: '#94a3b8' },
+}
+
+function SyslogTab({ agent }: { agent: Agent }) {
+  const { isDark } = useTheme()
+  const C = mkC(isDark)
+  const { message } = App.useApp()
+  const [enabled, setEnabled] = useState(false)
+  const [port, setPort] = useState(514)
+
+  const { data: events, refetch } = useQuery({
+    queryKey: ['agent-syslog', agent.id],
+    queryFn: () => agentsApi.getSyslogEvents(agent.id, { limit: 100 }),
+    refetchInterval: enabled ? 5000 : false,
+  })
+
+  const toggleMutation = useMutation({
+    mutationFn: (en: boolean) => agentsApi.configureSyslog(agent.id, { enabled: en, bind_port: port }),
+    onSuccess: (data) => {
+      setEnabled(data.enabled)
+      message.success(data.enabled ? `Syslog dinleniyor (UDP :${data.bind_port})` : 'Syslog durduruldu')
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Syslog yapılandırma hatası'),
+  })
+
+  const items = events?.items || []
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ flex: 1, fontSize: 12, color: C.text }}>
+            <strong>Syslog Toplayıcı</strong>
+            <div style={{ color: C.muted, fontSize: 11 }}>UDP syslog mesajlarını dinler ve kaydeder</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontSize: 11, color: C.muted }}>Port:</Text>
+            <Input
+              type="number"
+              value={port}
+              onChange={e => setPort(Number(e.target.value))}
+              style={{ width: 70 }}
+              size="small"
+              disabled={enabled}
+            />
+            <Switch
+              checked={enabled}
+              onChange={val => toggleMutation.mutate(val)}
+              loading={toggleMutation.isPending}
+              checkedChildren="Açık"
+              unCheckedChildren="Kapalı"
+            />
+          </div>
+        </div>
+      </div>
+
+      {items.length > 0 ? (
+        <Table
+          dataSource={items}
+          rowKey="id"
+          size="small"
+          pagination={{ pageSize: 20 }}
+          columns={[
+            {
+              title: 'Seviye', dataIndex: 'severity', width: 90,
+              render: (v: number) => {
+                const s = SYSLOG_SEVERITY[v] || SYSLOG_SEVERITY[7]
+                return <Tag style={{ fontSize: 10, color: s.color, borderColor: s.color + '50', background: s.color + '15' }}>{s.label}</Tag>
+              }
+            },
+            { title: 'Kaynak IP', dataIndex: 'source_ip', width: 130, render: (v: string) => <code style={{ fontSize: 11 }}>{v}</code> },
+            { title: 'Mesaj', dataIndex: 'message', ellipsis: true, render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+            { title: 'Zaman', dataIndex: 'received_at', width: 120, render: (v: string) => <Text type="secondary" style={{ fontSize: 11 }}>{dayjs(v).fromNow()}</Text> },
+          ]}
+        />
+      ) : (
+        <div style={{ textAlign: 'center', padding: '24px 0', color: C.muted, fontSize: 12 }}>
+          {enabled ? 'Henüz syslog mesajı alınmadı' : 'Syslog toplayıcıyı etkinleştirin'}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── StreamingTab ──────────────────────────────────────────────────────────────
+
+function StreamingTab({ agent }: { agent: Agent }) {
+  const { isDark } = useTheme()
+  const C = mkC(isDark)
+  const { message } = App.useApp()
+  const [deviceId, setDeviceId] = useState('')
+  const [command, setCommand] = useState('')
+  const [output, setOutput] = useState('')
+  const [isRunning, setIsRunning] = useState(false)
+
+  const run = async () => {
+    if (!deviceId || !command.trim()) { message.warning('Cihaz ID ve komut giriniz'); return }
+    setOutput('')
+    setIsRunning(true)
+    try {
+      const res = await agentsApi.startStreamCommand(agent.id, { device_id: Number(deviceId), command: command.trim() })
+      const apiBase = (window as any).__VITE_API_URL__ || ''
+      const evtSource = new EventSource(`${apiBase}/api/v1/stream/${res.request_id}`)
+      evtSource.onmessage = (e) => {
+        const data = JSON.parse(e.data)
+        if (data.chunk) setOutput(prev => prev + data.chunk)
+        if (data.done) {
+          evtSource.close()
+          setIsRunning(false)
+        }
+      }
+      evtSource.onerror = () => {
+        evtSource.close()
+        setIsRunning(false)
+      }
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Komut başlatılamadı')
+      setIsRunning(false)
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <Input
+            value={deviceId}
+            onChange={e => setDeviceId(e.target.value)}
+            placeholder="Cihaz ID"
+            style={{ width: 110 }}
+            type="number"
+          />
+          <Input
+            value={command}
+            onChange={e => setCommand(e.target.value)}
+            placeholder="show running-config"
+            onPressEnter={run}
+            style={{ flex: 1 }}
+          />
+          <Button type="primary" onClick={run} loading={isRunning} disabled={!agent.status || agent.status !== 'online'}>
+            Çalıştır
+          </Button>
+        </div>
+        <Text style={{ fontSize: 11, color: C.muted }}>Uzun çıktılı komutlar için canlı akış modunu kullanın</Text>
+      </div>
+
+      {(output || isRunning) && (
+        <div style={{
+          background: '#0f172a', border: '1px solid #334155', borderRadius: 8,
+          padding: 12, maxHeight: 360, overflowY: 'auto', fontFamily: 'monospace',
+        }}>
+          <pre style={{ margin: 0, fontSize: 11, color: '#e2e8f0', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+            {output || ' '}
+            {isRunning && <span style={{ color: '#3b82f6', animation: 'blink 1s infinite' }}>▋</span>}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── VaultTab ──────────────────────────────────────────────────────────────────
+
+function VaultTab({ agent, liveData }: { agent: Agent; liveData: any }) {
+  const { isDark } = useTheme()
+  const C = mkC(isDark)
+  const { message } = App.useApp()
+  const isOnline = agent.status === 'online'
+  const vaultActive = liveData?.vault_active || false
+  const credCount = liveData?.vault_credential_count || 0
+
+  const refreshMutation = useMutation({
+    mutationFn: () => agentsApi.refreshVault(agent.id),
+    onSuccess: (data) => {
+      message.success(`Vault güncellendi — ${data.credential_count} credential${data.encrypted ? ' (AES-256 şifreli)' : ''}`)
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Vault güncelleme başarısız'),
+  })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 4 }}>
+              Credential Vault
+            </div>
+            <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
+              SSH şifreleri backend'den her komutta gönderilmek yerine agent'ta AES-256-GCM ile şifreli tutulur.
+              Bağlantı kesildiğinde hafızadan silinir.
+            </div>
+          </div>
+          <Tag
+            style={{
+              fontSize: 11, padding: '2px 10px', flexShrink: 0,
+              color: vaultActive ? '#22c55e' : C.muted,
+              borderColor: vaultActive ? '#22c55e50' : C.border,
+              background: vaultActive ? '#22c55e15' : 'transparent',
+            }}
+          >
+            {vaultActive ? `Aktif (${credCount})` : 'Pasif'}
+          </Tag>
+        </div>
+      </div>
+
+      {!vaultActive && isOnline && (
+        <Alert type="info" showIcon
+          message="Agent v1.3+ bağlandığında vault otomatik yüklenir"
+          description="vault_support=True ile bağlanan agent'lar credential'ları otomatik alır." />
+      )}
+
+      {!isOnline && (
+        <Alert type="warning" showIcon
+          message="Agent çevrimdışı"
+          description="Vault, agent yeniden bağlandığında otomatik yenilenir." />
+      )}
+
+      <Button
+        type="primary"
+        onClick={() => refreshMutation.mutate()}
+        loading={refreshMutation.isPending}
+        disabled={!isOnline}
+        icon={<ReloadOutlined />}
+      >
+        Vault'u Yenile
+      </Button>
+
+      <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.6 }}>
+        <strong>Güvenlik notu:</strong> AES key her yenilemede değişir. Key yalnızca TLS WS üzerinden aktarılır ve disk'e yazılmaz.
+        Agent hafızasında plaintext olarak tutulur — agent process'ini koruyun.
+      </div>
+    </div>
+  )
+}
+
 // ── AgentDetailModal ──────────────────────────────────────────────────────────
 
 function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => void }) {
@@ -705,6 +1043,23 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
                       </div>
                     )}
 
+                    {(metrics.pool_size ?? 0) > 0 && (
+                      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: '10px 14px', marginBottom: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 6 }}>SSH Bağlantı Havuzu</div>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                          <div>
+                            <span style={{ fontSize: 18, fontWeight: 700, color: '#22c55e' }}>{metrics.pool_size}</span>
+                            <div style={{ fontSize: 10, color: C.muted }}>Aktif bağlantı</div>
+                          </div>
+                          <div style={{ flex: 1 }}>
+                            {(metrics.pool_active_hosts || []).map((h: string) => (
+                              <Tag key={h} style={{ fontSize: 10, marginBottom: 2 }}>{h}</Tag>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {!liveLoading && metrics.cpu_percent === undefined && totalCmds === 0 && (
                       <Alert type="info" showIcon style={{ fontSize: 12 }}
                         message="Agent v1.2+ bağlandığında detaylı metrikler görünür."
@@ -731,6 +1086,26 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
             key: 'log',
             label: <Space size={4}><HistoryOutlined />Komut Logu</Space>,
             children: <CommandLogTab agentId={agent.id} />,
+          },
+          {
+            key: 'discovery',
+            label: <Space size={4}><SearchOutlined />Keşif</Space>,
+            children: <DiscoveryTab agent={agent} />,
+          },
+          {
+            key: 'syslog',
+            label: <Space size={4}><WifiOutlined />Syslog</Space>,
+            children: <SyslogTab agent={agent} />,
+          },
+          {
+            key: 'stream',
+            label: <Space size={4}><ThunderboltOutlined />Akış</Space>,
+            children: <StreamingTab agent={agent} />,
+          },
+          {
+            key: 'vault',
+            label: <Space size={4}><SafetyCertificateOutlined />Vault</Space>,
+            children: <VaultTab agent={agent} liveData={liveData} />,
           },
         ]}
       />

@@ -36,6 +36,10 @@ export interface AgentMetrics {
   cmd_blocked?: number
   cmd_total_ms?: number
   python_version?: string
+  pool_size?: number
+  pool_active_hosts?: string[]
+  vault_active?: boolean
+  vault_credential_count?: number
 }
 
 export interface AgentLiveData {
@@ -43,6 +47,8 @@ export interface AgentLiveData {
   connected_at?: string
   last_heartbeat?: string
   metrics: AgentMetrics
+  vault_active?: boolean
+  vault_credential_count?: number
 }
 
 export interface AgentLatencyEntry {
@@ -142,4 +148,69 @@ export const agentsApi = {
     if (serverUrl) params.set('server_url', serverUrl)
     return `/api/v1/agents/${id}/download/${platform}?${params.toString()}`
   },
+
+  deviceSync: (id: string) =>
+    client.post<{sent: boolean; device_count: number}>(`/agents/${id}/device-sync`).then(r => r.data),
+
+  discover: (id: string, body: {subnet: string; ports?: number[]}) =>
+    client.post<DiscoverResult>(`/agents/${id}/discover`, body).then(r => r.data),
+
+  getDiscoveryHistory: (id: string) =>
+    client.get<DiscoveryHistoryEntry[]>(`/agents/${id}/discover/history`).then(r => r.data),
+
+  configureSyslog: (id: string, body: {enabled: boolean; bind_port?: number}) =>
+    client.post<{sent: boolean; enabled: boolean; bind_port: number}>(`/agents/${id}/syslog-config`, body).then(r => r.data),
+
+  getSyslogEvents: (id: string, params?: {limit?: number; offset?: number; severity_max?: number}) =>
+    client.get<SyslogEventsResponse>(`/agents/${id}/syslog-events`, {params}).then(r => r.data),
+
+  startStreamCommand: (agentId: string, body: {device_id: number; command: string}) =>
+    client.post<StreamCommandResponse>(`/agents/${agentId}/stream-command`, body).then(r => r.data),
+
+  refreshVault: (id: string) =>
+    client.post<VaultRefreshResponse>(`/agents/${id}/refresh-vault`).then(r => r.data),
+}
+
+export interface DiscoverResult {
+  success: boolean
+  hosts: Array<{ip: string; open_ports: number[]; banner: string | null; response_time_ms: number}>
+  scanned: number
+}
+
+export interface DiscoveryHistoryEntry {
+  id: number
+  subnet: string
+  triggered_at: string
+  completed_at: string | null
+  status: 'running' | 'completed' | 'failed'
+  total_discovered: number
+  scanned_count: number
+  results: DiscoverResult['hosts']
+}
+
+export interface SyslogEvent {
+  id: number
+  source_ip: string
+  facility: number
+  severity: number
+  message: string
+  received_at: string
+}
+
+export interface SyslogEventsResponse {
+  items: SyslogEvent[]
+  total: number
+  offset: number
+  limit: number
+}
+
+export interface StreamCommandResponse {
+  request_id: string
+  stream_url: string
+}
+
+export interface VaultRefreshResponse {
+  sent: boolean
+  credential_count: number
+  encrypted: boolean
 }

@@ -30,6 +30,9 @@ from app.models.location import Location
 from app.models.backup_schedule import BackupSchedule
 from app.models.driver_template import DriverTemplate
 from app.models.command_execution import CommandExecution
+from app.models.syslog_event import SyslogEvent
+from app.models.discovery_result import DiscoveryResult
+from app.models.agent_credential_bundle import AgentCredentialBundle
 
 __all__ = [
     "Tenant",
@@ -64,4 +67,7 @@ __all__ = [
     "BackupSchedule",
     "DriverTemplate",
     "CommandExecution",
+    "SyslogEvent",
+    "DiscoveryResult",
+    "AgentCredentialBundle",
 ]

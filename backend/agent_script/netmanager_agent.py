@@ -1,24 +1,38 @@
 #!/usr/bin/env python3
 """
-NetManager Proxy Agent v1.2
+NetManager Proxy Agent v1.3
 Yerel ağa kurulur, NetManager backend'e WebSocket ile bağlanır.
 SSH komutlarını ağ cihazlarına iletir ve sonuçları döner.
 
-Güvenlik özellikleri (v1.2):
+Güvenlik ve yeni özellikler (v1.3.0):
   - Sunucu tarafından gönderilen komut whitelist/blacklist politikası
   - Agent tarafında komut doğrulama (çift katmanlı koruma)
   - Key rotasyon desteği (env dosyasını otomatik günceller)
   - Güvenlik ihlali bildirim mesajları
+  - SSH Connection Pool (F1)
+  - Offline Command Queue (F3)
+  - Proactive Device Health Monitoring (F2)
+  - SNMP via Agent (F4)
+  - Auto Device Discovery (F5)
+  - Syslog Collector (F6)
+  - Command Result Streaming (F7)
+  - Secure Credential Vault (F8)
 """
 import asyncio
 import json
 import logging
 import os
 import platform
+import socket
 import sys
+import threading
 import time
 import uuid
+from collections import deque
 from datetime import datetime, timezone
+import ipaddress
+import concurrent.futures
+import base64
 
 try:
     import websockets
@@ -39,7 +53,21 @@ try:
 except ImportError:
     _HAS_PSUTIL = False
 
-VERSION = "1.2.0"
+try:
+    import puresnmp
+    from puresnmp import Client as SnmpClient
+    from puresnmp.credentials import V2C
+    _HAS_SNMP = True
+except ImportError:
+    _HAS_SNMP = False
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    _HAS_CRYPTO = True
+except ImportError:
+    _HAS_CRYPTO = False
+
+VERSION = "1.3.0"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -82,6 +110,30 @@ _stats = {
 
 _restart_requested = False
 
+# ── Feature 1: SSH Connection Pool ────────────────────────────────────────
+_ssh_pool: dict = {}          # key: (device_ip, port, username) -> {"conn": ..., "last_used": float}
+_pool_lock = threading.Lock()
+_POOL_TTL = 300               # 5 minutes
+
+# ── Feature 3: Offline Command Queue ─────────────────────────────────────
+_result_queue: deque = deque(maxlen=100)
+
+# ── Feature 2: Proactive Device Health Monitoring ────────────────────────
+_device_list: list = []
+_health_check_interval = 60
+
+# ── Feature 6: Syslog Collector ──────────────────────────────────────────
+_syslog_enabled = False
+_syslog_port = 514
+
+# ── Feature 8: Secure Credential Vault ───────────────────────────────────
+_vault: dict = {}             # keyed by credential_id / device_id
+_vault_key: bytes = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _is_command_allowed(command: str) -> tuple:
     """Returns (allowed, reason) based on current security policy."""
@@ -155,12 +207,21 @@ def _record_result(result):
 
 
 def _get_metrics():
+    with _pool_lock:
+        pool_size = len(_ssh_pool)
+        pool_active_hosts = sum(
+            1 for v in _ssh_pool.values()
+            if v["conn"].is_alive()
+        ) if _ssh_pool else 0
+
     metrics = {
         "cmd_success": _stats["cmd_success"],
         "cmd_fail": _stats["cmd_fail"],
         "cmd_total_ms": _stats["cmd_total_ms"],
         "cmd_blocked": _stats["cmd_blocked"],
         "python_version": platform.python_version(),
+        "pool_size": pool_size,
+        "pool_active_hosts": pool_active_hosts,
     }
     if _HAS_PSUTIL:
         try:
@@ -174,15 +235,94 @@ def _get_metrics():
     return metrics
 
 
-# ── SSH islemleri (thread executor'da calisir) ─────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 1: SSH Connection Pool helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _pool_get(msg):
+    """Return a pooled SSH connection, reconnecting if stale."""
+    params = _build_params(msg)
+    key = (params["host"], params["port"], params["username"])
+
+    with _pool_lock:
+        entry = _ssh_pool.get(key)
+        if entry is not None:
+            conn = entry["conn"]
+            try:
+                alive = conn.is_alive()
+            except Exception:
+                alive = False
+
+            if alive:
+                entry["last_used"] = time.time()
+                return conn
+            else:
+                # Stale connection — close and reconnect
+                try:
+                    conn.disconnect()
+                except Exception:
+                    pass
+                del _ssh_pool[key]
+
+        # Open a fresh connection and store it
+        conn = _get_connection(msg)
+        _ssh_pool[key] = {"conn": conn, "last_used": time.time()}
+        return conn
+
+
+def _pool_evict_idle():
+    """Evict connections idle longer than _POOL_TTL. Runs synchronously."""
+    now = time.time()
+    with _pool_lock:
+        stale_keys = [
+            k for k, v in _ssh_pool.items()
+            if (now - v["last_used"]) > _POOL_TTL
+        ]
+        for k in stale_keys:
+            try:
+                _ssh_pool[k]["conn"].disconnect()
+            except Exception:
+                pass
+            del _ssh_pool[k]
+            log.debug("Pool: evicted idle connection to {}".format(k[0]))
+
+
+async def _pool_evict_loop():
+    """Coroutine: periodically evict idle pool connections."""
+    loop = asyncio.get_event_loop()
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await loop.run_in_executor(None, _pool_evict_idle)
+        except Exception as e:
+            log.debug("Pool evict hatasi: {}".format(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSH helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _build_params(msg):
+    """Build netmiko ConnectHandler params, using vault credentials if available."""
     os_type = msg.get("os_type", "cisco_ios")
+
+    # Feature 8: vault credential lookup
+    credential_id = msg.get("credential_id")
+    if credential_id and credential_id in _vault:
+        creds = _vault[credential_id]
+        ssh_username = creds.get("username", msg.get("ssh_username", ""))
+        ssh_password = creds.get("password", msg.get("ssh_password", ""))
+        enable_secret = creds.get("enable_secret", msg.get("enable_secret", ""))
+    else:
+        ssh_username = msg.get("ssh_username", "")
+        ssh_password = msg.get("ssh_password", "")
+        enable_secret = msg.get("enable_secret", "")
+
     params = {
         "device_type":        os_type,
         "host":               msg["device_ip"],
-        "username":           msg["ssh_username"],
-        "password":           msg["ssh_password"],
+        "username":           ssh_username,
+        "password":           ssh_password,
         "port":               int(msg.get("ssh_port", 22)),
         "timeout":            60,
         "auth_timeout":       30,
@@ -192,8 +332,8 @@ def _build_params(msg):
         "fast_cli":           False,
         "global_delay_factor": 3,
     }
-    if msg.get("enable_secret"):
-        params["secret"] = msg["enable_secret"]
+    if enable_secret:
+        params["secret"] = enable_secret
     return params
 
 
@@ -207,7 +347,7 @@ def _get_connection(msg):
     """
     params = _build_params(msg)
     os_type = params["device_type"]
-    enable_secret = msg.get("enable_secret", "")
+    enable_secret = params.get("secret", "")
 
     if os_type == "ruijie_os" and not enable_secret:
         # Use auto_connect=False so we can skip the automatic enable() call
@@ -229,6 +369,7 @@ def _get_connection(msg):
 
 
 def _ssh_test(msg):
+    """Always uses a fresh connection — never pooled."""
     t0 = time.time()
     try:
         conn = _get_connection(msg)
@@ -243,32 +384,305 @@ def _ssh_test(msg):
 
 
 def _ssh_command(msg):
+    """Uses pooled connection."""
     t0 = time.time()
     try:
-        conn = _get_connection(msg)
+        conn = _pool_get(msg)
         output = conn.send_command(msg["command"], read_timeout=120)
-        conn.disconnect()
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
     except Exception as e:
+        # On error, remove from pool so next call gets a fresh connection
+        params = _build_params(msg)
+        key = (params["host"], params["port"], params["username"])
+        with _pool_lock:
+            _ssh_pool.pop(key, None)
         return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
 
 
 def _ssh_config(msg):
+    """Uses pooled connection."""
     t0 = time.time()
     try:
-        conn = _get_connection(msg)
+        conn = _pool_get(msg)
         output = conn.send_config_set(msg["commands"], read_timeout=120)
         conn.save_config()
-        conn.disconnect()
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
     except Exception as e:
+        params = _build_params(msg)
+        key = (params["host"], params["port"], params["username"])
+        with _pool_lock:
+            _ssh_pool.pop(key, None)
         return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
 
 
-# ── WebSocket dongusu ─────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 7: Command Result Streaming
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ssh_command_stream_sync(msg, chunk_queue, main_loop):
+    """Run SSH command and push ~512B chunks into chunk_queue via main_loop."""
+    CHUNK_SIZE = 512
+    try:
+        conn = _pool_get(msg)
+        output = conn.send_command_timing(msg["command"], read_timeout=120)
+        # Split output into chunks
+        for i in range(0, max(len(output), 1), CHUNK_SIZE):
+            chunk = output[i:i + CHUNK_SIZE]
+            main_loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+    except Exception as e:
+        main_loop.call_soon_threadsafe(chunk_queue.put_nowait, {"__error__": str(e)})
+    finally:
+        # Sentinel to signal end of stream
+        main_loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 4: SNMP via Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _snmp_get_sync(msg):
+    """Synchronously run async SNMP get using a dedicated event loop."""
+    if not _HAS_SNMP:
+        return {"success": False, "error": "puresnmp not installed"}
+
+    host = msg.get("device_ip", "")
+    community = msg.get("community", "public")
+    oid = msg.get("oid", "")
+    port = int(msg.get("snmp_port", 161))
+
+    async def _do_get():
+        try:
+            async with SnmpClient(host, V2C(community), port=port) as client:
+                result = await client.get(oid)
+            return {"success": True, "data": {oid: str(result)}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_do_get())
+    finally:
+        loop.close()
+
+
+def _snmp_walk_sync(msg):
+    """Synchronously run async SNMP walk using a dedicated event loop."""
+    if not _HAS_SNMP:
+        return {"success": False, "error": "puresnmp not installed"}
+
+    host = msg.get("device_ip", "")
+    community = msg.get("community", "public")
+    oid = msg.get("oid", "")
+    port = int(msg.get("snmp_port", 161))
+
+    async def _do_walk():
+        try:
+            result_data = {}
+            async with SnmpClient(host, V2C(community), port=port) as client:
+                async for varbind in client.walk(oid):
+                    result_data[str(varbind.oid)] = str(varbind.value)
+            return {"success": True, "data": result_data}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_do_walk())
+    finally:
+        loop.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 5: Auto Device Discovery
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ssh_banner_grab(ip: str, port: int, timeout: float = 2.0) -> str:
+    """TCP connect to ip:port, send \\r\\n, read up to 256 bytes, return banner string."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout) as s:
+            s.sendall(b"\r\n")
+            banner = s.recv(256)
+            return banner.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
+def _probe_host(ip: str, ports: list) -> dict | None:
+    """Try each port; collect open_ports and banners. Return dict or None if all closed."""
+    open_ports = []
+    banners = {}
+    for port in ports:
+        banner = _ssh_banner_grab(ip, port)
+        if banner is not None and banner != "":
+            open_ports.append(port)
+            banners[port] = banner
+        else:
+            # Still check if port is open even without banner
+            try:
+                with socket.create_connection((ip, port), timeout=2.0):
+                    open_ports.append(port)
+                    banners[port] = ""
+            except Exception:
+                pass
+
+    if open_ports:
+        return {"ip": ip, "open_ports": open_ports, "banners": banners}
+    return None
+
+
+def _discover_subnet(msg: dict) -> dict:
+    """Parse CIDR range, probe up to 1024 hosts in parallel."""
+    cidr = msg.get("subnet", "")
+    ports = msg.get("ports", [22, 23, 80, 443])
+    try:
+        network = ipaddress.ip_network(cidr, strict=False)
+    except ValueError as e:
+        return {"success": False, "error": "Gecersiz CIDR: {}".format(e)}
+
+    hosts = list(network.hosts())
+    if len(hosts) > 1024:
+        hosts = hosts[:1024]
+
+    scanned = len(hosts)
+    discovered = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        futures = {executor.submit(_probe_host, str(ip), ports): str(ip) for ip in hosts}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    discovered.append(result)
+            except Exception:
+                pass
+
+    return {"success": True, "hosts": discovered, "scanned": scanned}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 6: Syslog Collector
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_syslog(data: bytes, addr: tuple) -> dict:
+    """Minimal RFC 3164 syslog parser."""
+    source_ip = addr[0] if addr else ""
+    try:
+        raw = data.decode("utf-8", errors="replace").strip()
+    except Exception:
+        raw = str(data)
+
+    facility = 0
+    severity = 0
+    message = raw
+
+    # Try to parse PRI field: <PRI>...
+    if raw.startswith("<"):
+        try:
+            end = raw.index(">")
+            pri = int(raw[1:end])
+            facility = pri >> 3
+            severity = pri & 0x07
+            message = raw[end + 1:].strip()
+        except (ValueError, IndexError):
+            pass
+
+    return {
+        "facility": facility,
+        "severity": severity,
+        "message": message,
+        "source_ip": source_ip,
+    }
+
+
+class SyslogProtocol(asyncio.DatagramProtocol):
+    def __init__(self, ws, loop):
+        self._ws = ws
+        self._loop = loop
+
+    def datagram_received(self, data: bytes, addr: tuple):
+        parsed = _parse_syslog(data, addr)
+        payload = json.dumps({
+            "type": "syslog_event",
+            "agent_id": AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **parsed,
+        })
+
+        async def _do_send():
+            try:
+                await self._ws.send(payload)
+            except Exception as e:
+                log.debug("Syslog gonderilemedi: {}".format(e))
+
+        asyncio.ensure_future(_do_send(), loop=self._loop)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 8: Secure Credential Vault helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _vault_decrypt(ciphertext_b64: str, key: bytes) -> dict:
+    """Decrypt AES-GCM encrypted credential. Returns plaintext dict."""
+    raw = base64.b64decode(ciphertext_b64)
+    nonce = raw[:12]
+    ciphertext = raw[12:]
+    aesgcm = AESGCM(key)
+    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+    return json.loads(plaintext.decode("utf-8"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 2: Proactive Device Health Monitoring
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def _health_check(ws, loop):
+    """Coroutine: periodically TCP-probe each device in _device_list."""
+    while True:
+        await asyncio.sleep(_health_check_interval)
+        if not _device_list:
+            continue
+
+        results = []
+        for device in _device_list:
+            ip = device.get("device_ip") or device.get("ip", "")
+            port = int(device.get("ssh_port", 22))
+            device_id = device.get("id") or device.get("device_id") or ip
+
+            reachable = False
+            try:
+                # TCP connect — not a full SSH handshake
+                with socket.create_connection((ip, port), timeout=3.0):
+                    reachable = True
+            except Exception:
+                reachable = False
+
+            results.append({
+                "device_id": device_id,
+                "ip": ip,
+                "port": port,
+                "reachable": reachable,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+        try:
+            await ws.send(json.dumps({
+                "type": "device_status_report",
+                "agent_id": AGENT_ID,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "results": results,
+            }))
+        except Exception as e:
+            log.debug("Health check raporu gonderilemedi: {}".format(e))
+            break
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket message handler
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def handle_message(ws, msg, loop):
-    global _restart_requested
+    global _restart_requested, _device_list, _syslog_enabled, _syslog_port
+    global _vault, _vault_key
 
     t = msg.get("type")
     rid = msg.get("request_id", "")
@@ -291,12 +705,70 @@ async def handle_message(ws, msg, loop):
             await ws.send(json.dumps({"type": "key_rotate_ack", "agent_id": AGENT_ID}))
         return
 
+    # Feature 3: _send helper — enqueues on failure if request_id present
     async def _send(payload):
-        """Send a message; silently drop if the connection closed mid-operation."""
+        """Send a message; enqueue if connection closed and payload has request_id."""
         try:
             await ws.send(json.dumps(payload))
         except Exception as exc:
             log.warning("Sonuc gonderilemedi (baglanti kapali): {}".format(exc))
+            if payload.get("request_id"):
+                _result_queue.append(payload)
+
+    # Feature 2: device sync
+    if t == "device_sync":
+        _device_list.clear()
+        _device_list.extend(msg.get("devices", []))
+        log.info("Cihaz listesi guncellendi: {} cihaz".format(len(_device_list)))
+        return
+
+    # Feature 6: syslog config
+    if t == "syslog_config":
+        _syslog_enabled = msg.get("enabled", False)
+        _syslog_port = int(msg.get("port", 514))
+        log.info("Syslog konfig guncellendi: enabled={}, port={}".format(_syslog_enabled, _syslog_port))
+        return
+
+    # Feature 8: credential bundle
+    if t == "credential_bundle":
+        new_key_b64 = msg.get("vault_key", "")
+        credentials = msg.get("credentials", [])
+        if new_key_b64:
+            try:
+                _vault_key = base64.b64decode(new_key_b64)
+            except Exception as e:
+                log.error("Vault key decode hatasi: {}".format(e))
+                await _send({"type": "vault_ack", "agent_id": AGENT_ID, "success": False, "error": str(e)})
+                return
+
+        stored = 0
+        errors = []
+        for cred in credentials:
+            cred_id = cred.get("id")
+            ciphertext = cred.get("data")
+            if not cred_id or not ciphertext:
+                continue
+            if _vault_key and _HAS_CRYPTO:
+                try:
+                    decrypted = _vault_decrypt(ciphertext, _vault_key)
+                    _vault[cred_id] = decrypted
+                    stored += 1
+                except Exception as e:
+                    errors.append({"id": cred_id, "error": str(e)})
+            else:
+                # No crypto — store as-is (plaintext fallback, server decides)
+                _vault[cred_id] = cred.get("plaintext", {})
+                stored += 1
+
+        log.info("Vault guncellendi: {} credential saklanadi".format(stored))
+        await _send({
+            "type": "vault_ack",
+            "agent_id": AGENT_ID,
+            "success": True,
+            "stored": stored,
+            "errors": errors,
+        })
+        return
 
     if t == "ssh_test":
         log.info("SSH test -> {}".format(msg.get("device_ip")))
@@ -356,6 +828,86 @@ async def handle_message(ws, msg, loop):
         _record_result(result)
         await _send({"type": "ssh_result", "request_id": rid, **result})
 
+    # Feature 7: Command Result Streaming
+    elif t == "ssh_command_stream":
+        command = msg.get("command", "")
+
+        if "command_mode" in msg:
+            _security["command_mode"] = msg["command_mode"]
+            _security["allowed_commands"] = msg.get("allowed_commands", [])
+
+        allowed, reason = _is_command_allowed(command)
+        if not allowed:
+            log.warning("Stream komutu engellendi: {} - {}".format(command[:60], reason))
+            _stats["cmd_blocked"] += 1
+            await _send({
+                "type": "security_blocked",
+                "request_id": rid,
+                "command": command,
+                "reason": reason,
+            })
+            return
+
+        log.info("SSH stream -> {} : {}".format(msg.get("device_ip"), command[:60]))
+
+        chunk_queue: asyncio.Queue = asyncio.Queue()
+        main_loop = loop
+
+        async def _stream_task():
+            # Run the blocking SSH part in executor
+            await loop.run_in_executor(
+                None, _ssh_command_stream_sync, msg, chunk_queue, main_loop
+            )
+            # Read chunks from queue and send
+            seq = 0
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    # End of stream sentinel
+                    break
+                if isinstance(chunk, dict) and "__error__" in chunk:
+                    await _send({
+                        "type": "ssh_stream_end",
+                        "request_id": rid,
+                        "success": False,
+                        "error": chunk["__error__"],
+                    })
+                    return
+                await _send({
+                    "type": "ssh_stream_chunk",
+                    "request_id": rid,
+                    "seq": seq,
+                    "data": chunk,
+                })
+                seq += 1
+
+            await _send({
+                "type": "ssh_stream_end",
+                "request_id": rid,
+                "success": True,
+                "total_chunks": seq,
+            })
+
+        asyncio.create_task(_stream_task())
+
+    # Feature 4: SNMP
+    elif t == "snmp_get":
+        log.info("SNMP get -> {} OID: {}".format(msg.get("device_ip"), msg.get("oid")))
+        result = await loop.run_in_executor(None, _snmp_get_sync, msg)
+        await _send({"type": "snmp_result", "request_id": rid, "operation": "get", **result})
+
+    elif t == "snmp_walk":
+        log.info("SNMP walk -> {} OID: {}".format(msg.get("device_ip"), msg.get("oid")))
+        result = await loop.run_in_executor(None, _snmp_walk_sync, msg)
+        await _send({"type": "snmp_result", "request_id": rid, "operation": "walk", **result})
+
+    # Feature 5: Auto Device Discovery
+    elif t == "discover_request":
+        subnet = msg.get("subnet", "")
+        log.info("Subnet discovery basladi: {}".format(subnet))
+        result = await loop.run_in_executor(None, _discover_subnet, msg)
+        await _send({"type": "discover_result", "request_id": rid, **result})
+
     elif t == "ping":
         await _send({"type": "pong"})
 
@@ -364,6 +916,10 @@ async def handle_message(ws, msg, loop):
         await _send({"type": "restart_ack", "agent_id": AGENT_ID})
         _restart_requested = True
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main run loop
+# ─────────────────────────────────────────────────────────────────────────────
 
 async def run():
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
@@ -376,6 +932,8 @@ async def run():
         # Always use the most recent key (may have been rotated)
         current_key = os.environ.get("NETMANAGER_AGENT_KEY", AGENT_KEY)
         ws_url = "{}/api/v1/agents/ws/{}?key={}".format(ws_base, AGENT_ID, current_key)
+
+        syslog_transport = None
 
         try:
             log.info("Baglaniliyor: {}/api/v1/agents/ws/{}".format(ws_base, AGENT_ID))
@@ -390,14 +948,35 @@ async def run():
                 delay = 5
 
                 await ws.send(json.dumps({
-                    "type":     "hello",
-                    "agent_id": AGENT_ID,
-                    "version":  VERSION,
-                    "platform": platform.system().lower(),
-                    "hostname": platform.node(),
+                    "type":          "hello",
+                    "agent_id":      AGENT_ID,
+                    "version":       VERSION,
+                    "platform":      platform.system().lower(),
+                    "hostname":      platform.node(),
                     "python_version": platform.python_version(),
-                    "has_psutil": _HAS_PSUTIL,
+                    "has_psutil":    _HAS_PSUTIL,
+                    "has_snmp":      _HAS_SNMP,
+                    "has_crypto":    _HAS_CRYPTO,
+                    "vault_support": True,
                 }))
+
+                # Feature 3: flush offline queue after reconnect
+                if _result_queue:
+                    queued = list(_result_queue)
+                    _result_queue.clear()
+                    try:
+                        await ws.send(json.dumps({
+                            "type":     "queued_results",
+                            "agent_id": AGENT_ID,
+                            "count":    len(queued),
+                            "results":  queued,
+                        }))
+                        log.info("Kuyruklanmis {} sonuc gonderildi".format(len(queued)))
+                    except Exception as e:
+                        log.warning("Kuyruk gonderilemedi: {}".format(e))
+                        # Put them back if send fails
+                        for item in queued:
+                            _result_queue.append(item)
 
                 async def _heartbeat():
                     while True:
@@ -413,7 +992,23 @@ async def run():
                         except Exception:
                             break
 
-                hb = asyncio.create_task(_heartbeat())
+                # Start background tasks
+                hb   = asyncio.create_task(_heartbeat())
+                evict = asyncio.create_task(_pool_evict_loop())
+                hc   = asyncio.create_task(_health_check(ws, loop))
+
+                # Feature 6: Start syslog UDP server if enabled
+                if _syslog_enabled:
+                    try:
+                        transport, _protocol = await loop.create_datagram_endpoint(
+                            lambda: SyslogProtocol(ws, loop),
+                            local_addr=("0.0.0.0", _syslog_port),
+                        )
+                        syslog_transport = transport
+                        log.info("Syslog UDP sunucusu basladi: port={}".format(_syslog_port))
+                    except Exception as e:
+                        log.warning("Syslog sunucusu baslatılamadi: {}".format(e))
+
                 try:
                     async for raw in ws:
                         try:
@@ -425,12 +1020,24 @@ async def run():
                             break
                 finally:
                     hb.cancel()
+                    evict.cancel()
+                    hc.cancel()
+                    if syslog_transport is not None:
+                        syslog_transport.close()
+                        syslog_transport = None
 
             if _restart_requested:
                 log.info("Yeniden baslatiliyor...")
                 sys.exit(0)
 
         except Exception as exc:
+            if syslog_transport is not None:
+                try:
+                    syslog_transport.close()
+                except Exception:
+                    pass
+                syslog_transport = None
+
             # Handle specific WS close codes
             err_str = str(exc)
             if "4001" in err_str:
