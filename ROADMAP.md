@@ -469,7 +469,8 @@
 ### Bekleyen Deploy & Test Görevleri ✅
 - ✅ **VPS deploy** — tamamlandı (2026-05-04)
 - ✅ **Yerel agent servisi yeniden başlat** — tamamlandı (2026-05-04, PID 2802)
-- 🔵 **Sprint 11 özelliklerini test et** — SNMP GET/WALK, keşif→envanter, syslog filtresi, stream geçmişi, kuyruk göstergesi
+- ✅ **Sprint 12 VPS deploy** — tamamlandı (2026-05-04)
+- 🔵 **Sprint 11 + 12 özelliklerini test et** — SNMP GET/WALK, risk skoru, MTTR/MTBF, zaman çizelgesi
 
 ### SNMP Trap Receiver ⚪
 - ⚪ Pasif trap dinleme (UDP 162) — şu an sadece GET/WALK (aktif sorgulama) var
