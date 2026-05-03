@@ -466,13 +466,9 @@
 - ✅ SNMP Interface Utilization Charts — DeviceDetail Health sekmesinde her interface satırı expandable; son 48 poll verisi AreaChart olarak gösterilir (recharts)
 - ✅ Otomatik EOL lookup — `eol_lookup.py` statik veritabanı (Cisco/Aruba/Ruijie/Fortinet 120+ model); `POST /asset-lifecycle/eol-lookup`; AssetLifecycle sayfasında "EOL Otomatik Ara" butonu + sonuç modal
 
-### Bekleyen Deploy & Test Görevleri 🔵
-- 🔵 **VPS deploy** — `cd /opt/netmanager && git pull && docker compose up --build -d backend`
-- 🔵 **Yerel agent servisi yeniden başlat** — `queue_size` metriği için:
-  ```
-  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.netmanager.agent.plist
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.netmanager.agent.plist
-  ```
+### Bekleyen Deploy & Test Görevleri ✅
+- ✅ **VPS deploy** — tamamlandı (2026-05-04)
+- ✅ **Yerel agent servisi yeniden başlat** — tamamlandı (2026-05-04, PID 2802)
 - 🔵 **Sprint 11 özelliklerini test et** — SNMP GET/WALK, keşif→envanter, syslog filtresi, stream geçmişi, kuyruk göstergesi
 
 ### SNMP Trap Receiver ⚪
@@ -492,36 +488,146 @@
 
 ---
 
+## SPRINT 12 — Intelligence Fundamentals 🔵
+
+> Kaynak: `yenifikir.md` analizi | Tahmini: 2-3 hafta | Öncelik: Yüksek
+> Bu sprint **mevcut veriden yeni anlam** üretiyor — yeni model veya veri toplama yok.
+
+### 12A. Cihaz Risk Skoru 🔵
+- Mevcut sinyalleri birleştirerek cihaz başına **0–100 risk puanı**:
+  - Compliance skoru (security_audit — mevcut)
+  - SLA uptime % (sla_policy — mevcut)
+  - Son 7 gün flapping sayısı (network_events — mevcut)
+  - Son offline süresi (network_events — mevcut)
+  - Yedek durumu (config_backup — mevcut)
+- `GET /devices/{id}/risk-score` + filo geneli özet endpoint
+- Dashboard widget — en riskli 10 cihaz, risk dağılımı
+- Cihaz tablosunda renk kodlu risk kolonu
+
+### 12B. MTTR & MTBF Analizi 🔵
+- `device_offline` → sonraki `device_online` çiftlerinden **ortalama kurtarma süresi (MTTR)** hesaplama
+- `device_online` → sonraki `device_offline` aralıklarından **ortalama arıza arası süre (MTBF)** hesaplama
+- `GET /sla/device/{id}/mttr-mtbf` — pencere parametreli
+- Device detail SLA sekmesine eklenir: "Ort. Kurtarma: X dk | Ortalama Çalışma: Y saat"
+
+### 12C. Config/Olay Zaman Çizelgesi 🔵
+- Cihaz başına birleşik timeline: config yedekleri + network_events + audit_log
+- "Config değişti → 2 dakika sonra port down oldu → muhtemelen ilişkili" korelasyonu
+- `GET /devices/{id}/timeline?from=...&to=...` — karışık kayıt listesi, zaman sıralı
+- Device detail yeni sekme: zaman çizelgesi görünümü (AntD Timeline bileşeni)
+
+### 12D. Topoloji Farkındalıklı Uyarı Bastırma 🔵
+- Upstream cihaz offline olduğunda downstream cihazların "device_offline" uyarıları otomatik bastırılır
+- "KORELASYON: distribution-sw-01 offline — 12 downstream cihaz bildirimi bastırıldı" üst-seviye uyarısı
+- Mevcut `_correlate_offline_events` fonksiyonu gerçek topoloji BFS ile güçlendirilir
+- Alert sayısı dramtik azalır (şu an: N down = N uyarı → N down = 1 root cause uyarısı)
+
+---
+
+## SPRINT 13 — Advanced Intelligence Layer 🔵
+
+> Kaynak: `yenifikir.md` | Tahmini: 3-4 hafta | Öncelik: Orta-Yüksek
+
+### 13A. Root Cause Engine v2 🔵
+- Mevcut: basit ≥3 cihaz heuristic
+- Hedef: topology-aware BFS ile **gerçek root cause tespiti**
+  - Her offline cihazdan grafı geriye yürü → ortak upstream bul
+  - "Core-SW-01 offline → 47 cihaz etkilendi (VLAN 10, 20, 30)" formatında üst-seviye olay
+  - Birden fazla olası root cause varsa skor sıralaması (bağlı cihaz sayısına göre)
+- `GET /monitor/root-cause-analysis` — aktif olay grupları
+- Dashboard: "Kök Neden Tespitleri" widget'ı
+
+### 13B. Koşullu Otomasyon Motoru 🔵
+- Mevcut playbook adım tiplerini **IF/THEN koşulu** ile genişletme
+- Yeni `condition_check` adım tipi:
+  ```yaml
+  type: condition_check
+  condition: "device.offline_duration_min > 5 AND uplink.status == 'online'"
+  on_true: [continue]
+  on_false: [skip | abort]
+  ```
+- Değerlendirilebilecek alanlar: `device.*`, `uplink.*`, `last_event.*`, `time.*`
+- Dry-run'da koşul sonucu gösterilir (true/false + açıklama)
+- Güvenlik: koşul parser whitelist tabanlı (eval yok, AST değerlendirme)
+
+### 13C. Servis Etki Haritalama 🔵
+- Yeni `Service` modeli: isim, öncelik, VLAN'lar, cihazlar, iş açıklaması
+- Cihaz/VLAN offline → ilgili servislere etki hesaplama
+- `GET /services/{id}/impact` — hangi cihazlar, VLAN'lar, servisler etkileniyor
+- Device detail: "Bu cihaz hangi servislerde kritik?" rozetleri
+- Dashboard: "Aktif Servis Kesintileri" kartı
+- Örnek: Core-SW down → POS sistemi etkili → "Kritik İş Süreci Kesintisi" uyarısı
+
+---
+
+## SPRINT 14 — Network Analytics & Digital Twin ⚪
+
+> Kaynak: `yenifikir.md` | Tahmini: 4-5 hafta | Öncelik: Orta
+> Sprint 12–13 tamamlandıktan sonra değerlendir.
+
+### 14A. Ağ Davranış Analitiği ⚪
+- Rolling baseline: MAC sayısı, trafik, VLAN aktivitesi (7 günlük ortalama)
+- Anomali = mevcut değer > 2× baseline → `mac_anomaly` / `traffic_spike` event tipi
+- Interface başına "beklenmeyen VLAN aktivitesi" tespiti (802.1Q tag analizi)
+- Döngü şüphesi: aynı kaynak MAC farklı portlarda görülünce uyarı (MAC/ARP tablosu)
+- Dashboard: "Anormal Davranışlar" widget'ı
+
+### 14B. Network Digital Twin ⚪
+- Mevcut topoloji "kilitlenerek" expected state olarak kaydedilir
+- Periyodik karşılaştırma: actual topology vs expected topology
+- Topoloji drift'i: yeni bağlantı eklendi / mevcut bağlantı koptu → `topology_drift` event
+- "Beklenen vs Gerçek" iki panel yan yana görünüm
+- Config digital twin (zaten var: golden baseline + drift detection) ile birleşik
+
+### 14C. Agent Edge Intelligence ⚪
+- Agent tarafında **lokal anomali pattern'leri** (sunucu round-trip olmadan):
+  - SSH hata oranı > %50 → lokal uyarı + sunucuya bildir
+  - Cihazdan beklenmedik disconnect tekrarı → bağlantı sorununu raporla
+  - SNMP yanıt süresi >N ms → gecikme uyarısı
+- Lokal cihaz config cache (agent restart sonrası vault gibi yüklenir)
+- `local_anomaly` mesajı WebSocket üzerinden sunucuya iletilir
+
+---
+
 ## TARTIŞMAYA AÇIK — Benim Görüşlerim
 
 ### Yapmamalı veya Ertelemeli
 
-| Fikir | Neden Ertelenir |
+| Fikir | Neden |
 |---|---|
 | Wireless AP haritası | Çok vendor-specific (Cisco WLC vs Aruba vs Ruckus), ilk fazda kapsam dışı |
 | PoE detay sekmesi | Sadece PoE switch kullananlar için değerli, düşük öncelik |
 | Capacity planning | 6+ ay veri gerektirir, şimdi anlamsız |
 | Session replay (terminal) | Yüksek geliştirme maliyeti, limited değer. AuditLog + komut arşivi yeterli |
+| **Platform mikro-servisler** | Monolith sorun değil, bölünme 2-3 aylık iş, öncelikli değil |
+| **Template/Parser Engine (tam)** | Netmiko zaten vendor abstraction yapıyor; full abstraction = yüksek maliyet, düşük kazanç |
+| **AI/ML runtime inference** | Kural tabanlı risk score + root cause yeterli; gerçek ML için 12+ ay veri şart |
 
 ### Zaten Yapıyoruz (Ekstra İş Gerekmez)
 
-| Kullanıcı İsteği | Mevcut Karşılığı |
+| Fikir (yenifikir.md) | Mevcut Karşılığı |
 |---|---|
-| "Config diff" | ✅ Tamamlandı (bu oturumda) |
-| "Config compliance" | ✅ Tamamlandı (bu oturumda) |
-| "Flapping detection" | ✅ Tamamlandı (önceki oturum) |
-| "Event correlation" | ✅ Tamamlandı (önceki oturum) |
-| "Agent health dashboard" | ✅ Dashboard Intelligence içinde |
-| "Backup compliance widget" | ✅ Dashboard Intelligence içinde |
-| "Ghost node tespiti" | ✅ Topoloji keşfinde var |
+| Alert deduplication | ✅ Redis TTL bazlı dedup (monitor_tasks.py) |
+| Maintenance window suppression | ✅ AlertRule + bakım penceresi (Sprint 14) |
+| Config drift detection | ✅ Golden baseline + daily Celery task (Sprint 9) |
+| Blast radius analizi | ✅ Topology BFS graph traversal (Sprint 1) |
+| Flapping detection | ✅ Saatte ≥4 değişim → flapping event |
+| Agent offline queue | ✅ Sprint 11 F3 |
+| Temel event correlation | ✅ ≥3 cihaz offline → upstream heuristic |
 
-### En Kritik 5 Sonraki Adım (Benim Önerim)
+### En Kritik Sonraki Adımlar (Öneri)
 
-1. **Topoloji Blast Radius** — tek bir görsel özellik, çok güçlü satış argümanı
-2. **Automation/Playbooks** — ürünü "yönetim paneli"nden "otomasyon platformu"na taşır
-3. **Güvenli CLI (denylist + approval)** — üretimde kullanım için zorunlu
-4. **PDF Rapor + Email Digest** — C-level'e gösterilecek çıktı
-5. **Slack/Teams/webhook bildirimleri** — kullanıcı iş akışına entegrasyon
+**Sprint 12 → Anında başlanabilir (mevcut veri yeterli):**
+1. **Risk Skoru** — en somut, dashboard'a doğrudan eklenir, satış değeri yüksek
+2. **Topoloji farkındalıklı uyarı bastırma** — operasyonel acı noktası (alert flood)
+3. **MTTR/MTBF** — SLA raporlarına kritik katkı, 2 günlük iş
+
+**Sprint 13 → Sonra:**
+4. **Root Cause Engine v2** — mevcut heuristic'i gerçek topoloji traversal'a yükselt
+5. **Config/Olay Timeline** — "config değişikliği olayı tetikledi mi?" sorusu her zaman geliyor
+
+**Daha sonra değerlendir:**
+6. Koşullu Otomasyon, Servis Etki, Digital Twin, Davranış Analitiği
 
 ---
 
