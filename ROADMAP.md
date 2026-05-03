@@ -1,6 +1,6 @@
 # NetManager — Ürün Yol Haritası
 
-> Son güncelleme: 2026-04-23  
+> Son güncelleme: 2026-05-03  
 > Platform: FastAPI · React · Celery · Redis · PostgreSQL · Docker  
 > Hedef: Multi-vendor ağ görünürlüğü, yapılandırma kontrolü, topoloji zekâsı ve güvenli otomasyon platformu
 
@@ -196,7 +196,7 @@
 
 ---
 
-## SPRINT 6 — Akıllı Keşif & Onboarding 🔄
+## SPRINT 6 — Akıllı Keşif & Onboarding ✅
 
 > Tahmini süre: 2 hafta | Öncelik: Orta-Yüksek
 
@@ -247,6 +247,54 @@
 - ✅ SSH Manager `_via_agent()` — primary agent + fallback_agent_ids sırayla denenir
 - ✅ DeviceForm → "Yedek Agent'lar" multi-select alanı
 - ✅ Gecikme bazlı otomatik route seçimi — `AgentDeviceLatency` modeli; her SSH komutunda EMA latency ölçümü + DB persist; `_via_agent()` online agent'ları latency'ye göre sıralar; `/agents/latency-map` + `/agents/{id}/probe-devices` endpoint'leri; Agent sayfasında "Gecikme Haritası" + Probe butonu
+
+---
+
+## SPRINT 11 — Agent v1.3 Gelişmiş Özellikler ✅
+
+> Commit: `544b8dc` + `6b16fd7` + `6c3606d` | Tamamlandı: 2026-05-03
+
+### 11A. SSH & Ağ Altyapısı ✅
+- ✅ **SSH Connection Pool** — agent SSH bağlantıları 5dk boyunca havuzda tutulur (Paramiko channel yeniden kullanımı, pool stats heartbeat'te)
+- ✅ **Proaktif Cihaz Sağlık İzleme** — agent cihazları TCP port 22 ile 60s aralıkla test eder, status değişimini backend'e bildirir
+
+### 11B. Offline Command Queue ✅
+- ✅ Agent bağlantısı koptuğunda komut sonuçları `_result_queue` (deque) içinde tutulur
+- ✅ Bağlantı yeniden kurulunca kuyruk otomatik flush edilir
+- ✅ `queue_size` heartbeat metrics'ine eklendi (psutil ile birlikte raporlanır)
+- ✅ Agent detay modalı Status sekmesinde çevrimdışı kuyruk uyarı kartı (≥1 komut varsa gösterilir)
+
+### 11C. SNMP via Agent ✅
+- ✅ Agent üzerinde `puresnmp` ile SNMP GET / WALK (NAT arkası cihazlara erişim)
+- ✅ Backend REST: `POST /agents/{id}/snmp-get`, `POST /agents/{id}/snmp-walk`
+- ✅ `AgentManager.execute_snmp_get` / `execute_snmp_walk` — WebSocket mesajlaşması ile agent'a yönlendirme
+- ✅ Frontend SNMP sekmesi — mode toggle (GET/WALK), 8 OID preset butonu, cihaz ID + OID girişi, sonuç tablosu
+
+### 11D. Otomatik Cihaz Keşfi ✅
+- ✅ Agent üzerinde subnet tarama + SSH banner grab (`POST /agents/{id}/discover`)
+- ✅ Keşif geçmişi (`GET /agents/{id}/discover/history`) — durum, tarih, bulunan host sayısı
+- ✅ `DiscoveryResult` modeli (DB persist)
+- ✅ Frontend Keşif sekmesi — subnet girişi, sonuç tablosu (IP, açık portlar, banner, yanıt süresi)
+- ✅ **Envanter Entegrasyonu** — keşfedilen host'a "+ Ekle" butonu ile device oluşturma modal'ı (hostname, vendor, os_type, SSH kullanıcı)
+
+### 11E. Syslog Toplayıcı ✅
+- ✅ Agent UDP 514 dinleyici — gelen syslog mesajlarını DB'ye kaydeder
+- ✅ `SyslogEvent` modeli (source_ip, facility, severity, message, received_at)
+- ✅ `POST /agents/{id}/syslog-config` — agent syslog dinleyiciyi uzaktan aç/kapat
+- ✅ `GET /agents/{id}/syslog-events` — sayfalanmış log listesi, `severity_max` filtresi
+- ✅ Frontend Syslog sekmesi — tablo, severity renk rozeti, **severity dropdown filtresi** (Emergency → Debug/Tümü)
+
+### 11F. Komut Akışı (SSE Streaming) ✅
+- ✅ `POST /agents/{id}/stream-command` — request_id + stream_url döner
+- ✅ `GET /stream/{request_id}` — SSE endpoint, SSH çıktısı canlı akar
+- ✅ Frontend Akış sekmesi — device seçimi, komut girişi, canlı çıktı textarea
+- ✅ **Komut geçmişi localStorage'da** (anahtar: `nm_stream_history_{agentId}`, max 20 öğe, AutoComplete ile öneri)
+
+### 11G. Güvenli Credential Vault ✅
+- ✅ `AgentCredentialBundle` modeli — AES-256-GCM ile şifreli credential bundle
+- ✅ `POST /agents/{id}/refresh-vault` — güncel credential'ları agent'a push eder
+- ✅ Agent tarafında `~/.netmanager-agent/vault.enc` şifreli dosya (bellek içi decrypt)
+- ✅ Frontend Vault sekmesi — vault durumu, credential sayısı, "Vault'u Yenile" butonu
 
 ---
 
@@ -349,7 +397,7 @@
 - ✅ Notification channel entegrasyonu (`threshold_alert` kanalı)
 - ✅ Settings → Uyarı Kuralları sekmesi (tüm cihazlar veya tek cihaz, interface wildcard)
 
-### 13. SNMP & Telemetri İzleme 🔄
+### 13. SNMP & Telemetri İzleme ✅
 - ✅ SNMP v1/v2c desteği (puresnmp ile, asyncio-native)
 - ✅ Per-device SNMP credentials (snmp_community, snmp_version, snmp_port)
 - ✅ Device detail "Health" sekmesi: sysUpTime, sysDescr, sysName, sysLocation
@@ -418,12 +466,25 @@
 - ✅ SNMP Interface Utilization Charts — DeviceDetail Health sekmesinde her interface satırı expandable; son 48 poll verisi AreaChart olarak gösterilir (recharts)
 - ✅ Otomatik EOL lookup — `eol_lookup.py` statik veritabanı (Cisco/Aruba/Ruijie/Fortinet 120+ model); `POST /asset-lifecycle/eol-lookup`; AssetLifecycle sayfasında "EOL Otomatik Ara" butonu + sonuç modal
 
-### Multi-Tenant
+### Bekleyen Deploy & Test Görevleri 🔵
+- 🔵 **VPS deploy** — `cd /opt/netmanager && git pull && docker compose up --build -d backend`
+- 🔵 **Yerel agent servisi yeniden başlat** — `queue_size` metriği için:
+  ```
+  launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.netmanager.agent.plist
+  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.netmanager.agent.plist
+  ```
+- 🔵 **Sprint 11 özelliklerini test et** — SNMP GET/WALK, keşif→envanter, syslog filtresi, stream geçmişi, kuyruk göstergesi
+
+### SNMP Trap Receiver ⚪
+- ⚪ Pasif trap dinleme (UDP 162) — şu an sadece GET/WALK (aktif sorgulama) var
+- Önce syslog toplayıcı kullanım verisi toplanmalı, talep varsa eklenir
+
+### Multi-Tenant ⚪
 - Müşteri bazlı tenant izolasyonu
 - Tenant scoped RBAC & reporting
 - MSP/SaaS hazır mimari
 
-### AI Destekli Öneriler (Uzun Vade)
+### AI Destekli Öneriler ⚪ (Uzun Vade)
 - "Bu cihaz neden offline olabilir?"
 - "Son config değişikliği ile olay arasında ilişki var mı?"
 - "Bu topolojide single point of failure var mı?"
