@@ -13,13 +13,13 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, DashboardOutlined, ApiOutlined,
   SafetyOutlined, HistoryOutlined, KeyOutlined, LockOutlined, UnlockOutlined,
   WarningOutlined, PlusCircleOutlined, SearchOutlined, WifiOutlined,
-  DatabaseOutlined, SafetyCertificateOutlined, BugOutlined,
+  DatabaseOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   agentsApi, type Agent, type AgentLatencyEntry,
   type AgentCommandLog, type AgentSecurityConfig,
-  type DiscoveryHistoryEntry, type SyslogEvent,
+  type SnmpGetResult, type SnmpWalkResult,
 } from '@/api/agents'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -657,7 +657,7 @@ function SyslogTab({ agent }: { agent: Agent }) {
   const [enabled, setEnabled] = useState(false)
   const [port, setPort] = useState(514)
 
-  const { data: events, refetch } = useQuery({
+  const { data: events } = useQuery({
     queryKey: ['agent-syslog', agent.id],
     queryFn: () => agentsApi.getSyslogEvents(agent.id, { limit: 100 }),
     refetchInterval: enabled ? 5000 : false,
@@ -804,6 +804,168 @@ function StreamingTab({ agent }: { agent: Agent }) {
           </pre>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── SnmpTab ───────────────────────────────────────────────────────────────────
+
+const SNMP_PRESETS = [
+  { label: 'sysDescr',    oid: '1.3.6.1.2.1.1.1.0' },
+  { label: 'sysUpTime',   oid: '1.3.6.1.2.1.1.3.0' },
+  { label: 'sysName',     oid: '1.3.6.1.2.1.1.5.0' },
+  { label: 'sysLocation', oid: '1.3.6.1.2.1.1.6.0' },
+  { label: 'ifTable',     oid: '1.3.6.1.2.1.2.2' },
+  { label: 'ifOperStatus',oid: '1.3.6.1.2.1.2.2.1.8' },
+  { label: 'ifInOctets',  oid: '1.3.6.1.2.1.2.2.1.10' },
+  { label: 'ifOutOctets', oid: '1.3.6.1.2.1.2.2.1.16' },
+]
+
+function SnmpTab({ agent }: { agent: Agent }) {
+  const { isDark } = useTheme()
+  const C = mkC(isDark)
+  const { message } = App.useApp()
+  const [mode, setMode] = useState<'get' | 'walk'>('get')
+  const [deviceId, setDeviceId] = useState('')
+  const [oids, setOids] = useState('1.3.6.1.2.1.1.1.0,1.3.6.1.2.1.1.5.0,1.3.6.1.2.1.1.3.0')
+  const [oidPrefix, setOidPrefix] = useState('1.3.6.1.2.1.1')
+  const [isRunning, setIsRunning] = useState(false)
+  const [getResult, setGetResult] = useState<SnmpGetResult | null>(null)
+  const [walkResult, setWalkResult] = useState<SnmpWalkResult | null>(null)
+  const isOnline = agent.status === 'online'
+
+  const applyPreset = (oid: string) => {
+    if (mode === 'get') {
+      setOids(prev => prev ? `${prev},${oid}` : oid)
+    } else {
+      setOidPrefix(oid)
+    }
+  }
+
+  const run = async () => {
+    if (!deviceId) { message.warning('Cihaz ID giriniz'); return }
+    setIsRunning(true)
+    setGetResult(null)
+    setWalkResult(null)
+    try {
+      if (mode === 'get') {
+        const oidList = oids.split(',').map(o => o.trim()).filter(Boolean)
+        if (!oidList.length) { message.warning('En az bir OID giriniz'); setIsRunning(false); return }
+        const res = await agentsApi.snmpGet(agent.id, { device_id: Number(deviceId), oids: oidList })
+        setGetResult(res)
+        if (!res.success) message.error(`SNMP GET başarısız: ${res.error || 'Bilinmeyen hata'}`)
+      } else {
+        if (!oidPrefix.trim()) { message.warning('OID prefix giriniz'); setIsRunning(false); return }
+        const res = await agentsApi.snmpWalk(agent.id, { device_id: Number(deviceId), oid_prefix: oidPrefix.trim() })
+        setWalkResult(res)
+        if (!res.success) message.error(`SNMP WALK başarısız: ${res.error || 'Bilinmeyen hata'}`)
+      }
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'SNMP sorgusu başarısız')
+    } finally {
+      setIsRunning(false)
+    }
+  }
+
+  const getRows = getResult?.results
+    ? Object.entries(getResult.results).map(([oid, value], i) => ({ key: i, oid, value: String(value ?? '') }))
+    : []
+
+  const walkRows = (walkResult?.results || []).map((r, i) => ({ key: i, oid: r.oid, value: String(r.value ?? '') }))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <Select
+            value={mode}
+            onChange={setMode}
+            style={{ width: 100 }}
+            size="small"
+            options={[{ value: 'get', label: 'GET' }, { value: 'walk', label: 'WALK' }]}
+          />
+          <Input
+            value={deviceId}
+            onChange={e => setDeviceId(e.target.value)}
+            placeholder="Cihaz ID"
+            style={{ width: 100 }}
+            type="number"
+            size="small"
+          />
+          {mode === 'get' ? (
+            <Input
+              value={oids}
+              onChange={e => setOids(e.target.value)}
+              placeholder="1.3.6.1.2.1.1.1.0,1.3.6.1.2.1.1.5.0"
+              style={{ flex: 1 }}
+              size="small"
+            />
+          ) : (
+            <Input
+              value={oidPrefix}
+              onChange={e => setOidPrefix(e.target.value)}
+              placeholder="1.3.6.1.2.1.2.2"
+              style={{ flex: 1 }}
+              size="small"
+            />
+          )}
+          <Button type="primary" size="small" onClick={run} loading={isRunning} disabled={!isOnline}>
+            Sorgula
+          </Button>
+        </div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {SNMP_PRESETS.map(p => (
+            <Tag
+              key={p.oid}
+              style={{ cursor: 'pointer', fontSize: 10, userSelect: 'none' }}
+              onClick={() => applyPreset(p.oid)}
+            >
+              {p.label}
+            </Tag>
+          ))}
+        </div>
+        {mode === 'get' && (
+          <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>Birden fazla OID için virgülle ayırın</div>
+        )}
+      </div>
+
+      {!isOnline && (
+        <div style={{ textAlign: 'center', padding: '16px 0', color: C.muted, fontSize: 12 }}>
+          Agent çevrimdışı — SNMP sorgusu yapılamaz
+        </div>
+      )}
+
+      {getResult?.success && getRows.length > 0 && (
+        <Table
+          dataSource={getRows}
+          rowKey="key"
+          size="small"
+          pagination={false}
+          columns={[
+            { title: 'OID', dataIndex: 'oid', width: '40%', render: (v: string) => <code style={{ fontSize: 10 }}>{v}</code> },
+            { title: 'Değer', dataIndex: 'value', render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+          ]}
+        />
+      )}
+
+      {walkResult?.success && walkRows.length > 0 && (
+        <Table
+          dataSource={walkRows}
+          rowKey="key"
+          size="small"
+          pagination={{ pageSize: 20 }}
+          columns={[
+            { title: 'OID', dataIndex: 'oid', width: '55%', render: (v: string) => <code style={{ fontSize: 10 }}>{v}</code> },
+            { title: 'Değer', dataIndex: 'value', render: (v: string) => <Text style={{ fontSize: 11 }}>{v}</Text> },
+          ]}
+        />
+      )}
+
+      {(getResult && !getResult.success) || (walkResult && !walkResult.success) ? (
+        <div style={{ background: '#450a0a20', border: '1px solid #ef444430', borderRadius: 8, padding: 10, fontSize: 12, color: '#f87171' }}>
+          {getResult?.error || walkResult?.error || 'SNMP sorgusu başarısız'}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1101,6 +1263,11 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
             key: 'stream',
             label: <Space size={4}><ThunderboltOutlined />Akış</Space>,
             children: <StreamingTab agent={agent} />,
+          },
+          {
+            key: 'snmp',
+            label: <Space size={4}><DatabaseOutlined />SNMP</Space>,
+            children: <SnmpTab agent={agent} />,
           },
           {
             key: 'vault',

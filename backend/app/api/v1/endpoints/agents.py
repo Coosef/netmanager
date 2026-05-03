@@ -603,6 +603,62 @@ async def push_device_sync(
     return {"sent": sent, "device_count": len(payload)}
 
 
+# ── Feature 4: SNMP via Agent ─────────────────────────────────────────────────
+
+@router.post("/{agent_id}/snmp-get", response_model=dict)
+async def snmp_get_via_agent(
+    agent_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Run SNMP GET for specific OIDs via agent. body: {device_id, oids: [str]}"""
+    if not current_user.has_permission("device:read"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    device_id = body.get("device_id")
+    oids = body.get("oids", [])
+    if not device_id or not oids:
+        raise HTTPException(status_code=400, detail="device_id and oids are required")
+
+    from app.models.device import Device
+    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    result = await agent_manager.execute_snmp_get(agent_id, device, oids)
+    return result
+
+
+@router.post("/{agent_id}/snmp-walk", response_model=dict)
+async def snmp_walk_via_agent(
+    agent_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Run SNMP WALK for an OID subtree via agent. body: {device_id, oid_prefix}"""
+    if not current_user.has_permission("device:read"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent is offline")
+
+    device_id = body.get("device_id")
+    oid_prefix = body.get("oid_prefix", "").strip()
+    if not device_id or not oid_prefix:
+        raise HTTPException(status_code=400, detail="device_id and oid_prefix are required")
+
+    from app.models.device import Device
+    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    result = await agent_manager.execute_snmp_walk(agent_id, device, oid_prefix)
+    return result
+
+
 # ── Feature 5: Discovery ──────────────────────────────────────────────────────
 
 @router.post("/{agent_id}/discover", response_model=dict)

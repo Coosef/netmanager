@@ -169,6 +169,12 @@ export const agentsApi = {
 
   refreshVault: (id: string) =>
     client.post<VaultRefreshResponse>(`/agents/${id}/refresh-vault`).then(r => r.data),
+
+  snmpGet: (id: string, body: { device_id: number; oids: string[] }) =>
+    client.post<SnmpGetResult>(`/agents/${id}/snmp-get`, body).then(r => r.data),
+
+  snmpWalk: (id: string, body: { device_id: number; oid_prefix: string }) =>
+    client.post<SnmpWalkResult>(`/agents/${id}/snmp-walk`, body).then(r => r.data),
 }
 
 export interface DiscoverResult {
@@ -213,4 +219,16 @@ export interface VaultRefreshResponse {
   sent: boolean
   credential_count: number
   encrypted: boolean
+}
+
+export interface SnmpGetResult {
+  success: boolean
+  results: Record<string, string | number | null>
+  error?: string
+}
+
+export interface SnmpWalkResult {
+  success: boolean
+  results: Array<{ oid: string; value: string | number | null }>
+  error?: string
 }
