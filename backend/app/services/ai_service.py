@@ -45,7 +45,11 @@ Hangi işlemlerin otomatize edilebileceğini ve nasıl yapılacağını açıkla
 ## 📜 Playbook Adımları
 ## ⚙️ Konfigürasyon""",
     "security": """
-Güvenlik modundasın. Güvenlik açıklarını, riskleri ve tehditleri analiz et.
+Güvenlik modundasın. Sana yukarıda "GÜVENLİK DENETİM RAPORU" başlığıyla gerçek sistem verisi verildi.
+SADECE bu veriye dayanarak yanıt ver — genel/teorik güvenlik tavsiyesi verme.
+Her bulgu için hangi cihazı, olayı veya konumu kastettiğini açıkça belirt.
+Herhangi bir cihaz SSH/SNMP ile bağlanmadan, yalnızca pasif veri analizi yaptığını hatırlat.
+Yanıtını şu başlıklarla yapılandır:
 ## 🛡️ Güvenlik Analizi
 ## 🚨 Tespit Edilen Riskler
 ## 🔒 Güvenlik Önerileri
@@ -113,6 +117,129 @@ Davranış anomali sayısı: {anomaly_count}
 """.strip()
 
 
+async def build_security_context(db: AsyncSession) -> str:
+    """Deep security context — read-only DB queries, no device connections."""
+    now = datetime.now(timezone.utc)
+    since_24h = now - timedelta(hours=24)
+    since_7d  = now - timedelta(days=7)
+
+    # ── 1. Offline devices with full detail ─────────────────────────────────
+    offline_rows = await db.execute(
+        select(Device)
+        .where(Device.is_active == True, Device.status == "offline")
+        .order_by(desc(Device.last_seen))
+        .limit(15)
+    )
+    offline_lines = []
+    for d in offline_rows.scalars():
+        ago = ""
+        if d.last_seen:
+            mins = int((now - d.last_seen.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+            ago = f"{mins}dk önce" if mins < 60 else f"{mins // 60}sa önce"
+        location = " | ".join(filter(None, [d.site, d.building, d.floor, d.location]))
+        offline_lines.append(
+            f"  • {d.hostname} ({d.ip_address}) — son görülme: {ago} | konum: {location or '?'} | katman: {d.layer or '?'} | {d.vendor}"
+        )
+    offline_text = "\n".join(offline_lines) or "  Tüm cihazlar online"
+
+    # ── 2. Correlation incidents (multi-device correlated events) ────────────
+    corr_rows = await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.event_type == "correlation_incident", NetworkEvent.created_at >= since_7d)
+        .order_by(desc(NetworkEvent.created_at))
+        .limit(5)
+    )
+    corr_lines = []
+    for ev in corr_rows.scalars():
+        ago_min = int((now - ev.created_at.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+        detail = ""
+        if ev.details:
+            involved = ev.details.get("involved_devices", [])
+            if involved:
+                detail = f" | İlgili cihazlar: {', '.join(str(h) for h in involved[:6])}"
+            reason = ev.details.get("reason", ev.details.get("common_factor", ""))
+            if reason:
+                detail += f" | Sebep: {reason}"
+        corr_lines.append(f"  • [{ago_min}dk] {ev.title}{detail}")
+    corr_text = "\n".join(corr_lines) or "  - yok"
+
+    # ── 3. Security-relevant anomaly events with messages ────────────────────
+    sec_event_types = (
+        "mac_anomaly", "mac_loop_suspicion", "vlan_anomaly",
+        "stp_anomaly", "loop_detected", "topology_drift",
+        "traffic_spike", "device_flapping", "threshold_alert",
+    )
+    sec_rows = await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.event_type.in_(sec_event_types), NetworkEvent.created_at >= since_24h)
+        .order_by(desc(NetworkEvent.created_at))
+        .limit(12)
+    )
+    sec_event_lines = []
+    for ev in sec_rows.scalars():
+        ago_min = int((now - ev.created_at.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+        host = f" @ {ev.device_hostname}" if ev.device_hostname else ""
+        msg_snippet = (ev.message or "")[:120]
+        sec_event_lines.append(f"  • [{ago_min}dk | {ev.event_type}]{host}: {ev.title} — {msg_snippet}")
+    sec_event_text = "\n".join(sec_event_lines) or "  - yok"
+
+    # ── 4. STP / loop events ─────────────────────────────────────────────────
+    stp_count = await db.scalar(
+        select(func.count(NetworkEvent.id))
+        .where(NetworkEvent.event_type.in_(("stp_anomaly", "loop_detected")), NetworkEvent.created_at >= since_24h)
+    ) or 0
+
+    # ── 5. Flapping devices (unstable) ───────────────────────────────────────
+    flap_rows = await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.event_type == "device_flapping", NetworkEvent.created_at >= since_24h)
+        .order_by(desc(NetworkEvent.created_at))
+        .limit(5)
+    )
+    flap_lines = [
+        f"  • {ev.device_hostname or '?'} — {ev.title}"
+        for ev in flap_rows.scalars()
+    ]
+    flap_text = "\n".join(flap_lines) or "  - yok"
+
+    # ── 6. Devices without SNMP (blind spots) ───────────────────────────────
+    no_snmp_count = await db.scalar(
+        select(func.count(Device.id))
+        .where(Device.is_active == True, Device.snmp_enabled == False)
+    ) or 0
+
+    # ── 7. Devices never seen / stale (last_seen > 24h) ─────────────────────
+    stale_count = await db.scalar(
+        select(func.count(Device.id))
+        .where(
+            Device.is_active == True,
+            Device.status == "offline",
+            Device.last_seen < since_24h,
+        )
+    ) or 0
+
+    return f"""
+=== GÜVENLİK DENETİM RAPORU ({now.strftime('%Y-%m-%d %H:%M')} UTC) ===
+NOT: Bu veriler tamamen pasif DB sorgusudur — hiçbir cihaza bağlantı yapılmamıştır.
+
+[OFFLİNE CİHAZLAR — DETAY]
+{offline_text}
+
+[KORERLASYONLANMİŞ OLAYLAR (son 7 gün)]
+{corr_text}
+
+[GÜVENLİK ANOMALİLERİ (son 24s — mac/vlan/stp/loop/flap/traffic)]
+{sec_event_text}
+
+[ÖZET RİSK GÖSTERGELERİ]
+STP/Loop olayları (24s): {stp_count}
+Kararsız cihazlar (flapping, 24s):
+{flap_text}
+SNMP'siz cihazlar (kör nokta): {no_snmp_count}
+24s+ görülmeyen offline cihazlar: {stale_count}
+""".strip()
+
+
 async def _get_or_create_settings(db: AsyncSession) -> AISettings:
     row = await db.get(AISettings, 1)
     if row is None:
@@ -133,6 +260,9 @@ async def chat(
         raise ValueError("AI sağlayıcısı yapılandırılmamış. Lütfen Ayarlar → AI Asistanı bölümünden bir sağlayıcı seçin.")
 
     context = await build_network_context(db)
+    if mode == "security":
+        sec_context = await build_security_context(db)
+        context = context + "\n\n" + sec_context
     system = SYSTEM_PROMPT.format(context=context) + MODE_PROMPTS.get(mode, "")
     provider = settings.active_provider
 
