@@ -49,34 +49,63 @@ const MODES = [
 ] as const
 type Mode = typeof MODES[number]['key']
 
-/* ─── suggested questions per mode ─────────────────────────────────────── */
-const SUGGESTED: Record<Mode, { label: string; q: string }[]> = {
-  analyze: [
-    { label: 'Kaç cihaz offline?',        q: 'Şu an kaç cihaz offline? Hangilerinde kritik sorun var?' },
-    { label: 'En riskli cihazlar',        q: 'En riskli cihazlar hangileri? Neden riskli?' },
-    { label: 'Son 24 saat özeti',         q: 'Son 24 saatte neler oldu? Dikkat etmem gereken bir şey var mı?' },
-    { label: 'Anomali var mı?',           q: 'Son 24 saatte anormal bir davranış tespit edildi mi?' },
-    { label: 'Topoloji değişimi',         q: 'Topolojide beklenmeden değişen bir bağlantı var mı?' },
-    { label: 'Genel sağlık',             q: 'Ağımı daha sağlıklı tutmak için ne yapmalıyım?' },
-  ],
-  troubleshoot: [
-    { label: 'Offline cihaz kök neden', q: 'Offline cihazların kök nedenini analiz et ve sorun giderme adımlarını ver.' },
-    { label: 'Latency sorunları',       q: 'Ağda latency sorunu var mı? Nasıl giderilir?' },
-    { label: 'VLAN sorunları',          q: 'VLAN yapılandırmasında sorun var mı?' },
-    { label: 'Bağlantı kopmaları',      q: 'Sürekli bağlantı kopması yaşayan cihazlar var mı? Sebebi ne?' },
-  ],
-  automate: [
-    { label: 'Playbook öner',          q: 'Mevcut sorunlar için hangi playbook\'ları çalıştırmalıyım?' },
-    { label: 'Otomatize edilecekler',  q: 'Hangi operasyonları otomatize etmeliyim?' },
-    { label: 'Yedekleme planı',        q: 'Yedekleme sürecimi nasıl otomatize edebilirim?' },
-    { label: 'Alert kuralları',        q: 'Hangi alert kurallarını eklemeyi önerirsin?' },
-  ],
-  security: [
-    { label: 'Güvenlik açıkları',      q: 'Güvenlik açısından dikkat etmem gereken bir şey var mı?' },
-    { label: 'Yetkisiz erişim',        q: 'Şüpheli veya yetkisiz erişim girişimi var mı?' },
-    { label: 'Compliance durumu',      q: 'Uyumluluk (compliance) açısından risk var mı?' },
-    { label: 'Fiziksel güvenlik',      q: 'Offline cihazlar güvenlik riski oluşturuyor mu?' },
-  ],
+/* ─── suggested questions — dynamic, built inside component ─────────────── */
+type SuggestedItem = { label: string; q: string }
+function buildSuggested(
+  mode: Mode,
+  offline: number,
+  unacked: number,
+  health: number,
+  criticalEvents: { title: string; device_hostname?: string | null }[],
+): SuggestedItem[] {
+  const firstCrit = criticalEvents[0]
+  const critDevice = firstCrit?.device_hostname ?? 'kritik cihaz'
+  switch (mode) {
+    case 'analyze':
+      return [
+        offline > 0
+          ? { label: `${offline} cihaz offline — kök neden?`, q: `Ağda ${offline} cihaz offline. Offline süreleri, konumları ve kök nedenini analiz et. En kritik olanı hangisi?` }
+          : { label: 'Genel durum analizi', q: 'Ağın genel durumunu ve potansiyel riskleri analiz et.' },
+        unacked > 0
+          ? { label: `${unacked} aktif uyarı — öncelikli hangisi?`, q: `Sistemde ${unacked} onaylanmamış uyarı var. En kritiklerini öncelik sırasıyla listele ve ne yapmalıyım?` }
+          : { label: 'Anomali taraması', q: 'Son 24 saatte anormal bir davranış veya topoloji değişikliği var mı?' },
+        health < 80
+          ? { label: `Sağlık skoru ${health}/100 — nasıl iyileşir?`, q: `Ağ sağlık skoru ${health}/100. Bu skoru düşüren faktörler neler ve nasıl iyileştirebilirim?` }
+          : { label: 'Proaktif risk analizi', q: 'Şu an kritik sorun olmasa da gelecekte risk oluşturabilecek durumlar var mı?' },
+        firstCrit
+          ? { label: `Son kritik: ${critDevice}`, q: `${firstCrit.title} — bu olayı detaylıca analiz et ve etkisini değerlendir.` }
+          : { label: 'Son 24 saat özeti', q: 'Son 24 saatte neler oldu? Dikkat çekmesi gereken bir durum var mı?' },
+        { label: 'Topoloji bütünlüğü', q: 'Ağ topolojisinde beklenmedik değişiklik veya bağlantı kopması var mı?' },
+        { label: 'Performans trendi', q: 'Son 6 saat ile önceki 6 saati karşılaştır — durum kötüleşiyor mu?' },
+      ]
+    case 'troubleshoot':
+      return [
+        offline > 0
+          ? { label: `${offline} offline cihaz — adım adım çöz`, q: `${offline} cihaz offline. Olay zaman çizelgesine bakarak kök nedeni bul ve NetManager üzerinden adım adım çözüm yolunu göster.` }
+          : { label: 'Periyodik bağlantı kopmaları', q: 'Son 24 saatte tekrarlayan bağlantı kopması yaşayan cihazlar var mı?' },
+        { label: 'VLAN yapılandırma sorunu', q: 'VLAN yapılandırmasında tutarsızlık veya yanlış atama var mı? Etkilenen cihazlar hangileri?' },
+        { label: 'STP / loop riski', q: 'Spanning-tree anomalisi veya loop riski var mı? Hangi portları kontrol etmeliyim?' },
+        { label: 'Agent erişim sorunu', q: 'Agent üzerinden erişilemeyen cihazlar var mı? Agent sağlığını kontrol et.' },
+      ]
+    case 'automate':
+      return [
+        { label: 'Acil playbook öner', q: 'Mevcut durumdaki sorunlar için hangi playbook\'ları hemen çalıştırmalıyım?' },
+        offline > 0
+          ? { label: `${offline} offline için otomatik aksiyon`, q: `${offline} offline cihaz var. Bu cihazlar için otomatik tetiklenen bir playbook mevcut mu? Yoksa nasıl oluşturabilirim?` }
+          : { label: 'Playbook ekle', q: 'Mevcut ağ durumu için hangi yeni playbook\'ları oluşturmalıyım?' },
+        { label: 'Yedekleme kapsamı', q: 'Son 7 günde hangi cihazların yedeği alınmamış? Bu cihazları kapsayacak schedule nasıl oluşturabilirim?' },
+        { label: 'Alert kuralı ekle', q: 'Mevcut sorunlar için eksik alert kuralları neler? Hangi metrikleri izlemeliyim?' },
+      ]
+    case 'security':
+      return [
+        offline > 0
+          ? { label: `${offline} offline — fiziksel müdahale riski?`, q: `${offline} cihaz offline. Bu cihazların konumları ve offline süreleri güvenlik açısından risk oluşturuyor mu?` }
+          : { label: 'Güvenlik taraması', q: 'Sistemde güvenlik açığı veya şüpheli aktivite var mı?' },
+        { label: 'MAC/ARP anomalisi', q: 'Son 24 saatte MAC anomalisi veya yetkisiz cihaz bağlantısı var mı?' },
+        { label: 'Yetkisiz erişim girişimi', q: 'SNMP veya SSH üzerinden yetkisiz erişim girişimi tespit edildi mi?' },
+        { label: 'Compliance durumu', q: 'Uyumluluk açısından hangi cihazlar politikayı ihlal ediyor?' },
+      ]
+  }
 }
 
 /* ─── quick actions ─────────────────────────────────────────────────────── */
@@ -286,8 +315,35 @@ export default function AIAssistantPage() {
   const unacked  = stats?.events_24h.unacknowledged ?? 0
   const health   = stats?.health_score ?? 0
   const healthColor = health >= 80 ? '#22c55e' : health >= 50 ? '#f59e0b' : '#ef4444'
+  const criticalEvents = eventsData?.items?.filter(e => e.severity === 'critical') ?? []
+  const hasCritical    = criticalEvents.length > 0 || offline > 0
 
-  const suggested = SUGGESTED[mode]
+  /* dynamic suggested questions */
+  const suggested = useMemo(
+    () => buildSuggested(mode, offline, unacked, health, criticalEvents),
+    [mode, offline, unacked, health, criticalEvents.length] // eslint-disable-line
+  )
+
+  /* proactive auto-analysis: on first mount when there are issues and no chat history */
+  const proactiveTriggered = useRef(false)
+  useEffect(() => {
+    if (
+      proactiveTriggered.current ||
+      messages.length > 0 ||
+      !isConfigured ||
+      chatMut.isPending ||
+      settingsLoading ||
+      (!offline && !unacked)
+    ) return
+    proactiveTriggered.current = true
+    const timer = setTimeout(() => {
+      const q = offline > 0
+        ? `Proaktif analiz: Ağda ${offline} offline cihaz ve ${unacked} aktif uyarı var. Durumu değerlendir, en kritik sorunu ve yapılması gerekeni söyle.`
+        : `Proaktif analiz: ${unacked} aktif uyarı var. Bunları öncelik sırasıyla analiz et ve acil aksiyon gerektiren var mı söyle.`
+      send(q)
+    }, 1800)
+    return () => clearTimeout(timer)
+  }, [isConfigured, settingsLoading]) // eslint-disable-line
 
   const contentPadH = isMobile ? 14 : 24
   const contentPadV = isMobile ? 12 : 20
@@ -490,6 +546,27 @@ export default function AIAssistantPage() {
             ))}
           </div>
 
+          {/* Proaktif Tarama button */}
+          <Tooltip title="Mevcut ağ durumunu AI ile otomatik analiz et">
+            <Button
+              size="small"
+              icon={<ThunderboltOutlined />}
+              onClick={() => {
+                const q = `Proaktif tam analiz: Sistemin anlık durumunu değerlendir. Offline cihazlar, aktif uyarılar, anomaliler ve trend dahil — en kritik noktayı öne çıkar ve ne yapmalıyım söyle.`
+                send(q)
+              }}
+              disabled={chatMut.isPending}
+              style={{
+                background: `${currentMode.color}20`,
+                border: `1px solid ${currentMode.color}60`,
+                color: currentMode.color,
+                borderRadius: 7, fontSize: 11, fontWeight: 600,
+              }}
+            >
+              {!isMobile && 'Proaktif Tarama'}
+            </Button>
+          </Tooltip>
+
           {/* data status */}
           <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 11, color: C.muted }}>Son güncelleme: {lastUpdate}</span>
@@ -529,6 +606,25 @@ export default function AIAssistantPage() {
           </div>
         ) : (
           <>
+            {/* ── Critical alert banner ───────────────────────────────────── */}
+            {hasCritical && messages.length === 0 && !chatMut.isPending && (
+              <div style={{
+                flexShrink: 0,
+                background: isDark ? '#1a0a0a' : '#fff5f5',
+                borderBottom: `1px solid #ef444440`,
+                padding: '8px 24px',
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}>
+                <span style={{ fontSize: 14 }}>🚨</span>
+                <span style={{ fontSize: 12, color: '#ef4444', fontWeight: 600 }}>
+                  {offline > 0 && `${offline} cihaz offline`}
+                  {offline > 0 && unacked > 0 && ' · '}
+                  {unacked > 0 && `${unacked} onaylanmamış uyarı`}
+                </span>
+                <span style={{ fontSize: 11, color: C.muted }}>— AI otomatik analiz başlatılıyor…</span>
+              </div>
+            )}
+
             <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               {messages.length === 0 && (
                 <div style={{

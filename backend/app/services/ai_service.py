@@ -29,20 +29,22 @@ Sadece ağ yönetimiyle ilgili konularda yardım et; anlık ağ verisini sana sa
 
 MODE_PROMPTS: dict[str, str] = {
     "analyze": """
-Analiz modundasın. Karmaşık sorular için yanıtını şu markdown başlıkları ile yapılandır (uygunsa):
+Analiz modundasın. Sana "ANALİZ BAĞLAMI" başlığıyla gerçek sistem verisi verildi.
+Bu veriye dayanarak somut bulgular sun — "kontrol edin" gibi genel tavsiye değil, neyi nerede kontrol edeceğini belirt.
+Proaktif ol: kullanıcı sormasa bile dikkat çekmesi gereken kritik noktaları öne çıkar.
 ## 🔍 Analiz Sonucu
 ## 🎯 Kök Neden
-## 📊 Etki
+## 📊 Etki Değerlendirmesi
 ## ⚠️ Risk Seviyesi
-## ✅ Önerilen Aksiyonlar
-Basit sorularda düz metin yeterli.""",
+## ✅ Önerilen Aksiyonlar""",
     "troubleshoot": """
-Sorun giderme modundasın. Adım adım komut ve kontrol listesi ver.
-Yanıtını şu başlıklarla yapılandır (uygunsa):
+Sorun giderme modundasın. Sana "SORUN GİDERME BAĞLAMI" başlığıyla gerçek olay zaman çizelgesi verildi.
+Bu veriye dayanarak adım adım, NetManager üzerinden yapılabilecek somut işlemleri sırala.
+Dış araç veya script önerme — NetManager'ın Diagnostics, Playbooks, Tasks menülerini kullan.
 ## 🛠️ Sorun Tespiti
-## 📋 Kontrol Listesi
-## 💻 Komutlar
-## 🔄 Sonraki Adımlar""",
+## 📋 Adım Adım Çözüm
+## 💻 NetManager'da Yapılacaklar
+## 🔄 Doğrulama""",
     "automate": """
 Otomasyon modundasın. Sana "NETMANAGER OTOMASYON VARLIĞI" başlığıyla sistemde MEVCUT olan özellikler verildi.
 KESİNLİKLE dış betik (Python/Bash/Netmiko/NAPALM), harici araç veya sıfırdan kod yazmayı önerme.
@@ -122,6 +124,179 @@ Olay tipleri: {event_summary}
 
 [ANOMALİLER (son 24s)]
 Davranış anomali sayısı: {anomaly_count}
+""".strip()
+
+
+async def build_analyze_context(db: AsyncSession) -> str:
+    """Rich analysis context: problem devices, offline durations, event trend, config changes."""
+    now = datetime.now(timezone.utc)
+    since_24h = now - timedelta(hours=24)
+    since_6h  = now - timedelta(hours=6)
+    since_12h = now - timedelta(hours=12)
+
+    # ── Top 5 problem devices by event count (24h) ───────────────────────────
+    top_dev_rows = await db.execute(
+        select(NetworkEvent.device_hostname, func.count(NetworkEvent.id).label("cnt"))
+        .where(NetworkEvent.created_at >= since_24h, NetworkEvent.device_hostname.isnot(None))
+        .group_by(NetworkEvent.device_hostname)
+        .order_by(desc("cnt"))
+        .limit(5)
+    )
+    top_dev_lines = [f"  • {r.device_hostname}: {r.cnt} olay" for r in top_dev_rows]
+    top_dev_text = "\n".join(top_dev_lines) or "  - cihaz bazlı olay yok"
+
+    # ── Offline devices with exact duration ──────────────────────────────────
+    offline_rows = await db.execute(
+        select(Device)
+        .where(Device.is_active == True, Device.status == "offline")
+        .order_by(desc(Device.last_seen))
+        .limit(10)
+    )
+    offline_dur_lines = []
+    for d in offline_rows.scalars():
+        if d.last_seen:
+            mins = int((now - d.last_seen.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+            duration = f"{mins}dk" if mins < 60 else f"{mins // 60}sa {mins % 60}dk"
+        else:
+            duration = "süre bilinmiyor"
+        loc = " / ".join(filter(None, [d.site, d.building, d.floor, d.location]))
+        offline_dur_lines.append(
+            f"  • {d.hostname} ({d.ip_address}) — {duration}dır offline | {loc or '?'} | {d.layer or '?'} katman"
+        )
+    offline_dur_text = "\n".join(offline_dur_lines) or "  Tüm cihazlar online"
+
+    # ── Event trend: last 6h vs previous 6h ─────────────────────────────────
+    last_6h = await db.scalar(
+        select(func.count(NetworkEvent.id)).where(NetworkEvent.created_at >= since_6h)
+    ) or 0
+    prev_6h = await db.scalar(
+        select(func.count(NetworkEvent.id))
+        .where(NetworkEvent.created_at >= since_12h, NetworkEvent.created_at < since_6h)
+    ) or 0
+    if last_6h > prev_6h * 1.25:
+        trend = f"↑ KÖTÜLEŞIYOR (son 6s: {last_6h}, önceki 6s: {prev_6h})"
+    elif prev_6h > last_6h * 1.25:
+        trend = f"↓ İyileşiyor (son 6s: {last_6h}, önceki 6s: {prev_6h})"
+    else:
+        trend = f"→ Stabil (son 6s: {last_6h}, önceki 6s: {prev_6h})"
+
+    # ── Recent config backups that may signal changes ────────────────────────
+    cfg_rows = await db.execute(
+        select(ConfigBackup.device_id, Device.hostname, ConfigBackup.created_at, ConfigBackup.size_bytes)
+        .join(Device, ConfigBackup.device_id == Device.id)
+        .where(ConfigBackup.created_at >= since_24h)
+        .order_by(desc(ConfigBackup.created_at))
+        .limit(6)
+    )
+    cfg_lines = []
+    for row in cfg_rows:
+        ago_min = int((now - row.created_at.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+        cfg_lines.append(f"  • {row.hostname}: {ago_min}dk önce ({row.size_bytes} byte)")
+    cfg_text = "\n".join(cfg_lines) or "  - son 24s yedek/konfigürasyon değişikliği yok"
+
+    # ── Most recent critical event full detail ───────────────────────────────
+    last_crit_row = await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.severity == "critical", NetworkEvent.created_at >= since_24h)
+        .order_by(desc(NetworkEvent.created_at))
+        .limit(1)
+    )
+    last_crit = last_crit_row.scalar_one_or_none()
+    if last_crit:
+        ago_min = int((now - last_crit.created_at.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+        crit_detail = f"{last_crit.title} @ {last_crit.device_hostname or '?'} ({ago_min}dk önce)\n  Mesaj: {(last_crit.message or '')[:200]}"
+    else:
+        crit_detail = "- yok"
+
+    return f"""
+=== ANALİZ BAĞLAMI ({now.strftime('%Y-%m-%d %H:%M')} UTC) ===
+
+[EN SORUNLU CİHAZLAR (son 24s olay sayısına göre)]
+{top_dev_text}
+
+[OFFLİNE CİHAZ SÜRELERİ]
+{offline_dur_text}
+
+[OLAY TRENDI]
+{trend}
+
+[SON KRİTİK OLAY DETAYI]
+{crit_detail}
+
+[SON 24S KONFİGÜRASYON DEĞİŞİKLİKLERİ]
+{cfg_text}
+""".strip()
+
+
+async def build_troubleshoot_context(db: AsyncSession) -> str:
+    """Detailed event timeline and failure chains for troubleshooting."""
+    now = datetime.now(timezone.utc)
+    since_6h = now - timedelta(hours=6)
+    since_24h = now - timedelta(hours=24)
+
+    # ── Chronological event timeline (last 6h, all severities) ──────────────
+    timeline_rows = await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.created_at >= since_6h)
+        .order_by(NetworkEvent.created_at)
+        .limit(20)
+    )
+    timeline_lines = []
+    for ev in timeline_rows.scalars():
+        t = ev.created_at.replace(tzinfo=timezone.utc).strftime('%H:%M')
+        host = f" | {ev.device_hostname}" if ev.device_hostname else ""
+        sev = ev.severity.upper()[:4]
+        msg = (ev.message or "")[:80]
+        timeline_lines.append(f"  {t} [{sev}] {ev.event_type}{host}: {ev.title} — {msg}")
+    timeline_text = "\n".join(timeline_lines) or "  son 6 saatte olay yok"
+
+    # ── Offline devices with details ─────────────────────────────────────────
+    offline_rows = await db.execute(
+        select(Device)
+        .where(Device.is_active == True, Device.status == "offline")
+        .order_by(desc(Device.last_seen))
+        .limit(10)
+    )
+    offline_lines = []
+    for d in offline_rows.scalars():
+        if d.last_seen:
+            mins = int((now - d.last_seen.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+            dur = f"{mins}dk" if mins < 60 else f"{mins // 60}sa"
+        else:
+            dur = "?"
+        offline_lines.append(
+            f"  • {d.hostname} | IP: {d.ip_address} | {dur}dır offline"
+            f" | SSH port: {d.ssh_port} | SNMP: {'✓' if d.snmp_enabled else '✗'}"
+            f" | Agent: {d.agent_id or 'doğrudan'}"
+        )
+    offline_text = "\n".join(offline_lines) or "  Tüm cihazlar online"
+
+    # ── Recent device_offline events with messages ────────────────────────────
+    offline_ev_rows = await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.event_type.in_(["device_offline", "device_flapping", "correlation_incident"]),
+               NetworkEvent.created_at >= since_24h)
+        .order_by(desc(NetworkEvent.created_at))
+        .limit(8)
+    )
+    offline_ev_lines = []
+    for ev in offline_ev_rows.scalars():
+        ago = int((now - ev.created_at.replace(tzinfo=timezone.utc)).total_seconds() / 60)
+        msg = (ev.message or "")[:120]
+        offline_ev_lines.append(f"  • [{ago}dk] {ev.device_hostname or '?'}: {ev.title} — {msg}")
+    offline_ev_text = "\n".join(offline_ev_lines) or "  - yok"
+
+    return f"""
+=== SORUN GİDERME BAĞLAMI ({now.strftime('%Y-%m-%d %H:%M')} UTC) ===
+
+[SON 6 SAAT OLAY ZAMANÇİZELGESİ]
+{timeline_text}
+
+[OFFLİNE CİHAZ DETAYLARI (SSH/SNMP/Agent bilgisi dahil)]
+{offline_text}
+
+[SON 24S KESİNTİ OLAYLARI]
+{offline_ev_text}
 """.strip()
 
 
@@ -357,11 +532,13 @@ async def chat(
 
     context = await build_network_context(db)
     if mode == "security":
-        sec_context = await build_security_context(db)
-        context = context + "\n\n" + sec_context
+        context = context + "\n\n" + await build_security_context(db)
     elif mode == "automate":
-        auto_context = await build_automate_context(db)
-        context = context + "\n\n" + auto_context
+        context = context + "\n\n" + await build_automate_context(db)
+    elif mode == "analyze":
+        context = context + "\n\n" + await build_analyze_context(db)
+    elif mode == "troubleshoot":
+        context = context + "\n\n" + await build_troubleshoot_context(db)
     system = SYSTEM_PROMPT.format(context=context) + MODE_PROMPTS.get(mode, "")
     provider = settings.active_provider
 
