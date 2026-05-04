@@ -9,7 +9,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
 from app.models.sla_policy import SlaPolicy
@@ -168,6 +168,7 @@ async def uptime_report(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
 ):
     """Return uptime % for every active device (or a subset) over the window."""
     now = datetime.now(timezone.utc)
@@ -176,6 +177,12 @@ async def uptime_report(
     if device_ids:
         ids = [int(x) for x in device_ids.split(",") if x.strip().isdigit()]
         q = q.where(Device.id.in_(ids))
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return []
+        q = q.where(Device.site.in_(eff))
+        site = None
     if site:
         q = q.where(Device.site == site)
 
@@ -354,10 +361,17 @@ async def fleet_summary(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
 ):
     """Aggregated uptime stats for the whole fleet."""
     now = datetime.now(timezone.utc)
     fleet_q = select(Device).where(Device.is_active == True)
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {"total": 0, "above_99": 0, "above_95": 0, "below_95": 0, "avg_uptime_pct": 0}
+        fleet_q = fleet_q.where(Device.site.in_(eff))
+        site = None
     if site:
         fleet_q = fleet_q.where(Device.site == site)
     devices = (await db.execute(fleet_q)).scalars().all()
