@@ -8,7 +8,7 @@ from sqlalchemy import cast, Date, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.device import Device
 from app.models.security_audit import SecurityAudit
 from app.models.task import Task, TaskType, TaskStatus
@@ -27,6 +27,7 @@ class RunAuditRequest(BaseModel):
 async def get_audit_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     site: Optional[str] = Query(None),
 ):
     subq = (
@@ -39,6 +40,13 @@ async def get_audit_stats(
         (SecurityAudit.device_id == subq.c.device_id)
         & (SecurityAudit.created_at == subq.c.latest),
     )
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {"total": 0, "avg_score": 0, "grades": {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}, "critical_count": 0}
+        site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
+        q = q.where(SecurityAudit.device_id.in_(site_ids))
+        site = None
     if site:
         site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
         q = q.where(SecurityAudit.device_id.in_(site_ids))
@@ -78,6 +86,7 @@ async def list_audits(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
 ):
     subq = (
         select(SecurityAudit.device_id, func.max(SecurityAudit.created_at).label("latest"))
@@ -89,6 +98,13 @@ async def list_audits(
         (SecurityAudit.device_id == subq.c.device_id)
         & (SecurityAudit.created_at == subq.c.latest),
     )
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {"total": 0, "items": []}
+        site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
+        q = q.where(SecurityAudit.device_id.in_(site_ids))
+        site = None
     if grade:
         q = q.where(SecurityAudit.grade == grade)
     if search:
