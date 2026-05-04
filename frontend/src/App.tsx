@@ -52,6 +52,7 @@ import ServicesPage from '@/pages/Services'
 import TopologyTwinPage from '@/pages/TopologyTwin'
 import AIAssistantPage from '@/pages/AIAssistant'
 import SuperAdminPage from '@/pages/SuperAdmin'
+import InviteAcceptPage from '@/pages/InviteAccept'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -169,6 +170,7 @@ function ThemedApp() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
+            <Route path="/invite" element={<InviteAcceptPage />} />
             <Route
               element={
                 <ProtectedRoute>

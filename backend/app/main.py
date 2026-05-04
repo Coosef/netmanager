@@ -346,6 +346,23 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_user_locations_location_id ON user_locations(location_id)"
         ))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS invite_tokens ("
+            "id SERIAL PRIMARY KEY, "
+            "token VARCHAR(64) NOT NULL UNIQUE, "
+            "email VARCHAR(255) NOT NULL, "
+            "role VARCHAR(32) NOT NULL DEFAULT 'viewer', "
+            "tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, "
+            "created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+            "expires_at TIMESTAMPTZ NOT NULL, "
+            "used_at TIMESTAMPTZ, "
+            "used_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+            "created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_invite_tokens_token ON invite_tokens(token)"
+        ))
 
     await _create_default_tenant()
     await _create_default_admin()

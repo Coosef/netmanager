@@ -8,11 +8,13 @@ import {
   PlusOutlined, EditOutlined, DeleteOutlined,
   TeamOutlined, UserOutlined, SafetyOutlined, ApartmentOutlined,
   KeyOutlined, EnvironmentOutlined, MinusCircleOutlined,
+  MailOutlined, LinkOutlined, StopOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersApi } from '@/api/users'
 import { tenantsApi } from '@/api/tenants'
 import { locationsApi } from '@/api/locations'
+import { invitesApi, type Invite } from '@/api/invites'
 import { useTheme } from '@/contexts/ThemeContext'
 import type { User } from '@/types'
 import { ROLE_OPTIONS, LOC_ROLE_OPTIONS } from '@/types'
@@ -101,6 +103,39 @@ export default function UsersPage() {
   const [editUser, setEditUser] = useState<User | null>(null)
   const [resetUser, setResetUser] = useState<User | null>(null)
   const [resetForm] = Form.useForm()
+
+  // Invite state
+  const [inviteModalOpen, setInviteModalOpen] = useState(false)
+  const [inviteForm] = Form.useForm()
+  const [lastInviteLink, setLastInviteLink] = useState<string | null>(null)
+
+  const { data: invites, refetch: refetchInvites } = useQuery({
+    queryKey: ['invites'],
+    queryFn: invitesApi.list,
+  })
+
+  const createInviteMutation = useMutation({
+    mutationFn: ({ email, role, expires_hours }: { email: string; role: string; expires_hours: number }) =>
+      invitesApi.create(email, role, expires_hours),
+    onSuccess: (data) => {
+      const link = `${window.location.origin}/invite?token=${data.token}`
+      setLastInviteLink(link)
+      navigator.clipboard?.writeText(link).catch(() => {})
+      refetchInvites()
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Davet oluşturulamadı'),
+  })
+
+  const revokeInviteMutation = useMutation({
+    mutationFn: (id: number) => invitesApi.revoke(id),
+    onSuccess: () => refetchInvites(),
+    onError: () => message.error('Davet iptal edilemedi'),
+  })
+
+  const handleCreateInvite = async () => {
+    const vals = await inviteForm.validateFields()
+    createInviteMutation.mutate(vals)
+  }
 
   // Location assignment drawer
   const [locDrawerUser, setLocDrawerUser] = useState<User | null>(null)
@@ -581,6 +616,123 @@ export default function UsersPage() {
           </div>
         )}
       </Drawer>
+
+      {/* ── Invite Management ──────────────────────────────────────────── */}
+      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <MailOutlined style={{ color: '#3b82f6' }} />
+            <span style={{ color: C.text, fontWeight: 600, fontSize: 14 }}>Davet Linkleri</span>
+            <span style={{ color: C.muted, fontSize: 12 }}>— Kullanıcıları e-posta yerine link ile davet edin</span>
+          </div>
+          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { inviteForm.resetFields(); setLastInviteLink(null); setInviteModalOpen(true) }}>
+            Davet Oluştur
+          </Button>
+        </div>
+        <Table<Invite>
+          size="small"
+          dataSource={invites ?? []}
+          rowKey="id"
+          pagination={false}
+          locale={{ emptyText: 'Henüz davet oluşturulmamış' }}
+          columns={[
+            {
+              title: 'E-posta',
+              dataIndex: 'email',
+              render: (email: string) => <span style={{ fontSize: 13 }}>{email}</span>,
+            },
+            {
+              title: 'Rol',
+              dataIndex: 'role',
+              width: 130,
+              render: (role: string) => (
+                <Tag style={{ fontSize: 11, color: ROLE_HEX[role] || '#94a3b8', borderColor: (ROLE_HEX[role] || '#94a3b8') + '40', background: (ROLE_HEX[role] || '#94a3b8') + '15' }}>
+                  {ROLE_LABEL[role] || role.toUpperCase()}
+                </Tag>
+              ),
+            },
+            {
+              title: 'Bitiş',
+              dataIndex: 'expires_at',
+              width: 130,
+              render: (v: string) => <span style={{ fontSize: 12, color: C.muted }}>{dayjs(v).format('DD.MM.YYYY HH:mm')}</span>,
+            },
+            {
+              title: 'Durum',
+              width: 110,
+              render: (_: unknown, rec: Invite) => rec.is_used
+                ? <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 11 }}>Kullanıldı</Tag>
+                : rec.is_expired
+                  ? <Tag color="default" style={{ fontSize: 11 }}>Süresi Doldu</Tag>
+                  : <Tag color="processing" style={{ fontSize: 11 }}>Aktif</Tag>,
+            },
+            {
+              title: '',
+              width: 80,
+              render: (_: unknown, rec: Invite) => (
+                <Space size={4}>
+                  {!rec.is_used && !rec.is_expired && (
+                    <Tooltip title="Linki Kopyala">
+                      <Button
+                        size="small" type="text"
+                        icon={<LinkOutlined />}
+                        onClick={() => {
+                          message.info('Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun')
+                        }}
+                      />
+                    </Tooltip>
+                  )}
+                  <Popconfirm title="Daveti iptal et?" onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
+                    <Tooltip title="İptal Et">
+                      <Button size="small" type="text" danger icon={<StopOutlined />} />
+                    </Tooltip>
+                  </Popconfirm>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </div>
+
+      {/* Create invite modal */}
+      <Modal
+        title={<span style={{ color: C.text }}><MailOutlined style={{ marginRight: 8, color: '#3b82f6' }} />Davet Linki Oluştur</span>}
+        open={inviteModalOpen}
+        onOk={lastInviteLink ? () => setInviteModalOpen(false) : handleCreateInvite}
+        onCancel={() => setInviteModalOpen(false)}
+        okText={lastInviteLink ? 'Tamam' : 'Davet Oluştur'}
+        cancelText="İptal"
+        confirmLoading={createInviteMutation.isPending}
+        width={480}
+        styles={{ body: { background: C.bg }, header: { background: C.bg } }}
+      >
+        {lastInviteLink ? (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ background: isDark ? '#071224' : '#f0f9ff', border: `1px solid ${isDark ? '#1a3458' : '#bae6fd'}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
+              <div style={{ color: '#22c55e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>✓ Davet linki panoya kopyalandı</div>
+              <div style={{ fontSize: 11, color: C.muted, wordBreak: 'break-all', fontFamily: 'monospace' }}>{lastInviteLink}</div>
+            </div>
+            <div style={{ color: C.muted, fontSize: 12 }}>Bu linki davette bulunmak istediğiniz kişiyle paylaşın. Link tek kullanımlıktır.</div>
+          </div>
+        ) : (
+          <Form form={inviteForm} layout="vertical" style={{ marginTop: 16 }} initialValues={{ role: 'viewer', expires_hours: 72 }}>
+            <Form.Item label="E-posta Adresi" name="email" rules={[{ required: true, type: 'email', message: 'Geçerli bir e-posta girin' }]}>
+              <Input placeholder="kullanici@sirket.com" />
+            </Form.Item>
+            <Form.Item label="Rol" name="role" rules={[{ required: true }]}>
+              <Select options={ROLE_OPTIONS.filter((r) => r.value !== 'super_admin')} />
+            </Form.Item>
+            <Form.Item label="Geçerlilik Süresi" name="expires_hours" rules={[{ required: true }]}>
+              <Select options={[
+                { label: '24 saat', value: 24 },
+                { label: '3 gün', value: 72 },
+                { label: '7 gün', value: 168 },
+                { label: '30 gün', value: 720 },
+              ]} />
+            </Form.Item>
+          </Form>
+        )}
+      </Modal>
     </div>
   )
 }
