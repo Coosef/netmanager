@@ -11,7 +11,7 @@ from app.services.audit_service import log_action
 
 router = APIRouter()
 
-VALID_TYPES = {"email", "slack", "telegram"}
+VALID_TYPES = {"email", "slack", "telegram", "teams", "webhook"}
 VALID_NOTIFY_ON = {
     "device_offline", "critical_event", "warning_event",
     "approval_request", "playbook_failure", "backup_failure", "any_event",
