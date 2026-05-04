@@ -1,14 +1,14 @@
 import { useState } from 'react'
 import {
   Table, Tag, Input, Select, Space, Typography, Modal, Descriptions,
-  Badge, Tooltip, Button, DatePicker, Collapse,
+  Badge, Tooltip, Button, DatePicker, Collapse, Statistic, Row, Col,
 } from 'antd'
 import {
   InfoCircleOutlined, ClockCircleOutlined, GlobalOutlined, CodeOutlined,
-  FileSearchOutlined,
+  FileSearchOutlined, DownloadOutlined, UserOutlined, WarningOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
 import { tasksApi } from '@/api/tasks'
@@ -40,6 +40,23 @@ const ACTION_HEX: Record<string, string> = {
   password_changed: '#eab308',
 }
 
+const ROLE_COLOR: Record<string, string> = {
+  super_admin: '#ef4444', admin: '#f97316', operator: '#3b82f6',
+  viewer: '#64748b', auditor: '#8b5cf6',
+}
+
+function parseUA(ua?: string): string {
+  if (!ua) return '—'
+  if (ua.includes('Python')) return 'Python'
+  if (ua.includes('curl')) return 'cURL'
+  if (ua.includes('Postman')) return 'Postman'
+  if (ua.includes('Edg/')) return 'Edge'
+  if (ua.includes('Chrome')) return 'Chrome'
+  if (ua.includes('Firefox')) return 'Firefox'
+  if (ua.includes('Safari')) return 'Safari'
+  return ua.substring(0, 24)
+}
+
 function mkC(isDark: boolean) {
   return {
     bg:     isDark ? '#1e293b' : '#ffffff',
@@ -58,6 +75,7 @@ const RESOURCE_TYPES = [
   { label: 'Görev', value: 'task' },
   { label: 'Playbook', value: 'playbook' },
   { label: 'Approval', value: 'approval' },
+  { label: 'Agent', value: 'agent' },
 ]
 
 function StateDiff({ before, after, isDark }: {
@@ -114,9 +132,7 @@ function DetailModal({ record, onClose, isDark }: { record: AuditLog; onClose: (
             width: 8, height: 8, borderRadius: '50%',
             background: accentHex, boxShadow: `0 0 6px ${accentHex}`,
           }} />
-          <Tag
-            style={{ color: accentHex, borderColor: accentHex + '60', background: accentHex + '18', fontSize: 12 }}
-          >
+          <Tag style={{ color: accentHex, borderColor: accentHex + '60', background: accentHex + '18', fontSize: 12 }}>
             {record.action}
           </Tag>
           <Text style={{ fontSize: 13, color: C.text }}>{record.resource_name || record.resource_id || ''}</Text>
@@ -133,11 +149,29 @@ function DetailModal({ record, onClose, isDark }: { record: AuditLog; onClose: (
       <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}
         styles={{ label: { background: C.bg2, color: C.muted }, content: { background: C.bg, color: C.text } }}
       >
-        <Descriptions.Item label="Kullanıcı">{record.username}</Descriptions.Item>
+        <Descriptions.Item label="Kullanıcı">
+          <Space size={4}>
+            {record.username}
+            {record.user_role && (
+              <Tag style={{
+                fontSize: 10, lineHeight: '16px', padding: '0 5px',
+                color: ROLE_COLOR[record.user_role] || '#64748b',
+                borderColor: (ROLE_COLOR[record.user_role] || '#64748b') + '50',
+                background: (ROLE_COLOR[record.user_role] || '#64748b') + '15',
+              }}>
+                {record.user_role}
+              </Tag>
+            )}
+          </Space>
+        </Descriptions.Item>
         <Descriptions.Item label="Tarih">
           {dayjs(record.created_at).format('DD.MM.YYYY HH:mm:ss')}
         </Descriptions.Item>
-        <Descriptions.Item label="IP">{record.client_ip || '—'}</Descriptions.Item>
+        <Descriptions.Item label="IP (gerçek)">
+          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>
+            {record.client_ip || '—'}
+          </Text>
+        </Descriptions.Item>
         <Descriptions.Item label="Süre">
           {record.duration_ms != null ? (
             <Text style={{ color: record.duration_ms > 5000 ? '#ef4444' : C.text }}>
@@ -153,11 +187,9 @@ function DetailModal({ record, onClose, isDark }: { record: AuditLog; onClose: (
             {record.request_id || '—'}
           </Text>
         </Descriptions.Item>
-        {record.user_agent && (
-          <Descriptions.Item label="User Agent" span={2}>
-            <Text style={{ fontSize: 11, color: C.dim }}>{record.user_agent}</Text>
-          </Descriptions.Item>
-        )}
+        <Descriptions.Item label="Tarayıcı / İstemci" span={2}>
+          <Text style={{ fontSize: 11, color: C.dim }}>{record.user_agent || '—'}</Text>
+        </Descriptions.Item>
       </Descriptions>
 
       {hasStateChange && (
@@ -194,25 +226,55 @@ function DetailModal({ record, onClose, isDark }: { record: AuditLog; onClose: (
   )
 }
 
+function exportCSV(items: AuditLog[]) {
+  const headers = ['ID', 'Zaman', 'Kullanıcı', 'Rol', 'Aksiyon', 'Kaynak Tipi', 'Kaynak', 'IP', 'Süre(ms)', 'Durum', 'UA']
+  const rows = items.map(l => [
+    l.id,
+    dayjs(l.created_at).format('DD.MM.YYYY HH:mm:ss'),
+    l.username,
+    l.user_role || '',
+    l.action,
+    l.resource_type || '',
+    l.resource_name || l.resource_id || '',
+    l.client_ip || '',
+    l.duration_ms?.toFixed(0) || '',
+    l.status,
+    parseUA(l.user_agent),
+  ])
+  const csv = [headers, ...rows]
+    .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(','))
+    .join('\n')
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `audit-log-${dayjs().format('YYYYMMDD-HHmm')}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function AuditLogPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  const [ipFilter, setIpFilter] = useState('')
   const [resourceType, setResourceType] = useState<string>()
   const [statusFilter, setStatusFilter] = useState<string>()
   const [dateRange, setDateRange] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null)
   const [selected, setSelected] = useState<AuditLog | null>(null)
   const pageSize = 100
-  const { t } = useTranslation()
   const { isDark } = useTheme()
   const C = mkC(isDark)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['audit-log', page, search, resourceType, statusFilter, dateRange],
+    queryKey: ['audit-log', page, search, actionFilter, ipFilter, resourceType, statusFilter, dateRange],
     queryFn: () =>
       tasksApi.getAuditLog({
         skip: (page - 1) * pageSize,
         limit: pageSize,
         username: search || undefined,
+        action: actionFilter || undefined,
+        client_ip: ipFilter || undefined,
         resource_type: resourceType,
         status: statusFilter,
         date_from: dateRange?.[0]?.toISOString(),
@@ -224,7 +286,7 @@ export default function AuditLogPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <style>{AUDIT_CSS}</style>
 
-      {/* Header */}
+      {/* Header + Stats */}
       <div style={{
         background: isDark
           ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
@@ -233,40 +295,82 @@ export default function AuditLogPage() {
         borderLeft: `4px solid #3b82f6`,
         borderRadius: 12,
         padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        flexWrap: 'wrap',
-        gap: 12,
         animation: isDark ? 'auditHeaderGlow 4s ease-in-out infinite' : undefined,
       }}>
-        <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               width: 36, height: 36, borderRadius: 8,
-              background: '#3b82f620',
-              border: '1px solid #3b82f630',
+              background: '#3b82f620', border: '1px solid #3b82f630',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <FileSearchOutlined style={{ color: '#3b82f6', fontSize: 18 }} />
             </div>
             <div>
               <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>
-                {t('audit.title')}
+                Denetim Kaydı
                 <Text style={{ color: C.dim, fontSize: 13, fontWeight: 400, marginLeft: 8 }}>({data?.total || 0})</Text>
               </div>
               <div style={{ color: C.muted, fontSize: 12 }}>Tüm kullanıcı aksiyonlarının denetim kaydı</div>
             </div>
           </div>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={() => data?.items && exportCSV(data.items)}
+            disabled={!data?.items?.length}
+          >
+            CSV İndir
+          </Button>
         </div>
 
+        {/* Stats row */}
+        <Row gutter={16} style={{ marginBottom: 16 }}>
+          {[
+            { icon: <FileSearchOutlined />, title: 'Toplam Kayıt', value: data?.total ?? 0, color: '#3b82f6' },
+            { icon: <WarningOutlined />, title: 'Başarısız', value: data?.failure_count ?? 0, color: '#ef4444' },
+            { icon: <TeamOutlined />, title: 'Benzersiz Kullanıcı', value: data?.unique_users ?? 0, color: '#8b5cf6' },
+          ].map(({ icon, title, value, color }) => (
+            <Col key={title} xs={8} sm={8}>
+              <div style={{
+                background: `${color}0d`, border: `1px solid ${color}25`,
+                borderRadius: 8, padding: '10px 14px',
+                display: 'flex', alignItems: 'center', gap: 10,
+              }}>
+                <span style={{ color, fontSize: 18 }}>{icon}</span>
+                <Statistic
+                  title={<span style={{ fontSize: 11, color: C.muted }}>{title}</span>}
+                  value={value}
+                  valueStyle={{ fontSize: 20, color, lineHeight: 1 }}
+                />
+              </div>
+            </Col>
+          ))}
+        </Row>
+
+        {/* Filters */}
         <Space wrap>
           <Input.Search
-            placeholder={t('audit.search_placeholder')}
-            style={{ width: 180 }}
+            placeholder="Kullanıcı ara..."
+            style={{ width: 150 }}
             allowClear
             onSearch={setSearch}
             onChange={(e) => !e.target.value && setSearch('')}
+            prefix={<UserOutlined style={{ color: C.dim }} />}
+          />
+          <Input.Search
+            placeholder="Aksiyon ara..."
+            style={{ width: 150 }}
+            allowClear
+            onSearch={setActionFilter}
+            onChange={(e) => !e.target.value && setActionFilter('')}
+          />
+          <Input.Search
+            placeholder="IP ara..."
+            style={{ width: 140 }}
+            allowClear
+            onSearch={setIpFilter}
+            onChange={(e) => !e.target.value && setIpFilter('')}
+            prefix={<GlobalOutlined style={{ color: C.dim }} />}
           />
           <Select
             placeholder="Kaynak tipi"
@@ -288,7 +392,7 @@ export default function AuditLogPage() {
           <DatePicker.RangePicker
             showTime={{ format: 'HH:mm' }}
             format="DD.MM.YY HH:mm"
-            style={{ width: 330 }}
+            style={{ width: 310 }}
             onChange={(range) => {
               setDateRange(range as [dayjs.Dayjs | null, dayjs.Dayjs | null] | null)
               setPage(1)
@@ -333,8 +437,23 @@ export default function AuditLogPage() {
             {
               title: 'Kullanıcı',
               dataIndex: 'username',
-              width: 110,
-              render: (v) => <Text strong style={{ fontSize: 12, color: C.text }}>{v}</Text>,
+              width: 130,
+              render: (v, r) => (
+                <Space size={4} direction="vertical" style={{ gap: 2 }}>
+                  <Text strong style={{ fontSize: 12, color: C.text }}>{v}</Text>
+                  {r.user_role && (
+                    <Tag style={{
+                      fontSize: 10, lineHeight: '14px', padding: '0 4px',
+                      color: ROLE_COLOR[r.user_role] || '#64748b',
+                      borderColor: (ROLE_COLOR[r.user_role] || '#64748b') + '50',
+                      background: (ROLE_COLOR[r.user_role] || '#64748b') + '15',
+                      margin: 0,
+                    }}>
+                      {r.user_role}
+                    </Tag>
+                  )}
+                </Space>
+              ),
             },
             {
               title: 'Aksiyon',
@@ -343,14 +462,7 @@ export default function AuditLogPage() {
                 const hex = ACTION_HEX[v] || '#64748b'
                 return (
                   <Space size={4}>
-                    <Tag
-                      style={{
-                        fontSize: 11,
-                        color: hex,
-                        borderColor: hex + '50',
-                        background: hex + '18',
-                      }}
-                    >
+                    <Tag style={{ fontSize: 11, color: hex, borderColor: hex + '50', background: hex + '18' }}>
                       {v}
                     </Tag>
                     {(r.before_state || r.after_state) && (
@@ -369,15 +481,25 @@ export default function AuditLogPage() {
                 : <Text style={{ color: C.dim }}>—</Text>,
             },
             {
-              title: 'IP',
+              title: 'IP (gerçek)',
               dataIndex: 'client_ip',
-              width: 120,
+              width: 130,
               render: (v) => v
                 ? <Space size={4}>
                     <GlobalOutlined style={{ fontSize: 11, color: C.dim }} />
-                    <Text style={{ fontSize: 12, color: C.muted, fontFamily: 'monospace' }}>{v}</Text>
+                    <Text copyable={{ text: v }} style={{ fontSize: 12, color: C.muted, fontFamily: 'monospace' }}>{v}</Text>
                   </Space>
                 : <Text style={{ color: C.dim }}>—</Text>,
+            },
+            {
+              title: 'İstemci',
+              dataIndex: 'user_agent',
+              width: 80,
+              render: (v) => (
+                <Tooltip title={v || '—'}>
+                  <Text style={{ fontSize: 11, color: C.muted }}>{parseUA(v)}</Text>
+                </Tooltip>
+              ),
             },
             {
               title: <Tooltip title="İşlem süresi"><ClockCircleOutlined /></Tooltip>,

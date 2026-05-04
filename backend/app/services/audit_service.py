@@ -28,7 +28,15 @@ async def log_action(
     computed_duration_ms = duration_ms
 
     if request:
-        client_ip = request.client.host if request.client else None
+        # Prefer proxy-forwarded headers so the real client IP is recorded
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        real_ip_header = request.headers.get("X-Real-IP")
+        if forwarded_for:
+            client_ip = forwarded_for.split(",")[0].strip()
+        elif real_ip_header:
+            client_ip = real_ip_header.strip()
+        else:
+            client_ip = request.client.host if request.client else None
         user_agent = request.headers.get("user-agent")
         request_id = getattr(request.state, "request_id", None)
         if computed_duration_ms is None and hasattr(request.state, "started_at"):

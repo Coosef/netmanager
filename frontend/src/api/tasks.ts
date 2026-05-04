@@ -21,9 +21,12 @@ export const tasksApi = {
     resource_type?: string
     username?: string
     status?: string
+    client_ip?: string
     date_from?: string
     date_to?: string
     request_id?: string
   }) =>
-    client.get<PaginatedResponse<AuditLog>>('/tasks/audit-log', { params }).then((r) => r.data),
+    client.get<PaginatedResponse<AuditLog> & { failure_count: number; unique_users: number }>(
+      '/tasks/audit-log', { params }
+    ).then((r) => r.data),
 }

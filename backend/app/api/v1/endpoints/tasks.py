@@ -120,11 +120,13 @@ async def get_audit_log(
     resource_type: str = Query(None),
     username: str = Query(None),
     status: str = Query(None),
+    client_ip: str = Query(None),
     date_from: str = Query(None),
     date_to: str = Query(None),
     request_id: str = Query(None),
 ):
     from datetime import datetime, timezone
+    from app.models.user import User
     if not current_user.has_permission("audit:view"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
@@ -137,6 +139,8 @@ async def get_audit_log(
         query = query.where(AuditLog.username.ilike(f"%{username}%"))
     if status:
         query = query.where(AuditLog.status == status)
+    if client_ip:
+        query = query.where(AuditLog.client_ip.ilike(f"%{client_ip}%"))
     if request_id:
         query = query.where(AuditLog.request_id == request_id)
     if date_from:
@@ -150,16 +154,34 @@ async def get_audit_log(
         except ValueError:
             pass
 
-    total = await db.execute(select(func.count()).select_from(query.subquery()))
-    result = await db.execute(
+    total_scalar = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar()
+    logs = (await db.execute(
         query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit)
-    )
-    logs = result.scalars().all()
+    )).scalars().all()
+
+    # Fetch user roles for current page in one query
+    user_ids = list({l.user_id for l in logs if l.user_id})
+    role_map: dict[int, str] = {}
+    if user_ids:
+        rows = (await db.execute(select(User.id, User.role).where(User.id.in_(user_ids)))).fetchall()
+        role_map = {row[0]: row[1] for row in rows}
+
+    # Summary stats for header
+    failure_count = (await db.execute(
+        select(func.count()).select_from(query.where(AuditLog.status == "failure").subquery())
+    )).scalar()
+    unique_users = (await db.execute(
+        select(func.count(func.distinct(AuditLog.username))).select_from(query.subquery())
+    )).scalar()
+
     return {
-        "total": total.scalar(),
+        "total": total_scalar,
+        "failure_count": failure_count,
+        "unique_users": unique_users,
         "items": [
             {
                 "id": l.id, "user_id": l.user_id, "username": l.username,
+                "user_role": role_map.get(l.user_id) if l.user_id else None,
                 "action": l.action, "resource_type": l.resource_type,
                 "resource_id": l.resource_id, "resource_name": l.resource_name,
                 "details": l.details, "client_ip": l.client_ip,

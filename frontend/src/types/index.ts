@@ -93,6 +93,7 @@ export interface AuditLog {
   id: number
   user_id?: number
   username: string
+  user_role?: string
   action: string
   resource_type?: string
   resource_id?: string
