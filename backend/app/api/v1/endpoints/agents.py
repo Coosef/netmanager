@@ -6,11 +6,13 @@ import textwrap
 from datetime import datetime, timezone
 from typing import Optional
 
+import redis as _redis_lib
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.core.security import hash_password, verify_password
@@ -21,7 +23,10 @@ from app.services.agent_manager import agent_manager
 
 router = APIRouter()
 
+_redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
 _MAX_FAILED_AUTH = 10   # lock agent WS after this many consecutive failures
+_AGENT_EVENT_DEDUP_TTL = 600   # 10 min — suppress duplicate agent online/offline events
+_AGENT_OFFLINE_FLAG_TTL = 600  # 10 min — poll skips devices while this flag is set
 
 
 def _gen_id(length: int = 12) -> str:
@@ -57,15 +62,37 @@ def _agent_to_dict(agent: Agent, online_ids: set) -> dict:
 
 
 async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
-    """Create a NetworkEvent for agent online/offline transitions."""
+    """Create a NetworkEvent for agent online/offline transitions.
+    Deduped to once per 10 min per agent to prevent event storms during reconnect loops."""
     from app.models.network_event import NetworkEvent
+    from app.models.device import Device
+
+    # Dedup: skip if same event fired within the last 10 minutes
+    dedup_key = f"event:dedup:{agent.id}:{event_type}"
+    if _redis.get(dedup_key):
+        return
+    _redis.setex(dedup_key, _AGENT_EVENT_DEDUP_TTL, "1")
+
+    if event_type == "agent_offline":
+        # Mark agent as recently offline so poll_device_status skips its devices
+        _redis.setex(f"agent:{agent.id}:recently_offline", _AGENT_OFFLINE_FLAG_TTL, "1")
+    elif event_type == "agent_online":
+        # Clear offline flag and reset flap counters for all devices of this agent
+        _redis.delete(f"agent:{agent.id}:recently_offline")
+        # Reset device flap counters (devices were offline due to agent, not themselves)
+        device_rows = await db.execute(
+            select(Device.id).where(Device.agent_id == agent.id, Device.is_active == True)
+        )
+        for (dev_id,) in device_rows.fetchall():
+            _redis.delete(f"flap:{dev_id}:count")
+
     severity = "info" if event_type == "agent_online" else "warning"
     title = f"Agent {'çevrimiçi' if event_type == 'agent_online' else 'çevrimdışı'}: {agent.name}"
     ev = NetworkEvent(
         event_type=event_type,
         severity=severity,
         title=title,
-        message=f"Agent {agent.id} ({agent.machine_hostname or agent.last_ip or '?'}) {title.lower()}",
+        message=f"Agent {agent.id} ({agent.machine_hostname or agent.last_ip or '?'})",
         details={"agent_id": agent.id, "platform": agent.platform, "version": agent.version},
     )
     db.add(ev)

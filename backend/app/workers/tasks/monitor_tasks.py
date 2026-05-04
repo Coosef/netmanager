@@ -284,6 +284,10 @@ def poll_device_status():
         changes: list[tuple] = []
         for device in devices:
             try:
+                # Skip devices whose agent is recently offline — avoids false flap increments
+                if device.agent_id and _redis.get(f"agent:{device.agent_id}:recently_offline"):
+                    continue
+
                 prev_status = device.status
                 try:
                     result = _run_async(asyncio.wait_for(ssh.test_connection(device), timeout=30.0))
@@ -357,7 +361,7 @@ def poll_device_status():
                         f"AGENT KESİNTİSİ: {agent_id} — {cnt} cihaz etkilendi",
                         f"Aynı anda offline olan cihazlar: {hostnames}{'...' if cnt > 6 else ''}",
                         dedup_key=f"agent_outage:{agent_id}",
-                        dedup_ttl=OFFLINE_DEDUP_TTL,
+                        dedup_ttl=CORR_DEDUP_TTL,  # 1 saat — agent döngüleri çok event üretmemeli
                     )
             else:
                 # Small group — individual events (with flap suppression)
