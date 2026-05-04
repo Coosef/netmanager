@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   App, Alert, AutoComplete, Button, Descriptions, Form, Input, Modal, Select,
   Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography,
@@ -1639,6 +1639,32 @@ export default function AgentsPage() {
     },
   })
 
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'online' | 'offline'>('all')
+
+  const { data: devicesData } = useQuery({
+    queryKey: ['devices-agent-count'],
+    queryFn: () => devicesApi.list({ limit: 2000 }),
+    staleTime: 60_000,
+  })
+  const deviceCountByAgent = useMemo(() => {
+    const map: Record<string, number> = {}
+    ;(devicesData?.items || []).forEach((d: any) => {
+      if (d.agent_id) map[String(d.agent_id)] = (map[String(d.agent_id)] || 0) + 1
+    })
+    return map
+  }, [devicesData])
+
+  const filteredAgents = useMemo(() => agents.filter(a => {
+    const q = search.toLowerCase()
+    const matchSearch = !q ||
+      a.name.toLowerCase().includes(q) ||
+      (a.machine_hostname || '').toLowerCase().includes(q) ||
+      (a.last_ip || '').includes(q)
+    const matchStatus = statusFilter === 'all' || a.status === statusFilter
+    return matchSearch && matchStatus
+  }), [agents, search, statusFilter])
+
   const online = agents.filter(a => a.status === 'online').length
   const offline = agents.filter(a => a.status === 'offline').length
   const locked = agents.filter(a => a.failed_auth_count >= 10).length
@@ -1668,16 +1694,22 @@ export default function AgentsPage() {
     {
       title: t('agents.col_name'),
       dataIndex: 'name',
-      render: (v: string, r: Agent) => (
-        <Button type="link" style={{ padding: 0, fontWeight: 600 }} onClick={() => setDetailAgent(r)}>{v}</Button>
-      ),
-    },
-    {
-      title: t('agents.col_id'),
-      dataIndex: 'id',
-      render: (v: string) => (
-        <code style={{ fontSize: 11, background: isDark ? '#0f172a' : '#f5f5f5', padding: '1px 6px', borderRadius: 4 }}>{v}</code>
-      ),
+      render: (v: string, r: Agent) => {
+        const devCount = deviceCountByAgent[r.id]
+        return (
+          <div>
+            <Button type="link" style={{ padding: 0, fontWeight: 600, height: 'auto' }} onClick={() => setDetailAgent(r)}>{v}</Button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 1 }}>
+              <code style={{ fontSize: 10, color: C.dim }}>{r.id.slice(0, 8)}…</code>
+              {devCount ? (
+                <Tag style={{ fontSize: 10, margin: 0, color: '#3b82f6', borderColor: '#3b82f650', background: '#3b82f615' }}>
+                  {devCount} cihaz
+                </Tag>
+              ) : null}
+            </div>
+          </div>
+        )
+      },
     },
     {
       title: 'Güvenlik',
@@ -1811,13 +1843,55 @@ export default function AgentsPage() {
       )}
 
       <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+        {/* Search & filter bar */}
+        <div style={{
+          padding: '10px 14px', borderBottom: `1px solid ${C.border}`,
+          background: isDark ? '#0f172a' : '#f8fafc',
+          display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+        }}>
+          <Input
+            prefix={<SearchOutlined style={{ color: C.dim, fontSize: 12 }} />}
+            placeholder="Agent adı, hostname veya IP ara…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            allowClear
+            size="small"
+            style={{ width: 240, borderRadius: 7, background: isDark ? '#1e293b' : '#fff', borderColor: C.border, color: C.text }}
+          />
+          <div style={{ display: 'flex', gap: 4 }}>
+            {(['all', 'online', 'offline'] as const).map(s => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                style={{
+                  padding: '3px 12px', borderRadius: 6, fontSize: 12, cursor: 'pointer',
+                  border: `1px solid ${statusFilter === s ? (s === 'online' ? '#22c55e' : s === 'offline' ? '#ef4444' : '#3b82f6') : C.border}`,
+                  background: statusFilter === s
+                    ? (s === 'online' ? '#22c55e18' : s === 'offline' ? '#ef444418' : '#3b82f618')
+                    : 'transparent',
+                  color: statusFilter === s
+                    ? (s === 'online' ? '#22c55e' : s === 'offline' ? '#ef4444' : '#3b82f6')
+                    : C.muted,
+                  fontWeight: statusFilter === s ? 600 : 400,
+                  transition: 'all 0.12s',
+                }}
+              >
+                {s === 'all' ? 'Tümü' : s === 'online' ? 'Online' : 'Offline'}
+              </button>
+            ))}
+          </div>
+          <span style={{ marginLeft: 'auto', fontSize: 11, color: C.dim }}>
+            {filteredAgents.length} / {agents.length} agent
+          </span>
+        </div>
+
         <Table<Agent>
-          dataSource={agents}
+          dataSource={filteredAgents}
           rowKey="id"
           loading={isLoading}
           size="small"
           columns={columns}
-          pagination={false}
+          pagination={filteredAgents.length > 10 ? { pageSize: 10, size: 'small' } : false}
           onRow={() => ({ style: { animation: 'agentRowIn 0.2s ease-out' } })}
         />
       </div>

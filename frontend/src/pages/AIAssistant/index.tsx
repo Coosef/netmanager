@@ -6,7 +6,7 @@ import {
   ThunderboltOutlined, CopyOutlined, CheckOutlined,
   AlertOutlined, DashboardOutlined, ApartmentOutlined,
   SafetyOutlined, BarChartOutlined, PlayCircleOutlined,
-  BranchesOutlined, AimOutlined, ReloadOutlined,
+  BranchesOutlined, AimOutlined, ReloadOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
@@ -299,6 +299,41 @@ export default function AIAssistantPage() {
 
   const clearChat = () => { setMessages([]); localStorage.removeItem(STORAGE_KEY) }
 
+  const exportChat = () => {
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' })
+    const timeStr = now.toLocaleTimeString('tr-TR')
+
+    let md = `# NetManager AI Analiz Raporu\n\n`
+    md += `| | |\n|---|---|\n`
+    md += `| **Tarih** | ${dateStr} ${timeStr} |\n`
+    md += `| **Mod** | ${currentMode.icon} ${currentMode.label} |\n`
+    md += `| **Ağ Durumu** | ${online} online · ${offline} offline · Sağlık ${health}/100 |\n`
+    if (providerLabel) md += `| **AI Sağlayıcı** | ${providerLabel} |\n`
+    md += `\n---\n\n`
+
+    messages.forEach(msg => {
+      if (msg.role === 'user') {
+        md += `### 💬 Kullanıcı\n\n${msg.content}\n\n`
+      } else if (msg.role === 'assistant' && !msg.error) {
+        const mLabel = MODES.find(m => m.key === msg.mode)?.label ?? ''
+        const prov = msg.provider ? ` · ${PROVIDER_LABELS[msg.provider] ?? msg.provider}` : ''
+        md += `### 🤖 AI Yanıtı${mLabel ? ` (${mLabel})` : ''}${prov}\n\n${msg.content}\n\n`
+      }
+      md += `---\n\n`
+    })
+
+    md += `*NetManager tarafından oluşturuldu — ${now.toISOString()}*\n`
+
+    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `netmanager-ai-raporu-${now.toISOString().slice(0, 10)}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   const isConfigured = settings?.active_provider && (
     settings.active_provider === 'ollama' ||
     (settings.active_provider === 'claude'  && settings.claude_configured) ||
@@ -575,10 +610,16 @@ export default function AIAssistantPage() {
               />
             </Tooltip>
             {messages.length > 0 && (
-              <Tooltip title="Geçmişi temizle">
-                <Button type="text" size="small" icon={<ClearOutlined style={{ fontSize: 11 }} />}
-                  onClick={clearChat} style={{ color: C.muted, padding: '0 4px' }} />
-              </Tooltip>
+              <>
+                <Tooltip title="Rapor olarak indir (.md)">
+                  <Button type="text" size="small" icon={<DownloadOutlined style={{ fontSize: 11 }} />}
+                    onClick={exportChat} style={{ color: C.muted, padding: '0 4px' }} />
+                </Tooltip>
+                <Tooltip title="Geçmişi temizle">
+                  <Button type="text" size="small" icon={<ClearOutlined style={{ fontSize: 11 }} />}
+                    onClick={clearChat} style={{ color: C.muted, padding: '0 4px' }} />
+                </Tooltip>
+              </>
             )}
             <Tooltip title="AI Ayarları">
               <Button type="text" size="small" icon={<ThunderboltOutlined style={{ fontSize: 11 }} />}

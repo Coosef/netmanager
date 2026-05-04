@@ -1,12 +1,13 @@
 import { useState } from 'react'
-import { Input } from 'antd'
+import { Input, Collapse } from 'antd'
 import {
   DashboardOutlined, LaptopOutlined, ApartmentOutlined,
   AlertOutlined, CloudOutlined, ClusterOutlined, BranchesOutlined,
   FileDoneOutlined, LineChartOutlined, SafetyOutlined, ThunderboltOutlined,
   CalendarOutlined, RiseOutlined, RobotOutlined, HddOutlined, BuildOutlined,
   AimOutlined, BarChartOutlined, RadarChartOutlined, QuestionCircleOutlined,
-  SearchOutlined, CheckCircleOutlined, UserOutlined,
+  SearchOutlined, CheckCircleOutlined, UserOutlined, QuestionOutlined,
+  TagOutlined,
 } from '@ant-design/icons'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
@@ -26,10 +27,21 @@ function mkC(isDark: boolean) {
 const STEP_COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b']
 
 const ROLE_META = [
-  { color: '#ef4444', titleKey: 'role_super_admin_title', descKey: 'role_super_admin_desc' },
-  { color: '#f97316', titleKey: 'role_admin_title',       descKey: 'role_admin_desc' },
-  { color: '#3b82f6', titleKey: 'role_operator_title',    descKey: 'role_operator_desc' },
-  { color: '#22c55e', titleKey: 'role_viewer_title',      descKey: 'role_viewer_desc' },
+  { color: '#ef4444', titleKey: 'role_super_admin_title',        descKey: 'role_super_admin_desc' },
+  { color: '#f97316', titleKey: 'role_admin_title',              descKey: 'role_admin_desc' },
+  { color: '#8b5cf6', titleKey: 'role_org_viewer_title',         descKey: 'role_org_viewer_desc' },
+  { color: '#3b82f6', titleKey: 'role_location_manager_title',   descKey: 'role_location_manager_desc' },
+  { color: '#06b6d4', titleKey: 'role_location_operator_title',  descKey: 'role_location_operator_desc' },
+  { color: '#22c55e', titleKey: 'role_location_viewer_title',    descKey: 'role_location_viewer_desc' },
+]
+
+const FAQ_ITEMS = [
+  { qKey: 'faq_ssh_q',      aKey: 'faq_ssh_a' },
+  { qKey: 'faq_agent_q',    aKey: 'faq_agent_a' },
+  { qKey: 'faq_backup_q',   aKey: 'faq_backup_a' },
+  { qKey: 'faq_snmp_q',     aKey: 'faq_snmp_a' },
+  { qKey: 'faq_invite_q',   aKey: 'faq_invite_a' },
+  { qKey: 'faq_location_q', aKey: 'faq_location_a' },
 ]
 
 const FEATURES = [
@@ -47,6 +59,8 @@ const FEATURES = [
   { icon: <CalendarOutlined />,   color: '#ec4899', titleKey: 'feat_change_title',     descKey: 'feat_change_desc' },
   { icon: <RiseOutlined />,       color: '#22c55e', titleKey: 'feat_sla_title',        descKey: 'feat_sla_desc' },
   { icon: <RobotOutlined />,      color: '#3b82f6', titleKey: 'feat_agents_title',     descKey: 'feat_agents_desc' },
+  { icon: <RobotOutlined />,      color: '#6366f1', titleKey: 'feat_ai_title',         descKey: 'feat_ai_desc' },
+  { icon: <TagOutlined />,        color: '#f59e0b', titleKey: 'feat_lifecycle_title',  descKey: 'feat_lifecycle_desc' },
   { icon: <HddOutlined />,        color: '#64748b', titleKey: 'feat_racks_title',      descKey: 'feat_racks_desc' },
   { icon: <BuildOutlined />,      color: '#84cc16', titleKey: 'feat_floor_title',      descKey: 'feat_floor_desc' },
   { icon: <AimOutlined />,        color: '#06b6d4', titleKey: 'feat_diagnostics_title',descKey: 'feat_diagnostics_desc' },
@@ -206,6 +220,36 @@ export default function HelpPage() {
               </div>
             ))}
           </div>
+        </section>
+      )}
+
+      {/* FAQ — only show when not searching */}
+      {!q && (
+        <section>
+          <SectionLabel label={t('help.section_faq')} isDark={isDark} C={C} />
+          <Collapse
+            style={{ marginTop: 10, background: 'transparent', border: `1px solid ${C.border}`, borderRadius: 10 }}
+            items={FAQ_ITEMS.map((item, i) => ({
+              key: i,
+              label: (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <QuestionOutlined style={{ color: '#3b82f6', fontSize: 13 }} />
+                  <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>
+                    {t(`help.${item.qKey}`)}
+                  </span>
+                </div>
+              ),
+              children: (
+                <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.7, paddingLeft: 22 }}>
+                  {t(`help.${item.aKey}`)}
+                </div>
+              ),
+              style: {
+                background: isDark ? '#1e293b' : '#ffffff',
+                borderColor: C.border,
+              },
+            }))}
+          />
         </section>
       )}
     </div>
