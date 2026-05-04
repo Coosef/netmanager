@@ -127,6 +127,30 @@ function MarkdownContent({ content, isDark, C }: { content: string; isDark: bool
   )
 }
 
+const STORAGE_KEY = 'ai_chat_history'
+const MAX_STORED = 100
+
+function loadMessages(): DisplayMessage[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as DisplayMessage[]
+    // Restore sequential IDs so nextId() doesn't collide
+    let max = 0
+    parsed.forEach(m => { if (m.id > max) max = m.id })
+    _msgId = max
+    return parsed
+  } catch {
+    return []
+  }
+}
+
+function saveMessages(msgs: DisplayMessage[]) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-MAX_STORED)))
+  } catch { /* storage full — ignore */ }
+}
+
 let _msgId = 0
 function nextId() { return ++_msgId }
 
@@ -135,9 +159,14 @@ export default function AIAssistantPage() {
   const C = mkC(isDark)
   const navigate = useNavigate()
   const [input, setInput] = useState('')
-  const [messages, setMessages] = useState<DisplayMessage[]>([])
+  const [messages, setMessages] = useState<DisplayMessage[]>(() => loadMessages())
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  // Persist messages to localStorage on every change
+  useEffect(() => {
+    saveMessages(messages)
+  }, [messages])
 
   const { data: settings, isLoading: settingsLoading } = useQuery({
     queryKey: ['ai-settings'],
@@ -278,8 +307,12 @@ export default function AIAssistantPage() {
           </div>
           <Space>
             {messages.length > 0 && (
-              <Tooltip title="Sohbeti temizle">
-                <Button icon={<ClearOutlined />} size="small" onClick={() => setMessages([])} />
+              <Tooltip title="Geçmişi temizle">
+                <Button
+                  icon={<ClearOutlined />}
+                  size="small"
+                  onClick={() => { setMessages([]); localStorage.removeItem(STORAGE_KEY) }}
+                />
               </Tooltip>
             )}
             <Button
