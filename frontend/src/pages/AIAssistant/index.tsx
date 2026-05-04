@@ -327,14 +327,10 @@ export default function AIAssistantPage() {
   /* proactive auto-analysis: on first mount when there are issues and no chat history */
   const proactiveTriggered = useRef(false)
   useEffect(() => {
-    if (
-      proactiveTriggered.current ||
-      messages.length > 0 ||
-      !isConfigured ||
-      chatMut.isPending ||
-      settingsLoading ||
-      (!offline && !unacked)
-    ) return
+    // wait until both settings AND stats have loaded
+    if (proactiveTriggered.current || messages.length > 0) return
+    if (!isConfigured || settingsLoading || !stats) return
+    if (!offline && !unacked) return
     proactiveTriggered.current = true
     const timer = setTimeout(() => {
       const q = offline > 0
@@ -343,7 +339,7 @@ export default function AIAssistantPage() {
       send(q)
     }, 1800)
     return () => clearTimeout(timer)
-  }, [isConfigured, settingsLoading]) // eslint-disable-line
+  }, [isConfigured, settingsLoading, stats]) // re-run when stats arrive
 
   const contentPadH = isMobile ? 14 : 24
   const contentPadV = isMobile ? 12 : 20
