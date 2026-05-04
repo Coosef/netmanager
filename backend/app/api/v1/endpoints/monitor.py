@@ -1,4 +1,7 @@
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+
+_ISTANBUL = ZoneInfo("Europe/Istanbul")
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -210,10 +213,11 @@ async def events_timeline(
     )
     rows = result.fetchall()
 
-    # Group by hour
+    # Group by hour (Istanbul time — UTC+3)
     buckets: dict[str, dict] = {}
     for ts, severity in rows:
-        hour_key = ts.strftime("%H:00")
+        ts_local = ts.astimezone(_ISTANBUL) if ts.tzinfo else ts
+        hour_key = ts_local.strftime("%H:00")
         if hour_key not in buckets:
             buckets[hour_key] = {"time": hour_key, "critical": 0, "warning": 0, "info": 0}
         buckets[hour_key][severity] = buckets[hour_key].get(severity, 0) + 1

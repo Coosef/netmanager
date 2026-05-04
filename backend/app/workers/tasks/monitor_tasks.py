@@ -1,5 +1,7 @@
 import asyncio
+import hashlib
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 
 import redis
@@ -13,6 +15,7 @@ from app.services.ssh_manager import SSHManager
 from app.workers.celery_app import celery_app
 
 _redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+logger = logging.getLogger(__name__)
 
 FLAP_THRESHOLD = 10   # status changes/hour before device is considered "flapping"
 OFFLINE_DEDUP_TTL = 1800   # 30 min — cap offline events at 2/hour per device
@@ -50,6 +53,38 @@ def _get_db():
     return SyncSessionLocal()
 
 
+def _is_in_maintenance(db, device_id: int | None) -> bool:
+    """Return True if device is currently covered by an active maintenance window.
+    Active windows are cached in Redis for 60s to avoid repeated DB queries per poll."""
+    cache_key = "maint:active_windows"
+    cached = _redis.get(cache_key)
+    if cached is not None:
+        windows = json.loads(cached)
+    else:
+        from app.models.maintenance_window import MaintenanceWindow
+        now = datetime.now(timezone.utc)
+        rows = db.execute(
+            select(MaintenanceWindow).where(
+                MaintenanceWindow.start_time <= now,
+                MaintenanceWindow.end_time >= now,
+            )
+        ).scalars().all()
+        windows = [
+            {"applies_to_all": w.applies_to_all, "device_ids": w.device_ids or []}
+            for w in rows
+        ]
+        _redis.setex(cache_key, 60, json.dumps(windows))
+
+    if not windows:
+        return False
+    for w in windows:
+        if w["applies_to_all"]:
+            return True
+        if device_id is not None and device_id in w["device_ids"]:
+            return True
+    return False
+
+
 def _is_duplicate_event(device_id: int | None, event_type: str, dedup_key: str, ttl: int = 300) -> bool:
     """Return True if an identical event was saved within `ttl` seconds."""
     key = f"event:dedup:{device_id}:{event_type}:{dedup_key[:64]}"
@@ -62,6 +97,8 @@ def _is_duplicate_event(device_id: int | None, event_type: str, dedup_key: str, 
 def _save_event(db, device, event_type: str, severity: str, title: str,
                 message: str = "", details: dict = None, dedup_key: str = "",
                 dedup_ttl: int = 300):
+    if _is_in_maintenance(db, device.id if device else None):
+        return None
     if dedup_key and _is_duplicate_event(
         device.id if device else None, event_type, dedup_key or title, ttl=dedup_ttl
     ):
@@ -248,7 +285,11 @@ def poll_device_status():
         for device in devices:
             try:
                 prev_status = device.status
-                result = _run_async(ssh.test_connection(device))
+                try:
+                    result = _run_async(asyncio.wait_for(ssh.test_connection(device), timeout=30.0))
+                except asyncio.TimeoutError:
+                    logger.warning("poll timeout: %s (30s)", device.hostname)
+                    result = type("R", (), {"success": False, "error": "timeout"})()
                 new_status = DeviceStatus.ONLINE if result.success else DeviceStatus.OFFLINE
 
                 db.execute(update(Device).where(Device.id == device.id).values(
@@ -263,8 +304,8 @@ def poll_device_status():
 
                 if prev_status != new_status:
                     changes.append((device, new_status, result.error or ""))
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("poll error for %s: %s", device.hostname, exc)
 
         if not changes:
             return
@@ -389,7 +430,8 @@ def check_stp_anomalies(device_ids: list[int]):
                         ev = _save_event(db, device, "stp_anomaly", severity, label,
                                          f"Pattern: '{pattern}'",
                                          {"pattern": pattern, "snippet": result.output[:300]},
-                                         dedup_key=f"stp:{device.id}:{pattern}")
+                                         dedup_key=f"stp:{device.id}:{pattern}",
+                                         dedup_ttl=1800)
                         if ev:
                             found.append(ev.id)
                             _redis.publish("anomalies", json.dumps({
@@ -423,7 +465,8 @@ def check_loop_detection(device_ids: list[int]):
                         ev = _save_event(db, device, "loop_detected", severity, label,
                                          f"Pattern: '{pattern}'",
                                          {"pattern": pattern, "snippet": result.output[:300]},
-                                         dedup_key=f"loop:{device.id}:{pattern}")
+                                         dedup_key=f"loop:{device.id}:{pattern}",
+                                         dedup_ttl=1800)
                         if ev:
                             found.append(ev.id)
                             _redis.publish("anomalies", json.dumps({
@@ -452,7 +495,7 @@ def check_port_status(device_ids: list[int]):
                     continue
                 for line in result.output.splitlines()[-30:]:
                     ll = line.lower()
-                    line_hash = str(hash(line.strip()))
+                    line_hash = hashlib.md5(line.strip().encode()).hexdigest()[:16]
                     if any(p in ll for p in PORT_DOWN_PATTERNS):
                         _save_event(db, device, "port_change", "warning",
                                     f"{device.hostname} — Port çevrimdışı",
