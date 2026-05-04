@@ -275,14 +275,39 @@ async def apply_group_suggestions(
 
 # ── Tenant-scoped device lookup ─────────────────────────────────────────────
 
+_LOCATION_SCOPED_ROLES = {
+    UserRole.LOCATION_MANAGER,
+    UserRole.LOCATION_OPERATOR,
+    UserRole.LOCATION_VIEWER,
+}
+
+
+async def _accessible_sites(db: AsyncSession, current_user) -> list[str] | None:
+    """Return list of site names the user can access, or None if unrestricted."""
+    if current_user.role not in _LOCATION_SCOPED_ROLES:
+        return None
+    from app.models.location import Location
+    from app.models.user_location import UserLocation
+    rows = (await db.execute(
+        select(Location.name)
+        .join(UserLocation, Location.id == UserLocation.location_id)
+        .where(UserLocation.user_id == current_user.id)
+    )).fetchall()
+    return [r[0] for r in rows]
+
+
 async def _get_device_scoped(db: AsyncSession, device_id: int, current_user) -> Device:
-    """Fetch a device, enforcing tenant isolation for non-SUPER_ADMIN users."""
+    """Fetch a device, enforcing tenant and location isolation."""
     q = select(Device).where(Device.id == device_id)
     if current_user.role != UserRole.SUPER_ADMIN:
         q = q.where(Device.tenant_id == current_user.tenant_id)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    if current_user.role in _LOCATION_SCOPED_ROLES:
+        sites = await _accessible_sites(db, current_user)
+        if sites is not None and device.site not in sites:
+            raise HTTPException(status_code=403, detail="Bu cihaza erişim yetkiniz yok")
     return device
 
 
@@ -368,6 +393,12 @@ async def create_device(
 ):
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    # Location-scoped roles can only create devices in their assigned sites
+    if current_user.role in _LOCATION_SCOPED_ROLES:
+        sites = await _accessible_sites(db, current_user)
+        if sites is not None and payload.site not in sites:
+            raise HTTPException(status_code=403, detail="Bu lokasyonda cihaz oluşturma yetkiniz yok")
 
     # SaaS quota: check tenant device limit
     if current_user.tenant_id:
