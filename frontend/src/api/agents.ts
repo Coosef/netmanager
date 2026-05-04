@@ -154,7 +154,7 @@ export const agentsApi = {
     client.post<{sent: boolean; device_count: number}>(`/agents/${id}/device-sync`).then(r => r.data),
 
   discover: (id: string, body: {subnet: string; ports?: number[]}) =>
-    client.post<DiscoverResult>(`/agents/${id}/discover`, body).then(r => r.data),
+    client.post<DiscoverResult>(`/agents/${id}/discover`, body, { timeout: 180_000 }).then(r => r.data),
 
   getDiscoveryHistory: (id: string) =>
     client.get<DiscoveryHistoryEntry[]>(`/agents/${id}/discover/history`).then(r => r.data),

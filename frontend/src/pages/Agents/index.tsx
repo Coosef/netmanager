@@ -547,6 +547,36 @@ function CommandLogTab({ agentId }: { agentId: string }) {
   )
 }
 
+// ── Subnet normalization ──────────────────────────────────────────────────────
+// Accepts both CIDR (192.168.1.0/24) and dotted-mask (192.168.1.0/255.255.255.0)
+// Returns normalized network CIDR or null if invalid
+function normalizeSubnet(raw: string): string | null {
+  const s = raw.trim()
+  // Dotted-decimal mask: 10.2.16.1/255.255.255.0
+  const dotted = s.match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,3}(?:\.\d{1,3}){3})$/)
+  if (dotted) {
+    const ip = dotted[1].split('.').map(Number)
+    const mk = dotted[2].split('.').map(Number)
+    if (ip.some(b => b > 255) || mk.some(b => b > 255)) return null
+    let prefix = 0
+    for (const b of mk) { let x = b; while (x) { prefix += x & 1; x >>= 1 } }
+    const net = ip.map((b, i) => b & mk[i])
+    return `${net.join('.')}/${prefix}`
+  }
+  // Standard CIDR
+  const cidr = s.match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/)
+  if (cidr) {
+    const parts = cidr[1].split('.').map(Number)
+    const prefix = parseInt(cidr[2])
+    if (parts.some(b => b > 255) || prefix > 32) return null
+    const ipInt = (parts[0] << 24 | parts[1] << 16 | parts[2] << 8 | parts[3]) >>> 0
+    const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0
+    const net = (ipInt & mask) >>> 0
+    return `${(net >>> 24) & 0xff}.${(net >>> 16) & 0xff}.${(net >>> 8) & 0xff}.${net & 0xff}/${prefix}`
+  }
+  return null
+}
+
 // ── DiscoveryTab ──────────────────────────────────────────────────────────────
 
 function DiscoveryTab({ agent }: { agent: Agent }) {
@@ -588,13 +618,26 @@ function DiscoveryTab({ agent }: { agent: Agent }) {
 
   const run = async () => {
     if (!subnet.trim()) { message.warning('Subnet giriniz (örn: 192.168.1.0/24)'); return }
+    const normalized = normalizeSubnet(subnet.trim())
+    if (!normalized) {
+      message.error('Geçersiz subnet formatı. Örnek: 192.168.1.0/24 veya 192.168.1.0/255.255.255.0')
+      return
+    }
+    // Warn if too large (> /22 = 1024 IPs)
+    const prefix = parseInt(normalized.split('/')[1])
+    if (prefix < 22) {
+      message.warning(`/${prefix} çok büyük (${Math.pow(2, 32 - prefix)} IP). Maksimum /22 önerilir.`)
+      return
+    }
+    // Auto-correct display if format was normalized
+    if (normalized !== subnet.trim()) setSubnet(normalized)
     setIsRunning(true)
     try {
-      const res = await agentsApi.discover(agent.id, { subnet: subnet.trim() })
+      const res = await agentsApi.discover(agent.id, { subnet: normalized })
       setResult(res)
       message.success(`${res.hosts?.length ?? 0} cihaz keşfedildi (${res.scanned} IP tarandı)`)
     } catch (e: any) {
-      message.error(e?.response?.data?.detail || 'Keşif başarısız')
+      message.error(e?.response?.data?.detail || 'Keşif başarısız — agent yanıt vermedi veya bağlantı kesildi')
     } finally {
       setIsRunning(false)
     }
@@ -616,7 +659,9 @@ function DiscoveryTab({ agent }: { agent: Agent }) {
             {isRunning ? 'Taranıyor...' : 'Tara'}
           </Button>
         </div>
-        <Text style={{ fontSize: 11, color: C.muted }}>Maksimum /22 (1024 IP). Tarama ~60-90s sürebilir.</Text>
+        <Text style={{ fontSize: 11, color: C.muted }}>
+          CIDR (192.168.1.0/24) veya maske (192.168.1.0/255.255.255.0) formatı desteklenir. Maks /22 (1024 IP). Tarama ~60-90s sürebilir.
+        </Text>
       </div>
 
       {result && (
@@ -1230,7 +1275,7 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
           {isLocked && <Tag color="red" icon={<LockOutlined />}>Kilitli</Tag>}
         </Space>
       }
-      width={640}
+      width={960}
       styles={{
         content: { background: C.bg, border: `1px solid ${C.border}` },
         header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
@@ -1238,6 +1283,7 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
     >
       <Tabs
         size="small"
+        tabBarStyle={{ flexWrap: 'nowrap', overflowX: 'auto', overflowY: 'hidden', marginBottom: 12 }}
         items={[
           {
             key: 'info',
