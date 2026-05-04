@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import case, desc
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
 from app.models.agent import Agent
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
@@ -23,6 +23,7 @@ router = APIRouter()
 async def report_summary(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     site: str = Query(None),
 ):
     """High-level network summary for reports page."""
@@ -30,6 +31,12 @@ async def report_summary(
     since_7d = datetime.now(timezone.utc) - timedelta(days=7)
 
     dev_q = select(Device).where(Device.is_active == True)
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {}
+        dev_q = dev_q.where(Device.site.in_(eff))
+        site = None
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
@@ -96,11 +103,18 @@ async def report_summary(
 async def report_devices(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     format: str = Query("json", description="json or csv"),
     site: str = Query(None),
 ):
     """Device inventory report."""
     dev_q = select(Device).where(Device.is_active == True).order_by(Device.hostname)
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return [] if format != "csv" else Response(content="", media_type="text/csv")
+        dev_q = dev_q.where(Device.site.in_(eff))
+        site = None
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
