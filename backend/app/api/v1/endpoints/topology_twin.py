@@ -94,6 +94,20 @@ async def list_snapshots(
     return {"snapshots": [_snap_out(s) for s in rows], "total": len(rows)}
 
 
+@router.get("/snapshots/{snapshot_id}")
+async def get_snapshot(
+    snapshot_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    snap = (await db.execute(
+        select(TopologySnapshot).where(TopologySnapshot.id == snapshot_id)
+    )).scalar_one_or_none()
+    if not snap:
+        raise HTTPException(404, "Snapshot not found")
+    return {**_snap_out(snap), "links": snap.links or []}
+
+
 @router.delete("/snapshots/{snapshot_id}", status_code=204)
 async def delete_snapshot(
     snapshot_id: int,

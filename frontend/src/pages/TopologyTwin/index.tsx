@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import {
   Button, Table, Tag, Modal, Input, Space, Badge,
-  Descriptions, Empty, Popconfirm, Tabs, Alert,
+  Descriptions, Empty, Popconfirm, Tabs, Alert, Drawer, Spin,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, StarOutlined, StarFilled,
   CheckCircleOutlined, WarningOutlined, ApartmentOutlined,
-  ArrowUpOutlined, ArrowDownOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { topologyTwinApi, type TopologySnapshotMeta, type SnapshotLink } from '@/api/topologyTwin'
@@ -45,6 +45,13 @@ export default function TopologyTwinPage() {
   const qc = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [snapName, setSnapName] = useState('')
+  const [detailId, setDetailId] = useState<number | null>(null)
+
+  const { data: snapDetail, isLoading: detailLoading } = useQuery({
+    queryKey: ['topology-snapshot-detail', detailId],
+    queryFn: () => topologyTwinApi.getSnapshot(detailId!),
+    enabled: detailId !== null,
+  })
 
   const { data: snaps, isLoading } = useQuery({
     queryKey: ['topology-snapshots'],
@@ -109,9 +116,13 @@ export default function TopologyTwinPage() {
     },
     {
       title: '',
-      width: 140,
+      width: 170,
       render: (_: unknown, row: TopologySnapshotMeta) => (
         <Space>
+          <Button size="small" icon={<EyeOutlined />}
+            onClick={() => setDetailId(row.id)}>
+            Detay
+          </Button>
           {!row.is_golden && (
             <Button size="small" icon={<StarOutlined />}
               loading={goldenMut.isPending}
@@ -269,6 +280,77 @@ export default function TopologyTwinPage() {
           },
         ]}
       />
+
+      {/* Snapshot Detail Drawer */}
+      <Drawer
+        title={snapDetail ? `${snapDetail.is_golden ? '⭐ ' : ''}${snapDetail.name}` : 'Anlık Görüntü Detayı'}
+        open={detailId !== null}
+        onClose={() => setDetailId(null)}
+        width={820}
+        styles={{ body: { padding: '16px 20px', background: C.bg2 } }}
+        extra={
+          snapDetail && (
+            <Space>
+              <Tag color="blue">{snapDetail.device_count} Cihaz</Tag>
+              <Tag color="purple">{snapDetail.link_count} Bağlantı</Tag>
+              <span style={{ color: C.muted, fontSize: 12 }}>{dayjs(snapDetail.created_at).format('DD.MM.YYYY HH:mm')}</span>
+            </Space>
+          )
+        }
+      >
+        {detailLoading ? (
+          <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
+        ) : snapDetail ? (
+          <Table
+            dataSource={snapDetail.links}
+            size="small"
+            pagination={{ pageSize: 20, showTotal: (t) => `${t} bağlantı` }}
+            rowKey={(r: SnapshotLink) => `${r.device_id}:${r.local_port}:${r.neighbor_hostname}`}
+            columns={[
+              {
+                title: 'Cihaz ID',
+                dataIndex: 'device_id',
+                width: 80,
+                render: (v: number | null) => v ?? '—',
+              },
+              {
+                title: 'Yerel Port',
+                dataIndex: 'local_port',
+                render: (v: string) => <code style={{ fontSize: 11 }}>{v}</code>,
+              },
+              {
+                title: 'Komşu',
+                dataIndex: 'neighbor_hostname',
+                render: (v: string) => <span style={{ fontWeight: 500 }}>{v}</span>,
+              },
+              {
+                title: 'Komşu Port',
+                dataIndex: 'neighbor_port',
+                render: (v: string) => <code style={{ fontSize: 11 }}>{v}</code>,
+              },
+              {
+                title: 'Komşu IP',
+                dataIndex: 'neighbor_ip',
+                render: (v: string | null) => v ?? <span style={{ color: C.muted }}>—</span>,
+              },
+              {
+                title: 'Protokol',
+                dataIndex: 'protocol',
+                width: 80,
+                render: (v: string) => <Tag>{v?.toUpperCase()}</Tag>,
+              },
+              {
+                title: 'Son Görülme',
+                dataIndex: 'last_seen',
+                width: 130,
+                render: (v: string | null) => v
+                  ? <span style={{ fontSize: 11, color: C.muted }}>{dayjs(v).format('DD.MM HH:mm')}</span>
+                  : <span style={{ color: C.muted }}>—</span>,
+              },
+            ]}
+          />
+        ) : null}
+      </Drawer>
 
       {/* Create Modal */}
       <Modal

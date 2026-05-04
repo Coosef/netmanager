@@ -32,9 +32,16 @@ export interface TopologyDiff {
   golden: TopologySnapshotMeta | null
 }
 
+export interface TopologySnapshotDetail extends TopologySnapshotMeta {
+  links: SnapshotLink[]
+}
+
 export const topologyTwinApi = {
   listSnapshots: () =>
     client.get<{ snapshots: TopologySnapshotMeta[]; total: number }>('/topology-twin/snapshots').then(r => r.data),
+
+  getSnapshot: (id: number) =>
+    client.get<TopologySnapshotDetail>(`/topology-twin/snapshots/${id}`).then(r => r.data),
 
   createSnapshot: (name: string) =>
     client.post<TopologySnapshotMeta>('/topology-twin/snapshots', { name }).then(r => r.data),
