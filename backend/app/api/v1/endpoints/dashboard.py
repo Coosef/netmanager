@@ -6,7 +6,7 @@ from sqlalchemy import case, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
 from app.models.agent import Agent
 from app.models.audit_log import AuditLog
 from app.models.config_backup import ConfigBackup
@@ -21,6 +21,7 @@ async def dashboard_analytics(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
     tenant_filter: TenantFilter = None,
+    location_filter: LocationNameFilter = None,
     site: Optional[str] = Query(None),
 ):
     """Operational intelligence for the smart dashboard."""
@@ -32,6 +33,10 @@ async def dashboard_analytics(
     dev_q = select(Device).where(Device.is_active == True)
     if tenant_filter is not None:
         dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        dev_q = dev_q.where(Device.site.in_(eff)) if eff else dev_q.where(text("false"))
+        site = None
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
