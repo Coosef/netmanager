@@ -11,6 +11,7 @@ import {
   FireOutlined, RobotOutlined, SwapOutlined, SyncOutlined,
   ExperimentOutlined, EyeInvisibleOutlined, SafetyOutlined, CalendarOutlined, RiseOutlined,
   DashboardOutlined, ArrowUpOutlined, ArrowDownOutlined, AlertOutlined,
+  EnvironmentOutlined,
 } from '@ant-design/icons'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, Legend,
@@ -32,6 +33,7 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
+import { useAuthStore } from '@/store/auth'
 
 dayjs.extend(relativeTime)
 
@@ -450,7 +452,8 @@ export default function DashboardPage() {
   const qc        = useQueryClient()
   const { t }     = useTranslation()
   const { isDark } = useTheme()
-  const { activeSite } = useSite()
+  const { activeSite, setSite, locations } = useSite()
+  const { isOrgAdmin } = useAuthStore()
   const C = isDark ? C_DARK : C_LIGHT
   const N = isDark ? N_DARK : N_LIGHT
   const wsRef     = useRef<WebSocket | null>(null)
@@ -1558,6 +1561,84 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Location Overview (admin+) ───────────────────────────────────────── */}
+        {isOrgAdmin() && locations.length > 0 && (
+          <div className="tv-card">
+            <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <EnvironmentOutlined style={{ color: N.cyan }} />
+                <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>Lokasyon Genel Bakış</span>
+                {activeSite && (
+                  <Tag
+                    style={{ fontSize: 11, cursor: 'pointer', background: `${N.cyan}15`, borderColor: `${N.cyan}30`, color: N.cyan }}
+                    onClick={() => setSite(null)}
+                  >
+                    {activeSite} ✕
+                  </Tag>
+                )}
+              </div>
+              <span
+                onClick={() => navigate('/locations')}
+                style={{ color: N.cyan, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+              >
+                Yönet <RightOutlined />
+              </span>
+            </div>
+            <div style={{ padding: '12px 18px' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {/* "All" pill */}
+                <div
+                  onClick={() => setSite(null)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                    border: `1px solid ${!activeSite ? N.cyan : C.border}`,
+                    background: !activeSite ? `${N.cyan}12` : C.hover,
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseEnter={(e) => { const el = e.currentTarget as HTMLElement; el.style.borderColor = N.cyan; el.style.background = `${N.cyan}10` }}
+                  onMouseLeave={(e) => { const el = e.currentTarget as HTMLElement; el.style.borderColor = !activeSite ? N.cyan : C.border; el.style.background = !activeSite ? `${N.cyan}12` : C.hover }}
+                >
+                  <span style={{ color: !activeSite ? N.cyan : C.muted, fontSize: 13, fontWeight: !activeSite ? 700 : 400 }}>Tüm Lokasyonlar</span>
+                  <Tag style={{ margin: 0, fontSize: 11, background: `${N.blue}15`, borderColor: `${N.blue}30`, color: N.blue }}>
+                    {locations.reduce((sum, l) => sum + (l.device_count ?? 0), 0)} cihaz
+                  </Tag>
+                </div>
+
+                {/* Per-location pills */}
+                {locations.map((loc) => {
+                  const isActive = activeSite === loc.name
+                  const dotColor = loc.color || '#3b82f6'
+                  return (
+                    <div
+                      key={loc.id}
+                      onClick={() => setSite(isActive ? null : loc.name)}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 14px', borderRadius: 8, cursor: 'pointer',
+                        border: `1px solid ${isActive ? dotColor : C.border}`,
+                        background: isActive ? `${dotColor}15` : C.hover,
+                        transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={(e) => { const el = e.currentTarget as HTMLElement; el.style.borderColor = dotColor; el.style.background = `${dotColor}12` }}
+                      onMouseLeave={(e) => { const el = e.currentTarget as HTMLElement; el.style.borderColor = isActive ? dotColor : C.border; el.style.background = isActive ? `${dotColor}15` : C.hover }}
+                    >
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: dotColor, flexShrink: 0, boxShadow: isActive ? `0 0 6px ${dotColor}` : undefined }} />
+                      <span style={{ color: isActive ? C.text : C.muted, fontSize: 13, fontWeight: isActive ? 600 : 400 }}>{loc.name}</span>
+                      {(loc.city || loc.country) && (
+                        <span style={{ color: C.dim, fontSize: 11 }}>{[loc.city, loc.country].filter(Boolean).join(', ')}</span>
+                      )}
+                      <Tag style={{ margin: 0, fontSize: 11, background: `${N.blue}10`, borderColor: `${N.blue}20`, color: N.blue }}>
+                        {loc.device_count ?? 0}
+                      </Tag>
+                    </div>
+                  )
+                })}
+              </div>
             </div>
           </div>
         )}
