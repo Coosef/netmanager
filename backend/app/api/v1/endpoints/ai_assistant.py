@@ -23,6 +23,7 @@ class ChatMessage(BaseModel):
 
 class ChatRequest(BaseModel):
     messages: list[ChatMessage]
+    mode: str = "analyze"
 
 
 class UpdateAISettings(BaseModel):
@@ -106,7 +107,7 @@ async def ai_chat(
 ) -> dict[str, Any]:
     messages = [{"role": m.role, "content": m.content} for m in req.messages]
     try:
-        return await ai_service.chat(db, messages)
+        return await ai_service.chat(db, messages, mode=req.mode)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

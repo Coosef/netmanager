@@ -22,6 +22,36 @@ Sadece ağ yönetimiyle ilgili konularda yardım et; anlık ağ verisini sana sa
 
 {context}"""
 
+MODE_PROMPTS: dict[str, str] = {
+    "analyze": """
+Analiz modundasın. Karmaşık sorular için yanıtını şu markdown başlıkları ile yapılandır (uygunsa):
+## 🔍 Analiz Sonucu
+## 🎯 Kök Neden
+## 📊 Etki
+## ⚠️ Risk Seviyesi
+## ✅ Önerilen Aksiyonlar
+Basit sorularda düz metin yeterli.""",
+    "troubleshoot": """
+Sorun giderme modundasın. Adım adım komut ve kontrol listesi ver.
+Yanıtını şu başlıklarla yapılandır (uygunsa):
+## 🛠️ Sorun Tespiti
+## 📋 Kontrol Listesi
+## 💻 Komutlar
+## 🔄 Sonraki Adımlar""",
+    "automate": """
+Otomasyon modundasın. Playbook, script ve otomasyon önerileri sun.
+Hangi işlemlerin otomatize edilebileceğini ve nasıl yapılacağını açıkla.
+## 🤖 Otomasyon Fırsatı
+## 📜 Playbook Adımları
+## ⚙️ Konfigürasyon""",
+    "security": """
+Güvenlik modundasın. Güvenlik açıklarını, riskleri ve tehditleri analiz et.
+## 🛡️ Güvenlik Analizi
+## 🚨 Tespit Edilen Riskler
+## 🔒 Güvenlik Önerileri
+## 📌 Acil Aksiyonlar""",
+}
+
 
 async def build_network_context(db: AsyncSession) -> str:
     now = datetime.now(timezone.utc)
@@ -96,13 +126,14 @@ async def _get_or_create_settings(db: AsyncSession) -> AISettings:
 async def chat(
     db: AsyncSession,
     messages: list[dict[str, str]],
+    mode: str = "analyze",
 ) -> dict[str, Any]:
     settings = await _get_or_create_settings(db)
     if not settings.active_provider:
         raise ValueError("AI sağlayıcısı yapılandırılmamış. Lütfen Ayarlar → AI Asistanı bölümünden bir sağlayıcı seçin.")
 
     context = await build_network_context(db)
-    system = SYSTEM_PROMPT.format(context=context)
+    system = SYSTEM_PROMPT.format(context=context) + MODE_PROMPTS.get(mode, "")
     provider = settings.active_provider
 
     if provider == "claude":

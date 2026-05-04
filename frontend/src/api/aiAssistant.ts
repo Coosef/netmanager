@@ -48,8 +48,8 @@ export const aiAssistantApi = {
     client.get<AIProviderSettings>('/ai/settings').then((r) => r.data),
   updateSettings: (payload: UpdateAISettings): Promise<{ ok: boolean }> =>
     client.patch<{ ok: boolean }>('/ai/settings', payload).then((r) => r.data),
-  chat: (messages: ChatMessage[]): Promise<ChatResponse> =>
-    client.post<ChatResponse>('/ai/chat', { messages }).then((r) => r.data),
+  chat: (messages: ChatMessage[], mode = 'analyze'): Promise<ChatResponse> =>
+    client.post<ChatResponse>('/ai/chat', { messages, mode }).then((r) => r.data),
   getProviders: (): Promise<{ providers: AIProvider[] }> =>
     client.get<{ providers: AIProvider[] }>('/ai/providers').then((r) => r.data),
 }

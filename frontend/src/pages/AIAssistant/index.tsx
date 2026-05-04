@@ -1,122 +1,185 @@
-import { useState, useRef, useEffect } from 'react'
-import { Button, Input, Space, Spin, Empty, Avatar, Tooltip } from 'antd'
+import { useState, useRef, useEffect, useMemo } from 'react'
+import { Button, Input, Spin, Empty, Avatar, Tooltip, Tag } from 'antd'
 import {
-  SendOutlined, RobotOutlined, UserOutlined, ThunderboltOutlined,
-  ClearOutlined, CopyOutlined, CheckOutlined,
+  SendOutlined, RobotOutlined, UserOutlined, ClearOutlined,
+  ThunderboltOutlined, CopyOutlined, CheckOutlined,
+  AlertOutlined, DashboardOutlined, ApartmentOutlined,
+  SafetyOutlined, BarChartOutlined, PlayCircleOutlined,
+  BranchesOutlined, AimOutlined, ReloadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { aiAssistantApi, type ChatMessage } from '@/api/aiAssistant'
+import { monitorApi } from '@/api/monitor'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useNavigate } from 'react-router-dom'
 
+/* ─── theme ─────────────────────────────────────────────────────────────── */
 function mkC(isDark: boolean) {
   return {
     bg:       isDark ? '#030c1e' : '#f0f5fb',
-    card:     isDark ? '#0f172a' : '#ffffff',
-    border:   isDark ? '#1e3a5f' : '#e2e8f0',
+    panel:    isDark ? '#07111f' : '#ffffff',
+    card:     isDark ? '#0f172a' : '#f8fafc',
+    border:   isDark ? '#1a3050' : '#e2e8f0',
     text:     isDark ? '#f1f5f9' : '#1e293b',
     muted:    isDark ? '#64748b' : '#94a3b8',
     userBg:   isDark ? '#1e40af' : '#dbeafe',
     userText: isDark ? '#e0f2fe' : '#1e3a8a',
     codeBg:   isDark ? '#0a1628' : '#f1f5f9',
     errBg:    isDark ? '#3b1212' : '#fee2e2',
-    sidebar:  isDark ? '#070f1f' : '#f8fafc',
+    accent:   '#3b82f6',
   }
 }
 
 const PROVIDER_COLORS: Record<string, string> = {
-  claude: '#cc785c',
-  openai: '#10a37f',
-  gemini: '#4285f4',
-  ollama: '#7c3aed',
+  claude: '#cc785c', openai: '#10a37f', gemini: '#4285f4', ollama: '#7c3aed',
 }
 const PROVIDER_LABELS: Record<string, string> = {
-  claude: 'Claude',
-  openai: 'OpenAI',
-  gemini: 'Gemini',
-  ollama: 'Ollama',
+  claude: 'Claude', openai: 'OpenAI', gemini: 'Gemini', ollama: 'Ollama',
 }
 
-const SUGGESTED: { label: string; icon: string; q: string }[] = [
-  { label: 'Durum',      icon: '📡', q: 'Şu an kaç cihaz offline? Hangilerinde kritik sorun var?' },
-  { label: 'Risk',       icon: '⚠️', q: 'En riskli cihazlar hangileri? Neden riskli?' },
-  { label: 'Anomali',    icon: '🔍', q: 'Son 24 saatte anormal bir davranış tespit edildi mi?' },
-  { label: 'Olaylar',   icon: '📋', q: 'Son 24 saatte neler oldu? Dikkat etmem gereken bir şey var mı?' },
-  { label: 'Performans', icon: '📈', q: 'Ağda trafik veya latency sorunu var mı?' },
-  { label: 'Güvenlik',  icon: '🛡️', q: 'Güvenlik açısından dikkat etmem gereken bir şey var mı?' },
-  { label: 'Topoloji',  icon: '🗺️', q: 'Topolojide beklenmeden değişen bir bağlantı var mı?' },
-  { label: 'Öneri',     icon: '💡', q: 'Ağımı daha sağlıklı tutmak için ne yapmalıyım?' },
+/* ─── modes ─────────────────────────────────────────────────────────────── */
+const MODES = [
+  { key: 'analyze',      label: 'Analiz',       icon: '🔍', color: '#3b82f6' },
+  { key: 'troubleshoot', label: 'Sorun Gider',  icon: '🛠️', color: '#f59e0b' },
+  { key: 'automate',    label: 'Otomasyon',    icon: '🤖', color: '#8b5cf6' },
+  { key: 'security',    label: 'Güvenlik',     icon: '🛡️', color: '#ef4444' },
+] as const
+type Mode = typeof MODES[number]['key']
+
+/* ─── suggested questions per mode ─────────────────────────────────────── */
+const SUGGESTED: Record<Mode, { label: string; q: string }[]> = {
+  analyze: [
+    { label: 'Kaç cihaz offline?',        q: 'Şu an kaç cihaz offline? Hangilerinde kritik sorun var?' },
+    { label: 'En riskli cihazlar',        q: 'En riskli cihazlar hangileri? Neden riskli?' },
+    { label: 'Son 24 saat özeti',         q: 'Son 24 saatte neler oldu? Dikkat etmem gereken bir şey var mı?' },
+    { label: 'Anomali var mı?',           q: 'Son 24 saatte anormal bir davranış tespit edildi mi?' },
+    { label: 'Topoloji değişimi',         q: 'Topolojide beklenmeden değişen bir bağlantı var mı?' },
+    { label: 'Genel sağlık',             q: 'Ağımı daha sağlıklı tutmak için ne yapmalıyım?' },
+  ],
+  troubleshoot: [
+    { label: 'Offline cihaz kök neden', q: 'Offline cihazların kök nedenini analiz et ve sorun giderme adımlarını ver.' },
+    { label: 'Latency sorunları',       q: 'Ağda latency sorunu var mı? Nasıl giderilir?' },
+    { label: 'VLAN sorunları',          q: 'VLAN yapılandırmasında sorun var mı?' },
+    { label: 'Bağlantı kopmaları',      q: 'Sürekli bağlantı kopması yaşayan cihazlar var mı? Sebebi ne?' },
+  ],
+  automate: [
+    { label: 'Playbook öner',          q: 'Mevcut sorunlar için hangi playbook\'ları çalıştırmalıyım?' },
+    { label: 'Otomatize edilecekler',  q: 'Hangi operasyonları otomatize etmeliyim?' },
+    { label: 'Yedekleme planı',        q: 'Yedekleme sürecimi nasıl otomatize edebilirim?' },
+    { label: 'Alert kuralları',        q: 'Hangi alert kurallarını eklemeyi önerirsin?' },
+  ],
+  security: [
+    { label: 'Güvenlik açıkları',      q: 'Güvenlik açısından dikkat etmem gereken bir şey var mı?' },
+    { label: 'Yetkisiz erişim',        q: 'Şüpheli veya yetkisiz erişim girişimi var mı?' },
+    { label: 'Compliance durumu',      q: 'Uyumluluk (compliance) açısından risk var mı?' },
+    { label: 'Fiziksel güvenlik',      q: 'Offline cihazlar güvenlik riski oluşturuyor mu?' },
+  ],
+}
+
+/* ─── quick actions ─────────────────────────────────────────────────────── */
+const QUICK_ACTIONS = [
+  { icon: <AimOutlined />,        label: 'Diagnostics',    sub: 'Tanılama çalıştır',       path: '/diagnostics',       color: '#3b82f6' },
+  { icon: <AlertOutlined />,      label: 'Olaylar',        sub: 'Aktif uyarılara git',     path: '/monitor',           color: '#ef4444' },
+  { icon: <PlayCircleOutlined />, label: 'Playbook',       sub: 'Hazır playbook çalıştır', path: '/playbooks',         color: '#8b5cf6' },
+  { icon: <BranchesOutlined />,   label: 'VLAN',           sub: 'VLAN yönetimine git',     path: '/vlan',              color: '#f59e0b' },
+  { icon: <BarChartOutlined />,   label: 'Raporlar',       sub: 'Analiz raporu aç',        path: '/reports',           color: '#10a37f' },
+  { icon: <SafetyOutlined />,     label: 'Güvenlik',       sub: 'Güvenlik denetimi',       path: '/security-audit',    color: '#ec4899' },
+  { icon: <ApartmentOutlined />,  label: 'Topoloji',       sub: 'Ağ haritasını aç',        path: '/topology',          color: '#6366f1' },
+  { icon: <DashboardOutlined />,  label: 'Dashboard',      sub: 'Ana ekrana dön',          path: '/',                  color: '#64748b' },
 ]
 
+/* ─── storage ────────────────────────────────────────────────────────────── */
+const STORAGE_KEY = 'ai_chat_v2'
+const MAX_STORED  = 100
+
 interface DisplayMessage extends ChatMessage {
+  id: number
   provider?: string
   model?: string
   error?: boolean
-  id: number
+  mode?: Mode
 }
 
-function MarkdownContent({ content, isDark, C }: { content: string; isDark: boolean; C: ReturnType<typeof mkC> }) {
+let _id = 0
+const nextId = () => ++_id
+
+function loadMessages(): DisplayMessage[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (!raw) return []
+    const msgs = JSON.parse(raw) as DisplayMessage[]
+    const maxId = msgs.reduce((m, x) => Math.max(m, x.id), 0)
+    _id = maxId
+    return msgs
+  } catch { return [] }
+}
+function saveMessages(msgs: DisplayMessage[]) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-MAX_STORED))) } catch { }
+}
+
+/* ─── markdown renderer ─────────────────────────────────────────────────── */
+function MdContent({ content, isDark, C }: { content: string; isDark: boolean; C: ReturnType<typeof mkC> }) {
+  const sectionColors: Record<string, string> = {
+    '🔍': '#3b82f6', '🎯': '#f59e0b', '📊': '#8b5cf6', '⚠️': '#ef4444', '✅': '#22c55e',
+    '🛠️': '#f59e0b', '📋': '#6366f1', '💻': '#0ea5e9', '🔄': '#10a37f',
+    '🤖': '#8b5cf6', '📜': '#6366f1', '⚙️': '#64748b',
+    '🛡️': '#ef4444', '🚨': '#dc2626', '🔒': '#7c3aed', '📌': '#f97316',
+  }
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        p: ({ children }) => (
-          <p style={{ margin: '0 0 8px 0', lineHeight: 1.65 }}>{children}</p>
+        h2: ({ children }) => {
+          const text = String(children)
+          const emoji = text.match(/^\p{Emoji}/u)?.[0] ?? ''
+          const color = sectionColors[emoji] ?? C.accent
+          return (
+            <div style={{
+              background: `${color}18`,
+              border: `1px solid ${color}40`,
+              borderLeft: `3px solid ${color}`,
+              borderRadius: 8,
+              padding: '8px 12px',
+              margin: '12px 0 6px',
+              color,
+              fontWeight: 700,
+              fontSize: 13,
+            }}>{children}</div>
+          )
+        },
+        h3: ({ children }) => (
+          <div style={{ fontWeight: 600, fontSize: 13, margin: '10px 0 4px', color: C.text }}>{children}</div>
         ),
+        p: ({ children }) => <p style={{ margin: '0 0 8px', lineHeight: 1.65 }}>{children}</p>,
         strong: ({ children }) => (
           <strong style={{ color: isDark ? '#93c5fd' : '#1d4ed8', fontWeight: 600 }}>{children}</strong>
         ),
-        ul: ({ children }) => (
-          <ul style={{ margin: '6px 0', paddingLeft: 20, lineHeight: 1.7 }}>{children}</ul>
-        ),
-        ol: ({ children }) => (
-          <ol style={{ margin: '6px 0', paddingLeft: 20, lineHeight: 1.7 }}>{children}</ol>
-        ),
-        li: ({ children }) => (
-          <li style={{ marginBottom: 3 }}>{children}</li>
-        ),
+        ul: ({ children }) => <ul style={{ margin: '4px 0 8px', paddingLeft: 20, lineHeight: 1.7 }}>{children}</ul>,
+        ol: ({ children }) => <ol style={{ margin: '4px 0 8px', paddingLeft: 20, lineHeight: 1.7 }}>{children}</ol>,
+        li: ({ children }) => <li style={{ marginBottom: 3 }}>{children}</li>,
         code: ({ children, className }) => {
-          const isBlock = className?.includes('language-')
+          const isBlock = !!className?.includes('language-')
           return isBlock ? (
             <code style={{
-              display: 'block',
-              background: C.codeBg,
-              border: `1px solid ${C.border}`,
-              borderRadius: 6,
-              padding: '10px 14px',
-              fontSize: 12,
-              fontFamily: 'monospace',
-              overflowX: 'auto',
-              margin: '8px 0',
-              whiteSpace: 'pre',
+              display: 'block', background: C.codeBg, border: `1px solid ${C.border}`,
+              borderRadius: 6, padding: '10px 14px', fontSize: 12,
+              fontFamily: 'monospace', overflowX: 'auto', margin: '8px 0', whiteSpace: 'pre',
             }}>{children}</code>
           ) : (
             <code style={{
-              background: C.codeBg,
-              border: `1px solid ${C.border}`,
-              borderRadius: 4,
-              padding: '1px 6px',
-              fontSize: 12,
-              fontFamily: 'monospace',
+              background: C.codeBg, border: `1px solid ${C.border}`, borderRadius: 4,
+              padding: '1px 6px', fontSize: 12, fontFamily: 'monospace',
             }}>{children}</code>
           )
         },
         pre: ({ children }) => <>{children}</>,
-        h3: ({ children }) => (
-          <h3 style={{ fontSize: 14, fontWeight: 700, margin: '10px 0 4px', color: C.text }}>{children}</h3>
-        ),
-        h4: ({ children }) => (
-          <h4 style={{ fontSize: 13, fontWeight: 600, margin: '8px 0 4px', color: C.text }}>{children}</h4>
-        ),
         blockquote: ({ children }) => (
           <blockquote style={{
-            borderLeft: `3px solid ${isDark ? '#3b82f6' : '#93c5fd'}`,
-            margin: '8px 0',
-            paddingLeft: 12,
-            color: C.muted,
-            fontStyle: 'italic',
+            borderLeft: `3px solid ${C.accent}`, margin: '8px 0', paddingLeft: 12,
+            color: C.muted, fontStyle: 'italic',
           }}>{children}</blockquote>
         ),
         hr: () => <hr style={{ border: 'none', borderTop: `1px solid ${C.border}`, margin: '10px 0' }} />,
@@ -127,89 +190,74 @@ function MarkdownContent({ content, isDark, C }: { content: string; isDark: bool
   )
 }
 
-const STORAGE_KEY = 'ai_chat_history'
-const MAX_STORED = 100
-
-function loadMessages(): DisplayMessage[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw) as DisplayMessage[]
-    // Restore sequential IDs so nextId() doesn't collide
-    let max = 0
-    parsed.forEach(m => { if (m.id > max) max = m.id })
-    _msgId = max
-    return parsed
-  } catch {
-    return []
-  }
+/* ─── severity helpers ──────────────────────────────────────────────────── */
+const SEV_COLOR: Record<string, string> = {
+  critical: '#ef4444', warning: '#f59e0b', info: '#3b82f6',
+}
+const SEV_LABEL: Record<string, string> = {
+  critical: 'Kritik', warning: 'Uyarı', info: 'Bilgi',
 }
 
-function saveMessages(msgs: DisplayMessage[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs.slice(-MAX_STORED)))
-  } catch { /* storage full — ignore */ }
-}
-
-let _msgId = 0
-function nextId() { return ++_msgId }
-
+/* ─── page ──────────────────────────────────────────────────────────────── */
 export default function AIAssistantPage() {
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const navigate = useNavigate()
-  const [input, setInput] = useState('')
+
+  const [input, setInput]       = useState('')
+  const [mode, setMode]         = useState<Mode>('analyze')
   const [messages, setMessages] = useState<DisplayMessage[]>(() => loadMessages())
   const [copiedId, setCopiedId] = useState<number | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // Persist messages to localStorage on every change
-  useEffect(() => {
-    saveMessages(messages)
-  }, [messages])
+  /* persist */
+  useEffect(() => { saveMessages(messages) }, [messages])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
 
+  /* data */
   const { data: settings, isLoading: settingsLoading } = useQuery({
-    queryKey: ['ai-settings'],
-    queryFn: aiAssistantApi.getSettings,
+    queryKey: ['ai-settings'], queryFn: aiAssistantApi.getSettings,
+  })
+  const { data: stats, dataUpdatedAt, refetch: refetchStats } = useQuery({
+    queryKey: ['monitor-stats'], queryFn: () => monitorApi.getStats(),
+    refetchInterval: 30_000,
+  })
+  const { data: eventsData } = useQuery({
+    queryKey: ['ai-events'],
+    queryFn: () => monitorApi.getEvents({ limit: 6, severity: 'critical,warning', hours: 24 }),
+    refetchInterval: 30_000,
   })
 
+  const lastUpdate = useMemo(() => {
+    if (!dataUpdatedAt) return '—'
+    const sec = Math.floor((Date.now() - dataUpdatedAt) / 1000)
+    if (sec < 60) return `${sec}s önce`
+    return `${Math.floor(sec / 60)}dk önce`
+  }, [dataUpdatedAt, messages]) // refresh label on any render
+
+  /* chat */
   const chatMut = useMutation<import('@/api/aiAssistant').ChatResponse, Error, ChatMessage[]>({
-    mutationFn: (msgs) => aiAssistantApi.chat(msgs),
+    mutationFn: (msgs) => aiAssistantApi.chat(msgs, mode),
     onSuccess: (data) => {
       setMessages(prev => [...prev, {
-        id: nextId(),
-        role: 'assistant',
-        content: data.message,
-        provider: data.provider,
-        model: data.model,
+        id: nextId(), role: 'assistant',
+        content: data.message, provider: data.provider, model: data.model, mode,
       }])
     },
     onError: (err: any) => {
       const detail = err?.response?.data?.detail || 'Bilinmeyen hata'
-      setMessages(prev => [...prev, {
-        id: nextId(),
-        role: 'assistant',
-        content: `Hata: ${detail}`,
-        error: true,
-      }])
+      setMessages(prev => [...prev, { id: nextId(), role: 'assistant', content: `Hata: ${detail}`, error: true }])
     },
   })
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, chatMut.isPending])
 
   const send = (text?: string) => {
     const content = (text ?? input).trim()
     if (!content || chatMut.isPending) return
-    const newMsg: DisplayMessage = { id: nextId(), role: 'user', content }
+    const newMsg: DisplayMessage = { id: nextId(), role: 'user', content, mode }
     const allMsgs = [...messages, newMsg]
     setMessages(allMsgs)
     setInput('')
-    const apiMsgs: ChatMessage[] = allMsgs
-      .filter(m => !m.error)
-      .map(m => ({ role: m.role, content: m.content }))
-    chatMut.mutate(apiMsgs)
+    chatMut.mutate(allMsgs.filter(m => !m.error).map(m => ({ role: m.role, content: m.content })))
   }
 
   const copyMsg = (msg: DisplayMessage) => {
@@ -218,162 +266,279 @@ export default function AIAssistantPage() {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const isConfigured = settings?.active_provider && (
-    (settings.active_provider === 'ollama') ||
-    (settings.active_provider === 'claude' && settings.claude_configured) ||
-    (settings.active_provider === 'openai' && settings.openai_configured) ||
-    (settings.active_provider === 'gemini' && settings.gemini_configured)
-  )
+  const clearChat = () => { setMessages([]); localStorage.removeItem(STORAGE_KEY) }
 
-  const providerColor = settings?.active_provider
-    ? (PROVIDER_COLORS[settings.active_provider] ?? '#64748b') : '#64748b'
-  const providerLabel = settings?.active_provider
-    ? (PROVIDER_LABELS[settings.active_provider] ?? settings.active_provider) : null
+  const isConfigured = settings?.active_provider && (
+    settings.active_provider === 'ollama' ||
+    (settings.active_provider === 'claude'  && settings.claude_configured) ||
+    (settings.active_provider === 'openai'  && settings.openai_configured) ||
+    (settings.active_provider === 'gemini'  && settings.gemini_configured)
+  )
+  const providerColor = settings?.active_provider ? (PROVIDER_COLORS[settings.active_provider] ?? '#64748b') : '#64748b'
+  const providerLabel = settings?.active_provider ? (PROVIDER_LABELS[settings.active_provider] ?? settings.active_provider) : null
+  const currentMode   = MODES.find(m => m.key === mode)!
+
+  const offline  = stats?.devices.offline ?? 0
+  const online   = stats?.devices.online ?? 0
+  const total    = stats?.devices.total ?? 0
+  const unacked  = stats?.events_24h.unacknowledged ?? 0
+  const health   = stats?.health_score ?? 0
+  const healthColor = health >= 80 ? '#22c55e' : health >= 50 ? '#f59e0b' : '#ef4444'
+
+  const suggested = SUGGESTED[mode]
 
   return (
-    <div style={{
-      display: 'flex', height: '100vh', background: C.bg, overflow: 'hidden',
-    }}>
-      {/* Left sidebar — suggested questions */}
-      <div style={{
-        width: 200, flexShrink: 0, background: C.sidebar,
-        borderRight: `1px solid ${C.border}`,
-        display: 'flex', flexDirection: 'column', padding: '16px 12px', gap: 8,
-        overflowY: 'auto',
-      }}>
-        <div style={{ color: C.muted, fontSize: 11, fontWeight: 600, letterSpacing: '0.07em', marginBottom: 4 }}>
-          HAZIR SORULAR
-        </div>
-        {SUGGESTED.map(s => (
-          <button
-            key={s.label}
-            onClick={() => send(s.q)}
-            disabled={chatMut.isPending}
-            style={{
-              background: 'transparent',
-              border: `1px solid ${C.border}`,
-              borderRadius: 8,
-              padding: '8px 10px',
-              cursor: chatMut.isPending ? 'not-allowed' : 'pointer',
-              textAlign: 'left',
-              color: C.text,
-              fontSize: 12,
-              lineHeight: 1.4,
-              transition: 'all 0.15s',
-              opacity: chatMut.isPending ? 0.5 : 1,
-            }}
-            onMouseEnter={e => {
-              if (!chatMut.isPending)
-                (e.currentTarget as HTMLElement).style.background = isDark ? '#0e1e38' : '#eff6ff'
-            }}
-            onMouseLeave={e => {
-              (e.currentTarget as HTMLElement).style.background = 'transparent'
-            }}
-          >
-            <span style={{ fontSize: 14 }}>{s.icon}</span>
-            <span style={{ marginLeft: 6, fontWeight: 500 }}>{s.label}</span>
-            <div style={{ color: C.muted, fontSize: 11, marginTop: 2 }}>
-              {s.q.length > 48 ? s.q.slice(0, 48) + '…' : s.q}
-            </div>
-          </button>
-        ))}
-      </div>
+    <div style={{ display: 'flex', height: '100vh', background: C.bg, overflow: 'hidden' }}>
 
-      {/* Main chat area */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Header */}
+      {/* ── LEFT PANEL ─────────────────────────────────────────────────── */}
+      <div style={{
+        width: 230, flexShrink: 0, background: C.panel,
+        borderRight: `1px solid ${C.border}`,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* header */}
         <div style={{
-          flexShrink: 0, padding: '12px 20px',
-          borderBottom: `1px solid ${C.border}`,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          background: C.card,
+          padding: '14px 14px 10px', borderBottom: `1px solid ${C.border}`, flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: 8,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: 10,
-              background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <RobotOutlined style={{ color: '#fff', fontSize: 16 }} />
+          <div style={{
+            width: 28, height: 28, borderRadius: 8,
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+          }}>
+            <RobotOutlined style={{ color: '#fff', fontSize: 13 }} />
+          </div>
+          <div>
+            <div style={{ color: C.text, fontWeight: 700, fontSize: 13 }}>AI Asistanı</div>
+            <div style={{ fontSize: 10, color: providerColor }}>
+              {providerLabel ? `● ${providerLabel} Pro aktif` : '● Yapılandırılmamış'}
             </div>
-            <div>
-              <div style={{ color: C.text, fontWeight: 700, fontSize: 15 }}>AI Ağ Asistanı</div>
-              <div style={{ color: C.muted, fontSize: 11 }}>
-                {providerLabel
-                  ? <><span style={{ color: providerColor }}>● </span>{providerLabel} aktif</>
-                  : 'Sağlayıcı yapılandırılmamış'}
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* CANLI İÇGÖRÜLER */}
+          <div>
+            <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+              CANLI İÇGÖRÜLER
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {[
+                { val: offline, label: 'Cihaz Offline', color: offline > 0 ? '#ef4444' : '#22c55e', icon: '📡' },
+                { val: unacked, label: 'Aktif Uyarı',   color: unacked > 0 ? '#f59e0b' : '#22c55e', icon: '⚠️' },
+                { val: online,  label: 'Online Cihaz',  color: '#22c55e',                             icon: '✅' },
+              ].map(item => (
+                <div key={item.label} style={{
+                  background: C.card, border: `1px solid ${C.border}`,
+                  borderRadius: 8, padding: '6px 10px',
+                  display: 'flex', alignItems: 'center', gap: 8,
+                }}>
+                  <div style={{
+                    fontSize: 18, fontWeight: 800, color: item.color, minWidth: 28, lineHeight: 1,
+                  }}>{item.val}</div>
+                  <div style={{ fontSize: 11, color: C.muted, lineHeight: 1.3 }}>{item.label}</div>
+                </div>
+              ))}
+              {/* health score */}
+              <div style={{
+                background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: '6px 10px',
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <span style={{ fontSize: 11, color: C.muted }}>Ağ Sağlığı</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: healthColor }}>{health}/100</span>
+                </div>
+                <div style={{ background: C.border, borderRadius: 4, height: 4, overflow: 'hidden' }}>
+                  <div style={{ background: healthColor, width: `${health}%`, height: '100%', transition: 'width 1s' }} />
+                </div>
               </div>
             </div>
           </div>
-          <Space>
+
+          {/* AKTİF OLAYLAR */}
+          <div>
+            <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+              AKTİF OLAYLAR
+            </div>
+            {eventsData?.items.length ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {eventsData.items.slice(0, 5).map(ev => (
+                  <div key={ev.id} style={{
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 6, padding: '5px 8px',
+                    borderLeft: `2px solid ${SEV_COLOR[ev.severity] ?? '#64748b'}`,
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: 10, fontWeight: 600, color: SEV_COLOR[ev.severity] }}>
+                        {SEV_LABEL[ev.severity] ?? ev.severity}
+                      </span>
+                      {!ev.acknowledged && (
+                        <div style={{ width: 5, height: 5, borderRadius: '50%', background: '#ef4444' }} />
+                      )}
+                    </div>
+                    <div style={{ fontSize: 11, color: C.text, marginTop: 1, lineHeight: 1.3 }}>
+                      {ev.title.length > 36 ? ev.title.slice(0, 36) + '…' : ev.title}
+                    </div>
+                    {ev.device_hostname && (
+                      <div style={{ fontSize: 10, color: C.muted, marginTop: 1 }}>{ev.device_hostname}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ color: C.muted, fontSize: 11, textAlign: 'center', padding: '8px 0' }}>
+                Aktif olay yok ✓
+              </div>
+            )}
+          </div>
+
+          {/* ÖNERİLEN SORULAR */}
+          <div>
+            <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+              ÖNERİLEN SORULAR
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+              {suggested.map(s => (
+                <button
+                  key={s.label}
+                  onClick={() => send(s.q)}
+                  disabled={chatMut.isPending}
+                  style={{
+                    background: 'transparent', border: `1px solid ${C.border}`,
+                    borderRadius: 6, padding: '5px 8px', cursor: chatMut.isPending ? 'not-allowed' : 'pointer',
+                    textAlign: 'left', color: C.text, fontSize: 11,
+                    transition: 'all 0.12s', opacity: chatMut.isPending ? 0.5 : 1,
+                    display: 'flex', alignItems: 'center', gap: 4,
+                  }}
+                  onMouseEnter={e => { if (!chatMut.isPending) (e.currentTarget as HTMLElement).style.background = isDark ? '#0e1e38' : '#eff6ff' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                >
+                  <span>›</span>
+                  <span>{s.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* KAYDEDİLEN SORGULAR */}
+          {messages.filter(m => m.role === 'user').length > 0 && (
+            <div>
+              <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+                KAYDEDİLEN SORGULAR
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {[...new Set(messages.filter(m => m.role === 'user').map(m => m.content))].slice(-5).reverse().map(q => (
+                  <button
+                    key={q}
+                    onClick={() => send(q)}
+                    disabled={chatMut.isPending}
+                    style={{
+                      background: 'transparent', border: `1px solid ${C.border}`,
+                      borderRadius: 6, padding: '5px 8px', cursor: chatMut.isPending ? 'not-allowed' : 'pointer',
+                      textAlign: 'left', color: C.muted, fontSize: 10,
+                      opacity: chatMut.isPending ? 0.5 : 1,
+                    }}
+                  >
+                    {q.length > 42 ? q.slice(0, 42) + '…' : q}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── CENTER ─────────────────────────────────────────────────────── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+        {/* top bar */}
+        <div style={{
+          flexShrink: 0, padding: '10px 20px',
+          borderBottom: `1px solid ${C.border}`,
+          background: C.panel,
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          {/* mode tabs */}
+          <div style={{ display: 'flex', gap: 4, background: C.card, borderRadius: 10, padding: 3 }}>
+            {MODES.map(m => (
+              <button
+                key={m.key}
+                onClick={() => setMode(m.key)}
+                style={{
+                  background: mode === m.key ? m.color : 'transparent',
+                  border: 'none', borderRadius: 7, padding: '5px 12px',
+                  cursor: 'pointer', color: mode === m.key ? '#fff' : C.muted,
+                  fontSize: 12, fontWeight: mode === m.key ? 600 : 400,
+                  transition: 'all 0.15s', display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                <span>{m.icon}</span>
+                <span>{m.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {/* data status */}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 11, color: C.muted }}>Son güncelleme: {lastUpdate}</span>
+            <Tooltip title="Veriyi yenile">
+              <Button
+                type="text" size="small"
+                icon={<ReloadOutlined style={{ fontSize: 11 }} />}
+                onClick={() => refetchStats()}
+                style={{ color: C.muted, padding: '0 4px' }}
+              />
+            </Tooltip>
             {messages.length > 0 && (
               <Tooltip title="Geçmişi temizle">
-                <Button
-                  icon={<ClearOutlined />}
-                  size="small"
-                  onClick={() => { setMessages([]); localStorage.removeItem(STORAGE_KEY) }}
-                />
+                <Button type="text" size="small" icon={<ClearOutlined style={{ fontSize: 11 }} />}
+                  onClick={clearChat} style={{ color: C.muted, padding: '0 4px' }} />
               </Tooltip>
             )}
-            <Button
-              size="small"
-              icon={<ThunderboltOutlined />}
-              onClick={() => navigate('/settings?tab=ai')}
-            >
-              Ayarlar
-            </Button>
-          </Space>
+            <Tooltip title="AI Ayarları">
+              <Button type="text" size="small" icon={<ThunderboltOutlined style={{ fontSize: 11 }} />}
+                onClick={() => navigate('/settings?tab=ai')} style={{ color: C.muted, padding: '0 4px' }} />
+            </Tooltip>
+          </div>
         </div>
 
-        {/* Body */}
+        {/* messages */}
         {settingsLoading ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Spin />
           </div>
         ) : !isConfigured ? (
-          <div style={{
-            flex: 1, display: 'flex', flexDirection: 'column',
-            alignItems: 'center', justifyContent: 'center', gap: 16,
-          }}>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
             <Empty
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={<span style={{ color: C.muted }}>AI asistanı kullanmak için önce bir sağlayıcı yapılandırın.</span>}
             />
-            <Button type="primary" onClick={() => navigate('/settings?tab=ai')}>
-              Sağlayıcı Ayarla
-            </Button>
+            <Button type="primary" onClick={() => navigate('/settings?tab=ai')}>Sağlayıcı Ayarla</Button>
           </div>
         ) : (
           <>
-            {/* Messages */}
-            <div style={{
-              flex: 1, overflowY: 'auto', padding: '16px 24px',
-              display: 'flex', flexDirection: 'column', gap: 16,
-            }}>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
               {messages.length === 0 && (
                 <div style={{
                   flex: 1, display: 'flex', flexDirection: 'column',
                   alignItems: 'center', justifyContent: 'center',
-                  color: C.muted, fontSize: 13, gap: 8, paddingTop: 60,
+                  color: C.muted, gap: 10, paddingTop: 80,
                 }}>
-                  <RobotOutlined style={{ fontSize: 40, opacity: 0.3 }} />
-                  <div>Ağınız hakkında bir soru sorun</div>
-                  <div style={{ fontSize: 11 }}>Sol paneldeki hazır sorulardan seçebilirsiniz</div>
+                  <span style={{ fontSize: 40 }}>{currentMode.icon}</span>
+                  <div style={{ fontWeight: 600, color: C.text }}>{currentMode.label} Modu</div>
+                  <div style={{ fontSize: 12 }}>Soldan bir soru seçin veya yazın</div>
                 </div>
               )}
 
-              {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  style={{
-                    display: 'flex',
-                    flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
-                    gap: 10,
-                    alignItems: 'flex-start',
-                  }}
-                >
+              {messages.map(msg => (
+                <div key={msg.id} style={{
+                  display: 'flex',
+                  flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                  gap: 10, alignItems: 'flex-start',
+                }}>
                   <Avatar
-                    size={32}
+                    size={34}
                     style={{
                       background: msg.role === 'user'
                         ? (isDark ? '#1d4ed8' : '#3b82f6')
@@ -382,35 +547,38 @@ export default function AIAssistantPage() {
                     }}
                     icon={msg.role === 'user' ? <UserOutlined /> : <RobotOutlined />}
                   />
-
-                  <div style={{ maxWidth: '78%' }}>
+                  <div style={{ maxWidth: '80%' }}>
+                    {msg.mode && msg.role === 'assistant' && (
+                      <div style={{ marginBottom: 4 }}>
+                        <Tag style={{
+                          fontSize: 10, lineHeight: '16px', padding: '0 6px',
+                          background: `${MODES.find(m => m.key === msg.mode)?.color ?? C.accent}22`,
+                          border: `1px solid ${MODES.find(m => m.key === msg.mode)?.color ?? C.accent}44`,
+                          color: MODES.find(m => m.key === msg.mode)?.color ?? C.accent,
+                          borderRadius: 4,
+                        }}>
+                          {MODES.find(m => m.key === msg.mode)?.icon} {MODES.find(m => m.key === msg.mode)?.label}
+                        </Tag>
+                      </div>
+                    )}
                     <div style={{
-                      background: msg.role === 'user'
-                        ? C.userBg
-                        : (msg.error ? C.errBg : C.card),
+                      background: msg.role === 'user' ? C.userBg : (msg.error ? C.errBg : C.panel),
                       border: `1px solid ${msg.role === 'user' ? 'transparent' : (msg.error ? '#f87171' : C.border)}`,
-                      borderRadius: msg.role === 'user' ? '18px 4px 18px 18px' : '4px 18px 18px 18px',
+                      borderRadius: msg.role === 'user' ? '16px 4px 16px 16px' : '4px 16px 16px 16px',
                       padding: '10px 14px',
                       color: msg.role === 'user' ? C.userText : C.text,
                       fontSize: 13,
-                      boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 1px 4px rgba(0,0,0,0.06)',
+                      boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.25)' : '0 1px 4px rgba(0,0,0,0.06)',
                     }}>
-                      {msg.role === 'user' ? (
-                        <span style={{ lineHeight: 1.6 }}>{msg.content}</span>
-                      ) : (
-                        <div style={{ lineHeight: 1.6 }}>
-                          <MarkdownContent content={msg.content} isDark={isDark} C={C} />
-                        </div>
-                      )}
+                      {msg.role === 'user'
+                        ? <span style={{ lineHeight: 1.6 }}>{msg.content}</span>
+                        : <MdContent content={msg.content} isDark={isDark} C={C} />
+                      }
                     </div>
-
-                    {/* Footer: provider tag + copy button */}
                     <div style={{
-                      display: 'flex',
+                      display: 'flex', gap: 6, marginTop: 4,
                       justifyContent: msg.role === 'user' ? 'flex-end' : 'flex-start',
                       alignItems: 'center',
-                      gap: 6,
-                      marginTop: 4,
                     }}>
                       {msg.provider && (
                         <span style={{ fontSize: 10, color: C.muted }}>
@@ -420,12 +588,12 @@ export default function AIAssistantPage() {
                       )}
                       {msg.role === 'assistant' && !msg.error && (
                         <Tooltip title={copiedId === msg.id ? 'Kopyalandı!' : 'Kopyala'}>
-                          <Button
-                            type="text"
-                            size="small"
-                            icon={copiedId === msg.id ? <CheckOutlined style={{ color: '#22c55e' }} /> : <CopyOutlined />}
+                          <Button type="text" size="small"
+                            icon={copiedId === msg.id
+                              ? <CheckOutlined style={{ color: '#22c55e', fontSize: 11 }} />
+                              : <CopyOutlined style={{ fontSize: 11 }} />}
                             onClick={() => copyMsg(msg)}
-                            style={{ color: C.muted, padding: '0 4px', height: 18, fontSize: 11 }}
+                            style={{ color: C.muted, padding: '0 4px', height: 18 }}
                           />
                         </Tooltip>
                       )}
@@ -436,63 +604,153 @@ export default function AIAssistantPage() {
 
               {chatMut.isPending && (
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <Avatar size={32} style={{ background: '#6366f1', flexShrink: 0 }} icon={<RobotOutlined />} />
+                  <Avatar size={34} style={{ background: '#6366f1', flexShrink: 0 }} icon={<RobotOutlined />} />
                   <div style={{
-                    background: C.card, border: `1px solid ${C.border}`,
-                    borderRadius: '4px 18px 18px 18px', padding: '12px 16px',
+                    background: C.panel, border: `1px solid ${C.border}`,
+                    borderRadius: '4px 16px 16px 16px', padding: '10px 16px',
                     display: 'flex', alignItems: 'center', gap: 8,
-                    boxShadow: isDark ? '0 2px 8px rgba(0,0,0,0.3)' : '0 1px 4px rgba(0,0,0,0.06)',
                   }}>
                     <Spin size="small" />
                     <span style={{ color: C.muted, fontSize: 12 }}>Yanıt hazırlanıyor…</span>
                   </div>
                 </div>
               )}
-
               <div ref={bottomRef} />
             </div>
 
-            {/* Input */}
-            <div style={{
-              flexShrink: 0,
-              padding: '12px 24px 16px',
-              borderTop: `1px solid ${C.border}`,
-              background: C.card,
-            }}>
+            {/* input */}
+            <div style={{ flexShrink: 0, padding: '10px 24px 14px', borderTop: `1px solid ${C.border}`, background: C.panel }}>
               <div style={{
-                display: 'flex', gap: 10, alignItems: 'flex-end',
+                display: 'flex', gap: 8, alignItems: 'flex-end',
                 background: isDark ? '#0a1628' : '#f8fafc',
-                border: `1px solid ${C.border}`,
-                borderRadius: 12, padding: '8px 12px',
+                border: `1px solid ${C.border}`, borderRadius: 12, padding: '8px 10px',
               }}>
                 <Input.TextArea
                   value={input}
                   onChange={e => setInput(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
-                  }}
-                  placeholder="Ağınız hakkında bir soru sorun… (Enter gönderin, Shift+Enter satır ekler)"
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+                  placeholder={`${currentMode.icon} ${currentMode.label} modunda soru sorun… (Enter gönderin, Shift+Enter satır ekler)`}
                   autoSize={{ minRows: 1, maxRows: 6 }}
-                  style={{
-                    border: 'none', boxShadow: 'none', resize: 'none',
-                    background: 'transparent', color: C.text, flex: 1, fontSize: 13,
-                  }}
+                  style={{ border: 'none', boxShadow: 'none', resize: 'none', background: 'transparent', color: C.text, flex: 1, fontSize: 13 }}
                 />
-                <Button
-                  type="primary"
-                  icon={<SendOutlined />}
-                  onClick={() => send()}
-                  loading={chatMut.isPending}
-                  disabled={!input.trim()}
-                  style={{ borderRadius: 8, flexShrink: 0, height: 34 }}
+                <Button type="primary" icon={<SendOutlined />} onClick={() => send()}
+                  loading={chatMut.isPending} disabled={!input.trim()}
+                  style={{
+                    borderRadius: 8, flexShrink: 0, height: 34,
+                    background: currentMode.color, borderColor: currentMode.color,
+                  }}
                 />
               </div>
-              <div style={{ color: C.muted, fontSize: 10, marginTop: 6, textAlign: 'center' }}>
+              <div style={{ color: C.muted, fontSize: 10, marginTop: 5, textAlign: 'center' }}>
                 AI yanıtları hatalı olabilir. Kritik kararlar için doğrulayın.
               </div>
             </div>
           </>
         )}
+      </div>
+
+      {/* ── RIGHT PANEL ────────────────────────────────────────────────── */}
+      <div style={{
+        width: 240, flexShrink: 0, background: C.panel,
+        borderLeft: `1px solid ${C.border}`,
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        <div style={{ padding: '14px 14px 10px', borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
+          <div style={{ color: C.text, fontWeight: 700, fontSize: 13 }}>Aksiyon Merkezi</div>
+          <div style={{ color: C.muted, fontSize: 10, marginTop: 1 }}>Hızlı erişim ve yönlendirme</div>
+        </div>
+
+        <div style={{ flex: 1, overflowY: 'auto', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+
+          {/* HIZLI AKSİYONLAR */}
+          <div>
+            <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+              HIZLI AKSİYONLAR
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {QUICK_ACTIONS.map(a => (
+                <button
+                  key={a.path}
+                  onClick={() => navigate(a.path)}
+                  style={{
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 8, padding: '7px 10px', cursor: 'pointer',
+                    textAlign: 'left', transition: 'all 0.12s',
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = a.color; (e.currentTarget as HTMLElement).style.background = `${a.color}15` }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = C.border; (e.currentTarget as HTMLElement).style.background = C.card }}
+                >
+                  <div style={{
+                    width: 28, height: 28, borderRadius: 7,
+                    background: `${a.color}20`, color: a.color,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 14, flexShrink: 0,
+                  }}>{a.icon}</div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{a.label}</div>
+                    <div style={{ fontSize: 10, color: C.muted }}>{a.sub}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* KONTEXT BİLGİLERİ */}
+          <div>
+            <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+              KONTEXT BİLGİLERİ
+            </div>
+            <div style={{
+              background: C.card, border: `1px solid ${C.border}`,
+              borderRadius: 8, padding: '8px 10px',
+            }}>
+              {[
+                { label: 'Toplam Cihaz',    val: total },
+                { label: 'Online',           val: online,  color: '#22c55e' },
+                { label: 'Offline',          val: offline, color: offline > 0 ? '#ef4444' : C.muted },
+                { label: 'Olay Sayısı (24s)', val: stats?.events_24h.total ?? '—' },
+                { label: 'Ağ Sağlığı',       val: `${health}/100`, color: healthColor },
+                { label: 'Topoloji Bağlantı', val: stats?.topology.links ?? '—' },
+              ].map(row => (
+                <div key={row.label} style={{
+                  display: 'flex', justifyContent: 'space-between',
+                  padding: '4px 0', borderBottom: `1px solid ${C.border}`,
+                  fontSize: 11,
+                }}>
+                  <span style={{ color: C.muted }}>{row.label}</span>
+                  <span style={{ fontWeight: 600, color: (row as any).color ?? C.text }}>{row.val}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ONAY & GÜVENLİK */}
+          <div>
+            <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 6 }}>
+              ONAY & GÜVENLİK
+            </div>
+            <div style={{
+              background: isDark ? '#1c1107' : '#fffbeb',
+              border: `1px solid ${isDark ? '#78350f' : '#fde68a'}`,
+              borderRadius: 8, padding: '8px 10px', fontSize: 11,
+              color: isDark ? '#fcd34d' : '#92400e',
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 3 }}>⚠️ Kritik Aksiyonlar</div>
+              <div style={{ lineHeight: 1.5 }}>Playbook çalıştırma ve config değişiklikleri onay gerektirir.</div>
+              <button
+                onClick={() => navigate('/approvals')}
+                style={{
+                  marginTop: 6, width: '100%', background: '#f59e0b', border: 'none',
+                  borderRadius: 6, padding: '5px 0', cursor: 'pointer',
+                  color: '#fff', fontSize: 11, fontWeight: 600,
+                }}
+              >
+                Onayları Görüntüle
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   )
