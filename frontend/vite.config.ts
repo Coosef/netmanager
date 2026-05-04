@@ -20,6 +20,19 @@ export default defineConfig({
         ws: true,
         proxyTimeout: 180000,
         timeout: 180000,
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq, req) => {
+            // Forward real client IP so audit logs record the actual WAN address
+            const existingFwd = req.headers['x-forwarded-for'] as string | undefined
+            const realIp = existingFwd
+              ? existingFwd.split(',')[0].trim()
+              : (req.socket.remoteAddress || '').replace(/^::ffff:/, '')
+            if (realIp) {
+              proxyReq.setHeader('X-Forwarded-For', realIp)
+              proxyReq.setHeader('X-Real-IP', realIp)
+            }
+          })
+        },
       },
       '/ws': {
         target: process.env.VITE_WS_URL || 'ws://localhost:8000',
