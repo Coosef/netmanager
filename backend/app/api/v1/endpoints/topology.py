@@ -3,7 +3,7 @@ from sqlalchemy import select, func, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.core.redis_client import get_json, set_json
 from app.core.security import encrypt_credential, decrypt_credential
 from app.models.device import Device
@@ -68,19 +68,29 @@ async def get_topology_graph(
     group_id: int = Query(None),
     site: str = Query(None),
     refresh: bool = Query(False),
+    location_filter: LocationNameFilter = None,
 ):
     """Return React Flow compatible graph. Cached in Redis for 5 minutes."""
+    effective_sites: list[str] | None = None
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {"nodes": [], "edges": []}
+        effective_sites = eff
+        site = None
+
     cache_key = f"topology:graph:{group_id or 'all'}:{site or 'all'}"
 
     if not refresh:
         cached = await get_json(cache_key)
-        if cached:
+        if cached and effective_sites is None:
             return cached
 
     svc = TopologyService(ssh_manager)
-    graph = await svc.build_graph(db, group_id, site=site)
+    graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites)
 
-    await set_json(cache_key, graph, ttl=300)
+    if effective_sites is None:
+        await set_json(cache_key, graph, ttl=300)
     return graph
 
 

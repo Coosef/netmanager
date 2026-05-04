@@ -534,7 +534,13 @@ class TopologyService:
         if updated:
             await db.commit()
 
-    async def build_graph(self, db: AsyncSession, group_id: int | None = None, site: str | None = None) -> dict:
+    async def build_graph(
+        self,
+        db: AsyncSession,
+        group_id: int | None = None,
+        site: str | None = None,
+        sites: list[str] | None = None,
+    ) -> dict:
         """Build React Flow compatible graph from topology_links."""
         # Opportunistically re-link any ghost nodes that are now in inventory
         await self._rematch_ghost_links(db)
@@ -543,7 +549,9 @@ class TopologyService:
         device_query = select(Device).where(Device.is_active == True)
         if group_id:
             device_query = device_query.where(Device.group_id == group_id)
-        if site:
+        if sites is not None:
+            device_query = device_query.where(Device.site.in_(sites))
+        elif site:
             device_query = device_query.where(Device.site == site)
         devices_result = await db.execute(device_query)
         devices: list[Device] = devices_result.scalars().all()
