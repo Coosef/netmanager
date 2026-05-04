@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.security import encrypt_credential, decrypt_credential_safe
 from app.models.ai_settings import AISettings
-from app.api.v1.endpoints.auth import get_current_user
+from app.core.deps import get_current_user
 from app.services import ai_service
 
 router = APIRouter()
