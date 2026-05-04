@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Button, Input, Spin, Empty, Avatar, Tooltip, Tag } from 'antd'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import {
   SendOutlined, RobotOutlined, UserOutlined, ClearOutlined,
   ThunderboltOutlined, CopyOutlined, CheckOutlined,
@@ -203,6 +204,7 @@ export default function AIAssistantPage() {
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const navigate = useNavigate()
+  const isMobile = useIsMobile()
 
   const [input, setInput]       = useState('')
   const [mode, setMode]         = useState<Mode>('analyze')
@@ -287,17 +289,20 @@ export default function AIAssistantPage() {
 
   const suggested = SUGGESTED[mode]
 
+  const contentPadH = isMobile ? 14 : 24
+  const contentPadV = isMobile ? 12 : 20
+
   return (
     <div style={{
       display: 'flex',
-      height: 'calc(100vh - 60px)',
-      margin: '-20px -24px',
+      height: `calc(100vh - 60px)`,
+      margin: `-${contentPadV}px -${contentPadH}px`,
       background: C.bg,
       overflow: 'hidden',
     }}>
 
       {/* ── LEFT PANEL ─────────────────────────────────────────────────── */}
-      <div style={{
+      {!isMobile && <div style={{
         width: 230, flexShrink: 0, background: C.panel,
         borderRight: `1px solid ${C.border}`,
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -453,7 +458,7 @@ export default function AIAssistantPage() {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
       {/* ── CENTER ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -656,7 +661,7 @@ export default function AIAssistantPage() {
       </div>
 
       {/* ── RIGHT PANEL ────────────────────────────────────────────────── */}
-      <div style={{
+      {!isMobile && <div style={{
         width: 240, flexShrink: 0, background: C.panel,
         borderLeft: `1px solid ${C.border}`,
         display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -757,7 +762,7 @@ export default function AIAssistantPage() {
             </div>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

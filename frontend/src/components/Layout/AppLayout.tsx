@@ -6,6 +6,7 @@ import AppHeader from './Header'
 import GlobalSearchModal from './GlobalSearchModal'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAlarmWatcher } from '@/hooks/useAlarmWatcher'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 const { Content } = Layout
 
@@ -19,10 +20,15 @@ const LAYOUT_CSS = `
 export default function AppLayout() {
   const { isDark } = useTheme()
   const location = useLocation()
+  const isMobile = useIsMobile()
   const layoutBg = isDark ? '#030c1e' : '#f1f5f9'
   const [searchOpen, setSearchOpen] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   useAlarmWatcher()
+
+  // close mobile nav on route change
+  useEffect(() => { setMobileNavOpen(false) }, [location.pathname])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -38,11 +44,17 @@ export default function AppLayout() {
   return (
     <Layout style={{ minHeight: '100vh', background: layoutBg }}>
       <style>{LAYOUT_CSS}</style>
-      <Sidebar />
+      <Sidebar
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
+      />
       <Layout style={{ background: layoutBg }}>
-        <AppHeader onOpenSearch={() => setSearchOpen(true)} />
+        <AppHeader
+          onOpenSearch={() => setSearchOpen(true)}
+          onOpenMobileNav={() => setMobileNavOpen(true)}
+        />
         <Content style={{
-          padding: '20px 24px',
+          padding: isMobile ? '12px 14px' : '20px 24px',
           minHeight: 'calc(100vh - 60px)',
           backgroundImage: isDark
             ? 'radial-gradient(circle, rgba(0,195,255,0.03) 1px, transparent 0)'

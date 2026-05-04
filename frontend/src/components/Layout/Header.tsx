@@ -5,9 +5,10 @@ import {
   BellOutlined, ReloadOutlined, SearchOutlined,
   SunOutlined, MoonOutlined, CheckOutlined,
   WarningOutlined, CloseCircleOutlined, InfoCircleOutlined,
-  LaptopOutlined,
+  LaptopOutlined, MenuOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuthStore } from '@/store/auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
@@ -35,7 +36,7 @@ const HEADER_CSS = `
   }
 `
 
-export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void }) {
+export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSearch?: () => void; onOpenMobileNav?: () => void }) {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
@@ -45,6 +46,7 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
   const activeLocation = locations.find((l) => l.name === activeSite)
   const { message } = App.useApp()
   const { t } = useTranslation()
+  const isMobile = useIsMobile()
 
   const [notifOpen, setNotifOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
@@ -274,45 +276,70 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
         : '0 1px 4px rgba(0,0,0,0.06)',
     }}>
       <style>{HEADER_CSS}</style>
+
+      {/* Hamburger — mobile only */}
+      {isMobile && (
+        <Button
+          type="text"
+          icon={<MenuOutlined style={{ fontSize: 18, color: iconColor }} />}
+          onClick={onOpenMobileNav}
+          style={{ marginRight: 4, padding: '0 8px' }}
+        />
+      )}
+
       <div style={{ flex: 1 }} />
 
-      {/* Location selector */}
-      <Space size={6}>
-        <div style={{
-          width: 10, height: 10, borderRadius: '50%',
-          background: activeLocation?.color || (activeSite ? '#38bdf8' : iconColor),
-          flexShrink: 0,
-        }} />
-        <Select
-          value={activeSite ?? '__all__'}
-          onChange={(v) => {
-            const next = v === '__all__' ? null : v
-            setSite(next)
-            qc.invalidateQueries()
-          }}
-          loading={sitesLoading}
-          size="small"
-          style={{
-            width: 160,
-            background: activeSite ? (isDark ? '#0c2040' : '#e0f0ff') : 'transparent',
-            borderRadius: 6,
-          }}
-          popupMatchSelectWidth={false}
-          variant="borderless"
-        >
-          <Select.Option value="__all__">Tüm Lokasyonlar</Select.Option>
-          {locations.map((loc) => (
-            <Select.Option key={loc.name} value={loc.name}>
-              <Space size={6}>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: loc.color || '#3b82f6', flexShrink: 0, display: 'inline-block' }} />
-                {loc.name}
-              </Space>
-            </Select.Option>
-          ))}
-        </Select>
-      </Space>
+      {/* Location selector — hidden on mobile */}
+      {!isMobile && (
+        <Space size={6}>
+          <div style={{
+            width: 10, height: 10, borderRadius: '50%',
+            background: activeLocation?.color || (activeSite ? '#38bdf8' : iconColor),
+            flexShrink: 0,
+          }} />
+          <Select
+            value={activeSite ?? '__all__'}
+            onChange={(v) => {
+              const next = v === '__all__' ? null : v
+              setSite(next)
+              qc.invalidateQueries()
+            }}
+            loading={sitesLoading}
+            size="small"
+            style={{
+              width: 160,
+              background: activeSite ? (isDark ? '#0c2040' : '#e0f0ff') : 'transparent',
+              borderRadius: 6,
+            }}
+            popupMatchSelectWidth={false}
+            variant="borderless"
+          >
+            <Select.Option value="__all__">Tüm Lokasyonlar</Select.Option>
+            {locations.map((loc) => (
+              <Select.Option key={loc.name} value={loc.name}>
+                <Space size={6}>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: loc.color || '#3b82f6', flexShrink: 0, display: 'inline-block' }} />
+                  {loc.name}
+                </Space>
+              </Select.Option>
+            ))}
+          </Select>
+        </Space>
+      )}
 
-      <Popover
+      {/* Search — mobile shows icon button only, desktop shows full input */}
+      {isMobile ? (
+        <Tooltip title={t('header.search_placeholder')}>
+          <Button
+            type="text"
+            icon={<SearchOutlined style={{ color: iconColor, fontSize: 16 }} />}
+            onClick={onOpenSearch}
+            style={{ padding: '0 8px' }}
+          />
+        </Tooltip>
+      ) : null}
+
+      {!isMobile && <Popover
         open={searchOpen && search.trim().length >= 2}
         onOpenChange={(v) => { if (!v) setSearchOpen(false) }}
         placement="bottomLeft"
@@ -394,26 +421,30 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
             ) : undefined
           }
         />
-      </Popover>
+      </Popover>}
 
-      {/* Theme toggle */}
-      <Tooltip title={isDark ? t('header.theme_light') : t('header.theme_dark')}>
-        <Switch
-          checked={isDark}
-          onChange={toggle}
-          checkedChildren={<MoonOutlined />}
-          unCheckedChildren={<SunOutlined />}
-          size="small"
-          style={{ background: isDark ? '#334155' : '#e2e8f0' }}
-        />
-      </Tooltip>
+      {/* Theme toggle — hidden on mobile */}
+      {!isMobile && (
+        <Tooltip title={isDark ? t('header.theme_light') : t('header.theme_dark')}>
+          <Switch
+            checked={isDark}
+            onChange={toggle}
+            checkedChildren={<MoonOutlined />}
+            unCheckedChildren={<SunOutlined />}
+            size="small"
+            style={{ background: isDark ? '#334155' : '#e2e8f0' }}
+          />
+        </Tooltip>
+      )}
 
-      <Tooltip title={t('header.refresh_data')}>
-        <ReloadOutlined
-          style={{ color: iconColor, fontSize: 16, cursor: 'pointer' }}
-          onClick={() => { qc.invalidateQueries(); message.info(t('header.refreshed')) }}
-        />
-      </Tooltip>
+      {!isMobile && (
+        <Tooltip title={t('header.refresh_data')}>
+          <ReloadOutlined
+            style={{ color: iconColor, fontSize: 16, cursor: 'pointer' }}
+            onClick={() => { qc.invalidateQueries(); message.info(t('header.refreshed')) }}
+          />
+        </Tooltip>
+      )}
 
       <Popover
         content={notifContent}
@@ -442,14 +473,14 @@ export default function AppHeader({ onOpenSearch }: { onOpenSearch?: () => void 
           <Avatar size={30} style={{ background: ROLE_COLORS[user?.role || 'viewer'], fontSize: 13 }}>
             {user?.username?.[0]?.toUpperCase()}
           </Avatar>
-          <div style={{ lineHeight: 1.2 }}>
+          {!isMobile && <div style={{ lineHeight: 1.2 }}>
             <Typography.Text style={{ color: textColor, fontSize: 13, fontWeight: 600, display: 'block' }}>
               {user?.username}
             </Typography.Text>
             <Typography.Text style={{ color: subColor, fontSize: 11, display: 'block' }}>
               {user?.role}
             </Typography.Text>
-          </div>
+          </div>}
         </Space>
       </Dropdown>
     </Header>

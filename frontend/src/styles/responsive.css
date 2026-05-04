@@ -1,0 +1,58 @@
+/* ── Responsive utilities for NetManager ── */
+
+/* Tables: horizontal scroll on all viewports */
+.ant-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Mobile breakpoint */
+@media (max-width: 768px) {
+
+  /* Ant Design card padding */
+  .ant-card-body {
+    padding: 12px !important;
+  }
+
+  /* Stat / summary cards that use fixed min-width */
+  .ant-statistic-content-value {
+    font-size: 22px !important;
+  }
+
+  /* Page-level headings */
+  h1 { font-size: 18px !important; }
+  h2 { font-size: 16px !important; }
+
+  /* Ant grid: force 1 column on small screens */
+  .ant-row > .ant-col-xs-24,
+  .ant-row > [class*='ant-col-'] {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  /* Tooltip/popover: prevent overflow */
+  .ant-tooltip { max-width: 90vw !important; }
+
+  /* Drawer body full height */
+  .ant-drawer-body { padding: 0 !important; }
+
+  /* Modal: full width on mobile */
+  .ant-modal { max-width: 96vw !important; margin: 8px auto !important; }
+
+  /* Form: stacked labels */
+  .ant-form-item-label { padding-bottom: 2px; }
+
+  /* Hide text-only columns in tables on very small screens */
+  .hide-mobile { display: none !important; }
+
+  /* Buttons: larger tap targets */
+  .ant-btn { min-height: 36px; }
+
+  /* Input: comfortable size */
+  .ant-input, .ant-select-selector {
+    font-size: 16px !important; /* prevents iOS zoom on focus */
+  }
+
+  /* AI Assistant: override the viewport escape margin for mobile */
+  /* (uses different padding — 12px 14px — so offset must match) */
+}

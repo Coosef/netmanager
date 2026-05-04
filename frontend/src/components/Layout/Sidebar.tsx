@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layout, Badge, Tooltip } from 'antd'
+import { Layout, Badge, Tooltip, Drawer } from 'antd'
 import {
   DashboardOutlined, LaptopOutlined, ApartmentOutlined,
   RadarChartOutlined, AlertOutlined, PlayCircleOutlined,
@@ -9,6 +9,7 @@ import {
   SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
   HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
+  CloseOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -17,6 +18,7 @@ import { approvalsApi } from '@/api/approvals'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 const { Sider } = Layout
 
@@ -40,7 +42,12 @@ const SIDEBAR_CSS = `
   }
 `
 
-export default function Sidebar() {
+interface SidebarProps {
+  mobileOpen?: boolean
+  onMobileClose?: () => void
+}
+
+export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -48,6 +55,7 @@ export default function Sidebar() {
   const { t } = useTranslation()
   const { isSuperAdmin } = useAuthStore()
   const isSA = isSuperAdmin()
+  const isMobile = useIsMobile()
 
   const { data: stats } = useQuery({
     queryKey: ['monitor-stats'],
@@ -74,6 +82,8 @@ export default function Sidebar() {
   const activeItemBg = isDark ? '#1d4ed820' : '#eff6ff'
   const hoverItemBg = isDark ? '#0e1e38' : '#f8fafc'
   const trackBg = isDark ? '#0e1e38' : '#f1f5f9'
+
+  const isCollapsed = isMobile ? false : collapsed
 
   const NAV_GROUPS = [
     {
@@ -133,24 +143,10 @@ export default function Sidebar() {
     },
   ]
 
-  return (
-    <Sider
-      width={220}
-      collapsedWidth={64}
-      collapsed={collapsed}
-      onCollapse={setCollapsed}
-      style={{
-        background: siderBg,
-        borderRight: `1px solid ${borderColor}`,
-        overflow: 'hidden',
-        position: 'sticky',
-        top: 0,
-        height: '100vh',
-        boxShadow: isDark ? '4px 0 24px rgba(0,0,0,0.6), inset -1px 0 0 #3b82f610' : '1px 0 4px rgba(0,0,0,0.06)',
-      }}
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+  const navContent = (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: siderBg }}>
       <style>{SIDEBAR_CSS}</style>
+
       {/* Logo */}
       <div style={{
         height: 60,
@@ -170,11 +166,17 @@ export default function Sidebar() {
         }}>
           <WifiOutlined style={{ color: '#fff', fontSize: 16 }} />
         </div>
-        {!collapsed && (
-          <div>
+        {!isCollapsed && (
+          <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ color: textPrimary, fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>NetManager</div>
             <div style={{ color: textSecondary, fontSize: 10 }}>Universal Cloud Network Manager</div>
           </div>
+        )}
+        {isMobile && (
+          <CloseOutlined
+            onClick={onMobileClose}
+            style={{ color: textSecondary, fontSize: 16, cursor: 'pointer', flexShrink: 0 }}
+          />
         )}
       </div>
 
@@ -182,7 +184,7 @@ export default function Sidebar() {
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
         {NAV_GROUPS.map((group) => (
           <div key={group.label}>
-            {!collapsed && (
+            {!isCollapsed && (
               <div style={{
                 color: groupLabel, fontSize: 10, fontWeight: 600,
                 padding: '12px 20px 4px', letterSpacing: '0.08em',
@@ -202,20 +204,20 @@ export default function Sidebar() {
               const content = (
                 <div
                   key={item.key}
-                  onClick={() => navigate(item.key)}
+                  onClick={() => { navigate(item.key); if (isMobile) onMobileClose?.() }}
                   className={`side-item${isActive ? ' side-active' : ''}`}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: 10,
-                    padding: collapsed ? '10px 0' : '9px 12px 9px 20px',
+                    padding: isCollapsed ? '10px 0' : '9px 12px 9px 20px',
                     margin: '1px 8px',
                     borderRadius: 6,
                     cursor: 'pointer',
                     background: isActive ? activeItemBg : 'transparent',
                     borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent',
                     transition: 'all 0.15s',
-                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    justifyContent: isCollapsed ? 'center' : 'flex-start',
                   }}
                   onMouseEnter={(e) => {
                     if (!isActive) (e.currentTarget as HTMLElement).style.background = hoverItemBg
@@ -227,7 +229,7 @@ export default function Sidebar() {
                   <span style={{ color: isActive ? '#3b82f6' : textSecondary, fontSize: 16, flexShrink: 0 }}>
                     {item.icon}
                   </span>
-                  {!collapsed && (
+                  {!isCollapsed && (
                     <>
                       <span style={{ color: isActive ? textPrimary : textSecondary, fontSize: 13, flex: 1, fontWeight: isActive ? 600 : 400 }}>
                         {item.label}
@@ -240,7 +242,7 @@ export default function Sidebar() {
                 </div>
               )
 
-              return collapsed ? (
+              return isCollapsed ? (
                 <Tooltip key={item.key} title={item.label} placement="right">
                   {content}
                 </Tooltip>
@@ -251,7 +253,7 @@ export default function Sidebar() {
       </div>
 
       {/* System status */}
-      {!collapsed && (
+      {!isCollapsed && (
         <div style={{
           borderTop: `1px solid ${borderColor}`,
           padding: '12px 16px',
@@ -269,22 +271,58 @@ export default function Sidebar() {
         </div>
       )}
 
-      {/* Collapse toggle */}
-      <div
-        onClick={() => setCollapsed(!collapsed)}
-        style={{
-          borderTop: `1px solid ${borderColor}`,
-          padding: '12px',
-          display: 'flex',
-          justifyContent: collapsed ? 'center' : 'flex-end',
-          cursor: 'pointer',
-          color: textSecondary,
-          flexShrink: 0,
-        }}
+      {/* Collapse toggle — desktop only */}
+      {!isMobile && (
+        <div
+          onClick={() => setCollapsed(!collapsed)}
+          style={{
+            borderTop: `1px solid ${borderColor}`,
+            padding: '12px',
+            display: 'flex',
+            justifyContent: collapsed ? 'center' : 'flex-end',
+            cursor: 'pointer',
+            color: textSecondary,
+            flexShrink: 0,
+          }}
+        >
+          {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+        </div>
+      )}
+    </div>
+  )
+
+  if (isMobile) {
+    return (
+      <Drawer
+        open={mobileOpen}
+        onClose={onMobileClose}
+        placement="left"
+        width={260}
+        styles={{ body: { padding: 0, background: siderBg }, header: { display: 'none' } }}
+        style={{ zIndex: 1001 }}
       >
-        {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-      </div>
-      </div>
+        {navContent}
+      </Drawer>
+    )
+  }
+
+  return (
+    <Sider
+      width={220}
+      collapsedWidth={64}
+      collapsed={collapsed}
+      onCollapse={setCollapsed}
+      style={{
+        background: siderBg,
+        borderRight: `1px solid ${borderColor}`,
+        overflow: 'hidden',
+        position: 'sticky',
+        top: 0,
+        height: '100vh',
+        boxShadow: isDark ? '4px 0 24px rgba(0,0,0,0.6), inset -1px 0 0 #3b82f610' : '1px 0 4px rgba(0,0,0,0.06)',
+      }}
+    >
+      {navContent}
     </Sider>
   )
 }
