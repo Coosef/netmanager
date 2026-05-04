@@ -9,7 +9,7 @@ import {
   SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
   HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
-  CloseOutlined,
+  CloseOutlined, GlobalOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -162,6 +162,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     {
       label: t('nav_group.management'),
       items: [
+        ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as UserRole }] : []),
         { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },
         { key: '/users', icon: <TeamOutlined />, label: t('nav.users'), minRole: 'admin' },

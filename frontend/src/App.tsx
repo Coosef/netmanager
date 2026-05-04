@@ -51,6 +51,7 @@ import HelpPage from '@/pages/Help'
 import ServicesPage from '@/pages/Services'
 import TopologyTwinPage from '@/pages/TopologyTwin'
 import AIAssistantPage from '@/pages/AIAssistant'
+import SuperAdminPage from '@/pages/SuperAdmin'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -210,6 +211,7 @@ function ThemedApp() {
               <Route path="services" element={<RoleRoute minRole="org_viewer"><ServicesPage /></RoleRoute>} />
               <Route path="topology-twin" element={<RoleRoute minRole="location_manager"><TopologyTwinPage /></RoleRoute>} />
               <Route path="ai-assistant" element={<RoleRoute minRole="admin"><AIAssistantPage /></RoleRoute>} />
+              <Route path="superadmin" element={<RoleRoute minRole="super_admin"><SuperAdminPage /></RoleRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>
