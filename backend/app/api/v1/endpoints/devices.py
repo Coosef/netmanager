@@ -9,9 +9,10 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
 from app.core.security import encrypt_credential
 from app.models.user import UserRole
+from app.models.tenant import Tenant
 from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
 from app.models.device import Device, DeviceGroup
@@ -292,6 +293,7 @@ async def list_devices(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
     tenant_filter: TenantFilter = None,
+    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = 50,
     search: str = Query(None),
@@ -305,6 +307,20 @@ async def list_devices(
     query = select(Device).where(Device.is_active == True)
     if tenant_filter is not None:
         query = query.where(Device.tenant_id == tenant_filter)
+
+    # Location-scoped RBAC: restrict to accessible locations
+    if location_filter is not None:
+        if not location_filter:
+            # user has no assigned locations — return nothing
+            return {"total": 0, "items": [], "skip": skip, "limit": limit}
+        # If caller also passed explicit site filter, intersect
+        effective_sites = [location_filter] if isinstance(location_filter, str) else location_filter
+        if site:
+            effective_sites = [s for s in effective_sites if s == site]
+        if not effective_sites:
+            return {"total": 0, "items": [], "skip": skip, "limit": limit}
+        query = query.where(Device.site.in_(effective_sites))
+        site = None  # already applied
 
     if search:
         query = query.where(
@@ -352,6 +368,20 @@ async def create_device(
 ):
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    # SaaS quota: check tenant device limit
+    if current_user.tenant_id:
+        tenant = (await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))).scalar_one_or_none()
+        if tenant:
+            current_count = (await db.execute(
+                select(func.count()).select_from(Device)
+                .where(Device.tenant_id == current_user.tenant_id, Device.is_active == True)
+            )).scalar() or 0
+            if current_count >= tenant.max_devices:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Cihaz limiti doldu ({current_count}/{tenant.max_devices}). Plan yükseltmeniz gerekiyor.",
+                )
 
     existing = await db.execute(select(Device).where(Device.ip_address == payload.ip_address))
     if existing.scalar_one_or_none():

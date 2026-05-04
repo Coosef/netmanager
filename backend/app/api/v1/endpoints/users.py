@@ -72,6 +72,20 @@ async def create_user(
     else:
         tenant_id = payload.tenant_id
 
+    # SaaS quota: check tenant user limit
+    if tenant_id:
+        tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
+        if tenant:
+            current_count = (await db.execute(
+                select(func.count()).select_from(User)
+                .where(User.tenant_id == tenant_id, User.is_active == True)
+            )).scalar() or 0
+            if current_count >= tenant.max_users:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Kullanıcı limiti doldu ({current_count}/{tenant.max_users}). Plan yükseltmeniz gerekiyor.",
+                )
+
     existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")

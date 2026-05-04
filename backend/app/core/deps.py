@@ -92,6 +92,35 @@ async def get_accessible_location_ids(
     return [r[0] for r in rows]
 
 
+async def get_accessible_location_names(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Optional[list[str]]:
+    """
+    Like get_accessible_location_ids but returns location names (matching Device.site).
+    Returns None for unrestricted (super_admin / admin).
+    """
+    from app.models.location import Location
+    from app.models.user_location import UserLocation
+
+    if current_user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+        return None
+
+    if current_user.role == UserRole.ORG_VIEWER:
+        rows = (await db.execute(
+            select(Location.name).where(Location.tenant_id == current_user.tenant_id)
+        )).fetchall()
+        return [r[0] for r in rows]
+
+    rows = (await db.execute(
+        select(Location.name)
+        .join(UserLocation, Location.id == UserLocation.location_id)
+        .where(UserLocation.user_id == current_user.id)
+    )).fetchall()
+    return [r[0] for r in rows]
+
+
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 TenantFilter = Annotated[Optional[int], Depends(get_tenant_context)]
 LocationFilter = Annotated[Optional[list[int]], Depends(get_accessible_location_ids)]
+LocationNameFilter = Annotated[Optional[list[str]], Depends(get_accessible_location_names)]

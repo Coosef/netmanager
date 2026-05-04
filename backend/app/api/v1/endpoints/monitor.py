@@ -2,14 +2,14 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 _ISTANBUL = ZoneInfo("Europe/Istanbul")
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
@@ -22,6 +22,7 @@ router = APIRouter()
 async def list_events(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = 100,
     severity: Optional[str] = Query(None),
@@ -33,6 +34,21 @@ async def list_events(
 ):
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
+
+    # Location RBAC enforcement
+    effective_sites: Optional[list[str]] = location_filter  # None = unrestricted
+    if effective_sites is not None:
+        if site:
+            effective_sites = [s for s in effective_sites if s == site]
+            site = None
+        if not effective_sites:
+            return {"total": 0, "items": []}
+        site_ids_sq = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
+        q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
+    elif site:
+        site_ids_sq = select(Device.id).where(Device.site == site, Device.is_active == True)
+        q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
+        site = None
 
     if severity:
         q = q.where(NetworkEvent.severity == severity)
@@ -124,16 +140,32 @@ async def purge_noise_events(
 async def monitor_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     site: Optional[str] = Query(None),
 ):
     """Dashboard-level stats: health score, event counts, offline devices."""
     since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
     since_7d  = datetime.now(timezone.utc) - timedelta(days=7)
 
+    # Resolve effective sites for location RBAC
+    effective_sites: Optional[list[str]] = location_filter  # None = unrestricted
+    if effective_sites is not None and site:
+        effective_sites = [s for s in effective_sites if s == site]
+        site = None
+    elif effective_sites is None and site:
+        effective_sites = [site]
+        site = None
+
     # Device counts
     dev_q = select(Device).where(Device.is_active == True)
-    if site:
-        dev_q = dev_q.where(Device.site == site)
+    if effective_sites is not None:
+        if not effective_sites:
+            return {
+                "health_score": 100, "devices": {"total": 0, "online": 0, "offline": 0, "unknown": 0},
+                "events_24h": {"total": 0, "by_severity": {}, "by_type": {}, "unacknowledged": 0},
+                "backups": {"never": 0, "stale_7d": 0}, "topology": {"nodes": 0, "links": 0},
+            }
+        dev_q = dev_q.where(Device.site.in_(effective_sites))
     all_devices = (await db.execute(dev_q)).scalars().all()
     total = len(all_devices)
     online  = sum(1 for d in all_devices if d.status == "online")
@@ -141,7 +173,9 @@ async def monitor_stats(
     unknown = total - online - offline
 
     # Event counts last 24h
-    site_ids_sq = select(Device.id).where(Device.site == site, Device.is_active == True) if site else None
+    site_ids_sq: Any = None
+    if effective_sites is not None:
+        site_ids_sq = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
 
     ev_base_24h = select(NetworkEvent.severity, func.count()).where(NetworkEvent.created_at >= since_24h)
     if site_ids_sq is not None:
