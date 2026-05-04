@@ -19,6 +19,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import type { UserRole } from '@/types'
 
 const { Sider } = Layout
 
@@ -42,6 +43,22 @@ const SIDEBAR_CSS = `
   }
 `
 
+// Role hierarchy order (lowest → highest)
+const ROLE_ORDER: UserRole[] = [
+  'location_viewer',
+  'viewer',
+  'location_operator',
+  'operator',
+  'location_manager',
+  'org_viewer',
+  'admin',
+  'super_admin',
+]
+
+function roleIndex(role: string): number {
+  return ROLE_ORDER.indexOf(role as UserRole)
+}
+
 interface SidebarProps {
   mobileOpen?: boolean
   onMobileClose?: () => void
@@ -53,9 +70,16 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const location = useLocation()
   const { isDark } = useTheme()
   const { t } = useTranslation()
-  const { isSuperAdmin } = useAuthStore()
+  const { user, isSuperAdmin } = useAuthStore()
   const isSA = isSuperAdmin()
   const isMobile = useIsMobile()
+
+  const userRoleIdx = roleIndex(user?.role ?? 'viewer')
+
+  const canSee = (minRole?: UserRole) => {
+    if (!minRole) return true
+    return userRoleIdx >= roleIndex(minRole)
+  }
 
   const { data: stats } = useQuery({
     queryKey: ['monitor-stats'],
@@ -85,7 +109,15 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
   const isCollapsed = isMobile ? false : collapsed
 
-  const NAV_GROUPS = [
+  type NavItem = {
+    key: string
+    icon: React.ReactNode
+    label: string
+    badge?: boolean | 'approval'
+    minRole?: UserRole
+  }
+
+  const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     {
       label: t('nav_group.main'),
       items: [
@@ -97,48 +129,48 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     {
       label: t('nav_group.discovery'),
       items: [
-        { key: '/discovery', icon: <RadarChartOutlined />, label: t('nav.discovery') },
-        { key: '/ipam', icon: <ClusterOutlined />, label: t('nav.ipam') },
-        { key: '/vlan', icon: <BranchesOutlined />, label: t('nav.vlan') },
-        { key: '/backups', icon: <CloudOutlined />, label: t('nav.backups') },
-        { key: '/compliance', icon: <FileDoneOutlined />, label: t('nav.compliance') },
-        { key: '/racks', icon: <HddOutlined />, label: t('nav.racks') },
-        { key: '/floor-plan', icon: <BuildOutlined />, label: t('nav.floor_plan') },
+        { key: '/discovery', icon: <RadarChartOutlined />, label: t('nav.discovery'), minRole: 'admin' },
+        { key: '/ipam', icon: <ClusterOutlined />, label: t('nav.ipam'), minRole: 'org_viewer' },
+        { key: '/vlan', icon: <BranchesOutlined />, label: t('nav.vlan'), minRole: 'org_viewer' },
+        { key: '/backups', icon: <CloudOutlined />, label: t('nav.backups'), minRole: 'location_manager' },
+        { key: '/compliance', icon: <FileDoneOutlined />, label: t('nav.compliance'), minRole: 'location_manager' },
+        { key: '/racks', icon: <HddOutlined />, label: t('nav.racks'), minRole: 'admin' },
+        { key: '/floor-plan', icon: <BuildOutlined />, label: t('nav.floor_plan'), minRole: 'admin' },
       ],
     },
     {
       label: t('nav_group.monitoring'),
       items: [
         { key: '/monitor', icon: <AlertOutlined />, label: t('nav.monitor'), badge: true },
-        { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules') },
-        { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth') },
-        { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence') },
-        { key: '/security-audit', icon: <SafetyOutlined />, label: t('nav.security_audit') },
-        { key: '/asset-lifecycle', icon: <CalendarOutlined />, label: t('nav.asset_lifecycle') },
-        { key: '/diagnostics', icon: <AimOutlined />, label: t('nav.diagnostics') },
-        { key: '/tasks', icon: <PlayCircleOutlined />, label: t('nav.tasks') },
-        { key: '/playbooks', icon: <ThunderboltOutlined />, label: t('nav.playbooks') },
-        { key: '/config-templates', icon: <FileTextOutlined />, label: t('nav.config_templates') },
-        { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management') },
-        { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval' },
-        { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla') },
-        { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası' },
-        { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin' },
-        { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports') },
+        { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules'), minRole: 'admin' },
+        { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth'), minRole: 'org_viewer' },
+        { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence'), minRole: 'org_viewer' },
+        { key: '/security-audit', icon: <SafetyOutlined />, label: t('nav.security_audit'), minRole: 'org_viewer' },
+        { key: '/asset-lifecycle', icon: <CalendarOutlined />, label: t('nav.asset_lifecycle'), minRole: 'org_viewer' },
+        { key: '/diagnostics', icon: <AimOutlined />, label: t('nav.diagnostics'), minRole: 'operator' },
+        { key: '/tasks', icon: <PlayCircleOutlined />, label: t('nav.tasks'), minRole: 'operator' },
+        { key: '/playbooks', icon: <ThunderboltOutlined />, label: t('nav.playbooks'), minRole: 'admin' },
+        { key: '/config-templates', icon: <FileTextOutlined />, label: t('nav.config_templates'), minRole: 'admin' },
+        { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management'), minRole: 'location_manager' },
+        { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval', minRole: 'location_manager' },
+        { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla'), minRole: 'org_viewer' },
+        { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası', minRole: 'org_viewer' },
+        { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin', minRole: 'location_manager' },
+        { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports'), minRole: 'org_viewer' },
       ],
     },
     {
       label: t('nav_group.management'),
       items: [
-        { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı' },
-        { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents') },
-        { key: '/users', icon: <TeamOutlined />, label: t('nav.users') },
-        { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations') },
-        ...(isSA ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: t('nav.tenants') }] : []),
-        { key: '/audit', icon: <AuditOutlined />, label: t('nav.audit') },
-        { key: '/driver-templates', icon: <CodeOutlined />, label: t('nav.driver_templates') },
+        { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
+        { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },
+        { key: '/users', icon: <TeamOutlined />, label: t('nav.users'), minRole: 'admin' },
+        { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations'), minRole: 'admin' },
+        ...(isSA ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: t('nav.tenants'), minRole: 'super_admin' as UserRole }] : []),
+        { key: '/audit', icon: <AuditOutlined />, label: t('nav.audit'), minRole: 'org_viewer' },
+        { key: '/driver-templates', icon: <CodeOutlined />, label: t('nav.driver_templates'), minRole: 'admin' },
         { key: '/help', icon: <QuestionCircleOutlined />, label: t('nav.help') },
-        { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings') },
+        { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings'), minRole: 'admin' },
       ],
     },
   ]
@@ -149,13 +181,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
       {/* Logo */}
       <div style={{
-        height: 60,
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 20px',
-        borderBottom: `1px solid ${borderColor}`,
-        gap: 10,
-        flexShrink: 0,
+        height: 60, display: 'flex', alignItems: 'center',
+        padding: '0 20px', borderBottom: `1px solid ${borderColor}`,
+        gap: 10, flexShrink: 0,
       }}>
         <div style={{
           width: 32, height: 32, borderRadius: 8,
@@ -182,83 +210,79 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
       {/* Nav groups */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label}>
-            {!isCollapsed && (
-              <div style={{
-                color: groupLabel, fontSize: 10, fontWeight: 600,
-                padding: '12px 20px 4px', letterSpacing: '0.08em',
-              }}>
-                {group.label}
-              </div>
-            )}
-            {group.items.map((item) => {
-              const isActive = location.pathname === item.key ||
-                (item.key !== '/' && location.pathname.startsWith(item.key))
-              const badgeType = (item as any).badge
-              const badgeCount = badgeType === 'approval'
-                ? (approvalCount?.count ?? 0)
-                : badgeType ? unacked : 0
-              const showBadge = badgeCount > 0
-
-              const content = (
-                <div
-                  key={item.key}
-                  onClick={() => { navigate(item.key); if (isMobile) onMobileClose?.() }}
-                  className={`side-item${isActive ? ' side-active' : ''}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    padding: isCollapsed ? '10px 0' : '9px 12px 9px 20px',
-                    margin: '1px 8px',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    background: isActive ? activeItemBg : 'transparent',
-                    borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent',
-                    transition: 'all 0.15s',
-                    justifyContent: isCollapsed ? 'center' : 'flex-start',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isActive) (e.currentTarget as HTMLElement).style.background = hoverItemBg
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
-                  }}
-                >
-                  <span style={{ color: isActive ? '#3b82f6' : textSecondary, fontSize: 16, flexShrink: 0 }}>
-                    {item.icon}
-                  </span>
-                  {!isCollapsed && (
-                    <>
-                      <span style={{ color: isActive ? textPrimary : textSecondary, fontSize: 13, flex: 1, fontWeight: isActive ? 600 : 400 }}>
-                        {item.label}
-                      </span>
-                      {showBadge && (
-                        <Badge count={badgeCount} size="small" style={{ backgroundColor: badgeType === 'approval' ? '#f59e0b' : '#ef4444' }} />
-                      )}
-                    </>
-                  )}
+        {NAV_GROUPS.map((group) => {
+          const visibleItems = group.items.filter((item) => canSee(item.minRole))
+          if (visibleItems.length === 0) return null
+          return (
+            <div key={group.label}>
+              {!isCollapsed && (
+                <div style={{
+                  color: groupLabel, fontSize: 10, fontWeight: 600,
+                  padding: '12px 20px 4px', letterSpacing: '0.08em',
+                }}>
+                  {group.label}
                 </div>
-              )
+              )}
+              {visibleItems.map((item) => {
+                const isActive = location.pathname === item.key ||
+                  (item.key !== '/' && location.pathname.startsWith(item.key))
+                const badgeType = item.badge
+                const badgeCount = badgeType === 'approval'
+                  ? (approvalCount?.count ?? 0)
+                  : badgeType ? unacked : 0
+                const showBadge = badgeCount > 0
 
-              return isCollapsed ? (
-                <Tooltip key={item.key} title={item.label} placement="right">
-                  {content}
-                </Tooltip>
-              ) : content
-            })}
-          </div>
-        ))}
+                const content = (
+                  <div
+                    key={item.key}
+                    onClick={() => { navigate(item.key); if (isMobile) onMobileClose?.() }}
+                    className={`side-item${isActive ? ' side-active' : ''}`}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      padding: isCollapsed ? '10px 0' : '9px 12px 9px 20px',
+                      margin: '1px 8px', borderRadius: 6, cursor: 'pointer',
+                      background: isActive ? activeItemBg : 'transparent',
+                      borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent',
+                      transition: 'all 0.15s',
+                      justifyContent: isCollapsed ? 'center' : 'flex-start',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive) (e.currentTarget as HTMLElement).style.background = hoverItemBg
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
+                    }}
+                  >
+                    <span style={{ color: isActive ? '#3b82f6' : textSecondary, fontSize: 16, flexShrink: 0 }}>
+                      {item.icon}
+                    </span>
+                    {!isCollapsed && (
+                      <>
+                        <span style={{ color: isActive ? textPrimary : textSecondary, fontSize: 13, flex: 1, fontWeight: isActive ? 600 : 400 }}>
+                          {item.label}
+                        </span>
+                        {showBadge && (
+                          <Badge count={badgeCount} size="small" style={{ backgroundColor: badgeType === 'approval' ? '#f59e0b' : '#ef4444' }} />
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+
+                return isCollapsed ? (
+                  <Tooltip key={item.key} title={item.label} placement="right">
+                    {content}
+                  </Tooltip>
+                ) : content
+              })}
+            </div>
+          )
+        })}
       </div>
 
       {/* System status */}
       {!isCollapsed && (
-        <div style={{
-          borderTop: `1px solid ${borderColor}`,
-          padding: '12px 16px',
-          flexShrink: 0,
-        }}>
+        <div style={{ borderTop: `1px solid ${borderColor}`, padding: '12px 16px', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: healthColor, flexShrink: 0 }} />
             <span style={{ color: textSecondary, fontSize: 11 }}>{t('sidebar.health_status')}</span>
@@ -276,13 +300,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         <div
           onClick={() => setCollapsed(!collapsed)}
           style={{
-            borderTop: `1px solid ${borderColor}`,
-            padding: '12px',
-            display: 'flex',
-            justifyContent: collapsed ? 'center' : 'flex-end',
-            cursor: 'pointer',
-            color: textSecondary,
-            flexShrink: 0,
+            borderTop: `1px solid ${borderColor}`, padding: '12px',
+            display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end',
+            cursor: 'pointer', color: textSecondary, flexShrink: 0,
           }}
         >
           {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}

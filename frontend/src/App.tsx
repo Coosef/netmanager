@@ -112,6 +112,20 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 
+// Role hierarchy order — same as auth store
+const ROLE_ORDER = [
+  'location_viewer', 'viewer', 'location_operator', 'operator',
+  'location_manager', 'org_viewer', 'admin', 'super_admin',
+] as const
+
+function RoleRoute({ children, minRole }: { children: React.ReactNode; minRole: string }) {
+  const { user } = useAuthStore()
+  const userIdx = ROLE_ORDER.indexOf((user?.role ?? 'viewer') as any)
+  const reqIdx  = ROLE_ORDER.indexOf(minRole as any)
+  if (userIdx < reqIdx) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 const GLOBAL_CSS_DARK = `
   :root { color-scheme: dark; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -165,37 +179,37 @@ function ThemedApp() {
               <Route path="devices" element={<DevicesPage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="topology" element={<TopologyPage />} />
-              <Route path="discovery" element={<LldpInventoryPage />} />
+              <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
-              <Route path="reports" element={<ReportsPage />} />
-              <Route path="users" element={<UsersPage />} />
-              <Route path="audit" element={<AuditLogPage />} />
-              <Route path="agents" element={<AgentsPage />} />
-              <Route path="settings" element={<SettingsPage />} />
-              <Route path="playbooks" element={<PlaybooksPage />} />
-              <Route path="approvals" element={<ApprovalsPage />} />
-              <Route path="mac-arp" element={<MacArpPage />} />
-              <Route path="ipam" element={<IpamPage />} />
-              <Route path="security-audit" element={<SecurityAuditPage />} />
-              <Route path="asset-lifecycle" element={<AssetLifecyclePage />} />
-              <Route path="diagnostics" element={<DiagnosticsPage />} />
-              <Route path="bandwidth" element={<BandwidthMonitorPage />} />
-              <Route path="config-templates" element={<ConfigTemplatesPage />} />
-              <Route path="change-management" element={<ChangeManagementPage />} />
-              <Route path="sla" element={<SlaReportPage />} />
-              <Route path="vlan" element={<VlanManagementPage />} />
-              <Route path="backups" element={<BackupCenterPage />} />
-              <Route path="compliance" element={<ComplianceCheckPage />} />
-              <Route path="racks" element={<RacksPage />} />
-              <Route path="tenants" element={<TenantsPage />} />
-              <Route path="locations" element={<LocationsPage />} />
-              <Route path="floor-plan" element={<FloorPlanPage />} />
-              <Route path="alert-rules" element={<AlertRulesPage />} />
-              <Route path="driver-templates" element={<DriverTemplatesPage />} />
+              <Route path="reports" element={<RoleRoute minRole="org_viewer"><ReportsPage /></RoleRoute>} />
+              <Route path="users" element={<RoleRoute minRole="admin"><UsersPage /></RoleRoute>} />
+              <Route path="audit" element={<RoleRoute minRole="org_viewer"><AuditLogPage /></RoleRoute>} />
+              <Route path="agents" element={<RoleRoute minRole="admin"><AgentsPage /></RoleRoute>} />
+              <Route path="settings" element={<RoleRoute minRole="admin"><SettingsPage /></RoleRoute>} />
+              <Route path="playbooks" element={<RoleRoute minRole="admin"><PlaybooksPage /></RoleRoute>} />
+              <Route path="approvals" element={<RoleRoute minRole="location_manager"><ApprovalsPage /></RoleRoute>} />
+              <Route path="mac-arp" element={<RoleRoute minRole="org_viewer"><MacArpPage /></RoleRoute>} />
+              <Route path="ipam" element={<RoleRoute minRole="org_viewer"><IpamPage /></RoleRoute>} />
+              <Route path="security-audit" element={<RoleRoute minRole="org_viewer"><SecurityAuditPage /></RoleRoute>} />
+              <Route path="asset-lifecycle" element={<RoleRoute minRole="org_viewer"><AssetLifecyclePage /></RoleRoute>} />
+              <Route path="diagnostics" element={<RoleRoute minRole="operator"><DiagnosticsPage /></RoleRoute>} />
+              <Route path="bandwidth" element={<RoleRoute minRole="org_viewer"><BandwidthMonitorPage /></RoleRoute>} />
+              <Route path="config-templates" element={<RoleRoute minRole="admin"><ConfigTemplatesPage /></RoleRoute>} />
+              <Route path="change-management" element={<RoleRoute minRole="location_manager"><ChangeManagementPage /></RoleRoute>} />
+              <Route path="sla" element={<RoleRoute minRole="org_viewer"><SlaReportPage /></RoleRoute>} />
+              <Route path="vlan" element={<RoleRoute minRole="org_viewer"><VlanManagementPage /></RoleRoute>} />
+              <Route path="backups" element={<RoleRoute minRole="location_manager"><BackupCenterPage /></RoleRoute>} />
+              <Route path="compliance" element={<RoleRoute minRole="location_manager"><ComplianceCheckPage /></RoleRoute>} />
+              <Route path="racks" element={<RoleRoute minRole="admin"><RacksPage /></RoleRoute>} />
+              <Route path="tenants" element={<RoleRoute minRole="super_admin"><TenantsPage /></RoleRoute>} />
+              <Route path="locations" element={<RoleRoute minRole="admin"><LocationsPage /></RoleRoute>} />
+              <Route path="floor-plan" element={<RoleRoute minRole="admin"><FloorPlanPage /></RoleRoute>} />
+              <Route path="alert-rules" element={<RoleRoute minRole="admin"><AlertRulesPage /></RoleRoute>} />
+              <Route path="driver-templates" element={<RoleRoute minRole="admin"><DriverTemplatesPage /></RoleRoute>} />
               <Route path="help" element={<HelpPage />} />
-              <Route path="services" element={<ServicesPage />} />
-              <Route path="topology-twin" element={<TopologyTwinPage />} />
-              <Route path="ai-assistant" element={<AIAssistantPage />} />
+              <Route path="services" element={<RoleRoute minRole="org_viewer"><ServicesPage /></RoleRoute>} />
+              <Route path="topology-twin" element={<RoleRoute minRole="location_manager"><TopologyTwinPage /></RoleRoute>} />
+              <Route path="ai-assistant" element={<RoleRoute minRole="admin"><AIAssistantPage /></RoleRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>
