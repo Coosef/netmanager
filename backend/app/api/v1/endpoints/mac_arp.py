@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select, delete as _del, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.device import Device
 from app.models.mac_arp import ArpEntry, MacAddressEntry
 from app.services.audit_service import log_action
@@ -271,6 +271,7 @@ async def collect_mac_arp(
 async def list_mac_table(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = Query(100, le=500),
     device_id: Optional[int] = Query(None),
@@ -281,6 +282,16 @@ async def list_mac_table(
     site: Optional[str] = Query(None),
 ):
     query = select(MacAddressEntry)
+    # Location RBAC
+    effective_sites = location_filter  # None = unrestricted
+    if effective_sites is not None:
+        if site:
+            effective_sites = [s for s in effective_sites if s == site]
+            site = None
+        if not effective_sites:
+            return {"total": 0, "items": []}
+        loc_dev_ids = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
+        query = query.where(MacAddressEntry.device_id.in_(loc_dev_ids))
     if device_id:
         query = query.where(MacAddressEntry.device_id == device_id)
     if mac_address:
@@ -326,6 +337,7 @@ async def list_mac_table(
 async def list_arp_table(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = Query(100, le=500),
     device_id: Optional[int] = Query(None),
@@ -334,6 +346,15 @@ async def list_arp_table(
     site: Optional[str] = Query(None),
 ):
     query = select(ArpEntry)
+    effective_sites = location_filter
+    if effective_sites is not None:
+        if site:
+            effective_sites = [s for s in effective_sites if s == site]
+            site = None
+        if not effective_sites:
+            return {"total": 0, "items": []}
+        loc_dev_ids = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
+        query = query.where(ArpEntry.device_id.in_(loc_dev_ids))
     if device_id:
         query = query.where(ArpEntry.device_id == device_id)
     if ip_address:
