@@ -183,32 +183,50 @@ async def _openai_chat(settings: AISettings, system: str, messages: list[dict]) 
 
 async def _gemini_chat(settings: AISettings, system: str, messages: list[dict]) -> dict:
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
     except ImportError:
-        raise RuntimeError("google-generativeai paketi yüklü değil.")
+        raise RuntimeError("google-genai paketi yüklü değil. VPS'te 'docker compose up -d --build' çalıştırın.")
 
     api_key = decrypt_credential_safe(settings.gemini_api_key_enc)
     if not api_key:
         raise ValueError("Gemini API anahtarı ayarlanmamış.")
 
-    genai.configure(api_key=api_key)
-    model_obj = genai.GenerativeModel(
-        model_name=settings.gemini_model or "gemini-1.5-pro",
+    client = genai.Client(api_key=api_key)
+    model_name = settings.gemini_model or "gemini-2.0-flash"
+
+    contents = [
+        types.Content(
+            role="user" if m["role"] == "user" else "model",
+            parts=[types.Part.from_text(text=m["content"])],
+        )
+        for m in messages
+    ]
+    config = types.GenerateContentConfig(
         system_instruction=system,
+        max_output_tokens=2048,
     )
 
-    history = []
-    for m in messages[:-1]:
-        role = "user" if m["role"] == "user" else "model"
-        history.append({"role": role, "parts": [m["content"]]})
+    try:
+        resp = await client.aio.models.generate_content(
+            model=model_name,
+            contents=contents,
+            config=config,
+        )
+    except Exception as e:
+        err_str = str(e)
+        if "401" in err_str or "API_KEY_INVALID" in err_str:
+            raise ValueError("Gemini API anahtarı geçersiz. Lütfen Ayarlar'dan kontrol edin.")
+        if "429" in err_str:
+            raise ValueError("Gemini rate limit aşıldı. Biraz bekleyip tekrar deneyin.")
+        if "404" in err_str:
+            raise ValueError(f"Gemini model '{model_name}' bulunamadı. Ayarlar'dan geçerli bir model seçin.")
+        raise RuntimeError(f"Gemini API hatası: {e}")
 
-    chat_session = model_obj.start_chat(history=history)
-    last_msg = messages[-1]["content"] if messages else ""
-    resp = await chat_session.send_message_async(last_msg)
     return {
         "message": resp.text,
         "provider": "gemini",
-        "model": settings.gemini_model,
+        "model": model_name,
         "tokens_used": 0,
     }
 

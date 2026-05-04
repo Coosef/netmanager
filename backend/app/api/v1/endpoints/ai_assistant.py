@@ -13,7 +13,7 @@ router = APIRouter()
 
 CLAUDE_MODELS = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
 OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
-GEMINI_MODELS = ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-2.0-flash-exp"]
+GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.5-pro-preview-05-06", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.5-flash-8b"]
 
 
 class ChatMessage(BaseModel):
