@@ -34,6 +34,8 @@ from app.models.syslog_event import SyslogEvent
 from app.models.discovery_result import DiscoveryResult
 from app.models.agent_credential_bundle import AgentCredentialBundle
 from app.models.service import Service
+from app.models.network_baseline import NetworkBaseline
+from app.models.topology_snapshot import TopologySnapshot
 
 __all__ = [
     "Tenant",
@@ -72,4 +74,6 @@ __all__ = [
     "DiscoveryResult",
     "AgentCredentialBundle",
     "Service",
+    "NetworkBaseline",
+    "TopologySnapshot",
 ]

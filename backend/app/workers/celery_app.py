@@ -18,6 +18,7 @@ celery_app = Celery(
         "app.workers.tasks.snmp_tasks",
         "app.workers.tasks.rotation_tasks",
         "app.workers.tasks.rollout_tasks",
+        "app.workers.tasks.behavior_analytics_tasks",
     ],
 )
 
@@ -45,6 +46,7 @@ celery_app.conf.update(
         "app.workers.tasks.snmp_tasks.*": {"queue": "monitor"},
         "app.workers.tasks.rotation_tasks.*": {"queue": "monitor"},
         "app.workers.tasks.rollout_tasks.*": {"queue": "monitor"},
+        "app.workers.tasks.behavior_analytics_tasks.*": {"queue": "monitor"},
     },
     beat_schedule={
         "poll-device-status-every-5min": {
@@ -102,6 +104,19 @@ celery_app.conf.update(
         "check-config-drift-daily": {
             "task": "app.workers.tasks.backup_tasks.check_config_drift",
             "schedule": 86400.0,  # once per day
+        },
+        # Sprint 14A — Behavior Analytics
+        "update-baselines-daily": {
+            "task": "app.workers.tasks.behavior_analytics_tasks.update_baselines",
+            "schedule": 86400.0,  # once per day
+        },
+        "detect-anomalies-every-30min": {
+            "task": "app.workers.tasks.behavior_analytics_tasks.detect_anomalies",
+            "schedule": 1800.0,  # every 30 minutes
+        },
+        "check-topology-drift-every-6h": {
+            "task": "app.workers.tasks.behavior_analytics_tasks.check_topology_drift",
+            "schedule": 21600.0,  # every 6 hours
         },
     },
 )

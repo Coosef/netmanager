@@ -113,6 +113,7 @@ export default function Sidebar() {
         { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval' },
         { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla') },
         { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası' },
+        { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin' },
         { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports') },
       ],
     },

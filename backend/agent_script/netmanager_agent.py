@@ -110,6 +110,15 @@ _stats = {
 
 _restart_requested = False
 
+# ── Sprint 14C: Edge Intelligence ─────────────────────────────────────────
+# SSH sliding window error rate (last 20 commands)
+_ssh_window: deque = deque(maxlen=20)
+# SNMP latency tracking (rolling 10-sample EMA, milliseconds)
+_snmp_ema_ms: float = 0.0
+_snmp_ema_count: int = 0
+_SNMP_LATENCY_THRESHOLD_MS: float = 5000.0  # fire anomaly if avg > 5 s
+_SSH_ERROR_RATE_THRESHOLD: float = 0.5       # fire anomaly if >50% fail
+
 # ── Feature 1: SSH Connection Pool ────────────────────────────────────────
 _ssh_pool: dict = {}          # key: (device_ip, port, username) -> {"conn": ..., "last_used": float}
 _pool_lock = threading.Lock()
@@ -199,11 +208,47 @@ def _update_env_file(new_key):
 
 
 def _record_result(result):
-    if result.get("success"):
+    ok = bool(result.get("success"))
+    if ok:
         _stats["cmd_success"] += 1
     else:
         _stats["cmd_fail"] += 1
     _stats["cmd_total_ms"] += result.get("duration_ms", 0)
+    _ssh_window.append(ok)
+
+
+def _record_snmp_latency_ms(ms: float):
+    global _snmp_ema_ms, _snmp_ema_count
+    _snmp_ema_count += 1
+    if _snmp_ema_count == 1:
+        _snmp_ema_ms = ms
+    else:
+        _snmp_ema_ms = 0.8 * _snmp_ema_ms + 0.2 * ms
+
+
+async def _maybe_send_anomaly(ws, anomaly_type: str, title: str,
+                               message: str, details: dict = None):
+    """Fire a local_anomaly event to the backend — deduplicated per type per 30 min."""
+    key = "anomaly_ts_{}".format(anomaly_type)
+    last = _stats.get(key, 0.0)
+    now = time.monotonic()
+    if now - last < 1800:  # 30 minute cooldown per type
+        return
+    _stats[key] = now
+    try:
+        await ws.send(json.dumps({
+            "type":         "local_anomaly",
+            "agent_id":     AGENT_ID,
+            "anomaly_type": anomaly_type,
+            "severity":     "warning",
+            "title":        title,
+            "message":      message,
+            "details":      details or {},
+            "timestamp":    datetime.now(timezone.utc).isoformat(),
+        }))
+        log.warning("[edge] Local anomaly: {} — {}".format(anomaly_type, message))
+    except Exception as e:
+        log.debug("[edge] Anomaly send failed: {}".format(e))
 
 
 def _get_metrics():
@@ -459,9 +504,12 @@ def _snmp_get_sync(msg):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    t0 = time.monotonic()
     loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(_do_get())
+        result = loop.run_until_complete(_do_get())
+        _record_snmp_latency_ms((time.monotonic() - t0) * 1000)
+        return result
     finally:
         loop.close()
 
@@ -926,6 +974,8 @@ async def run():
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
     delay   = 5
     loop    = asyncio.get_event_loop()
+    _disconnect_count = 0
+    _last_anomaly_disconnect = 0.0
 
     log.info("NetManager Agent v{} baslatiliyor - ID: {}".format(VERSION, AGENT_ID))
 
@@ -993,10 +1043,43 @@ async def run():
                         except Exception:
                             break
 
+                # Sprint 14C: Edge anomaly detector — runs every 5 min
+                async def _edge_anomaly_check():
+                    while True:
+                        await asyncio.sleep(300)
+                        try:
+                            # SSH error rate
+                            if len(_ssh_window) >= 5:
+                                fail_rate = _ssh_window.count(False) / len(_ssh_window)
+                                if fail_rate >= _SSH_ERROR_RATE_THRESHOLD:
+                                    await _maybe_send_anomaly(
+                                        ws,
+                                        "ssh_error_rate",
+                                        "Yüksek SSH Hata Oranı",
+                                        "Son {} komutun {:.0%} başarısız oldu".format(
+                                            len(_ssh_window), fail_rate),
+                                        {"fail_rate": round(fail_rate, 2),
+                                         "window_size": len(_ssh_window)},
+                                    )
+                            # SNMP latency
+                            if _snmp_ema_count >= 3 and _snmp_ema_ms > _SNMP_LATENCY_THRESHOLD_MS:
+                                await _maybe_send_anomaly(
+                                    ws,
+                                    "snmp_latency",
+                                    "Yüksek SNMP Yanıt Süresi",
+                                    "Ortalama SNMP yanıt {:.0f} ms (eşik: {:.0f} ms)".format(
+                                        _snmp_ema_ms, _SNMP_LATENCY_THRESHOLD_MS),
+                                    {"ema_ms": round(_snmp_ema_ms, 1),
+                                     "threshold_ms": _SNMP_LATENCY_THRESHOLD_MS},
+                                )
+                        except Exception:
+                            pass
+
                 # Start background tasks
                 hb   = asyncio.create_task(_heartbeat())
                 evict = asyncio.create_task(_pool_evict_loop())
                 hc   = asyncio.create_task(_health_check(ws, loop))
+                edge = asyncio.create_task(_edge_anomaly_check())
 
                 # Feature 6: Start syslog UDP server if enabled
                 if _syslog_enabled:
@@ -1023,6 +1106,7 @@ async def run():
                     hb.cancel()
                     evict.cancel()
                     hc.cancel()
+                    edge.cancel()
                     if syslog_transport is not None:
                         syslog_transport.close()
                         syslog_transport = None
@@ -1055,6 +1139,15 @@ async def run():
                 delay = 120
             else:
                 log.warning("Baglanti kesildi: {}. {}s sonra tekrar denenecek...".format(exc, delay))
+                _disconnect_count += 1
+                # Sprint 14C: fire local_anomaly on repeated disconnects (>= 3 in a row)
+                if _disconnect_count >= 3:
+                    now_m = time.monotonic()
+                    if now_m - _last_anomaly_disconnect > 1800:
+                        _last_anomaly_disconnect = now_m
+                        log.warning("[edge] Disconnect anomaly: {} kesinti".format(_disconnect_count))
+                        # We can't send via ws here (disconnected) — log only
+                        # The backend will detect offline agent via heartbeat timeout
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 120)
 

@@ -191,6 +191,12 @@ class AgentManager:
                 self._handle_syslog_event(agent_id, msg)
             )
 
+        # Sprint 14C: Agent edge intelligence anomaly report
+        elif msg_type == "local_anomaly":
+            asyncio.get_running_loop().create_task(
+                self._handle_local_anomaly(agent_id, msg)
+            )
+
         elif msg_type == "ssh_stream_chunk":
             rid = msg.get("request_id")
             chunk = msg.get("chunk", "")
@@ -260,6 +266,50 @@ class AgentManager:
                 await db.commit()
         except Exception as e:
             log.debug(f"Syslog persist error: {e}")
+
+    # ── Sprint 14C: Local anomaly handling ───────────────────────────────────
+
+    async def _handle_local_anomaly(self, agent_id: str, msg: dict):
+        """Persist agent-side anomaly as NetworkEvent and publish to Redis."""
+        try:
+            import json as _json
+            import redis as _redis_sync
+            from app.core.config import settings as _settings
+            from app.core.database import make_worker_session
+            from app.models.network_event import NetworkEvent
+
+            anomaly_type = msg.get("anomaly_type", "local_anomaly")
+            title = msg.get("title", f"Agent anomalisi: {agent_id}")
+            message = msg.get("message", "")
+            details = msg.get("details", {})
+            details["agent_id"] = agent_id
+
+            async with make_worker_session()() as db:
+                evt = NetworkEvent(
+                    device_id=None,
+                    device_hostname=None,
+                    event_type="local_anomaly",
+                    severity=msg.get("severity", "warning"),
+                    title=title,
+                    message=message,
+                    details=details,
+                )
+                db.add(evt)
+                await db.commit()
+
+            # Publish to Redis event stream
+            r = _redis_sync.from_url(_settings.REDIS_URL, decode_responses=True)
+            r.publish("network:events", _json.dumps({
+                "event_type": "local_anomaly",
+                "severity": "warning",
+                "title": title,
+                "message": message,
+                "agent_id": agent_id,
+                "anomaly_type": anomaly_type,
+            }))
+            log.info(f"Agent {agent_id} local_anomaly: {anomaly_type} — {message}")
+        except Exception as e:
+            log.debug(f"Local anomaly handler error: {e}")
 
     # ── Command streaming ─────────────────────────────────────────────────────
 

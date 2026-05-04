@@ -1,11 +1,12 @@
 """
 Sprint 12 — Intelligence Fundamentals
-  12A: Cihaz Risk Skoru
-  12B: MTTR / MTBF
-  12C: Config/Olay Zaman Çizelgesi
+  12A: Cihaz Risk Skoru / 12B: MTTR/MTBF / 12C: Zaman Çizelgesi
 
 Sprint 13A — Root Cause Engine v2
-  GET /intelligence/root-cause-incidents — son 24 saatin correlation_incident olayları
+  GET /intelligence/root-cause-incidents
+
+Sprint 14A — Behavior Analytics
+  GET /intelligence/anomalies — mac_anomaly / traffic_spike / vlan_anomaly / mac_loop_suspicion
 """
 
 from datetime import datetime, timedelta, timezone
@@ -393,4 +394,62 @@ async def root_cause_incidents(
         "window_hours": hours,
         "total": len(incidents),
         "incidents": incidents,
+    }
+
+
+# ── 14A: Behavior Analytics — Anomaly Feed ───────────────────────────────────
+
+_ANOMALY_TYPES = ("mac_anomaly", "traffic_spike", "vlan_anomaly", "mac_loop_suspicion")
+
+_ANOMALY_LABEL = {
+    "mac_anomaly":         "MAC Anomalisi",
+    "traffic_spike":       "Trafik Spike",
+    "vlan_anomaly":        "VLAN Anomalisi",
+    "mac_loop_suspicion":  "Döngü Şüphesi",
+}
+
+
+@router.get("/anomalies")
+async def get_anomalies(
+    hours: int = Query(24, ge=1, le=168),
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(CurrentUser),
+):
+    """
+    Son N saatteki davranış anomalisi olaylarını döndürür.
+    Tip başına sayaç + olay listesi içerir.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    rows = (await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.event_type.in_(_ANOMALY_TYPES))
+        .where(NetworkEvent.created_at >= since)
+        .order_by(NetworkEvent.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    counts: dict[str, int] = {t: 0 for t in _ANOMALY_TYPES}
+    events = []
+    for evt in rows:
+        counts[evt.event_type] = counts.get(evt.event_type, 0) + 1
+        events.append({
+            "id": evt.id,
+            "ts": evt.created_at.isoformat(),
+            "event_type": evt.event_type,
+            "label": _ANOMALY_LABEL.get(evt.event_type, evt.event_type),
+            "device_id": evt.device_id,
+            "device_hostname": evt.device_hostname,
+            "title": evt.title,
+            "message": evt.message,
+            "details": evt.details or {},
+            "acknowledged": evt.acknowledged,
+        })
+
+    return {
+        "window_hours": hours,
+        "total": len(events),
+        "counts": counts,
+        "events": events,
     }

@@ -80,6 +80,26 @@ export interface RootCauseReport {
   incidents: RootCauseIncident[]
 }
 
+export interface AnomalyEvent {
+  id: number
+  ts: string
+  event_type: string
+  label: string
+  device_id: number | null
+  device_hostname: string | null
+  title: string
+  message: string
+  details: Record<string, unknown>
+  acknowledged: boolean
+}
+
+export interface AnomalyReport {
+  window_hours: number
+  total: number
+  counts: Record<string, number>
+  events: AnomalyEvent[]
+}
+
 export const intelligenceApi = {
   getDeviceRisk: (deviceId: number) =>
     client.get<DeviceRiskScore>(`/intelligence/devices/${deviceId}/risk-score`).then(r => r.data),
@@ -99,6 +119,11 @@ export const intelligenceApi = {
 
   getRootCauseIncidents: (hours = 24, limit = 20) =>
     client.get<RootCauseReport>('/intelligence/root-cause-incidents', {
+      params: { hours, limit },
+    }).then(r => r.data),
+
+  getAnomalies: (hours = 24, limit = 50) =>
+    client.get<AnomalyReport>('/intelligence/anomalies', {
       params: { hours, limit },
     }).then(r => r.data),
 }

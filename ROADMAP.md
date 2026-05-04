@@ -545,32 +545,33 @@
 
 ---
 
-## SPRINT 14 — Network Analytics & Digital Twin ⚪
+## SPRINT 14 — Network Analytics & Digital Twin ✅
 
-> Kaynak: `yenifikir.md` | Tahmini: 4-5 hafta | Öncelik: Orta
-> Sprint 12–13 tamamlandıktan sonra değerlendir.
+> Kaynak: `yenifikir.md` | Tamamlandı: 2026-05-04
 
-### 14A. Ağ Davranış Analitiği ⚪
-- Rolling baseline: MAC sayısı, trafik, VLAN aktivitesi (7 günlük ortalama)
-- Anomali = mevcut değer > 2× baseline → `mac_anomaly` / `traffic_spike` event tipi
-- Interface başına "beklenmeyen VLAN aktivitesi" tespiti (802.1Q tag analizi)
-- Döngü şüphesi: aynı kaynak MAC farklı portlarda görülünce uyarı (MAC/ARP tablosu)
-- Dashboard: "Anormal Davranışlar" widget'ı
+### 14A. Ağ Davranış Analitiği ✅
+- ✅ `NetworkBaseline` modeli — cihaz başına EMA rolling baseline (mac_count, traffic_in_pct, traffic_out_pct, vlan_count)
+- ✅ `update_baselines` Celery task (günlük) — MAC/trafik/VLAN için 7 günlük EMA güncelleme
+- ✅ `detect_anomalies` Celery task (30 dakikada bir) — baseline 2× aşımı tespiti
+- ✅ Anomali tipleri: `mac_anomaly`, `traffic_spike`, `vlan_anomaly`, `mac_loop_suspicion`
+- ✅ `GET /intelligence/anomalies` endpoint — tip bazlı sayaç + olay listesi
+- ✅ Dashboard "Anormal Davranışlar" widget'ı — 4 sayaç kartı + son anomaliler listesi
 
-### 14B. Network Digital Twin ⚪
-- Mevcut topoloji "kilitlenerek" expected state olarak kaydedilir
-- Periyodik karşılaştırma: actual topology vs expected topology
-- Topoloji drift'i: yeni bağlantı eklendi / mevcut bağlantı koptu → `topology_drift` event
-- "Beklenen vs Gerçek" iki panel yan yana görünüm
-- Config digital twin (zaten var: golden baseline + drift detection) ile birleşik
+### 14B. Network Digital Twin ✅
+- ✅ `TopologySnapshot` modeli — topoloji anlık görüntüsü (links JSONB)
+- ✅ CRUD API (`/topology-twin/snapshots`) — oluştur/listele/sil
+- ✅ `POST /topology-twin/snapshots/{id}/set-golden` — altın baseline atama
+- ✅ `GET /topology-twin/diff` — actual vs expected karşılaştırması (added/removed/unchanged)
+- ✅ `check_topology_drift` Celery task (6 saatte bir) — `topology_drift` event'i
+- ✅ `/topology-twin` sayfası — anlık görüntü tablosu + diff analizi (Tabs), sidebar menü
 
-### 14C. Agent Edge Intelligence ⚪
-- Agent tarafında **lokal anomali pattern'leri** (sunucu round-trip olmadan):
-  - SSH hata oranı > %50 → lokal uyarı + sunucuya bildir
-  - Cihazdan beklenmedik disconnect tekrarı → bağlantı sorununu raporla
-  - SNMP yanıt süresi >N ms → gecikme uyarısı
-- Lokal cihaz config cache (agent restart sonrası vault gibi yüklenir)
-- `local_anomaly` mesajı WebSocket üzerinden sunucuya iletilir
+### 14C. Agent Edge Intelligence ✅
+- ✅ Agent sliding window SSH error rate tracker (`_ssh_window` deque, son 20 komut)
+- ✅ SNMP EMA latency tracker — `_record_snmp_latency_ms()` + EMA hesaplama
+- ✅ `_edge_anomaly_check()` coroutine — 5 dakikada bir SSH hata oranı + SNMP latency kontrol
+- ✅ `_maybe_send_anomaly()` — 30 dk cooldown'lu `local_anomaly` WebSocket mesajı
+- ✅ `agent_manager._handle_local_anomaly()` — NetworkEvent persist + Redis publish
+- ✅ Disconnect tekrar sayacı — ≥3 ardışık kesinti loglanır
 
 ---
 

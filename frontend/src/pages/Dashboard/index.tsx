@@ -10,7 +10,7 @@ import {
   CloseCircleOutlined, InfoCircleOutlined, RightOutlined,
   FireOutlined, RobotOutlined, SwapOutlined, SyncOutlined,
   ExperimentOutlined, EyeInvisibleOutlined, SafetyOutlined, CalendarOutlined, RiseOutlined,
-  DashboardOutlined, ArrowUpOutlined, ArrowDownOutlined,
+  DashboardOutlined, ArrowUpOutlined, ArrowDownOutlined, AlertOutlined,
 } from '@ant-design/icons'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, Legend,
@@ -486,6 +486,7 @@ export default function DashboardPage() {
   const { data: fleetRisk }    = useQuery({ queryKey: ['fleet-risk'],            queryFn: () => intelligenceApi.getFleetRisk(10), refetchInterval: 300000 })
   const { data: rootCauseData }= useQuery({ queryKey: ['root-cause-incidents'],  queryFn: () => intelligenceApi.getRootCauseIncidents(24, 10), refetchInterval: 120000 })
   const { data: fleetImpact }  = useQuery({ queryKey: ['fleet-impact-summary'],  queryFn: servicesApi.getFleetImpact,  refetchInterval: 120000 })
+  const { data: anomalyData }  = useQuery({ queryKey: ['behavior-anomalies'],     queryFn: () => intelligenceApi.getAnomalies(24, 30), refetchInterval: 120000 })
 
   // ── WebSocket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1274,6 +1275,76 @@ export default function DashboardPage() {
                               {svc.priority}
                             </Tag>
                           </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </Col>
+            </Row>
+          </>
+        )}
+
+        {/* ── Behavior Anomalies (14A) ─────────────────────────────────────────── */}
+        {anomalyData && anomalyData.total > 0 && (
+          <>
+            <SectionBar icon={<AlertOutlined />} title="Anormal Davranışlar" />
+            <Row gutter={[12, 12]}>
+              {/* Sayaç kartları */}
+              <Col xs={24} lg={10}>
+                <div className="tv-card">
+                  <CardHead icon={<AlertOutlined />} title="Anomali Özeti" color={N.amber}
+                    extra={<span style={{ color: C.dim, fontSize: 11 }}>{anomalyData.total} olay · son 24 saat</span>}
+                  />
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    {[
+                      { key: 'mac_anomaly',        label: 'MAC Anomalisi',   color: N.amber },
+                      { key: 'traffic_spike',       label: 'Trafik Spike',    color: N.red   },
+                      { key: 'vlan_anomaly',        label: 'VLAN Anomalisi',  color: '#8b5cf6' },
+                      { key: 'mac_loop_suspicion',  label: 'Döngü Şüphesi',  color: '#f97316' },
+                    ].map(({ key, label, color }) => (
+                      <div key={key} style={{
+                        padding: '10px 12px', borderRadius: 8,
+                        background: `${color}0d`, border: `1px solid ${color}22`,
+                        display: 'flex', flexDirection: 'column', gap: 2,
+                      }}>
+                        <div style={{ fontSize: 20, fontWeight: 700, color }}>
+                          {anomalyData.counts[key] ?? 0}
+                        </div>
+                        <div style={{ fontSize: 11, color: C.muted }}>{label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Col>
+              {/* Son olaylar listesi */}
+              <Col xs={24} lg={14}>
+                <div className="tv-card" style={{ maxHeight: 280, overflowY: 'auto' }}>
+                  <CardHead icon={<AlertOutlined />} title="Son Anomaliler" color={N.amber} />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {anomalyData.events.slice(0, 10).map((evt) => {
+                      const typeColors: Record<string, string> = {
+                        mac_anomaly: N.amber, traffic_spike: N.red,
+                        vlan_anomaly: '#8b5cf6', mac_loop_suspicion: '#f97316',
+                      }
+                      const tc = typeColors[evt.event_type] || N.amber
+                      return (
+                        <div key={evt.id} style={{
+                          display: 'flex', alignItems: 'flex-start', gap: 8,
+                          padding: '6px 8px', borderRadius: 6,
+                          background: `${tc}08`, border: `1px solid ${tc}18`,
+                        }}>
+                          <span style={{ color: tc, fontSize: 11, marginTop: 2 }}>●</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: 12, fontWeight: 600, color: C.text }}>{evt.device_hostname || '—'}</div>
+                            <div style={{ fontSize: 11, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {evt.message}
+                            </div>
+                          </div>
+                          <Tag style={{ fontSize: 10, padding: '0 4px', margin: 0, flexShrink: 0,
+                            background: `${tc}15`, color: tc, borderColor: `${tc}35` }}>
+                            {evt.label}
+                          </Tag>
                         </div>
                       )
                     })}
