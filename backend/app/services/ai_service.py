@@ -120,19 +120,25 @@ async def _claude_chat(settings: AISettings, system: str, messages: list[dict]) 
     try:
         from anthropic import AsyncAnthropic
     except ImportError:
-        raise RuntimeError("anthropic paketi yüklü değil.")
+        raise RuntimeError("anthropic paketi yüklü değil. VPS'te 'docker compose up -d --build' çalıştırın.")
 
     api_key = decrypt_credential_safe(settings.claude_api_key_enc)
     if not api_key:
         raise ValueError("Claude API anahtarı ayarlanmamış.")
 
-    client = AsyncAnthropic(api_key=api_key)
-    resp = await client.messages.create(
-        model=settings.claude_model or "claude-sonnet-4-6",
-        max_tokens=2048,
-        system=system,
-        messages=messages,
-    )
+    client = AsyncAnthropic(api_key=api_key, timeout=60.0)
+    try:
+        resp = await client.messages.create(
+            model=settings.claude_model or "claude-sonnet-4-6",
+            max_tokens=2048,
+            system=system,
+            messages=messages,
+        )
+    except Exception as e:
+        err_str = str(e)
+        if "401" in err_str or "authentication" in err_str.lower() or "invalid" in err_str.lower():
+            raise ValueError("Claude API anahtarı geçersiz. Lütfen Ayarlar'dan kontrol edin.")
+        raise RuntimeError(f"Claude API hatası: {e}")
     tokens = (resp.usage.input_tokens or 0) + (resp.usage.output_tokens or 0)
     return {
         "message": resp.content[0].text,
@@ -146,19 +152,27 @@ async def _openai_chat(settings: AISettings, system: str, messages: list[dict]) 
     try:
         from openai import AsyncOpenAI
     except ImportError:
-        raise RuntimeError("openai paketi yüklü değil.")
+        raise RuntimeError("openai paketi yüklü değil. VPS'te 'docker compose up -d --build' çalıştırın.")
 
     api_key = decrypt_credential_safe(settings.openai_api_key_enc)
     if not api_key:
         raise ValueError("OpenAI API anahtarı ayarlanmamış.")
 
-    client = AsyncOpenAI(api_key=api_key)
+    client = AsyncOpenAI(api_key=api_key, timeout=60.0)
     full_messages = [{"role": "system", "content": system}] + messages
-    resp = await client.chat.completions.create(
-        model=settings.openai_model or "gpt-4o",
-        messages=full_messages,
-        max_tokens=2048,
-    )
+    try:
+        resp = await client.chat.completions.create(
+            model=settings.openai_model or "gpt-4o",
+            messages=full_messages,
+            max_tokens=2048,
+        )
+    except Exception as e:
+        err_str = str(e)
+        if "401" in err_str or "Incorrect API key" in err_str or "invalid_api_key" in err_str:
+            raise ValueError(f"OpenAI API anahtarı geçersiz. Lütfen Ayarlar'dan kontrol edin.")
+        if "429" in err_str:
+            raise ValueError("OpenAI rate limit aşıldı. Biraz bekleyip tekrar deneyin.")
+        raise RuntimeError(f"OpenAI API hatası: {e}")
     return {
         "message": resp.choices[0].message.content,
         "provider": "openai",

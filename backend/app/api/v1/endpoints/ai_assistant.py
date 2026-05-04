@@ -110,7 +110,7 @@ async def ai_chat(
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"AI sağlayıcı hatası: {exc}")
+        raise HTTPException(status_code=503, detail=f"AI sağlayıcı hatası: {exc}")
 
 
 @router.get("/providers")
