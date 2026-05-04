@@ -288,7 +288,13 @@ export default function AIAssistantPage() {
   const suggested = SUGGESTED[mode]
 
   return (
-    <div style={{ display: 'flex', height: '100vh', background: C.bg, overflow: 'hidden' }}>
+    <div style={{
+      display: 'flex',
+      height: 'calc(100vh - 60px)',
+      margin: '-20px -24px',
+      background: C.bg,
+      overflow: 'hidden',
+    }}>
 
       {/* ── LEFT PANEL ─────────────────────────────────────────────────── */}
       <div style={{
