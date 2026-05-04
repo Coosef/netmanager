@@ -17,7 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.audit_log import AuditLog
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
@@ -153,11 +153,15 @@ async def fleet_risk(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(CurrentUser),
+    location_filter: LocationNameFilter = None,
 ):
     """Tüm aktif cihazların risk skorları — en riskli N cihaz ve özet."""
-    devices = (await db.execute(
-        select(Device).where(Device.is_active == True)
-    )).scalars().all()
+    dev_q = select(Device).where(Device.is_active == True)
+    if location_filter is not None:
+        if not location_filter:
+            return {"summary": {"total_devices": 0, "avg_risk_score": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}, "top_devices": []}
+        dev_q = dev_q.where(Device.site.in_(location_filter))
+    devices = (await db.execute(dev_q)).scalars().all()
 
     now = datetime.now(timezone.utc)
     results = [await _calc_risk(db, d, now) for d in devices]
