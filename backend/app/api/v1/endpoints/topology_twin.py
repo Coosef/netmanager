@@ -66,7 +66,7 @@ class SnapshotCreate(BaseModel):
 async def create_snapshot(
     body: SnapshotCreate,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser = None,
 ):
     links = await _current_links(db)
     device_ids = {lnk["device_id"] for lnk in links}
@@ -86,7 +86,7 @@ async def create_snapshot(
 @router.get("/snapshots")
 async def list_snapshots(
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser = None,
 ):
     rows = (await db.execute(
         select(TopologySnapshot).order_by(TopologySnapshot.created_at.desc())
@@ -98,7 +98,7 @@ async def list_snapshots(
 async def delete_snapshot(
     snapshot_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser = None,
 ):
     snap = (await db.execute(
         select(TopologySnapshot).where(TopologySnapshot.id == snapshot_id)
@@ -113,7 +113,7 @@ async def delete_snapshot(
 async def set_golden(
     snapshot_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser = None,
 ):
     snap = (await db.execute(
         select(TopologySnapshot).where(TopologySnapshot.id == snapshot_id)
@@ -139,7 +139,7 @@ async def set_golden(
 @router.get("/diff")
 async def get_diff(
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser = None,
 ):
     """
     Altın baseline vs mevcut topoloji karşılaştırması.
