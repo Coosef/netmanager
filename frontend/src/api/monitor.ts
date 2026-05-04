@@ -49,4 +49,9 @@ export const monitorApi = {
 
   triggerScan: () =>
     client.post<{ queued: boolean; device_count: number }>('/monitor/scan').then((r) => r.data),
+
+  purgeNoise: (olderThanHours = 1) =>
+    client.post<{ deleted: number; event_types: string[] }>(
+      '/monitor/events/purge-noise', null, { params: { older_than_hours: olderThanHours } }
+    ).then((r) => r.data),
 }

@@ -878,7 +878,14 @@ async def bulk_fetch_info(
         except Exception as exc:
             return {"device_id": device.id, "hostname": device.hostname, "success": False, "error": str(exc)}
 
-    ssh_results = await asyncio.gather(*[_ssh_fetch(d) for d in devices])
+    async def _ssh_fetch_safe(device: Device) -> dict:
+        try:
+            return await asyncio.wait_for(_ssh_fetch(device), timeout=45.0)
+        except asyncio.TimeoutError:
+            return {"device_id": device.id, "hostname": device.hostname,
+                    "success": False, "error": "SSH bağlantısı zaman aşımına uğradı (45s)"}
+
+    ssh_results = await asyncio.gather(*[_ssh_fetch_safe(d) for d in devices])
 
     for r in ssh_results:
         if r["success"] and r.get("updates"):

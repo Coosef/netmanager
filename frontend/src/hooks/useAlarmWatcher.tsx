@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { App } from 'antd'
+import React, { useEffect, useRef } from 'react'
+import { App, Button, Space } from 'antd'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { monitorApi } from '@/api/monitor'
@@ -49,8 +49,10 @@ export function useAlarmWatcher() {
       if (shown >= 3) break
 
       shown++
+
+      const notifKey = `alarm-${ev.id}`
       notification.open({
-        key: `alarm-${ev.id}`,
+        key: notifKey,
         type: ev.severity === 'critical' ? 'error' : 'warning',
         message: `${SEV_ICON[ev.severity] ?? ''} ${ev.title}`,
         description: ev.device_hostname ? `Cihaz: ${ev.device_hostname}` : undefined,
@@ -58,6 +60,23 @@ export function useAlarmWatcher() {
         placement: 'bottomRight',
         style: { cursor: 'pointer' },
         onClick: () => navigate('/monitor'),
+        btn: (
+          <Space size={6} onClick={(e) => e.stopPropagation()}>
+            <Button
+              size="small"
+              onClick={() => navigate('/monitor')}
+            >
+              Monitöre Git
+            </Button>
+            <Button
+              size="small"
+              danger
+              onClick={() => notification.destroy()}
+            >
+              Tümünü Kapat
+            </Button>
+          </Space>
+        ),
       })
     }
   }, [data, location.pathname, navigate, notification])

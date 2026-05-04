@@ -14,6 +14,12 @@ from app.workers.celery_app import celery_app
 
 _redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
+FLAP_THRESHOLD = 10   # status changes/hour before device is considered "flapping"
+OFFLINE_DEDUP_TTL = 1800   # 30 min — cap offline events at 2/hour per device
+ONLINE_DEDUP_TTL  = 1800   # same for online events
+FLAP_DEDUP_TTL    = 3600   # fire flapping alert at most once per hour
+CORR_DEDUP_TTL    = 3600   # correlation incidents at most once per hour
+
 STP_PATTERNS = [
     ("topology change", "STP Topoloji Değişikliği", "warning"),
     ("TCN", "STP TCN Algılandı", "warning"),
@@ -54,9 +60,10 @@ def _is_duplicate_event(device_id: int | None, event_type: str, dedup_key: str, 
 
 
 def _save_event(db, device, event_type: str, severity: str, title: str,
-                message: str = "", details: dict = None, dedup_key: str = ""):
+                message: str = "", details: dict = None, dedup_key: str = "",
+                dedup_ttl: int = 300):
     if dedup_key and _is_duplicate_event(
-        device.id if device else None, event_type, dedup_key or title
+        device.id if device else None, event_type, dedup_key or title, ttl=dedup_ttl
     ):
         return None
     event = NetworkEvent(
@@ -108,6 +115,12 @@ def _increment_flap_counter(device_id: int) -> int:
     return count
 
 
+def _is_flapping(device_id: int) -> bool:
+    """Return True if device has >= FLAP_THRESHOLD status changes in the current hour."""
+    count = _redis.get(f"flap:{device_id}:count")
+    return int(count or 0) >= FLAP_THRESHOLD
+
+
 def _correlate_offline_events(db, newly_offline: list) -> None:
     """
     Topoloji BFS ile root cause tespiti.
@@ -119,6 +132,12 @@ def _correlate_offline_events(db, newly_offline: list) -> None:
     """
     if len(newly_offline) < 2:
         return
+
+    # Exclude flapping devices — they are unstable and cause spurious cascades.
+    stable_offline = [d for d in newly_offline if not _is_flapping(d.id)]
+    if len(stable_offline) < 2:
+        return
+    newly_offline = stable_offline
 
     offline_ids = {d.id for d in newly_offline}
     id_to_device = {d.id: d for d in newly_offline}
@@ -191,6 +210,7 @@ def _correlate_offline_events(db, newly_offline: list) -> None:
                 "suppressed_alerts": len(affected_ids),
             },
             dedup_key=f"rootcause:{root_id}",
+            dedup_ttl=CORR_DEDUP_TTL,
         )
 
     # Cascade child'ların device_offline event'lerini bastır
@@ -201,11 +221,30 @@ def _correlate_offline_events(db, newly_offline: list) -> None:
 
 @celery_app.task(name="app.workers.tasks.monitor_tasks.poll_device_status")
 def poll_device_status():
+    """
+    Two-pass polling:
+      Pass 1 — Test all devices, update DB/Redis status.
+      Pass 2 — Group status changes and fire deduplicated events:
+        • N+ devices from the same agent going offline → single "agent_outage" event
+        • Devices beyond FLAP_THRESHOLD → single "device_flapping" event (no per-poll events)
+        • Everything else → individual device_offline / device_online events
+    """
+    from collections import defaultdict
+
+    # How many devices from the same agent offline at once = agent issue, not individual
+    AGENT_GROUP_MIN = 3
+
     db = _get_db()
     ssh = SSHManager()
-    newly_offline = []
     try:
         devices = db.execute(select(Device).where(Device.is_active == True)).scalars().all()
+        total = len(devices)
+        if total == 0:
+            return
+
+        # ── Pass 1: Test connections, update DB/Redis ───────────────────────
+        # changes: (device, new_status, error_msg)
+        changes: list[tuple] = []
         for device in devices:
             try:
                 prev_status = device.status
@@ -217,38 +256,115 @@ def poll_device_status():
                     last_seen=datetime.now(timezone.utc) if result.success else device.last_seen,
                 ))
                 db.commit()
-                _redis.setex(f"device:{device.id}:status", 600,
-                             json.dumps({"status": new_status, "ts": datetime.now(timezone.utc).isoformat()}))
+                _redis.setex(
+                    f"device:{device.id}:status", 600,
+                    json.dumps({"status": new_status, "ts": datetime.now(timezone.utc).isoformat()}),
+                )
 
                 if prev_status != new_status:
-                    flap_count = _increment_flap_counter(device.id)
-
-                    if new_status == DeviceStatus.OFFLINE:
-                        newly_offline.append(device)
-                        severity = "critical"
-                        extra_msg = ""
-                        if flap_count >= 4:
-                            severity = "critical"
-                            extra_msg = f" [FLAP #{flap_count} — son 1 saatte {flap_count} durum değişikliği]"
-                        _save_event(db, device, "device_offline", severity,
-                                    f"{device.hostname} çevrimdışı{extra_msg}",
-                                    f"SSH bağlantısı başarısız: {result.error}",
-                                    dedup_key=f"offline:{device.id}")
-                        if flap_count >= 4:
-                            _save_event(db, device, "device_flapping", "critical",
-                                        f"FLAP ALGILANDI: {device.hostname} ({flap_count}x/saat)",
-                                        f"{flap_count} durum değişikliği son 1 saatte.",
-                                        dedup_key=f"flap_alert:{device.id}:{flap_count // 4}")
-                    elif new_status == DeviceStatus.ONLINE:
-                        _save_event(db, device, "device_online", "info",
-                                    f"{device.hostname} tekrar çevrimiçi",
-                                    dedup_key=f"online:{device.id}")
+                    changes.append((device, new_status, result.error or ""))
             except Exception:
                 pass
 
-        # Correlate after all devices checked
-        if newly_offline:
-            _correlate_offline_events(db, newly_offline)
+        if not changes:
+            return
+
+        # ── Pass 2: Pattern analysis & event generation ─────────────────────
+        newly_offline_all = [(d, err) for d, ns, err in changes if ns == DeviceStatus.OFFLINE]
+        newly_online_all  = [d for d, ns, _ in changes if ns == DeviceStatus.ONLINE]
+
+        # Increment flap counters for all devices that changed state
+        flap_counts: dict[int, int] = {}
+        for device, _, _ in changes:
+            flap_counts[device.id] = _increment_flap_counter(device.id)
+
+        # Group offline devices by their agent_id
+        agent_groups: dict[str, list] = defaultdict(list)   # agent_id → [(device, err)]
+        no_agent_offline: list[tuple] = []
+        for dev, err in newly_offline_all:
+            aid = getattr(dev, "agent_id", None)
+            if aid:
+                agent_groups[aid].append((dev, err))
+            else:
+                no_agent_offline.append((dev, err))
+
+        # Devices eligible for correlation (non-flapping, non-agent-grouped)
+        stable_for_correlation: list = []
+
+        # ── Agent-grouped offline (N+ devices from same agent) ───────────────
+        for agent_id, group in agent_groups.items():
+            # Flapping alerts fire once when threshold crossed (regardless of group size)
+            for dev, _ in group:
+                fc = flap_counts[dev.id]
+                if fc == FLAP_THRESHOLD:
+                    _save_event(
+                        db, dev, "device_flapping", "critical",
+                        f"FLAP ALGILANDI: {dev.hostname} ({fc}x/saat)",
+                        f"Son 1 saatte {fc} durum değişikliği. Bireysel olaylar bastırıldı.",
+                        dedup_key=f"flap_alert:{dev.id}",
+                        dedup_ttl=FLAP_DEDUP_TTL,
+                    )
+
+            if len(group) >= AGENT_GROUP_MIN:
+                # Single grouped event instead of N individual events
+                not_flapping = [(d, e) for d, e in group if flap_counts[d.id] < FLAP_THRESHOLD]
+                if not_flapping:
+                    hostnames = ", ".join(d.hostname for d, _ in not_flapping[:6])
+                    cnt = len(group)
+                    _save_event(
+                        db, group[0][0], "agent_outage", "critical",
+                        f"AGENT KESİNTİSİ: {agent_id} — {cnt} cihaz etkilendi",
+                        f"Aynı anda offline olan cihazlar: {hostnames}{'...' if cnt > 6 else ''}",
+                        dedup_key=f"agent_outage:{agent_id}",
+                        dedup_ttl=OFFLINE_DEDUP_TTL,
+                    )
+            else:
+                # Small group — individual events (with flap suppression)
+                for dev, err in group:
+                    if flap_counts[dev.id] < FLAP_THRESHOLD:
+                        _save_event(
+                            db, dev, "device_offline", "critical",
+                            f"{dev.hostname} çevrimdışı",
+                            f"SSH bağlantısı başarısız: {err}",
+                            dedup_key=f"offline:{dev.id}",
+                            dedup_ttl=OFFLINE_DEDUP_TTL,
+                        )
+                        stable_for_correlation.append(dev)
+
+        # ── Non-agent offline ────────────────────────────────────────────────
+        for dev, err in no_agent_offline:
+            fc = flap_counts[dev.id]
+            if fc == FLAP_THRESHOLD:
+                _save_event(
+                    db, dev, "device_flapping", "critical",
+                    f"FLAP ALGILANDI: {dev.hostname} ({fc}x/saat)",
+                    f"Son 1 saatte {fc} durum değişikliği. Bireysel olaylar bastırıldı.",
+                    dedup_key=f"flap_alert:{dev.id}",
+                    dedup_ttl=FLAP_DEDUP_TTL,
+                )
+            if fc < FLAP_THRESHOLD:
+                _save_event(
+                    db, dev, "device_offline", "critical",
+                    f"{dev.hostname} çevrimdışı",
+                    f"SSH bağlantısı başarısız: {err}",
+                    dedup_key=f"offline:{dev.id}",
+                    dedup_ttl=OFFLINE_DEDUP_TTL,
+                )
+                stable_for_correlation.append(dev)
+
+        # ── Online events ────────────────────────────────────────────────────
+        for dev in newly_online_all:
+            if flap_counts.get(dev.id, 0) < FLAP_THRESHOLD:
+                _save_event(
+                    db, dev, "device_online", "info",
+                    f"{dev.hostname} tekrar çevrimiçi",
+                    dedup_key=f"online:{dev.id}",
+                    dedup_ttl=ONLINE_DEDUP_TTL,
+                )
+
+        # ── Topology correlation (only stable, non-grouped devices) ──────────
+        if stable_for_correlation:
+            _correlate_offline_events(db, stable_for_correlation)
 
     finally:
         _run_async(ssh.close_all())

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -91,6 +91,30 @@ async def acknowledge_all(
     )
     await db.commit()
     return {"ok": True}
+
+
+@router.post("/events/purge-noise")
+async def purge_noise_events(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    older_than_hours: int = Query(1, description="Purge noisy events older than N hours"),
+):
+    """
+    Delete accumulated flapping/correlation noise events.
+    Removes device_flapping, correlation_incident, and agent_outage events
+    older than `older_than_hours` to clear backlog from a flapping period.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
+    noisy_types = ("device_flapping", "correlation_incident", "agent_outage")
+
+    result = await db.execute(
+        delete(NetworkEvent).where(
+            NetworkEvent.event_type.in_(noisy_types),
+            NetworkEvent.created_at < cutoff,
+        )
+    )
+    await db.commit()
+    return {"deleted": result.rowcount, "event_types": list(noisy_types), "cutoff": cutoff.isoformat()}
 
 
 @router.get("/stats", response_model=dict)

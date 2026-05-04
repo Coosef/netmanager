@@ -8,7 +8,7 @@ import {
   SyncOutlined, CheckOutlined, BellOutlined, FilterOutlined,
   ThunderboltOutlined, CloseCircleOutlined, WarningOutlined,
   InfoCircleOutlined, CheckCircleFilled, AlertOutlined,
-  UnorderedListOutlined, MenuOutlined,
+  UnorderedListOutlined, MenuOutlined, ClearOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
@@ -108,20 +108,6 @@ function TimelineView({
             {/* Severity bar */}
             <div style={{ width: 3, flexShrink: 0, background: sevColor, borderRadius: '2px 0 0 2px' }} />
 
-            {/* Time column */}
-            <div style={{
-              width: 70, flexShrink: 0,
-              display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
-              justifyContent: 'center', padding: '10px 10px 10px 8px',
-              borderRight: `1px solid ${border}`,
-            }}>
-              <Tooltip title={dayjs(ev.created_at).format('DD.MM.YYYY HH:mm:ss')}>
-                <span style={{ fontSize: 11, color: muted, whiteSpace: 'nowrap', cursor: 'default' }}>
-                  {dayjs(ev.created_at).fromNow()}
-                </span>
-              </Tooltip>
-            </div>
-
             {/* Icon */}
             <div style={{ width: 36, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <span style={{ fontSize: 15 }}>{SEV_ICON[ev.severity]}</span>
@@ -148,8 +134,22 @@ function TimelineView({
               </div>
             </div>
 
+            {/* Time — right-aligned, fixed width so long Turkish strings don't overflow */}
+            <div style={{
+              flexShrink: 0, width: 108,
+              display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+              padding: '0 10px',
+              borderLeft: `1px solid ${border}`,
+            }}>
+              <Tooltip title={dayjs(ev.created_at).format('DD.MM.YYYY HH:mm:ss')}>
+                <span style={{ fontSize: 11, color: muted, whiteSpace: 'nowrap', cursor: 'default', textAlign: 'right' }}>
+                  {dayjs(ev.created_at).fromNow()}
+                </span>
+              </Tooltip>
+            </div>
+
             {/* Ack action */}
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 12px' }}>
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 10px', borderLeft: `1px solid ${border}` }}>
               {ev.acknowledged ? (
                 <CheckCircleFilled style={{ color: '#52c41a', fontSize: 15 }} />
               ) : (
@@ -306,6 +306,14 @@ export default function MonitorPage() {
   const handleScan = async () => {
     await monitorApi.triggerScan()
     message.success(t('monitor.scan_queued'))
+  }
+
+  const handlePurgeNoise = async () => {
+    const res = await monitorApi.purgeNoise(1)
+    message.success(`${res.deleted} gürültü olayı silindi (flapping, correlation, agent_outage)`)
+    qc.invalidateQueries({ queryKey: ['monitor-events'] })
+    qc.invalidateQueries({ queryKey: ['monitor-stats'] })
+    refetchStats()
   }
 
   const s = statsData
@@ -472,6 +480,16 @@ export default function MonitorPage() {
               </Button>
             </Popconfirm>
           )}
+          <Popconfirm
+            title="Son 1 saatteki flapping / correlation / agent_outage olayları silinsin mi?"
+            onConfirm={handlePurgeNoise}
+            okText="Sil"
+            cancelText="İptal"
+          >
+            <Button icon={<ClearOutlined />} danger>
+              Gürültüyü Temizle
+            </Button>
+          </Popconfirm>
         </Space>
       </div>
 
