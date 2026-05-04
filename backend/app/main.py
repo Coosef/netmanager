@@ -301,6 +301,52 @@ async def lifespan(app: FastAPI):
             "'gemini-2.0-flash-exp')"
         ))
 
+        # Org/Location/RBAC enhancements
+        await conn.execute(text(
+            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_tier VARCHAR(32) NOT NULL DEFAULT 'free'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_devices INTEGER NOT NULL DEFAULT 50"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_users INTEGER NOT NULL DEFAULT 5"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE locations ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE locations ADD COLUMN IF NOT EXISTS city VARCHAR(128)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE locations ADD COLUMN IF NOT EXISTS country VARCHAR(64)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE locations ADD COLUMN IF NOT EXISTS timezone VARCHAR(64)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_locations_tenant_id ON locations(tenant_id)"
+        ))
+        await conn.execute(text(
+            "CREATE TABLE IF NOT EXISTS user_locations ("
+            "id SERIAL PRIMARY KEY, "
+            "user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, "
+            "location_id INTEGER NOT NULL REFERENCES locations(id) ON DELETE CASCADE, "
+            "loc_role VARCHAR(32) NOT NULL DEFAULT 'location_viewer', "
+            "assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), "
+            "assigned_by INTEGER REFERENCES users(id) ON DELETE SET NULL, "
+            "CONSTRAINT uq_user_location UNIQUE(user_id, location_id)"
+            ")"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_user_locations_user_id ON user_locations(user_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_user_locations_location_id ON user_locations(location_id)"
+        ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _seed_builtin_templates()

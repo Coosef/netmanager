@@ -64,5 +64,34 @@ async def get_tenant_context(
     return current_user.tenant_id
 
 
+async def get_accessible_location_ids(
+    current_user: Annotated[User, Depends(get_current_active_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Optional[list[int]]:
+    """
+    Returns None for unrestricted access (super_admin, admin).
+    Returns list[int] of allowed location IDs for scoped roles.
+    org_viewer gets all tenant locations; location_* roles get only assigned ones.
+    """
+    from app.models.location import Location
+    from app.models.user_location import UserLocation
+
+    if current_user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+        return None
+
+    if current_user.role == UserRole.ORG_VIEWER:
+        rows = (await db.execute(
+            select(Location.id).where(Location.tenant_id == current_user.tenant_id)
+        )).fetchall()
+        return [r[0] for r in rows]
+
+    # location_* and legacy operator/viewer: only explicitly assigned locations
+    rows = (await db.execute(
+        select(UserLocation.location_id).where(UserLocation.user_id == current_user.id)
+    )).fetchall()
+    return [r[0] for r in rows]
+
+
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
 TenantFilter = Annotated[Optional[int], Depends(get_tenant_context)]
+LocationFilter = Annotated[Optional[list[int]], Depends(get_accessible_location_ids)]

@@ -9,18 +9,35 @@ export interface Tenant {
   user_count: number
 }
 
+export type UserRole =
+  | 'super_admin'
+  | 'admin'
+  | 'org_viewer'
+  | 'location_manager'
+  | 'location_operator'
+  | 'location_viewer'
+  | 'operator'
+  | 'viewer'
+
+export interface UserLocationItem {
+  location_id: number
+  location_name: string
+  loc_role: string
+}
+
 export interface User {
   id: number
   username: string
   email: string
   full_name?: string
-  role: 'super_admin' | 'admin' | 'operator' | 'viewer'
+  role: UserRole
   is_active: boolean
   notes?: string
   tenant_id?: number | null
   tenant_name?: string | null
   last_login?: string
   created_at: string
+  locations?: UserLocationItem[]
 }
 
 export interface Device {
@@ -208,9 +225,19 @@ export const VENDOR_OS_MAP: Record<string, string[]> = {
 
 export const ROLE_OPTIONS = [
   { label: 'Super Admin', value: 'super_admin' },
-  { label: 'Admin', value: 'admin' },
+  { label: 'Admin (Org Yönetici)', value: 'admin' },
+  { label: 'Org Viewer (Tüm Lok. Okuma)', value: 'org_viewer' },
+  { label: 'Lokasyon Yönetici', value: 'location_manager' },
+  { label: 'Lokasyon Operatör', value: 'location_operator' },
+  { label: 'Lokasyon Görüntüleyici', value: 'location_viewer' },
   { label: 'Operator', value: 'operator' },
   { label: 'Viewer', value: 'viewer' },
+]
+
+export const LOC_ROLE_OPTIONS = [
+  { label: 'Lokasyon Yönetici', value: 'location_manager' },
+  { label: 'Lokasyon Operatör', value: 'location_operator' },
+  { label: 'Lokasyon Görüntüleyici', value: 'location_viewer' },
 ]
 
 export const TASK_TYPE_OPTIONS = [

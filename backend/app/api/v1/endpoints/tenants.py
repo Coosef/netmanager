@@ -16,16 +16,21 @@ SuperAdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN))
 
 
 async def _enrich(db: AsyncSession, tenant: Tenant) -> dict:
+    from app.models.location import Location
     dev_cnt = (await db.execute(
         select(func.count()).where(Device.tenant_id == tenant.id)
     )).scalar() or 0
     usr_cnt = (await db.execute(
         select(func.count()).where(User.tenant_id == tenant.id)
     )).scalar() or 0
+    loc_cnt = (await db.execute(
+        select(func.count()).where(Location.tenant_id == tenant.id)
+    )).scalar() or 0
     return {
         **{c.name: getattr(tenant, c.name) for c in tenant.__table__.columns},
         "device_count": dev_cnt,
         "user_count": usr_cnt,
+        "location_count": loc_cnt,
     }
 
 

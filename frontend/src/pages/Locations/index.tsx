@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import {
   App, Button, Card, Col, Form, Input, Modal, Popconfirm,
-  Row, Space, Table, Tag, Tooltip, Typography, ColorPicker,
+  Row, Space, Table, Tag, Tooltip, Typography, ColorPicker, Select,
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
-  EnvironmentOutlined, LaptopOutlined, ReloadOutlined,
+  EnvironmentOutlined, LaptopOutlined, ReloadOutlined, TeamOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { locationsApi, type Location } from '@/api/locations'
@@ -18,6 +18,12 @@ const DEFAULT_COLORS = [
   '#3b82f6', '#22c55e', '#f97316', '#ef4444',
   '#8b5cf6', '#06b6d4', '#eab308', '#ec4899',
 ]
+
+const TZ_OPTIONS = [
+  'Europe/Istanbul', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+  'Europe/Moscow', 'Asia/Dubai', 'Asia/Riyadh', 'America/New_York',
+  'America/Chicago', 'America/Los_Angeles', 'Asia/Tokyo', 'Asia/Singapore',
+].map((v) => ({ label: v, value: v }))
 
 export default function LocationsPage() {
   const { message } = App.useApp()
@@ -79,7 +85,15 @@ export default function LocationsPage() {
     setEditing(loc)
     const c = loc.color || '#3b82f6'
     setColorValue(c)
-    form.setFieldsValue({ name: loc.name, description: loc.description || '', address: loc.address || '', color: c })
+    form.setFieldsValue({
+      name: loc.name,
+      description: loc.description || '',
+      address: loc.address || '',
+      city: loc.city || '',
+      country: loc.country || '',
+      timezone: loc.timezone || undefined,
+      color: c,
+    })
     setModalOpen(true)
   }
 
@@ -105,6 +119,7 @@ export default function LocationsPage() {
 
   const items = data?.items || []
   const totalDevices = items.reduce((s, l) => s + l.device_count, 0)
+  const totalUsers = items.reduce((s, l) => s + (l.user_count || 0), 0)
 
   const columns = [
     {
@@ -117,38 +132,51 @@ export default function LocationsPage() {
             width: 12, height: 12, borderRadius: '50%',
             background: rec.color || '#3b82f6', flexShrink: 0,
           }} />
-          <Text strong style={{ fontSize: 14 }}>{name}</Text>
+          <div>
+            <Text strong style={{ fontSize: 14 }}>{name}</Text>
+            {(rec.city || rec.country) && (
+              <div style={{ fontSize: 11, color: subText }}>
+                {[rec.city, rec.country].filter(Boolean).join(', ')}
+              </div>
+            )}
+          </div>
         </Space>
       ),
     },
     {
-      title: 'Açıklama',
-      dataIndex: 'description',
-      key: 'description',
-      render: (v: string | null) => v ? <Text type="secondary">{v}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
-    },
-    {
-      title: 'Adres',
-      dataIndex: 'address',
-      key: 'address',
-      render: (v: string | null) => v ? <Text style={{ fontSize: 13 }}>{v}</Text> : <Text type="secondary" style={{ fontSize: 12 }}>—</Text>,
+      title: 'Açıklama / Adres',
+      key: 'desc',
+      render: (_: unknown, rec: Location) => (
+        <div>
+          {rec.description && <Text type="secondary" style={{ fontSize: 12 }}>{rec.description}</Text>}
+          {rec.address && <div style={{ fontSize: 11, color: subText }}>{rec.address}</div>}
+          {!rec.description && !rec.address && <Text type="secondary" style={{ fontSize: 12 }}>—</Text>}
+        </div>
+      ),
     },
     {
       title: 'Cihaz',
       dataIndex: 'device_count',
       key: 'device_count',
+      width: 80,
+      render: (n: number) => (
+        <Tag icon={<LaptopOutlined />} color={n > 0 ? 'blue' : 'default'}>{n}</Tag>
+      ),
+    },
+    {
+      title: 'Kullanıcı',
+      dataIndex: 'user_count',
+      key: 'user_count',
       width: 90,
       render: (n: number) => (
-        <Tag icon={<LaptopOutlined />} color={n > 0 ? 'blue' : 'default'}>
-          {n}
-        </Tag>
+        <Tag icon={<TeamOutlined />} color={n > 0 ? 'green' : 'default'}>{n}</Tag>
       ),
     },
     {
       title: 'Eklenme',
       dataIndex: 'created_at',
       key: 'created_at',
-      width: 130,
+      width: 110,
       render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(v).format('DD.MM.YYYY')}</Text>,
     },
     {
@@ -187,7 +215,7 @@ export default function LocationsPage() {
             Lokasyon Yönetimi
           </Title>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            Ağ lokasyonlarını tanımlayın — header'dan seçerek lokasyon bazlı izleme yapın
+            Şube / site tanımları — kullanıcılara lokasyon bazlı yetki verin
           </Text>
         </div>
         <Space>
@@ -227,12 +255,10 @@ export default function LocationsPage() {
         <Col xs={24} sm={8}>
           <Card style={{ background: cardBg, border: `1px solid ${border}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <EnvironmentOutlined style={{ fontSize: 24, color: '#f97316' }} />
+              <TeamOutlined style={{ fontSize: 24, color: '#8b5cf6' }} />
               <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>Boş Lokasyon</Text>
-                <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>
-                  {items.filter((l) => l.device_count === 0).length}
-                </div>
+                <Text type="secondary" style={{ fontSize: 12 }}>Atanmış Kullanıcı</Text>
+                <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>{totalUsers}</div>
               </div>
             </div>
           </Card>
@@ -252,7 +278,7 @@ export default function LocationsPage() {
         />
       </Card>
 
-      {/* Color quick-pick display */}
+      {/* Create/Edit Modal */}
       <Modal
         title={editing ? 'Lokasyon Düzenle' : 'Yeni Lokasyon'}
         open={modalOpen}
@@ -261,7 +287,7 @@ export default function LocationsPage() {
         okText={editing ? 'Güncelle' : 'Oluştur'}
         cancelText="İptal"
         confirmLoading={createMutation.isPending || updateMutation.isPending}
-        width={480}
+        width={520}
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item
@@ -270,6 +296,31 @@ export default function LocationsPage() {
             rules={[{ required: true, message: 'Lokasyon adı zorunlu' }]}
           >
             <Input placeholder="örn. Merkez Ofis, İstanbul DC, Şube-1" />
+          </Form.Item>
+
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Şehir" name="city">
+                <Input placeholder="İstanbul" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Ülke" name="country">
+                <Input placeholder="Türkiye" />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item label="Zaman Dilimi" name="timezone">
+            <Select
+              options={TZ_OPTIONS}
+              allowClear
+              showSearch
+              placeholder="Europe/Istanbul"
+              filterOption={(input, option) =>
+                (option?.label as string)?.toLowerCase().includes(input.toLowerCase())
+              }
+            />
           </Form.Item>
 
           <Form.Item label="Renk" style={{ marginBottom: 8 }}>
@@ -287,11 +338,7 @@ export default function LocationsPage() {
                   }}
                 />
               ))}
-              <ColorPicker
-                value={colorValue}
-                onChange={(_, hex) => setColorValue(hex)}
-                size="small"
-              />
+              <ColorPicker value={colorValue} onChange={(_, hex) => setColorValue(hex)} size="small" />
             </div>
           </Form.Item>
 

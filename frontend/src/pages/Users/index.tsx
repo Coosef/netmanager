@@ -1,18 +1,21 @@
 import { useState } from 'react'
 import {
   App, Button, Drawer, Form, Input, Popconfirm, Select,
-  Space, Table, Tag, Switch, Avatar, Badge, Modal,
+  Space, Table, Tag, Switch, Avatar, Badge, Modal, Tooltip,
+  Divider, Empty,
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
-  TeamOutlined, UserOutlined, SafetyOutlined, ApartmentOutlined, KeyOutlined,
+  TeamOutlined, UserOutlined, SafetyOutlined, ApartmentOutlined,
+  KeyOutlined, EnvironmentOutlined, MinusCircleOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersApi } from '@/api/users'
 import { tenantsApi } from '@/api/tenants'
+import { locationsApi } from '@/api/locations'
 import { useTheme } from '@/contexts/ThemeContext'
 import type { User } from '@/types'
-import { ROLE_OPTIONS } from '@/types'
+import { ROLE_OPTIONS, LOC_ROLE_OPTIONS } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
@@ -26,11 +29,25 @@ const USERS_CSS = `
 `
 
 const ROLE_HEX: Record<string, string> = {
-  super_admin: '#ef4444', admin: '#f97316', operator: '#3b82f6', viewer: '#22c55e',
+  super_admin: '#ef4444',
+  admin: '#f97316',
+  org_viewer: '#8b5cf6',
+  location_manager: '#06b6d4',
+  location_operator: '#3b82f6',
+  location_viewer: '#22c55e',
+  operator: '#3b82f6',
+  viewer: '#22c55e',
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  super_admin: 'SUPER ADMIN', admin: 'ADMIN', operator: 'OPERATOR', viewer: 'VIEWER',
+  super_admin: 'SUPER ADMIN',
+  admin: 'ADMIN',
+  org_viewer: 'ORG VIEWER',
+  location_manager: 'LOC. MANAGER',
+  location_operator: 'LOC. OPERATOR',
+  location_viewer: 'LOC. VIEWER',
+  operator: 'OPERATOR',
+  viewer: 'VIEWER',
 }
 
 function mkC(isDark: boolean) {
@@ -52,8 +69,7 @@ function RoleStatCard({ role, count, isDark }: { role: string; count: number; is
       background: isDark ? `${hex}12` : C.bg,
       border: `1px solid ${isDark ? hex + '28' : C.border}`,
       borderTop: `2px solid ${hex}60`,
-      borderRadius: 10,
-      padding: '12px 16px',
+      borderRadius: 10, padding: '12px 16px',
       display: 'flex', alignItems: 'center', gap: 10,
       flex: 1, minWidth: 120,
     }}>
@@ -80,10 +96,17 @@ export default function UsersPage() {
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const isSA = isSuperAdmin()
+
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editUser, setEditUser] = useState<User | null>(null)
   const [resetUser, setResetUser] = useState<User | null>(null)
   const [resetForm] = Form.useForm()
+
+  // Location assignment drawer
+  const [locDrawerUser, setLocDrawerUser] = useState<User | null>(null)
+  const [locAssignments, setLocAssignments] = useState<{ location_id: number; loc_role: string }[]>([])
+  const [addLocId, setAddLocId] = useState<number | null>(null)
+  const [addLocRole, setAddLocRole] = useState('location_viewer')
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
@@ -96,7 +119,14 @@ export default function UsersPage() {
     enabled: isSA,
   })
 
+  const { data: locationsData } = useQuery({
+    queryKey: ['locations'],
+    queryFn: () => locationsApi.list(),
+    enabled: !!locDrawerUser,
+  })
+
   const tenantOptions = (tenants || []).map((t) => ({ label: t.name, value: t.id }))
+  const locationOptions = (locationsData?.items || []).map((l) => ({ label: l.name, value: l.id }))
 
   const createMutation = useMutation({
     mutationFn: usersApi.create,
@@ -120,9 +150,44 @@ export default function UsersPage() {
     onError: (e: any) => message.error(e?.response?.data?.detail || t('users.password_reset_error')),
   })
 
+  const saveLocationsMutation = useMutation({
+    mutationFn: ({ id, assignments }: { id: number; assignments: { location_id: number; loc_role: string }[] }) =>
+      usersApi.setLocations(id, assignments),
+    onSuccess: () => {
+      message.success('Lokasyon atamaları kaydedildi')
+      setLocDrawerUser(null)
+      queryClient.invalidateQueries({ queryKey: ['users'] })
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Kaydedilemedi'),
+  })
+
   const onSubmit = (values: Record<string, unknown>) => {
     if (editUser) updateMutation.mutate({ id: editUser.id, data: values })
     else createMutation.mutate(values)
+  }
+
+  const openLocDrawer = (user: User) => {
+    setLocDrawerUser(user)
+    setLocAssignments((user.locations || []).map((l) => ({ location_id: l.location_id, loc_role: l.loc_role })))
+    setAddLocId(null)
+    setAddLocRole('location_viewer')
+  }
+
+  const addLocAssignment = () => {
+    if (!addLocId) return
+    const exists = locAssignments.find((a) => a.location_id === addLocId)
+    if (exists) { message.warning('Bu lokasyon zaten eklenmiş'); return }
+    setLocAssignments([...locAssignments, { location_id: addLocId, loc_role: addLocRole }])
+    setAddLocId(null)
+    setAddLocRole('location_viewer')
+  }
+
+  const removeLocAssignment = (locId: number) => {
+    setLocAssignments(locAssignments.filter((a) => a.location_id !== locId))
+  }
+
+  const updateLocRole = (locId: number, newRole: string) => {
+    setLocAssignments(locAssignments.map((a) => a.location_id === locId ? { ...a, loc_role: newRole } : a))
   }
 
   const userList = users || []
@@ -135,6 +200,10 @@ export default function UsersPage() {
     ? ROLE_OPTIONS
     : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin')
 
+  const locNameMap = Object.fromEntries(
+    (locationsData?.items || []).map((l) => [l.id, l.name])
+  )
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <style>{USERS_CSS}</style>
@@ -144,13 +213,9 @@ export default function UsersPage() {
         background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
         border: `1px solid ${isDark ? '#3b82f620' : C.border}`,
         borderLeft: '4px solid #3b82f6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
+        borderRadius: 12, padding: '16px 20px',
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        gap: 12, flexWrap: 'wrap',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
@@ -175,12 +240,14 @@ export default function UsersPage() {
         </Button>
       </div>
 
-      {/* Role stat cards */}
+      {/* Role stat cards — show top 4 most useful */}
       {userList.length > 0 && (
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {(['super_admin', 'admin', 'operator', 'viewer'] as const).map((role) => (
-            <RoleStatCard key={role} role={role} count={roleCounts[role] || 0} isDark={isDark} />
-          ))}
+          {(['super_admin', 'admin', 'location_manager', 'location_operator', 'org_viewer', 'viewer'] as const)
+            .filter((r) => (roleCounts[r] || 0) > 0)
+            .map((role) => (
+              <RoleStatCard key={role} role={role} count={roleCounts[role] || 0} isDark={isDark} />
+            ))}
         </div>
       )}
 
@@ -219,13 +286,19 @@ export default function UsersPage() {
                   {!r.is_active && (
                     <Tag style={{ marginLeft: 4, fontSize: 10, color: C.dim, borderColor: C.border, background: C.bg2 }}>inactive</Tag>
                   )}
+                  {/* Show location count badge for location-scoped users */}
+                  {r.locations && r.locations.length > 0 && (
+                    <Tag style={{ marginLeft: 4, fontSize: 10, color: '#06b6d4', borderColor: '#06b6d440', background: '#06b6d415' }}>
+                      <EnvironmentOutlined style={{ marginRight: 2 }} />{r.locations.length}
+                    </Tag>
+                  )}
                 </div>
               ),
             },
             {
               title: t('users.col_role'),
               dataIndex: 'role',
-              width: 130,
+              width: 150,
               render: (v) => {
                 const hex = ROLE_HEX[v] || '#64748b'
                 return (
@@ -268,16 +341,8 @@ export default function UsersPage() {
                 : <span style={{ color: C.dim }}>—</span>,
             },
             {
-              title: t('users.col_created'),
-              dataIndex: 'created_at',
-              width: 100,
-              render: (v) => v
-                ? <span style={{ fontSize: 12, color: C.dim }}>{dayjs(v).format('DD.MM.YY')}</span>
-                : <span style={{ color: C.dim }}>—</span>,
-            },
-            {
               title: '',
-              width: 110,
+              width: 130,
               render: (_, r) => (
                 <Space size={4}>
                   <Button
@@ -286,6 +351,14 @@ export default function UsersPage() {
                     style={{ color: C.muted, borderColor: C.border }}
                     onClick={() => { setEditUser(r); setDrawerOpen(true) }}
                   />
+                  <Tooltip title="Lokasyon Yetkileri">
+                    <Button
+                      size="small"
+                      icon={<EnvironmentOutlined />}
+                      style={{ color: '#06b6d4', borderColor: '#06b6d440' }}
+                      onClick={() => openLocDrawer(r)}
+                    />
+                  </Tooltip>
                   <Button
                     size="small"
                     icon={<KeyOutlined />}
@@ -307,6 +380,7 @@ export default function UsersPage() {
         />
       </div>
 
+      {/* Password Reset Modal */}
       <Modal
         open={!!resetUser}
         onCancel={() => { setResetUser(null); resetForm.resetFields() }}
@@ -343,19 +417,14 @@ export default function UsersPage() {
             <Input.Password />
           </Form.Item>
           <Form.Item style={{ marginBottom: 0 }}>
-            <Button
-              type="primary"
-              htmlType="submit"
-              block
-              loading={resetPasswordMutation.isPending}
-              icon={<KeyOutlined />}
-            >
+            <Button type="primary" htmlType="submit" block loading={resetPasswordMutation.isPending} icon={<KeyOutlined />}>
               {t('users.reset_btn')}
             </Button>
           </Form.Item>
         </Form>
       </Modal>
 
+      {/* User Create/Edit Drawer */}
       <Drawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
@@ -390,27 +459,127 @@ export default function UsersPage() {
           </Form.Item>
           {isSA && (
             <Form.Item label={t('users.organization')} name="tenant_id">
-              <Select
-                options={tenantOptions}
-                allowClear
-                placeholder={t('users.tenant_placeholder')}
-              />
+              <Select options={tenantOptions} allowClear placeholder={t('users.tenant_placeholder')} />
             </Form.Item>
           )}
           <Form.Item label={t('users.form_active')} name="is_active" valuePropName="checked">
             <Switch />
           </Form.Item>
           <Form.Item>
-            <Button
-              type="primary"
-              htmlType="submit"
-              loading={createMutation.isPending || updateMutation.isPending}
-              block
-            >
+            <Button type="primary" htmlType="submit" loading={createMutation.isPending || updateMutation.isPending} block>
               {editUser ? t('common.save') : t('common.add')}
             </Button>
           </Form.Item>
         </Form>
+      </Drawer>
+
+      {/* Location Assignments Drawer */}
+      <Drawer
+        open={!!locDrawerUser}
+        onClose={() => setLocDrawerUser(null)}
+        title={
+          <span style={{ color: C.text }}>
+            <EnvironmentOutlined style={{ marginRight: 8, color: '#06b6d4' }} />
+            Lokasyon Yetkileri — {locDrawerUser?.username}
+          </span>
+        }
+        width={480}
+        destroyOnHidden
+        styles={{
+          body: { background: C.bg, padding: 20 },
+          header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
+          footer: { background: C.bg, borderTop: `1px solid ${C.border}`, padding: '12px 20px' },
+        }}
+        footer={
+          <Button
+            type="primary"
+            block
+            loading={saveLocationsMutation.isPending}
+            onClick={() => locDrawerUser && saveLocationsMutation.mutate({ id: locDrawerUser.id, assignments: locAssignments })}
+          >
+            Atamaları Kaydet
+          </Button>
+        }
+      >
+        <div style={{ marginBottom: 16, color: C.muted, fontSize: 12 }}>
+          Kullanıcının erişebileceği lokasyonları ve her lokasyondaki rolünü belirleyin.
+          <br />
+          <span style={{ color: '#f59e0b' }}>Admin ve Org Viewer rolleri tüm lokasyonlara otomatik erişir.</span>
+        </div>
+
+        {/* Add new location */}
+        <div style={{
+          background: isDark ? '#0f172a' : '#f8fafc',
+          border: `1px solid ${C.border}`,
+          borderRadius: 8, padding: 12, marginBottom: 16,
+        }}>
+          <div style={{ color: C.text, fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Lokasyon Ekle</div>
+          <Space.Compact style={{ width: '100%', marginBottom: 8 }}>
+            <Select
+              placeholder="Lokasyon seç"
+              style={{ flex: 1 }}
+              value={addLocId}
+              onChange={setAddLocId}
+              options={locationOptions.filter((l) => !locAssignments.find((a) => a.location_id === l.value))}
+              showSearch
+              filterOption={(input, option) => (option?.label as string)?.toLowerCase().includes(input.toLowerCase())}
+            />
+          </Space.Compact>
+          <Space style={{ width: '100%' }}>
+            <Select
+              value={addLocRole}
+              onChange={setAddLocRole}
+              style={{ flex: 1, minWidth: 180 }}
+              options={LOC_ROLE_OPTIONS}
+            />
+            <Button type="primary" icon={<PlusOutlined />} onClick={addLocAssignment} disabled={!addLocId}>
+              Ekle
+            </Button>
+          </Space>
+        </div>
+
+        <Divider style={{ margin: '12px 0', borderColor: C.border }} />
+
+        {/* Current assignments */}
+        <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
+          Mevcut Atamalar ({locAssignments.length})
+        </div>
+
+        {locAssignments.length === 0 ? (
+          <Empty description="Henüz lokasyon atanmamış" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {locAssignments.map((a) => {
+              const locName = locNameMap[a.location_id] || `Lokasyon #${a.location_id}`
+              const roleHex = a.loc_role === 'location_manager' ? '#06b6d4' : a.loc_role === 'location_operator' ? '#3b82f6' : '#22c55e'
+              return (
+                <div key={a.location_id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  background: isDark ? '#0f172a' : '#f8fafc',
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 6, padding: '8px 12px',
+                }}>
+                  <EnvironmentOutlined style={{ color: roleHex, flexShrink: 0 }} />
+                  <span style={{ flex: 1, color: C.text, fontSize: 13, fontWeight: 500 }}>{locName}</span>
+                  <Select
+                    value={a.loc_role}
+                    onChange={(v) => updateLocRole(a.location_id, v)}
+                    size="small"
+                    style={{ width: 160 }}
+                    options={LOC_ROLE_OPTIONS}
+                  />
+                  <Button
+                    size="small"
+                    type="text"
+                    danger
+                    icon={<MinusCircleOutlined />}
+                    onClick={() => removeLocAssignment(a.location_id)}
+                  />
+                </div>
+              )
+            })}
+          </div>
+        )}
       </Drawer>
     </div>
   )

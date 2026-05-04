@@ -11,6 +11,10 @@ from app.core.database import Base
 class UserRole(str, Enum):
     SUPER_ADMIN = "super_admin"
     ADMIN = "admin"
+    ORG_VIEWER = "org_viewer"
+    LOCATION_MANAGER = "location_manager"
+    LOCATION_OPERATOR = "location_operator"
+    LOCATION_VIEWER = "location_viewer"
     OPERATOR = "operator"
     VIEWER = "viewer"
 
@@ -27,6 +31,33 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "bulk:password_change", "bulk:config_push", "bulk:command",
         "monitor:view",
         "approval:view", "approval:review",
+    ],
+    UserRole.ORG_VIEWER: [
+        "device:view",
+        "config:view",
+        "task:view",
+        "audit:view",
+        "monitor:view",
+    ],
+    UserRole.LOCATION_MANAGER: [
+        "device:view", "device:create", "device:edit",
+        "config:view", "config:push", "config:backup", "config:restore",
+        "task:view", "task:create",
+        "audit:view",
+        "monitor:view",
+        "approval:view",
+    ],
+    UserRole.LOCATION_OPERATOR: [
+        "device:view", "device:connect",
+        "config:view", "config:push", "config:backup",
+        "task:view", "task:create",
+        "monitor:view",
+    ],
+    UserRole.LOCATION_VIEWER: [
+        "device:view",
+        "config:view",
+        "task:view",
+        "monitor:view",
     ],
     UserRole.OPERATOR: [
         "device:view", "device:connect",
@@ -73,3 +104,16 @@ class User(Base):
     def has_permission(self, permission: str) -> bool:
         perms = ROLE_PERMISSIONS.get(self.role, [])
         return "*" in perms or permission in perms
+
+    @property
+    def is_tenant_wide(self) -> bool:
+        """True for roles that see all locations in their tenant."""
+        return self.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.ORG_VIEWER)
+
+    @property
+    def is_location_scoped(self) -> bool:
+        """True for roles that only see explicitly assigned locations."""
+        return self.role in (
+            UserRole.LOCATION_MANAGER, UserRole.LOCATION_OPERATOR, UserRole.LOCATION_VIEWER,
+            UserRole.OPERATOR, UserRole.VIEWER,
+        )

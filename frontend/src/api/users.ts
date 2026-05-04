@@ -1,6 +1,13 @@
 import client from './client'
 import type { User } from '@/types'
 
+export interface UserLocationItem {
+  location_id: number
+  location_name: string
+  loc_role: string
+  assigned_at?: string
+}
+
 export const usersApi = {
   list: () => client.get<User[]>('/users/').then((r) => r.data),
 
@@ -19,4 +26,10 @@ export const usersApi = {
 
   resetPassword: (id: number, new_password: string) =>
     client.post(`/users/${id}/reset-password`, { new_password }),
+
+  getLocations: (id: number) =>
+    client.get<UserLocationItem[]>(`/users/${id}/locations`).then((r) => r.data),
+
+  setLocations: (id: number, assignments: { location_id: number; loc_role: string }[]) =>
+    client.put<{ success: boolean; count: number }>(`/users/${id}/locations`, assignments).then((r) => r.data),
 }

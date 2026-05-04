@@ -31,6 +31,14 @@ class AdminPasswordReset(BaseModel):
     new_password: str
 
 
+class UserLocationItem(BaseModel):
+    location_id: int
+    location_name: str
+    loc_role: str
+
+    model_config = {"from_attributes": True}
+
+
 class UserResponse(BaseModel):
     id: int
     username: str
@@ -43,5 +51,6 @@ class UserResponse(BaseModel):
     tenant_name: Optional[str] = None
     last_login: Optional[datetime]
     created_at: datetime
+    locations: list[UserLocationItem] = []
 
     model_config = {"from_attributes": True}

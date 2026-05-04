@@ -27,6 +27,7 @@ from app.models.sla_policy import SlaPolicy
 from app.models.api_token import ApiToken
 from app.models.rack import Rack, RackItem
 from app.models.location import Location
+from app.models.user_location import UserLocation
 from app.models.backup_schedule import BackupSchedule
 from app.models.driver_template import DriverTemplate
 from app.models.command_execution import CommandExecution
@@ -68,6 +69,7 @@ __all__ = [
     "ApiToken",
     "Rack", "RackItem",
     "Location",
+    "UserLocation",
     "BackupSchedule",
     "DriverTemplate",
     "CommandExecution",

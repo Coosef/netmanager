@@ -6,9 +6,14 @@ export interface Tenant {
   slug: string
   description?: string
   is_active: boolean
+  plan_tier: string
+  max_devices: number
+  max_users: number
+  contact_email?: string | null
   created_at: string
   device_count: number
   user_count: number
+  location_count: number
 }
 
 export interface TenantUser {
@@ -27,11 +32,26 @@ export const tenantsApi = {
   get: (id: number) =>
     client.get<Tenant>(`/tenants/${id}`).then((r) => r.data),
 
-  create: (data: { name: string; slug: string; description?: string; is_active?: boolean }) =>
-    client.post<Tenant>('/tenants/', data).then((r) => r.data),
+  create: (data: {
+    name: string
+    slug: string
+    description?: string
+    is_active?: boolean
+    plan_tier?: string
+    max_devices?: number
+    max_users?: number
+    contact_email?: string
+  }) => client.post<Tenant>('/tenants/', data).then((r) => r.data),
 
-  update: (id: number, data: Partial<{ name: string; description: string; is_active: boolean }>) =>
-    client.patch<Tenant>(`/tenants/${id}`, data).then((r) => r.data),
+  update: (id: number, data: Partial<{
+    name: string
+    description: string
+    is_active: boolean
+    plan_tier: string
+    max_devices: number
+    max_users: number
+    contact_email: string
+  }>) => client.patch<Tenant>(`/tenants/${id}`, data).then((r) => r.data),
 
   delete: (id: number) =>
     client.delete(`/tenants/${id}`),
