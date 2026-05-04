@@ -7,7 +7,7 @@ from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.device import Device
 from app.models.rack import Rack, RackItem
 
@@ -119,11 +119,21 @@ async def create_rack(
 
 
 @router.get("", response_model=list[RackSummary])
-async def list_racks(user: CurrentUser, db: AsyncSession = Depends(get_db), site: Optional[str] = Query(None)):
+async def list_racks(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    site: Optional[str] = Query(None),
+    location_filter: LocationNameFilter = None,
+):
     racks = (await db.execute(select(Rack).order_by(Rack.rack_name))).scalars().all()
 
     rack_dev_q = select(Device).where(Device.rack_name.isnot(None), Device.is_active == True)
-    if site:
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return []
+        rack_dev_q = rack_dev_q.where(Device.site.in_(eff))
+    elif site:
         rack_dev_q = rack_dev_q.where(Device.site == site)
     devices = (await db.execute(rack_dev_q)).scalars().all()
 
@@ -162,9 +172,19 @@ async def list_racks(user: CurrentUser, db: AsyncSession = Depends(get_db), site
 
 
 @router.get("/unassigned/devices", response_model=list[RackDeviceSummary])
-async def list_unassigned_devices(user: CurrentUser, db: AsyncSession = Depends(get_db), site: Optional[str] = Query(None)):
+async def list_unassigned_devices(
+    user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+    site: Optional[str] = Query(None),
+    location_filter: LocationNameFilter = None,
+):
     unassigned_q = select(Device).where(Device.rack_name.is_(None), Device.is_active == True)
-    if site:
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return []
+        unassigned_q = unassigned_q.where(Device.site.in_(eff))
+    elif site:
         unassigned_q = unassigned_q.where(Device.site == site)
     devices = (await db.execute(unassigned_q.order_by(Device.hostname))).scalars().all()
 
