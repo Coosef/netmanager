@@ -1,6 +1,7 @@
 """Multi-provider AI service: Claude, OpenAI, Gemini, Ollama."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Any
 
@@ -192,23 +193,18 @@ async def _gemini_chat(settings: AISettings, system: str, messages: list[dict]) 
     if not api_key:
         raise ValueError("Gemini API anahtarı ayarlanmamış.")
 
-    client = genai.Client(api_key=api_key)
     model_name = settings.gemini_model or "gemini-2.0-flash"
+    client = genai.Client(api_key=api_key)
 
     contents = [
-        types.Content(
-            role="user" if m["role"] == "user" else "model",
-            parts=[types.Part.from_text(text=m["content"])],
-        )
+        {"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
         for m in messages
     ]
-    config = types.GenerateContentConfig(
-        system_instruction=system,
-        max_output_tokens=2048,
-    )
+    config = types.GenerateContentConfig(system_instruction=system, max_output_tokens=2048)
 
     try:
-        resp = await client.aio.models.generate_content(
+        resp = await asyncio.to_thread(
+            client.models.generate_content,
             model=model_name,
             contents=contents,
             config=config,
@@ -220,8 +216,8 @@ async def _gemini_chat(settings: AISettings, system: str, messages: list[dict]) 
         if "429" in err_str:
             raise ValueError("Gemini rate limit aşıldı. Biraz bekleyip tekrar deneyin.")
         if "404" in err_str:
-            raise ValueError(f"Gemini model '{model_name}' bulunamadı. Ayarlar'dan geçerli bir model seçin.")
-        raise RuntimeError(f"Gemini API hatası: {e}")
+            raise ValueError(f"Gemini 404: {err_str[:400]}")
+        raise RuntimeError(f"Gemini API hatası: {err_str[:400]}")
 
     return {
         "message": resp.text,
