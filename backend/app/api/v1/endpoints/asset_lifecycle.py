@@ -8,7 +8,7 @@ from sqlalchemy import desc, func, select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.asset_lifecycle import AssetLifecycle
 from app.models.device import Device
 from app.services.audit_service import log_action
@@ -78,6 +78,7 @@ def _serialize(asset: AssetLifecycle) -> dict:
 async def get_asset_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
     site: Optional[str] = Query(None),
 ):
     today = date.today()
@@ -85,6 +86,13 @@ async def get_asset_stats(
     in_90 = today + timedelta(days=90)
 
     asset_q = select(AssetLifecycle)
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {"total": 0, "expiring_30d": 0, "expiring_90d": 0, "expired": 0, "eol_count": 0, "upcoming_expirations": []}
+        site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
+        asset_q = asset_q.where(AssetLifecycle.device_id.in_(site_ids))
+        site = None
     if site:
         site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
         asset_q = asset_q.where(AssetLifecycle.device_id.in_(site_ids))
@@ -147,12 +155,20 @@ async def list_assets(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
 ):
     today = date.today()
     in_30 = today + timedelta(days=30)
     in_90 = today + timedelta(days=90)
 
     q = select(AssetLifecycle)
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if not eff:
+            return {"total": 0, "items": []}
+        site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
+        q = q.where(AssetLifecycle.device_id.in_(site_ids))
+        site = None
     if search:
         q = q.where(AssetLifecycle.device_hostname.ilike(f"%{search}%"))
     if site:
