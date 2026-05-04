@@ -120,6 +120,7 @@ export default function Sidebar() {
     {
       label: t('nav_group.management'),
       items: [
+        { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı' },
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents') },
         { key: '/users', icon: <TeamOutlined />, label: t('nav.users') },
         { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations') },

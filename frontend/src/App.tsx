@@ -50,6 +50,7 @@ import DriverTemplatesPage from '@/pages/DriverTemplates'
 import HelpPage from '@/pages/Help'
 import ServicesPage from '@/pages/Services'
 import TopologyTwinPage from '@/pages/TopologyTwin'
+import AIAssistantPage from '@/pages/AIAssistant'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -194,6 +195,7 @@ function ThemedApp() {
               <Route path="help" element={<HelpPage />} />
               <Route path="services" element={<ServicesPage />} />
               <Route path="topology-twin" element={<TopologyTwinPage />} />
+              <Route path="ai-assistant" element={<AIAssistantPage />} />
             </Route>
           </Routes>
         </BrowserRouter>

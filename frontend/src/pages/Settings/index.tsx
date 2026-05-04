@@ -12,7 +12,7 @@ import {
   DeleteOutlined, ThunderboltOutlined, SendOutlined, AlertOutlined, ToolOutlined, SafetyOutlined,
   LockOutlined, CheckCircleOutlined, CloseCircleOutlined, SyncOutlined, PlayCircleOutlined,
   ClockCircleOutlined, RiseOutlined, WifiOutlined, KeyOutlined, CopyOutlined, ExclamationCircleOutlined,
-  CodeOutlined,
+  CodeOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import DriverTemplatesPage from '@/pages/DriverTemplates'
 import { apiTokensApi, ApiToken } from '@/api/apiTokens'
@@ -28,6 +28,7 @@ import { credentialProfilesApi, CredentialProfile, RotationPolicy } from '@/api/
 import { devicesApi } from '@/api/devices'
 import { slaApi, SlaPolicy, SlaPolicyCreate } from '@/api/sla'
 import { snmpApi, BulkSshResult, BulkSshDeviceResult } from '@/api/snmp'
+import { aiAssistantApi, type AIProviderSettings } from '@/api/aiAssistant'
 
 const { Text } = Typography
 
@@ -1845,6 +1846,166 @@ function ApiTokensTab() {
   )
 }
 
+// ── AI Settings Tab ─────────────────────────────────────────────────────────
+
+const PROVIDER_COLORS: Record<string, string> = {
+  claude: '#cc785c',
+  openai: '#10a37f',
+  gemini: '#4285f4',
+  ollama: '#7c3aed',
+}
+
+const CLAUDE_MODELS = ['claude-opus-4-7', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']
+const OPENAI_MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo']
+const GEMINI_MODELS = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash-exp']
+
+function AISettingsTab() {
+  const qc = useQueryClient()
+  const [form] = Form.useForm()
+  const [saving, setSaving] = useState(false)
+  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({})
+
+  const { data: settings, isLoading } = useQuery<AIProviderSettings>({
+    queryKey: ['ai-settings'],
+    queryFn: aiAssistantApi.getSettings,
+  })
+
+  React.useEffect(() => {
+    if (settings) {
+      form.setFieldsValue({
+        active_provider: settings.active_provider ?? '',
+        claude_model: settings.claude_model,
+        openai_model: settings.openai_model,
+        gemini_model: settings.gemini_model,
+        ollama_base_url: settings.ollama_base_url,
+        ollama_model: settings.ollama_model,
+      })
+    }
+  }, [settings, form])
+
+  const activeProvider = Form.useWatch('active_provider', form)
+
+  const save = async () => {
+    const vals = form.getFieldsValue()
+    setSaving(true)
+    try {
+      const payload: Record<string, any> = { active_provider: vals.active_provider || null }
+      if (vals.claude_model) payload.claude_model = vals.claude_model
+      if (vals.claude_api_key) payload.claude_api_key = vals.claude_api_key
+      if (vals.openai_model) payload.openai_model = vals.openai_model
+      if (vals.openai_api_key) payload.openai_api_key = vals.openai_api_key
+      if (vals.gemini_model) payload.gemini_model = vals.gemini_model
+      if (vals.gemini_api_key) payload.gemini_api_key = vals.gemini_api_key
+      if (vals.ollama_base_url !== undefined) payload.ollama_base_url = vals.ollama_base_url
+      if (vals.ollama_model !== undefined) payload.ollama_model = vals.ollama_model
+      await aiAssistantApi.updateSettings(payload)
+      qc.invalidateQueries({ queryKey: ['ai-settings'] })
+      message.success('AI ayarları kaydedildi')
+    } catch {
+      message.error('Kayıt başarısız')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const { isDark } = useTheme()
+  const C = { bg2: isDark ? '#0f172a' : '#f8fafc', border: isDark ? '#334155' : '#e2e8f0', text: isDark ? '#f1f5f9' : '#1e293b', muted: isDark ? '#64748b' : '#94a3b8' }
+
+  const providers: { id: string; name: string; keyField?: string; modelField?: string; models?: string[]; configured?: boolean }[] = [
+    { id: 'claude', name: 'Anthropic Claude', keyField: 'claude_api_key', modelField: 'claude_model', models: CLAUDE_MODELS, configured: settings?.claude_configured },
+    { id: 'openai', name: 'OpenAI GPT', keyField: 'openai_api_key', modelField: 'openai_model', models: OPENAI_MODELS, configured: settings?.openai_configured },
+    { id: 'gemini', name: 'Google Gemini', keyField: 'gemini_api_key', modelField: 'gemini_model', models: GEMINI_MODELS, configured: settings?.gemini_configured },
+    { id: 'ollama', name: 'Ollama (Yerel)', configured: true },
+  ]
+
+  return (
+    <div style={{ maxWidth: 720 }}>
+      <Alert
+        type="info"
+        showIcon
+        message="API anahtarlarınız sunucuda Fernet şifrelemesiyle saklanır ve asla loglanmaz."
+        style={{ marginBottom: 20 }}
+      />
+
+      <Form form={form} layout="vertical">
+        <Form.Item label="Aktif Sağlayıcı" name="active_provider">
+          <Select placeholder="Sağlayıcı seçin" allowClear style={{ width: 280 }}>
+            {providers.map(p => (
+              <Select.Option key={p.id} value={p.id}>
+                <span style={{ color: PROVIDER_COLORS[p.id], fontWeight: 600 }}>● </span>
+                {p.name}
+                {p.configured && p.id !== 'ollama' && <CheckCircleOutlined style={{ color: '#22c55e', marginLeft: 8 }} />}
+              </Select.Option>
+            ))}
+          </Select>
+        </Form.Item>
+
+        {providers.filter(p => p.id !== 'ollama').map(p => (
+          <div key={p.id} style={{
+            background: C.bg2, border: `1px solid ${activeProvider === p.id ? PROVIDER_COLORS[p.id] : C.border}`,
+            borderRadius: 10, padding: '16px 20px', marginBottom: 16,
+            opacity: activeProvider && activeProvider !== p.id ? 0.6 : 1,
+            transition: 'all 0.2s',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              <span style={{ color: PROVIDER_COLORS[p.id], fontWeight: 700, fontSize: 14 }}>
+                {p.name}
+              </span>
+              {p.configured
+                ? <Tag color="success" icon={<CheckCircleOutlined />}>Yapılandırıldı</Tag>
+                : <Tag color="default">API anahtarı yok</Tag>}
+            </div>
+            <Space direction="vertical" style={{ width: '100%' }} size={8}>
+              <Form.Item name={p.keyField} noStyle>
+                <Input.Password
+                  placeholder={`${p.name} API Anahtarı${p.configured ? ' (değiştirmek için yaz)' : ''}`}
+                  style={{ width: '100%' }}
+                  visibilityToggle={{
+                    visible: showKeys[p.id!] ?? false,
+                    onVisibleChange: v => setShowKeys(prev => ({ ...prev, [p.id!]: v })),
+                  }}
+                />
+              </Form.Item>
+              <Form.Item name={p.modelField} noStyle>
+                <Select style={{ width: 280 }} placeholder="Model seç">
+                  {(p.models ?? []).map(m => (
+                    <Select.Option key={m} value={m}>{m}</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            </Space>
+          </div>
+        ))}
+
+        {/* Ollama */}
+        <div style={{
+          background: C.bg2, border: `1px solid ${activeProvider === 'ollama' ? PROVIDER_COLORS['ollama'] : C.border}`,
+          borderRadius: 10, padding: '16px 20px', marginBottom: 16,
+          opacity: activeProvider && activeProvider !== 'ollama' ? 0.6 : 1,
+          transition: 'all 0.2s',
+        }}>
+          <div style={{ fontWeight: 700, color: PROVIDER_COLORS['ollama'], marginBottom: 12, fontSize: 14 }}>
+            Ollama (Yerel Model)
+            <Tag color="purple" style={{ marginLeft: 8 }}>API Key Gerektirmez</Tag>
+          </div>
+          <Space>
+            <Form.Item name="ollama_base_url" noStyle>
+              <Input placeholder="http://localhost:11434" style={{ width: 280 }} />
+            </Form.Item>
+            <Form.Item name="ollama_model" noStyle>
+              <Input placeholder="llama3.2" style={{ width: 160 }} />
+            </Form.Item>
+          </Space>
+        </div>
+
+        <Button type="primary" loading={saving || isLoading} onClick={save} icon={<CheckOutlined />}>
+          Kaydet
+        </Button>
+      </Form>
+    </div>
+  )
+}
+
 // ── Main Settings Page ──────────────────────────────────────────────────────
 
 export default function SettingsPage() {
@@ -2028,6 +2189,11 @@ export default function SettingsPage() {
             key: 'driver-templates',
             label: <span><CodeOutlined /> Sürücü Şablonları</span>,
             children: <DriverTemplatesPage />,
+          },
+          {
+            key: 'ai',
+            label: <span><RobotOutlined /> AI Asistanı</span>,
+            children: <AISettingsTab />,
           },
         ]}
       />

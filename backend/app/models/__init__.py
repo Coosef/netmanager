@@ -36,6 +36,7 @@ from app.models.agent_credential_bundle import AgentCredentialBundle
 from app.models.service import Service
 from app.models.network_baseline import NetworkBaseline
 from app.models.topology_snapshot import TopologySnapshot
+from app.models.ai_settings import AISettings
 
 __all__ = [
     "Tenant",
@@ -76,4 +77,5 @@ __all__ = [
     "Service",
     "NetworkBaseline",
     "TopologySnapshot",
+    "AISettings",
 ]

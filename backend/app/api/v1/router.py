@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, intelligence, interfaces, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, playbooks, racks, reports, security_audit, services, sla, snmp, tasks, tenants, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, intelligence, interfaces, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, playbooks, racks, reports, security_audit, services, sla, snmp, tasks, tenants, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
@@ -40,3 +40,4 @@ api_router.include_router(driver_templates.router, prefix="/driver-templates", t
 api_router.include_router(intelligence.router, prefix="/intelligence", tags=["Intelligence"])
 api_router.include_router(services.router, prefix="/services", tags=["Services"])
 api_router.include_router(topology_twin.router, prefix="/topology-twin", tags=["Topology Twin"])
+api_router.include_router(ai_assistant.router, prefix="/ai", tags=["AI Assistant"])
