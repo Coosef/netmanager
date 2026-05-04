@@ -20,7 +20,7 @@ class AISettings(Base):
     openai_model: Mapped[str] = mapped_column(String(64), default="gpt-4o")
 
     gemini_api_key_enc: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    gemini_model: Mapped[str] = mapped_column(String(64), default="gemini-1.5-pro")
+    gemini_model: Mapped[str] = mapped_column(String(64), default="gemini-3-flash-preview")
 
     ollama_base_url: Mapped[Optional[str]] = mapped_column(String(256), nullable=True, default="http://localhost:11434")
     ollama_model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, default="llama3.2")

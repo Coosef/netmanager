@@ -294,6 +294,13 @@ async def lifespan(app: FastAPI):
         # Sprint 13C: services table is created via create_all (new model Service)
         # No ALTER needed — new table with all columns defined in model
 
+        # Sprint 15A: migrate deprecated Gemini 1.5.x model names to current
+        await conn.execute(text(
+            "UPDATE ai_settings SET gemini_model = 'gemini-3-flash-preview' "
+            "WHERE gemini_model IN ('gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-1.5-flash-8b', "
+            "'gemini-2.0-flash-exp')"
+        ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _seed_builtin_templates()

@@ -192,7 +192,7 @@ async def _gemini_chat(settings: AISettings, system: str, messages: list[dict]) 
     if not api_key:
         raise ValueError("Gemini API anahtarı ayarlanmamış.")
 
-    model_name = settings.gemini_model or "gemini-2.0-flash"
+    model_name = settings.gemini_model or "gemini-3-flash-preview"
     client = genai.Client(api_key=api_key)
 
     # Build a single prompt string — most compatible approach across SDK versions
