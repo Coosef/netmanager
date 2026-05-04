@@ -407,6 +407,13 @@ def _validate_body(body: dict):
             raise HTTPException(400, f"Step {i+1}: command is required for ssh_command")
         if step_type == "notify" and not step.get("channel_id"):
             raise HTTPException(400, f"Step {i+1}: channel_id is required for notify step")
+        if step_type == "condition_check":
+            if not step.get("condition"):
+                raise HTTPException(400, f"Step {i+1}: condition is required for condition_check")
+            if step.get("on_true", "continue") not in ("continue",):
+                raise HTTPException(400, f"Step {i+1}: on_true must be 'continue'")
+            if step.get("on_false", "skip") not in ("skip", "abort"):
+                raise HTTPException(400, f"Step {i+1}: on_false must be 'skip' or 'abort'")
     trigger_type = body.get("trigger_type", "manual")
     if trigger_type not in ("manual", "scheduled", "event"):
         raise HTTPException(400, "trigger_type must be manual, scheduled, or event")

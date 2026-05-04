@@ -82,6 +82,7 @@ const STEP_TYPES: { label: string; value: StepType; icon: string }[] = [
   { label: 'Uyumluluk Tarama', value: 'compliance_check', icon: '🔍' },
   { label: 'Bildirim Gönder', value: 'notify', icon: '🔔' },
   { label: 'Bekle (saniye)', value: 'wait', icon: '⏱' },
+  { label: 'Koşul Kontrolü', value: 'condition_check', icon: '?' },
 ]
 
 const { Text } = Typography
@@ -626,6 +627,29 @@ export default function PlaybooksPage() {
                           </Form.Item>
                           <Form.Item {...rest} name={[name, 'message']} label="Mesaj ({hostname} ve {ip} kullanabilirsiniz)" style={{ marginBottom: 8 }}>
                             <Input.TextArea rows={2} placeholder="{hostname} cihazında playbook tamamlandı." />
+                          </Form.Item>
+                        </>
+                      )}
+                      {stepType === 'condition_check' && (
+                        <>
+                          <Form.Item
+                            {...rest} name={[name, 'condition']}
+                            label="Koşul İfadesi"
+                            rules={[{ required: true, message: 'Koşul gerekli' }]}
+                            help="Örnek: device.offline_duration_min > 5 veya time.is_business_hours == True"
+                            style={{ marginBottom: 8 }}
+                          >
+                            <Input.TextArea
+                              rows={2}
+                              placeholder="device.offline_duration_min > 5"
+                              style={{ fontFamily: 'monospace', fontSize: 12 }}
+                            />
+                          </Form.Item>
+                          <Form.Item {...rest} name={[name, 'on_false']} label="Koşul Sağlanmazsa" initialValue="skip" style={{ marginBottom: 8 }}>
+                            <Select options={[
+                              { value: 'skip', label: 'Atla (sonraki adıma geç)' },
+                              { value: 'abort', label: 'İptal Et (playbook dur)' },
+                            ]} />
                           </Form.Item>
                         </>
                       )}

@@ -1,6 +1,6 @@
 import client from './client'
 
-export type StepType = 'ssh_command' | 'backup' | 'compliance_check' | 'notify' | 'wait'
+export type StepType = 'ssh_command' | 'backup' | 'compliance_check' | 'notify' | 'wait' | 'condition_check'
 export type TriggerType = 'manual' | 'scheduled' | 'event'
 
 export interface PlaybookStep {
@@ -14,6 +14,10 @@ export interface PlaybookStep {
   channel_id?: number
   subject?: string
   message?: string
+  // condition_check step
+  condition?: string
+  on_true?: 'continue'
+  on_false?: 'skip' | 'abort'
 }
 
 export interface Playbook {

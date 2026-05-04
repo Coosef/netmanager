@@ -61,6 +61,25 @@ export interface DeviceTimeline {
   total: number
 }
 
+export interface RootCauseIncident {
+  id: number
+  ts: string
+  root_device_id: number
+  root_hostname: string
+  affected_count: number
+  affected_devices: { id: number; hostname: string }[]
+  suppressed_alerts: number
+  title: string
+  message: string | null
+  acknowledged: boolean
+}
+
+export interface RootCauseReport {
+  window_hours: number
+  total: number
+  incidents: RootCauseIncident[]
+}
+
 export const intelligenceApi = {
   getDeviceRisk: (deviceId: number) =>
     client.get<DeviceRiskScore>(`/intelligence/devices/${deviceId}/risk-score`).then(r => r.data),
@@ -76,5 +95,10 @@ export const intelligenceApi = {
   getTimeline: (deviceId: number, days = 30) =>
     client.get<DeviceTimeline>(`/intelligence/devices/${deviceId}/timeline`, {
       params: { days },
+    }).then(r => r.data),
+
+  getRootCauseIncidents: (hours = 24, limit = 20) =>
+    client.get<RootCauseReport>('/intelligence/root-cause-incidents', {
+      params: { hours, limit },
     }).then(r => r.data),
 }

@@ -1,9 +1,88 @@
 from datetime import datetime, timezone, timedelta
+import ast
 import asyncio
+import operator
 
 from sqlalchemy import select, update
 
 from app.workers.celery_app import celery_app
+
+
+# ── Safe AST condition evaluator ─────────────────────────────────────────────
+# Evaluates simple boolean expressions with whitelist operators only.
+# No eval(), no exec(). Supported: comparisons, AND/OR/NOT, literals.
+
+_ALLOWED_OPS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+}
+
+
+def _eval_condition(node, ctx: dict):
+    """Recursively evaluate an AST node against context dict."""
+    if isinstance(node, ast.Expression):
+        return _eval_condition(node.body, ctx)
+    if isinstance(node, ast.Constant):
+        return node.value
+    if isinstance(node, ast.Attribute):
+        obj = _eval_condition(node.value, ctx)
+        if isinstance(obj, dict):
+            return obj.get(node.attr)
+        return None
+    if isinstance(node, ast.Name):
+        return ctx.get(node.id)
+    if isinstance(node, ast.BoolOp):
+        if isinstance(node.op, ast.And):
+            return all(_eval_condition(v, ctx) for v in node.values)
+        if isinstance(node.op, ast.Or):
+            return any(_eval_condition(v, ctx) for v in node.values)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return not _eval_condition(node.operand, ctx)
+    if isinstance(node, ast.Compare):
+        left = _eval_condition(node.left, ctx)
+        for op, comparator in zip(node.ops, node.comparators):
+            op_fn = _ALLOWED_OPS.get(type(op))
+            if op_fn is None:
+                raise ValueError(f"Unsupported operator: {type(op).__name__}")
+            right = _eval_condition(comparator, ctx)
+            try:
+                if not op_fn(left, right):
+                    return False
+                left = right
+            except TypeError:
+                return False
+        return True
+    raise ValueError(f"Unsupported AST node: {type(node).__name__}")
+
+
+def evaluate_condition(expression: str, ctx: dict) -> tuple[bool, str]:
+    """
+    Safely evaluate a condition string against context.
+    Returns (result: bool, explanation: str).
+    Raises ValueError on syntax/security errors.
+    """
+    try:
+        tree = ast.parse(expression, mode="eval")
+    except SyntaxError as exc:
+        raise ValueError(f"Syntax error in condition: {exc}") from exc
+
+    # Security: reject any node type not in the safe set
+    allowed_types = (
+        ast.Expression, ast.BoolOp, ast.And, ast.Or, ast.UnaryOp, ast.Not,
+        ast.Compare, ast.Attribute, ast.Name, ast.Constant,
+        ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE,
+        ast.Load,
+    )
+    for node in ast.walk(tree):
+        if not isinstance(node, allowed_types):
+            raise ValueError(f"Disallowed node type in condition: {type(node).__name__}")
+
+    result = bool(_eval_condition(tree, ctx))
+    return result, f"'{expression}' → {'true' if result else 'false'} (ctx={ctx})"
 
 
 def _run_async(coro):
@@ -71,6 +150,96 @@ async def _exec_notify(step: dict, device, db, dry_run: bool) -> dict:
         return {"success": False, "output": "", "error": str(exc)}
 
 
+async def _exec_condition_check(step: dict, device, db, dry_run: bool) -> dict:
+    """
+    AST-based condition evaluation. Builds context from device fields and recent events.
+    on_true / on_false: 'continue' | 'skip' | 'abort'
+    Returns success=True if condition met (continue), success=False otherwise.
+    """
+    expression = step.get("condition", "").strip()
+    if not expression:
+        return {"success": False, "output": "", "error": "condition expression is required", "condition_result": None}
+
+    # Build evaluation context
+    from app.models.network_event import NetworkEvent
+    from sqlalchemy import select as _select
+    now = datetime.now(timezone.utc)
+
+    # Last offline event for this device
+    last_offline = (await db.execute(
+        _select(NetworkEvent)
+        .where(NetworkEvent.device_id == device.id)
+        .where(NetworkEvent.event_type == "device_offline")
+        .order_by(NetworkEvent.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    offline_duration_min = 0
+    if last_offline:
+        offline_duration_min = int((now - last_offline.created_at).total_seconds() / 60)
+
+    ctx = {
+        "device": {
+            "id": device.id,
+            "hostname": device.hostname,
+            "status": device.status if hasattr(device, 'status') else "unknown",
+            "vendor": str(device.vendor) if hasattr(device, 'vendor') else "unknown",
+            "offline_duration_min": offline_duration_min,
+        },
+        "time": {
+            "hour": now.hour,
+            "weekday": now.weekday(),  # 0=Mon, 6=Sun
+            "is_business_hours": 8 <= now.hour < 18 and now.weekday() < 5,
+        },
+    }
+
+    try:
+        result, explanation = evaluate_condition(expression, ctx)
+    except ValueError as exc:
+        return {"success": False, "output": "", "error": str(exc), "condition_result": None}
+
+    on_true = step.get("on_true", "continue")
+    on_false = step.get("on_false", "skip")
+
+    if dry_run:
+        return {
+            "success": True,
+            "output": f"[DRY-RUN] Condition: {explanation} | on_true={on_true} on_false={on_false}",
+            "error": None,
+            "condition_result": result,
+            "simulated": True,
+        }
+
+    if result:
+        return {
+            "success": True,
+            "output": f"Koşul sağlandı → {on_true}: {explanation}",
+            "error": None,
+            "condition_result": True,
+            "action": on_true,
+        }
+    else:
+        # on_false=abort → success=False, stop_on_error will catch it
+        # on_false=skip → success=True but mark skipped
+        if on_false == "abort":
+            return {
+                "success": False,
+                "output": f"Koşul sağlanmadı → abort: {explanation}",
+                "error": "Condition not met — playbook aborted",
+                "condition_result": False,
+                "action": "abort",
+            }
+        else:  # skip
+            return {
+                "success": True,
+                "output": f"Koşul sağlanmadı → skip: {explanation}",
+                "error": None,
+                "condition_result": False,
+                "action": "skip",
+                "skipped": True,
+            }
+
+
 async def _exec_wait(step: dict, dry_run: bool) -> dict:
     seconds = int(step.get("seconds", 5))
     if dry_run:
@@ -92,6 +261,8 @@ async def _exec_step(step: dict, device, db, ssh_manager, dry_run: bool) -> dict
         result = await _exec_notify(step, device, db, dry_run)
     elif step_type == "wait":
         result = await _exec_wait(step, dry_run)
+    elif step_type == "condition_check":
+        result = await _exec_condition_check(step, device, db, dry_run)
     else:
         result = {"success": False, "output": "", "error": f"Unknown step type: {step_type}"}
     return {**base, **result}

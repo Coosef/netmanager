@@ -20,6 +20,7 @@ import { agentsApi } from '@/api/agents'
 import { topologyApi } from '@/api/topology'
 import { snmpApi } from '@/api/snmp'
 import { intelligenceApi } from '@/api/intelligence'
+import { servicesApi } from '@/api/services'
 import type { Device, ConfigBackup, NetworkInterface, Vlan } from '@/types'
 import SwitchPortPanel, { type PortUtil } from '@/components/SwitchPortPanel'
 import dayjs from 'dayjs'
@@ -407,6 +408,14 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
     enabled: activeTab === 'timeline',
     staleTime: 60_000,
   })
+  const { data: allServices } = useQuery({
+    queryKey: ['services'],
+    queryFn: servicesApi.list,
+    staleTime: 300_000,
+  })
+  const deviceServices = (allServices?.items || []).filter(s =>
+    (s.device_ids || []).includes(currentDevice.id)
+  )
 
   // ── ssh test quick action ─────────────────────────────────────────────────
   const sshTestMutation = useMutation({
@@ -1299,6 +1308,27 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
                     {mttrData.window_days} gün
                   </Descriptions.Item>
                 </Descriptions>
+              </div>
+            )}
+
+            {/* Service badges */}
+            {deviceServices.length > 0 && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: 14 }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: '#15803d', marginBottom: 8 }}>
+                  Bu Cihazın Dahil Olduğu Servisler
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {deviceServices.map(svc => {
+                    const pc: Record<string, string> = { critical: '#ef4444', high: '#f97316', medium: '#eab308', low: '#22c55e' }
+                    const c = pc[svc.priority] || '#3b82f6'
+                    return (
+                      <Tag key={svc.id} style={{ color: c, borderColor: c + '40', background: c + '15', fontSize: 12, padding: '2px 8px' }}>
+                        {svc.name}
+                        {svc.priority === 'critical' && ' ⚠'}
+                      </Tag>
+                    )
+                  })}
+                </div>
               </div>
             )}
 

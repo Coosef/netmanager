@@ -112,6 +112,7 @@ export default function Sidebar() {
         { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management') },
         { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval' },
         { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla') },
+        { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası' },
         { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports') },
       ],
     },

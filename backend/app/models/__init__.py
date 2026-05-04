@@ -33,6 +33,7 @@ from app.models.command_execution import CommandExecution
 from app.models.syslog_event import SyslogEvent
 from app.models.discovery_result import DiscoveryResult
 from app.models.agent_credential_bundle import AgentCredentialBundle
+from app.models.service import Service
 
 __all__ = [
     "Tenant",
@@ -70,4 +71,5 @@ __all__ = [
     "SyslogEvent",
     "DiscoveryResult",
     "AgentCredentialBundle",
+    "Service",
 ]

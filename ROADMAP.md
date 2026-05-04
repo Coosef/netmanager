@@ -517,39 +517,31 @@
 
 ---
 
-## SPRINT 13 — Advanced Intelligence Layer 🔵
+## SPRINT 13 — Advanced Intelligence Layer ✅
 
-> Kaynak: `yenifikir.md` | Tahmini: 3-4 hafta | Öncelik: Orta-Yüksek
+> Kaynak: `yenifikir.md` | Tamamlandı: 2026-05-04
 
-### 13A. Root Cause Engine v2 🔵
-- Mevcut: basit ≥3 cihaz heuristic
-- Hedef: topology-aware BFS ile **gerçek root cause tespiti**
-  - Her offline cihazdan grafı geriye yürü → ortak upstream bul
-  - "Core-SW-01 offline → 47 cihaz etkilendi (VLAN 10, 20, 30)" formatında üst-seviye olay
-  - Birden fazla olası root cause varsa skor sıralaması (bağlı cihaz sayısına göre)
-- `GET /monitor/root-cause-analysis` — aktif olay grupları
-- Dashboard: "Kök Neden Tespitleri" widget'ı
+### 13A. Root Cause Engine v2 ✅
+- ✅ `GET /intelligence/root-cause-incidents` — son N saatin correlation_incident olayları (hours, limit param)
+- ✅ Dashboard "Kök Neden Tespitleri" widget'ı — root cihaz, etkilenen sayısı, bastırılan uyarı sayısı
+- ✅ Topology BFS zaten Sprint 12D'de yazıldı (monitor_tasks.py); bu sprint API + UI katmanı eklendi
 
-### 13B. Koşullu Otomasyon Motoru 🔵
-- Mevcut playbook adım tiplerini **IF/THEN koşulu** ile genişletme
-- Yeni `condition_check` adım tipi:
-  ```yaml
-  type: condition_check
-  condition: "device.offline_duration_min > 5 AND uplink.status == 'online'"
-  on_true: [continue]
-  on_false: [skip | abort]
-  ```
-- Değerlendirilebilecek alanlar: `device.*`, `uplink.*`, `last_event.*`, `time.*`
-- Dry-run'da koşul sonucu gösterilir (true/false + açıklama)
-- Güvenlik: koşul parser whitelist tabanlı (eval yok, AST değerlendirme)
+### 13B. Koşullu Otomasyon Motoru ✅
+- ✅ `condition_check` adım tipi — `evaluate_condition()` ile güvenli AST değerlendirme
+- ✅ Whitelist kontrolü: sadece Compare, BoolOp, Attribute, Name, Constant düğümleri
+- ✅ `on_true: continue` / `on_false: skip | abort` — skip=başarılı sayılır, abort=stop_on_error devreye girer
+- ✅ Dry-run'da koşul sonucu ve explanation string döndürülür
+- ✅ Playbook editor UI'a "Koşul Kontrolü" adım tipi + koşul ifadesi + on_false seçici eklendi
+- ✅ `device.offline_duration_min`, `time.is_business_hours`, `time.hour`, `time.weekday` context alanları
 
-### 13C. Servis Etki Haritalama 🔵
-- Yeni `Service` modeli: isim, öncelik, VLAN'lar, cihazlar, iş açıklaması
-- Cihaz/VLAN offline → ilgili servislere etki hesaplama
-- `GET /services/{id}/impact` — hangi cihazlar, VLAN'lar, servisler etkileniyor
-- Device detail: "Bu cihaz hangi servislerde kritik?" rozetleri
-- Dashboard: "Aktif Servis Kesintileri" kartı
-- Örnek: Core-SW down → POS sistemi etkili → "Kritik İş Süreci Kesintisi" uyarısı
+### 13C. Servis Etki Haritalama ✅
+- ✅ `Service` modeli (`services` tablosu) — name, priority, description, business_owner, device_ids[], vlan_ids[]
+- ✅ `GET /services` · `POST /services` · `PATCH /services/{id}` · `DELETE /services/{id}` — tam CRUD
+- ✅ `GET /services/fleet/impact-summary` — tüm aktif servisler için toplu etki özeti
+- ✅ `GET /services/{id}/impact` — offline cihaz listesi, etki yüzdesi, impact_level hesaplama
+- ✅ `/services` sayfası — tablo, oluşturma/düzenleme drawer (Transfer ile cihaz seçimi), etki modal
+- ✅ Dashboard "Aktif Servis Kesintileri" widget'ı — sadece etkilenen servisler gösterilir
+- ✅ DeviceDetail Risk & SLA sekmesinde "Bu Cihazın Dahil Olduğu Servisler" rozetleri
 
 ---
 

@@ -23,6 +23,7 @@ import { topologyApi } from '@/api/topology'
 import { dashboardApi } from '@/api/dashboard'
 import { slaApi } from '@/api/sla'
 import { intelligenceApi } from '@/api/intelligence'
+import { servicesApi } from '@/api/services'
 import { useTranslation } from 'react-i18next'
 import type { NetworkEvent, MonitorStats } from '@/api/monitor'
 import type { Task } from '@/types'
@@ -483,6 +484,8 @@ export default function DashboardPage() {
   const { data: snmpChart }    = useQuery({ queryKey: ['dashboard-snmp-chart'],  queryFn: dashboardApi.getSnmpChart,     refetchInterval: 300000 })
   const { data: sparklineData} = useQuery({ queryKey: ['dashboard-sparklines'],  queryFn: dashboardApi.getSparklines,    refetchInterval: 60000  })
   const { data: fleetRisk }    = useQuery({ queryKey: ['fleet-risk'],            queryFn: () => intelligenceApi.getFleetRisk(10), refetchInterval: 300000 })
+  const { data: rootCauseData }= useQuery({ queryKey: ['root-cause-incidents'],  queryFn: () => intelligenceApi.getRootCauseIncidents(24, 10), refetchInterval: 120000 })
+  const { data: fleetImpact }  = useQuery({ queryKey: ['fleet-impact-summary'],  queryFn: servicesApi.getFleetImpact,  refetchInterval: 120000 })
 
   // ── WebSocket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1160,6 +1163,121 @@ export default function DashboardPage() {
                       </div>
                     )
                   })}
+                </div>
+              </Col>
+            </Row>
+          </>
+        )}
+
+        {/* ── Root Cause Incidents ─────────────────────────────────────────────── */}
+        {rootCauseData && rootCauseData.total > 0 && (
+          <>
+            <SectionBar icon={<ApartmentOutlined />} title="Kök Neden Tespitleri" />
+            <Row gutter={[12, 12]}>
+              <Col xs={24}>
+                <div className="tv-card">
+                  <CardHead icon={<ApartmentOutlined />} title="Cascade Olaylar (son 24 saat)" color={N.red}
+                    extra={<span style={{ color: C.dim, fontSize: 11 }}>{rootCauseData.total} root cause tespit edildi</span>}
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {rootCauseData.incidents.map((inc) => (
+                      <div key={inc.id} style={{
+                        display: 'flex', alignItems: 'flex-start', gap: 12,
+                        padding: '8px 10px', borderRadius: 8,
+                        background: inc.acknowledged ? `${N.green}08` : `${N.red}10`,
+                        border: `1px solid ${inc.acknowledged ? N.green : N.red}25`,
+                      }}>
+                        <div style={{
+                          width: 42, height: 42, borderRadius: 8, flexShrink: 0,
+                          background: inc.acknowledged ? `${N.green}18` : `${N.red}18`,
+                          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        }}>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: inc.acknowledged ? N.green : N.red }}>
+                            {inc.affected_count}
+                          </span>
+                          <span style={{ fontSize: 9, color: C.dim }}>cihaz</span>
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <span style={{ color: inc.acknowledged ? N.green : N.red, fontWeight: 700, fontSize: 13 }}>
+                              {inc.root_hostname}
+                            </span>
+                            <Tag style={{ fontSize: 10, padding: '0 5px', margin: 0,
+                              background: `${N.red}15`, color: N.red, borderColor: `${N.red}30` }}>
+                              Root Cause
+                            </Tag>
+                            {inc.suppressed_alerts > 0 && (
+                              <Tag style={{ fontSize: 10, padding: '0 5px', margin: 0,
+                                background: `${N.amber}12`, color: N.amber, borderColor: `${N.amber}25` }}>
+                                {inc.suppressed_alerts} uyarı bastırıldı
+                              </Tag>
+                            )}
+                          </div>
+                          <div style={{ color: C.muted, fontSize: 11, marginTop: 2 }}>
+                            {inc.affected_devices.slice(0, 4).map(d => d.hostname).join(', ')}
+                            {inc.affected_devices.length > 4 && ` +${inc.affected_devices.length - 4} daha`}
+                          </div>
+                        </div>
+                        <span style={{ color: C.dim, fontSize: 10, flexShrink: 0, marginTop: 2 }}>
+                          {dayjs(inc.ts).fromNow()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Col>
+            </Row>
+          </>
+        )}
+
+        {/* ── Service Impact ───────────────────────────────────────────────────── */}
+        {fleetImpact && fleetImpact.affected_services.length > 0 && (
+          <>
+            <SectionBar icon={<WarningOutlined />} title="Aktif Servis Kesintileri" />
+            <Row gutter={[12, 12]}>
+              <Col xs={24}>
+                <div className="tv-card">
+                  <CardHead icon={<WarningOutlined />} title="Etkilenen Servisler" color={N.red}
+                    extra={
+                      <span style={{ color: C.dim, fontSize: 11 }}>
+                        {fleetImpact.critical_count > 0 && (
+                          <span style={{ color: N.red, fontWeight: 700 }}>{fleetImpact.critical_count} kritik · </span>
+                        )}
+                        {fleetImpact.total_services} toplam servis
+                      </span>
+                    }
+                  />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {fleetImpact.affected_services.map((svc) => {
+                      const impactColors: Record<string, string> = { critical: N.red, high: N.amber, medium: '#f97316', low: N.green }
+                      const ic = impactColors[svc.impact_level] || N.green
+                      return (
+                        <div key={svc.service_id} style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '7px 10px', borderRadius: 8,
+                          background: `${ic}0d`, border: `1px solid ${ic}22`,
+                        }}>
+                          <div style={{ width: 40, textAlign: 'center', flexShrink: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: 14, color: ic }}>{svc.impact_pct}%</div>
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>{svc.service_name}</div>
+                            <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
+                              {svc.offline_device_count}/{svc.total_device_count} cihaz offline
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', gap: 4, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                            <Tag style={{ fontSize: 10, padding: '0 5px', margin: 0, background: `${ic}15`, color: ic, borderColor: `${ic}35` }}>
+                              {svc.impact_level === 'critical' ? 'Kritik' : svc.impact_level === 'high' ? 'Yüksek' : svc.impact_level === 'medium' ? 'Orta' : 'Düşük'}
+                            </Tag>
+                            <Tag style={{ fontSize: 10, padding: '0 5px', margin: 0, background: `${C.border}`, color: C.muted, borderColor: C.border }}>
+                              {svc.priority}
+                            </Tag>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               </Col>
             </Row>

@@ -291,6 +291,8 @@ async def lifespan(app: FastAPI):
             "last_refreshed TIMESTAMPTZ NOT NULL DEFAULT NOW(), device_count INTEGER NOT NULL DEFAULT 0"
             ")"
         ))
+        # Sprint 13C: services table is created via create_all (new model Service)
+        # No ALTER needed — new table with all columns defined in model
 
     await _create_default_tenant()
     await _create_default_admin()

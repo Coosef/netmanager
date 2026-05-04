@@ -3,6 +3,9 @@ Sprint 12 — Intelligence Fundamentals
   12A: Cihaz Risk Skoru
   12B: MTTR / MTBF
   12C: Config/Olay Zaman Çizelgesi
+
+Sprint 13A — Root Cause Engine v2
+  GET /intelligence/root-cause-incidents — son 24 saatin correlation_incident olayları
 """
 
 from datetime import datetime, timedelta, timezone
@@ -345,3 +348,49 @@ async def device_timeline(
                     break
 
     return {"device_id": device_id, "hostname": device.hostname, "items": items, "total": len(items)}
+
+
+# ── 13A: Root Cause Incidents ─────────────────────────────────────────────────
+
+@router.get("/root-cause-incidents")
+async def root_cause_incidents(
+    hours: int = Query(24, ge=1, le=168),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _: dict = Depends(CurrentUser),
+):
+    """
+    Son N saatteki correlation_incident olaylarını döndürür.
+    Her olay bir root cause cihazını ve etkilenen cihaz listesini içerir.
+    """
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+
+    rows = (await db.execute(
+        select(NetworkEvent)
+        .where(NetworkEvent.event_type == "correlation_incident")
+        .where(NetworkEvent.created_at >= since)
+        .order_by(NetworkEvent.created_at.desc())
+        .limit(limit)
+    )).scalars().all()
+
+    incidents = []
+    for evt in rows:
+        details = evt.details or {}
+        incidents.append({
+            "id": evt.id,
+            "ts": evt.created_at.isoformat(),
+            "root_device_id": details.get("root_device_id") or evt.device_id,
+            "root_hostname": details.get("root_hostname") or evt.device_hostname or "?",
+            "affected_count": details.get("affected_count", 0),
+            "affected_devices": details.get("affected_devices", []),
+            "suppressed_alerts": details.get("suppressed_alerts", 0),
+            "title": evt.title,
+            "message": evt.message,
+            "acknowledged": evt.acknowledged,
+        })
+
+    return {
+        "window_hours": hours,
+        "total": len(incidents),
+        "incidents": incidents,
+    }

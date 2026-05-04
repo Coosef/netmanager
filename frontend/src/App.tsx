@@ -48,6 +48,7 @@ import FloorPlanPage from '@/pages/FloorPlan'
 import AlertRulesPage from '@/pages/AlertRules'
 import DriverTemplatesPage from '@/pages/DriverTemplates'
 import HelpPage from '@/pages/Help'
+import ServicesPage from '@/pages/Services'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -190,6 +191,7 @@ function ThemedApp() {
               <Route path="alert-rules" element={<AlertRulesPage />} />
               <Route path="driver-templates" element={<DriverTemplatesPage />} />
               <Route path="help" element={<HelpPage />} />
+              <Route path="services" element={<ServicesPage />} />
             </Route>
           </Routes>
         </BrowserRouter>
