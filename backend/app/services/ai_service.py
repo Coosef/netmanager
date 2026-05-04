@@ -185,7 +185,6 @@ async def _openai_chat(settings: AISettings, system: str, messages: list[dict]) 
 async def _gemini_chat(settings: AISettings, system: str, messages: list[dict]) -> dict:
     try:
         from google import genai
-        from google.genai import types
     except ImportError:
         raise RuntimeError("google-genai paketi yüklü değil. VPS'te 'docker compose up -d --build' çalıştırın.")
 
@@ -196,28 +195,28 @@ async def _gemini_chat(settings: AISettings, system: str, messages: list[dict]) 
     model_name = settings.gemini_model or "gemini-2.0-flash"
     client = genai.Client(api_key=api_key)
 
-    contents = [
-        {"role": "user" if m["role"] == "user" else "model", "parts": [{"text": m["content"]}]}
-        for m in messages
-    ]
-    config = types.GenerateContentConfig(system_instruction=system, max_output_tokens=2048)
+    # Build a single prompt string — most compatible approach across SDK versions
+    parts: list[str] = [system, "---"]
+    for m in messages[:-1]:
+        label = "Kullanıcı" if m["role"] == "user" else "Asistan"
+        parts.append(f"{label}: {m['content']}")
+    last = messages[-1]["content"] if messages else ""
+    parts.append(f"Kullanıcı: {last}")
+    prompt = "\n\n".join(parts)
 
     try:
         resp = await asyncio.to_thread(
             client.models.generate_content,
             model=model_name,
-            contents=contents,
-            config=config,
+            contents=prompt,
         )
     except Exception as e:
         err_str = str(e)
-        if "401" in err_str or "API_KEY_INVALID" in err_str:
+        if "401" in err_str or "API_KEY_INVALID" in err_str or "invalid" in err_str.lower():
             raise ValueError("Gemini API anahtarı geçersiz. Lütfen Ayarlar'dan kontrol edin.")
         if "429" in err_str:
             raise ValueError("Gemini rate limit aşıldı. Biraz bekleyip tekrar deneyin.")
-        if "404" in err_str:
-            raise ValueError(f"Gemini 404: {err_str[:400]}")
-        raise RuntimeError(f"Gemini API hatası: {err_str[:400]}")
+        raise RuntimeError(f"Gemini hatası: {err_str[:400]}")
 
     return {
         "message": resp.text,
