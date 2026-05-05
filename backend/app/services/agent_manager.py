@@ -225,6 +225,11 @@ class AgentManager:
                 self._handle_syslog_event(agent_id, msg)
             )
 
+        elif msg_type == "snmp_trap":
+            asyncio.get_running_loop().create_task(
+                self._handle_snmp_trap(agent_id, msg)
+            )
+
         # Sprint 14C: Agent edge intelligence anomaly report
         elif msg_type == "local_anomaly":
             asyncio.get_running_loop().create_task(
@@ -382,6 +387,107 @@ class AgentManager:
                 await db.commit()
         except Exception as e:
             log.debug(f"Syslog persist error: {e}")
+
+    # ── D4: SNMP Trap handling ────────────────────────────────────────────────
+
+    async def _handle_snmp_trap(self, agent_id: str, msg: dict):
+        """Find device by source IP, check maintenance window, create NetworkEvent."""
+        try:
+            from sqlalchemy import select, and_
+            from app.core.database import make_worker_session
+            from app.models.device import Device
+            from app.models.network_event import NetworkEvent
+            from app.models.maintenance_window import MaintenanceWindow
+            import json as _json
+
+            source_ip = msg.get("source_ip", "")
+            trap_name = msg.get("trap_name", "unknown")
+            severity = msg.get("severity", "warning")
+            trap_oid = msg.get("trap_oid", "")
+            community = msg.get("community", "")
+            version = msg.get("version", "unknown")
+
+            _redis = _get_sync_redis()
+            now_utc = datetime.now(timezone.utc)
+
+            async with make_worker_session()() as db:
+                # Find device by IP
+                row = await db.execute(
+                    select(Device.id, Device.hostname).where(Device.ip_address == source_ip)
+                )
+                device_row = row.first()
+
+                device_id = device_row[0] if device_row else None
+                hostname = device_row[1] if device_row else source_ip
+
+                # Check maintenance window (suppress events during maintenance)
+                if device_id:
+                    mw_rows = await db.execute(
+                        select(MaintenanceWindow).where(
+                            and_(
+                                MaintenanceWindow.start_time <= now_utc,
+                                MaintenanceWindow.end_time >= now_utc,
+                            )
+                        )
+                    )
+                    active_windows = mw_rows.scalars().all()
+                    for w in active_windows:
+                        if w.applies_to_all or (w.device_ids and device_id in w.device_ids):
+                            log.debug(f"SNMP trap from {source_ip} suppressed (maintenance window)")
+                            return
+
+                # Dedup: same trap type from same IP, 5-minute window
+                dedup_key = f"trap:dedup:{source_ip}:{trap_name}"
+                try:
+                    if _redis.get(dedup_key):
+                        return
+                    _redis.setex(dedup_key, 300, "1")
+                except Exception:
+                    pass
+
+                title = f"SNMP Trap: {trap_name} — {hostname}"
+                message = (
+                    f"{hostname} ({source_ip}) gönderdi: {trap_name}"
+                    + (f" [OID: {trap_oid}]" if trap_oid else "")
+                )
+
+                ev = NetworkEvent(
+                    device_id=device_id,
+                    device_hostname=hostname,
+                    event_type=f"snmp_trap_{trap_name}",
+                    severity=severity,
+                    title=title,
+                    message=message,
+                    details={
+                        "source_ip": source_ip,
+                        "trap_oid": trap_oid,
+                        "trap_name": trap_name,
+                        "community": community,
+                        "version": version,
+                        "agent_id": agent_id,
+                        "varbinds": msg.get("varbinds", []),
+                    },
+                )
+                db.add(ev)
+                await db.commit()
+
+            # Publish to Redis event stream for real-time UI updates
+            try:
+                r = _get_sync_redis()
+                r.publish("network:events", _json.dumps({
+                    "event_type": f"snmp_trap_{trap_name}",
+                    "severity": severity,
+                    "title": title,
+                    "message": message,
+                    "source_ip": source_ip,
+                    "agent_id": agent_id,
+                }))
+            except Exception:
+                pass
+
+            log.info(f"SNMP trap from {source_ip}: {trap_name} (device_id={device_id})")
+        except Exception as e:
+            log.debug(f"SNMP trap handler error: {e}")
 
     # ── Sprint 14C: Local anomaly handling ───────────────────────────────────
 
@@ -718,6 +824,20 @@ class AgentManager:
                 "type": "syslog_config",
                 "enabled": enabled,
                 "bind_port": bind_port,
+            }))
+            return True
+        except Exception:
+            return False
+
+    async def send_trap_config(self, agent_id: str, enabled: bool, bind_port: int = 162) -> bool:
+        ws = self._connections.get(agent_id)
+        if not ws:
+            return False
+        try:
+            await ws.send_text(json.dumps({
+                "type": "trap_config",
+                "enabled": enabled,
+                "port": bind_port,
             }))
             return True
         except Exception:

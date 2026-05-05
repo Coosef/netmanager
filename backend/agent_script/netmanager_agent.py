@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.7"
+VERSION = "1.3.8"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -143,6 +143,10 @@ _HEALTH_PARALLELISM = 10        # max concurrent TCP probes
 # ── Feature 6: Syslog Collector ──────────────────────────────────────────
 _syslog_enabled = False
 _syslog_port = 514
+
+# ── D4: SNMP Trap Receiver ────────────────────────────────────────────────
+_snmp_trap_enabled = False
+_snmp_trap_port = 162
 
 # ── Feature 8: Secure Credential Vault ───────────────────────────────────
 _vault: dict = {}             # keyed by credential_id / device_id
@@ -691,6 +695,187 @@ class SyslogProtocol(asyncio.DatagramProtocol):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# D4: SNMP Trap Receiver helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# OID → (trap_name, severity)
+_SNMP_TRAP_OID_MAP = {
+    "1.3.6.1.6.3.1.1.5.1": ("coldStart",   "warning"),
+    "1.3.6.1.6.3.1.1.5.2": ("warmStart",   "warning"),
+    "1.3.6.1.6.3.1.1.5.3": ("linkDown",    "critical"),
+    "1.3.6.1.6.3.1.1.5.4": ("linkUp",      "info"),
+    "1.3.6.1.6.3.1.1.5.5": ("authFailure", "warning"),
+}
+# v1 generic-trap integer → OID string
+_V1_GENERIC_TRAP_MAP = {
+    0: "1.3.6.1.6.3.1.1.5.1",
+    1: "1.3.6.1.6.3.1.1.5.2",
+    2: "1.3.6.1.6.3.1.1.5.3",
+    3: "1.3.6.1.6.3.1.1.5.4",
+    4: "1.3.6.1.6.3.1.1.5.5",
+}
+_SNMP_TRAP_OID_VARBIND = "1.3.6.1.6.3.1.1.4.1.0"  # snmpTrapOID.0
+
+
+def _ber_decode_length(data: bytes, offset: int):
+    b = data[offset]
+    offset += 1
+    if b < 0x80:
+        return b, offset
+    num_octets = b & 0x7F
+    length = 0
+    for _ in range(num_octets):
+        length = (length << 8) | data[offset]
+        offset += 1
+    return length, offset
+
+
+def _ber_decode_tlv(data: bytes, offset: int):
+    tag = data[offset]
+    offset += 1
+    length, offset = _ber_decode_length(data, offset)
+    value = data[offset:offset + length]
+    return tag, value, offset + length
+
+
+def _ber_decode_int(value: bytes) -> int:
+    if not value:
+        return 0
+    return int.from_bytes(value, "big", signed=True)
+
+
+def _ber_decode_oid(value: bytes) -> str:
+    if not value:
+        return ""
+    parts = [value[0] // 40, value[0] % 40]
+    idx = 1
+    while idx < len(value):
+        subid = 0
+        while idx < len(value):
+            b = value[idx]
+            idx += 1
+            subid = (subid << 7) | (b & 0x7F)
+            if not (b & 0x80):
+                break
+        parts.append(subid)
+    return ".".join(str(p) for p in parts)
+
+
+def _parse_snmp_trap(data: bytes, addr: tuple) -> dict:
+    """Minimal SNMP v1/v2c trap BER parser."""
+    source_ip = addr[0] if addr else ""
+    result = {
+        "source_ip": source_ip,
+        "version": "unknown",
+        "community": "",
+        "trap_oid": "",
+        "trap_name": "unknown",
+        "severity": "warning",
+        "varbinds": [],
+    }
+    try:
+        # Outer SEQUENCE wrapper
+        tag, seq_data, _ = _ber_decode_tlv(data, 0)
+        if tag != 0x30:
+            return result
+        data = seq_data
+        offset = 0
+
+        # Version INTEGER
+        tag, val, offset = _ber_decode_tlv(data, offset)
+        if tag != 0x02:
+            return result
+        version = _ber_decode_int(val)
+        result["version"] = "v{}".format(version + 1)
+
+        # Community OCTET STRING
+        tag, val, offset = _ber_decode_tlv(data, offset)
+        if tag == 0x04:
+            result["community"] = val.decode("ascii", errors="replace")
+
+        # PDU
+        tag, pdu_data, _ = _ber_decode_tlv(data, offset)
+
+        if tag == 0xA4:  # SNMPv1 Trap-PDU
+            pdu_off = 0
+            # enterprise OID
+            t, v, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            enterprise = _ber_decode_oid(v) if t == 0x06 else ""
+            # agent-addr (skip)
+            _, _, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            # generic-trap
+            t, v, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            generic = _ber_decode_int(v) if t == 0x02 else -1
+            # specific-trap
+            t, v, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            specific = _ber_decode_int(v) if t == 0x02 else 0
+            trap_oid = _V1_GENERIC_TRAP_MAP.get(generic, "{}.0.{}".format(enterprise, specific))
+            result["trap_oid"] = trap_oid
+            name, sev = _SNMP_TRAP_OID_MAP.get(trap_oid, ("generic_trap_{}".format(generic), "warning"))
+            result["trap_name"] = name
+            result["severity"] = sev
+
+        elif tag == 0xA7:  # SNMPv2c Trap-PDU
+            pdu_off = 0
+            # skip request-id, error-status, error-index
+            for _ in range(3):
+                _, _, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            # VarBindList
+            t, vbl, _ = _ber_decode_tlv(pdu_data, pdu_off)
+            if t == 0x30:
+                vb_off = 0
+                while vb_off < len(vbl):
+                    try:
+                        t2, vb, vb_off = _ber_decode_tlv(vbl, vb_off)
+                        if t2 != 0x30:
+                            break
+                        vi = 0
+                        t3, oid_v, vi = _ber_decode_tlv(vb, vi)
+                        oid_str = _ber_decode_oid(oid_v) if t3 == 0x06 else ""
+                        t4, obj_v, _ = _ber_decode_tlv(vb, vi)
+                        if t4 == 0x06:
+                            obj_str = _ber_decode_oid(obj_v)
+                        elif t4 == 0x04:
+                            obj_str = obj_v.decode("ascii", errors="replace")
+                        else:
+                            obj_str = str(_ber_decode_int(obj_v))
+                        if oid_str == _SNMP_TRAP_OID_VARBIND and t4 == 0x06:
+                            result["trap_oid"] = obj_str
+                            name, sev = _SNMP_TRAP_OID_MAP.get(obj_str, ("unknown", "warning"))
+                            result["trap_name"] = name
+                            result["severity"] = sev
+                        result["varbinds"].append({"oid": oid_str, "value": obj_str})
+                    except Exception:
+                        break
+    except Exception as e:
+        log.debug("SNMP trap parse hatasi: {}".format(e))
+    return result
+
+
+class SnmpTrapProtocol(asyncio.DatagramProtocol):
+    def __init__(self, ws, loop):
+        self._ws = ws
+        self._loop = loop
+
+    def datagram_received(self, data: bytes, addr: tuple):
+        parsed = _parse_snmp_trap(data, addr)
+        payload = json.dumps({
+            "type":      "snmp_trap",
+            "agent_id":  AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **parsed,
+        })
+
+        async def _do_send():
+            try:
+                await self._ws.send(payload)
+            except Exception as e:
+                log.debug("SNMP trap gonderilemedi: {}".format(e))
+
+        asyncio.ensure_future(_do_send(), loop=self._loop)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Feature 8: Secure Credential Vault helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -806,6 +991,7 @@ async def _health_check(ws, loop):
 
 async def handle_message(ws, msg, loop):
     global _restart_requested, _device_list, _syslog_enabled, _syslog_port
+    global _snmp_trap_enabled, _snmp_trap_port
     global _vault, _vault_key
 
     t = msg.get("type")
@@ -851,6 +1037,13 @@ async def handle_message(ws, msg, loop):
         _syslog_enabled = msg.get("enabled", False)
         _syslog_port = int(msg.get("port", 514))
         log.info("Syslog konfig guncellendi: enabled={}, port={}".format(_syslog_enabled, _syslog_port))
+        return
+
+    # D4: SNMP Trap config
+    if t == "trap_config":
+        _snmp_trap_enabled = msg.get("enabled", False)
+        _snmp_trap_port = int(msg.get("port", 162))
+        log.info("SNMP Trap konfig guncellendi: enabled={}, port={}".format(_snmp_trap_enabled, _snmp_trap_port))
         return
 
     # Feature 8: credential bundle
@@ -1114,6 +1307,7 @@ async def run():
         ws_url = "{}/api/v1/agents/ws/{}?key={}".format(ws_base, AGENT_ID, current_key)
 
         syslog_transport = None
+        trap_transport = None
 
         try:
             log.info("Baglaniliyor: {}/api/v1/agents/ws/{}".format(ws_base, AGENT_ID))
@@ -1234,6 +1428,18 @@ async def run():
                     except Exception as e:
                         log.warning("Syslog sunucusu baslatılamadi: {}".format(e))
 
+                # D4: Start SNMP trap listener if enabled
+                if _snmp_trap_enabled:
+                    try:
+                        transport, _protocol = await loop.create_datagram_endpoint(
+                            lambda: SnmpTrapProtocol(ws, loop),
+                            local_addr=("0.0.0.0", _snmp_trap_port),
+                        )
+                        trap_transport = transport
+                        log.info("SNMP Trap dinleyicisi basladi: port={}".format(_snmp_trap_port))
+                    except Exception as e:
+                        log.warning("SNMP Trap dinleyicisi baslatılamadi: {}".format(e))
+
                 try:
                     async for raw in ws:
                         try:
@@ -1251,6 +1457,9 @@ async def run():
                     if syslog_transport is not None:
                         syslog_transport.close()
                         syslog_transport = None
+                    if trap_transport is not None:
+                        trap_transport.close()
+                        trap_transport = None
 
             if _restart_requested:
                 log.info("Yeniden baslatiliyor...")
@@ -1263,6 +1472,12 @@ async def run():
                 except Exception:
                     pass
                 syslog_transport = None
+            if trap_transport is not None:
+                try:
+                    trap_transport.close()
+                except Exception:
+                    pass
+                trap_transport = None
 
             # Handle specific WS close codes
             err_str = str(exc)
