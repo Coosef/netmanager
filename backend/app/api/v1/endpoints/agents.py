@@ -1149,10 +1149,6 @@ async def agent_websocket(
                 # Auto-update: notify agent if its version is outdated
                 agent_ver = msg.get("version") or ""
                 if agent_ver and agent_ver != CURRENT_AGENT_VERSION:
-                    log.info(
-                        f"Agent {agent_id} eski versiyon ({agent_ver} != {CURRENT_AGENT_VERSION}), "
-                        "güncelleme bildirimi gönderiliyor"
-                    )
                     try:
                         await asyncio.wait_for(
                             websocket.send_text(json.dumps({
