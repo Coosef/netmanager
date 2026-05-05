@@ -12,11 +12,18 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+import redis as _redis_sync
+
 from fastapi import WebSocket
+from app.core.config import settings
 
 log = logging.getLogger("agent_manager")
 
 _COMMAND_TIMEOUT = 60  # seconds to wait for SSH result from agent
+_AGENT_ONLINE_TTL = 60  # seconds; refreshed on every heartbeat (agent sends every 15s)
+
+def _get_sync_redis():
+    return _redis_sync.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=2)
 _EMA_ALPHA = 0.3       # exponential moving average weight for latency
 
 # Commands that are always safe regardless of mode (read-only show commands)
@@ -80,6 +87,10 @@ class AgentManager:
                 pass
         self._connections[agent_id] = websocket
         self._meta[agent_id] = {**meta, "connected_at": datetime.now(timezone.utc).isoformat()}
+        try:
+            _get_sync_redis().setex(f"agent:{agent_id}:online", _AGENT_ONLINE_TTL, "1")
+        except Exception:
+            pass
         log.info(f"Agent connected: {agent_id} ({meta.get('hostname', '?')} / {meta.get('platform', '?')})")
 
     async def disconnect(self, agent_id: str):
@@ -89,10 +100,26 @@ class AgentManager:
         to_cancel = [rid for rid, fut in self._pending.items() if not fut.done()]
         for rid in to_cancel:
             self._pending[rid].set_exception(RuntimeError(f"Agent {agent_id} disconnected"))
+        try:
+            _get_sync_redis().delete(f"agent:{agent_id}:online")
+        except Exception:
+            pass
         log.info(f"Agent disconnected: {agent_id}")
 
     def is_online(self, agent_id: str) -> bool:
-        return agent_id in self._connections
+        if agent_id in self._connections:
+            return True
+        try:
+            return bool(_get_sync_redis().exists(f"agent:{agent_id}:online"))
+        except Exception:
+            return False
+
+    def refresh_online(self, agent_id: str) -> None:
+        """Called on heartbeat to reset the Redis TTL."""
+        try:
+            _get_sync_redis().expire(f"agent:{agent_id}:online", _AGENT_ONLINE_TTL)
+        except Exception:
+            pass
 
     def online_agent_ids(self) -> list[str]:
         return list(self._connections.keys())

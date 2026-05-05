@@ -1170,6 +1170,7 @@ async def agent_websocket(
 
             elif msg.get("type") == "heartbeat":
                 agent.last_heartbeat = datetime.now(timezone.utc)
+                agent_manager.refresh_online(agent_id)
                 try:
                     await db.commit()
                 except Exception:
