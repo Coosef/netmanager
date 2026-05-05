@@ -107,6 +107,8 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
   const [snmpForm] = Form.useForm()
   const [snmpVersion, setSnmpVersion] = useState<'v2c' | 'v3'>('v2c')
   const [snmpSkipSsh, setSnmpSkipSsh] = useState(false)
+  const [trapConfigOpen, setTrapConfigOpen] = useState(false)
+  const [trapForm] = Form.useForm()
   const [ifaceView, setIfaceView] = useState<'visual' | 'table'>('visual')
   const [ifaceRefreshKey, setIfaceRefreshKey] = useState(0)
   const [vlanRefreshKey, setVlanRefreshKey] = useState(0)
@@ -151,6 +153,20 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
       })
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'SNMP yapılandırılamadı'),
+  })
+
+  // ── configure SNMP Trap Forwarding ───────────────────────────────────────
+  const configureTrapMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof devicesApi.configureTrapForwarding>[1]) =>
+      devicesApi.configureTrapForwarding(currentDevice.id, payload),
+    onSuccess: (data) => {
+      message.success(
+        `Trap yönlendirme yapılandırıldı — cihaz ${data.agent_ip}:${data.port} adresine trap gönderecek`
+      )
+      setTrapConfigOpen(false)
+      trapForm.resetFields()
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Trap yapılandırılamadı'),
   })
 
   // ── live config ───────────────────────────────────────────────────────────
@@ -1053,6 +1069,19 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
                   Zaten Yapılandırıldı — Bilgileri Kaydet
                 </Button>
                 <Button
+                  icon={<SendOutlined />}
+                  onClick={() => {
+                    trapForm.setFieldsValue({
+                      agent_id: currentDevice.agent_id || (agents.find(a => a.status === 'online')?.id ?? ''),
+                      community: currentDevice.snmp_community_set ? 'public' : 'public',
+                      version: 'v2c',
+                    })
+                    setTrapConfigOpen(true)
+                  }}
+                >
+                  Trap Yönlendirmeyi Yapılandır
+                </Button>
+                <Button
                   icon={<SaveOutlined />}
                   onClick={() => window.open('/config-templates', '_blank')}
                 >
@@ -1074,6 +1103,17 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
                 <Button icon={<ApiOutlined />} size="small"
                   onClick={() => { setSnmpSkipSsh(false); setSnmpConfigOpen(true) }}>
                   SNMP Güncelle
+                </Button>
+                <Button icon={<SendOutlined />} size="small"
+                  onClick={() => {
+                    trapForm.setFieldsValue({
+                      agent_id: currentDevice.agent_id || (agents.find(a => a.status === 'online')?.id ?? ''),
+                      community: 'public',
+                      version: 'v2c',
+                    })
+                    setTrapConfigOpen(true)
+                  }}>
+                  Trap Yönlendirme
                 </Button>
               </div>
 
@@ -1483,6 +1523,71 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
               </Form.Item>
             </>
           )}
+        </Form>
+      </Modal>
+
+      {/* ── SNMP Trap Yönlendirme Modal ──────────────────────────────────────── */}
+      <Modal
+        title={<Space><SendOutlined />SNMP Trap Yönlendirmeyi Yapılandır — {currentDevice.hostname}</Space>}
+        open={trapConfigOpen}
+        onCancel={() => { setTrapConfigOpen(false); trapForm.resetFields() }}
+        onOk={() => trapForm.submit()}
+        confirmLoading={configureTrapMutation.isPending}
+        okText="Uygula (SSH)"
+        width={500}
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="Bu işlem cihaza SSH bağlanarak snmp-server host komutunu uygular. Cihaz bundan sonra trap'leri seçilen agent'a iletecek."
+        />
+        <Form
+          form={trapForm}
+          layout="vertical"
+          onFinish={(vals) => configureTrapMutation.mutate({
+            agent_id: vals.agent_id,
+            community: vals.community,
+            version: vals.version,
+          })}
+        >
+          <Form.Item
+            name="agent_id"
+            label="Trap Hedefi — Agent"
+            rules={[{ required: true, message: 'Agent seçin' }]}
+            extra="Cihaz trap'lerini bu agent'ın IP adresine gönderecek (UDP 1620)"
+          >
+            <Select placeholder="Agent seçin">
+              {agents.map(a => (
+                <Select.Option key={a.id} value={a.id} disabled={!a.local_ip}>
+                  <Space>
+                    <Badge status={a.status === 'online' ? 'success' : 'default'} />
+                    {a.name}
+                    {a.local_ip
+                      ? <Tag style={{ fontSize: 11 }}>{a.local_ip}</Tag>
+                      : <Tag color="warning" style={{ fontSize: 11 }}>IP bilinmiyor</Tag>}
+                  </Space>
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="community"
+            label="Community String"
+            rules={[{ required: true, message: 'Community string gerekli' }]}
+            extra="Cihazda tanımlı SNMP community string'ini girin"
+          >
+            <Input placeholder="public" />
+          </Form.Item>
+          <Form.Item name="version" label="SNMP Versiyon" initialValue="v2c">
+            <Select>
+              <Select.Option value="v2c">SNMPv2c (önerilen)</Select.Option>
+              <Select.Option value="v1">SNMPv1</Select.Option>
+            </Select>
+          </Form.Item>
+          <div style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>
+            Uygulanan komutlar cihaz türüne göre otomatik seçilir ({currentDevice.os_type || 'bilinmiyor'})
+          </div>
         </Form>
       </Modal>
 

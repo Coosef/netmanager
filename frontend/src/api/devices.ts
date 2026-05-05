@@ -248,6 +248,16 @@ export const devicesApi = {
       { credential_profile_id: credentialProfileId }
     ).then((r) => r.data),
 
+  configureTrapForwarding: (deviceId: number, payload: {
+    agent_id: string
+    community: string
+    version: 'v1' | 'v2c'
+    port?: number
+  }) =>
+    client.post<{ success: boolean; agent_ip: string; port: number; commands_applied: string[] }>(
+      `/devices/${deviceId}/configure-trap-forwarding`, payload
+    ).then((r) => r.data),
+
   configureSnmp: (deviceId: number, payload: {
     snmp_version: 'v2c' | 'v3'
     snmp_community?: string

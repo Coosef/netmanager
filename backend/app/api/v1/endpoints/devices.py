@@ -1577,6 +1577,83 @@ async def configure_snmp(
     return {"success": True, "commands_applied": cmds}
 
 
+def _trap_forwarding_commands(os_type: str, host_ip: str, port: int, community: str, version: str) -> list[str]:
+    """Return SNMP trap-host commands for the given OS type (v1 or v2c)."""
+    ver_str = "2c" if version == "v2c" else "1"
+    cmds: list[str] = []
+    if os_type in ("cisco_ios", "cisco_nxos", "cisco_sg300"):
+        cmds.append("snmp-server enable traps")
+        cmds.append(f"snmp-server host {host_ip} version {ver_str} {community} udp-port {port}")
+    elif os_type == "ruijie_os":
+        cmds.append("snmp-server enable traps")
+        cmds.append(f"snmp-server host {host_ip} version v{ver_str} {community}")
+    elif os_type in ("aruba_osswitch", "hp_procurve"):
+        cmds.append(f"snmp-server host {host_ip} community \"{community}\" trap-version {version} port {port}")
+    elif os_type == "aruba_aoscx":
+        cmds.append(f"snmp-server host {host_ip} version {version} community {community} port {port}")
+    else:
+        # Generic fallback (works for most Cisco-like OSes)
+        cmds.append("snmp-server enable traps")
+        cmds.append(f"snmp-server host {host_ip} version {ver_str} {community} udp-port {port}")
+    return cmds
+
+
+@router.post("/{device_id}/configure-trap-forwarding")
+async def configure_trap_forwarding(
+    device_id: int,
+    body: dict,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Push SNMP trap-host config to device via SSH so it sends traps to the agent."""
+    if not current_user.has_permission("config:push"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    device = await _get_device_scoped(db, device_id, current_user)
+
+    agent_id = body.get("agent_id") or str(device.agent_id or "")
+    community = body.get("community", "public")
+    version = body.get("version", "v2c")
+    port = int(body.get("port", 1620))
+
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="Bu cihaza atanmış bir agent yok. Lütfen önce agent atayın.")
+
+    # Get agent's local IP from DB
+    from app.models.agent import Agent as AgentModel
+    from sqlalchemy import select as _select
+    row = await db.execute(_select(AgentModel.local_ip, AgentModel.name).where(AgentModel.id == agent_id))
+    agent_row = row.first()
+    if not agent_row or not agent_row[0]:
+        raise HTTPException(
+            status_code=400,
+            detail="Agent'ın yerel IP adresi bilinmiyor. Agent en az bir kez bağlanmış olmalı."
+        )
+    agent_ip = agent_row[0]
+
+    cmds = _trap_forwarding_commands(device.os_type or "cisco_ios", agent_ip, port, community, version)
+
+    apply_result = await ssh_manager.send_config(device, cmds)
+    if not apply_result.success:
+        raise HTTPException(
+            status_code=502,
+            detail=f"SSH komutları uygulanamadı: {apply_result.error or 'bilinmeyen hata'}"
+        )
+
+    # Save to NVRAM (best-effort)
+    save_cmd = "copy running-config startup-config" if device.os_type in ("cisco_ios", "cisco_nxos") else "write memory"
+    await ssh_manager.execute_command(device, save_cmd)
+
+    await log_action(
+        db, current_user, "trap_forwarding_configured", "device", device_id, device.hostname,
+        details={"agent_id": agent_id, "agent_ip": agent_ip, "port": port, "community": community, "commands": cmds},
+        request=request,
+    )
+
+    return {"success": True, "agent_ip": agent_ip, "port": port, "commands_applied": cmds}
+
+
 @router.post("/{device_id}/backups/take", response_model=ConfigBackupResponse, status_code=201)
 async def take_backup(
     device_id: int,
