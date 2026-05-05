@@ -259,15 +259,25 @@ class AgentManager:
 
     async def _handle_device_status_report(self, agent_id: str, msg: dict):
         try:
-            from sqlalchemy import update
+            from sqlalchemy import update, select
             from app.core.database import make_worker_session
             from app.models.device import Device, DeviceStatus
+            from app.models.network_event import NetworkEvent
 
             results = msg.get("results", [])
+            if not results:
+                return
+
+            _redis = _get_sync_redis()
+
             async with make_worker_session()() as db:
                 for r in results:
                     device_id = r.get("device_id")
                     reachable = r.get("reachable", False)
+                    is_flapping = r.get("flapping", False)
+                    ip = r.get("ip", "")
+
+                    # Update device status in DB
                     new_status = DeviceStatus.ONLINE if reachable else DeviceStatus.OFFLINE
                     values: dict = {"status": new_status}
                     if reachable:
@@ -275,10 +285,56 @@ class AgentManager:
                     await db.execute(
                         update(Device).where(Device.id == device_id).values(**values)
                     )
+
+                    # Determine event type
+                    if is_flapping:
+                        event_type = "device_flapping"
+                        severity = "warning"
+                    elif reachable:
+                        event_type = "device_online"
+                        severity = "info"
+                    else:
+                        event_type = "device_offline"
+                        severity = "critical"
+
+                    # Dedup: skip if same event already fired in last 10 min
+                    dedup_key = f"event:dedup:{device_id}:{event_type}"
+                    try:
+                        if _redis.get(dedup_key):
+                            continue
+                        _redis.setex(dedup_key, 600, "1")
+                    except Exception:
+                        pass
+
+                    # Get hostname for readable event title
+                    row = await db.execute(select(Device.hostname).where(Device.id == device_id))
+                    hostname = row.scalar() or ip
+
+                    if is_flapping:
+                        title = f"Cihaz kararsız: {hostname}"
+                        message = f"{hostname} ({ip}) kısa sürede birden fazla kez durum değiştirdi"
+                    elif reachable:
+                        title = f"Cihaz çevrimiçi: {hostname}"
+                        message = f"{hostname} ({ip}) tekrar erişilebilir"
+                    else:
+                        title = f"Cihaz çevrimdışı: {hostname}"
+                        message = f"{hostname} ({ip}) — 2 ardışık kontrol başarısız"
+
+                    ev = NetworkEvent(
+                        device_id=device_id,
+                        device_hostname=hostname,
+                        event_type=event_type,
+                        severity=severity,
+                        title=title,
+                        message=message,
+                        details={"ip": ip, "agent_id": agent_id, "flapping": is_flapping},
+                    )
+                    db.add(ev)
+
                 await db.commit()
-            log.debug(f"Agent {agent_id} status report: {len(results)} devices updated")
+            log.debug(f"Agent {agent_id} status report: {len(results)} device(s) changed")
         except Exception as e:
-            log.debug(f"Device status report handler error: {e}")
+            log.warning(f"Device status report handler error: {e}")
 
     # ── Syslog event handling ─────────────────────────────────────────────────
 

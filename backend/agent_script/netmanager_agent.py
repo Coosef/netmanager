@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.6"
+VERSION = "1.3.7"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -130,6 +130,15 @@ _result_queue: deque = deque(maxlen=100)
 # ── Feature 2: Proactive Device Health Monitoring ────────────────────────
 _device_list: list = []
 _health_check_interval = 60
+
+# Smart health monitoring state
+_device_fail_count: dict = {}   # device_id -> consecutive failure count
+_device_last_status: dict = {}  # device_id -> last reported reachable (bool)
+_device_flap_history: dict = {} # device_id -> deque[(timestamp, reachable)]
+_CONFIRM_FAILURES = 2           # consecutive failures required before reporting down
+_FLAP_WINDOW_SEC = 600          # 10-minute window for flap detection
+_FLAP_THRESHOLD = 3             # status transitions within window = flapping
+_HEALTH_PARALLELISM = 10        # max concurrent TCP probes
 
 # ── Feature 6: Syslog Collector ──────────────────────────────────────────
 _syslog_enabled = False
@@ -699,41 +708,92 @@ def _vault_decrypt(ciphertext_b64: str, key: bytes) -> dict:
 # Feature 2: Proactive Device Health Monitoring
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _tcp_probe(ip: str, port: int, timeout: float = 3.0) -> bool:
+    """Blocking TCP reachability check — designed to run in an executor."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
 async def _health_check(ws, loop):
-    """Coroutine: periodically TCP-probe each device in _device_list."""
+    """Periodically TCP-probe all devices with:
+    - Parallel probes (up to _HEALTH_PARALLELISM concurrent)
+    - N-out-of-M confirmation (_CONFIRM_FAILURES before reporting down)
+    - Flap detection (_FLAP_THRESHOLD transitions in _FLAP_WINDOW_SEC)
+    - Delta reporting (only changed devices sent to backend)
+    """
+    sem = asyncio.Semaphore(_HEALTH_PARALLELISM)
+
+    async def _probe(device):
+        ip = device.get("device_ip") or device.get("ip", "")
+        port = int(device.get("ssh_port", 22))
+        device_id = device.get("id") or device.get("device_id") or ip
+        async with sem:
+            reachable = await loop.run_in_executor(None, _tcp_probe, ip, port, 3.0)
+        return device_id, ip, reachable
+
     while True:
         await asyncio.sleep(_health_check_interval)
         if not _device_list:
             continue
 
-        results = []
-        for device in _device_list:
-            ip = device.get("device_ip") or device.get("ip", "")
-            port = int(device.get("ssh_port", 22))
-            device_id = device.get("id") or device.get("device_id") or ip
+        tasks = [_probe(d) for d in _device_list]
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
 
-            reachable = False
-            try:
-                # TCP connect — not a full SSH handshake
-                with socket.create_connection((ip, port), timeout=3.0):
-                    reachable = True
-            except Exception:
-                reachable = False
+        changed = []
+        now = time.time()
 
-            results.append({
+        for item in raw:
+            if isinstance(item, Exception):
+                continue
+            device_id, ip, reachable = item
+
+            # N-out-of-M: accumulate consecutive failures before reporting down
+            if not reachable:
+                _device_fail_count[device_id] = _device_fail_count.get(device_id, 0) + 1
+            else:
+                _device_fail_count[device_id] = 0
+
+            fail_count = _device_fail_count[device_id]
+
+            # Silence single failures — wait for confirmation
+            if not reachable and fail_count < _CONFIRM_FAILURES:
+                continue
+
+            # Delta: skip if status hasn't changed since last report
+            last_status = _device_last_status.get(device_id)
+            if last_status is not None and last_status == reachable:
+                continue
+
+            # Flap detection: count status transitions in the sliding window
+            hist = _device_flap_history.setdefault(device_id, deque(maxlen=30))
+            hist.append((now, reachable))
+            transitions = sum(
+                1 for i in range(1, len(hist))
+                if hist[i][1] != hist[i - 1][1] and now - hist[i][0] < _FLAP_WINDOW_SEC
+            )
+            is_flapping = transitions >= _FLAP_THRESHOLD
+
+            _device_last_status[device_id] = reachable
+            changed.append({
                 "device_id": device_id,
                 "ip": ip,
-                "port": port,
                 "reachable": reachable,
+                "flapping": is_flapping,
                 "checked_at": datetime.now(timezone.utc).isoformat(),
             })
+
+        if not changed:
+            continue  # Delta reporting: nothing to send
 
         try:
             await ws.send(json.dumps({
                 "type": "device_status_report",
                 "agent_id": AGENT_ID,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "results": results,
+                "results": changed,
             }))
         except Exception as e:
             log.debug("Health check raporu gonderilemedi: {}".format(e))
