@@ -618,20 +618,34 @@ export default function MonitorPage() {
     },
     {
       title: '',
-      dataIndex: 'acknowledged',
-      width: 70,
-      render: (v: boolean, r: NetworkEvent) =>
-        v ? (
-          <CheckCircleFilled style={{ color: '#52c41a', fontSize: 16 }} />
-        ) : (
-          <Tooltip title={t('monitor.acknowledge')}>
+      key: 'actions',
+      width: 90,
+      render: (_: unknown, r: NetworkEvent) => (
+        <Space size={4} onClick={(e) => e.stopPropagation()}>
+          <Tooltip title="Detayı Gör">
             <Button
               size="small"
-              icon={<CheckOutlined />}
-              onClick={() => handleAck(r.id)}
-            />
+              type="text"
+              icon={<InfoCircleOutlined style={{ color: '#1677ff' }} />}
+              onClick={() => setSelectedEvent(r)}
+            >
+              <span style={{ fontSize: 11 }}>Detay</span>
+            </Button>
           </Tooltip>
-        ),
+          {r.acknowledged ? (
+            <CheckCircleFilled style={{ color: '#52c41a', fontSize: 16 }} />
+          ) : (
+            <Tooltip title={t('monitor.acknowledge')}>
+              <Button
+                size="small"
+                type="text"
+                icon={<CheckOutlined />}
+                onClick={() => handleAck(r.id)}
+              />
+            </Tooltip>
+          )}
+        </Space>
+      ),
     },
   ]
 
@@ -839,8 +853,7 @@ export default function MonitorPage() {
               `mon-row-${r.severity}${!r.acknowledged ? ' mon-row-unacked' : ''}`
             }
             onRow={(r) => ({
-              style: { borderLeft: `3px solid ${SEV_HEX[r.severity] || '#3b82f640'}`, cursor: 'pointer' },
-              onClick: () => setSelectedEvent(r),
+              style: { borderLeft: `3px solid ${SEV_HEX[r.severity] || '#3b82f640'}` },
             })}
             style={{ minHeight: 400 }}
           />

@@ -494,7 +494,7 @@ export function useAlarmWatcher() {
         type: ev.severity === 'critical' ? 'error' : 'warning',
         duration: ev.severity === 'critical' ? 0 : 12,
         placement: 'bottomRight',
-        style: { width: 360, padding: '12px 16px' },
+        style: { width: 340 },
         message: (
           <Space size={6}>
             {cfg.icon}
@@ -502,19 +502,23 @@ export function useAlarmWatcher() {
           </Space>
         ),
         description: (
-          <Space direction="vertical" size={8} style={{ width: '100%', marginTop: 4 }}>
+          <Space direction="vertical" size={4} style={{ width: '100%', marginTop: 2 }}>
             {ev.device_hostname && (
-              <Tag color="default" style={{ fontSize: 11, marginBottom: 2 }}>
-                📡 {ev.device_hostname}
-              </Tag>
+              <Text style={{ fontSize: 11, color: '#8c8c8c' }}>📡 {ev.device_hostname}</Text>
             )}
             {cfg.summary(ev)}
-            <Space size={4} style={{ marginTop: 4 }} onClick={(e) => e.stopPropagation()} wrap>
-              {cfg.actions(ev, navigate, closeThis)}
-              <Button size="small" onClick={closeAll} style={{ color: '#8c8c8c' }}>
-                Tümünü Kapat
-              </Button>
-            </Space>
+          </Space>
+        ),
+        btn: (
+          <Space size={6} onClick={(e) => e.stopPropagation()}>
+            {cfg.actions(ev, navigate, closeThis)}
+            <Button
+              size="small"
+              danger
+              onClick={closeAll}
+            >
+              Tümünü Kapat
+            </Button>
           </Space>
         ),
       })
