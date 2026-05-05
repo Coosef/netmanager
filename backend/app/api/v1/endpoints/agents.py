@@ -1191,6 +1191,14 @@ async def agent_websocket(
                 if msg.get("vault_support"):
                     asyncio.create_task(_push_vault_task(agent_id, db))
 
+                # D4: Auto-enable SNMP trap receiver (port 1620 avoids root requirement)
+                agent_ver = msg.get("version") or ""
+                def _ver(v): return tuple(int(x) for x in v.split(".") if x.isdigit())
+                if agent_ver and _ver(agent_ver) >= _ver("1.3.8"):
+                    asyncio.create_task(
+                        agent_manager.send_trap_config(agent_id, enabled=True, bind_port=1620)
+                    )
+
             elif msg.get("type") == "heartbeat":
                 agent.last_heartbeat = datetime.now(timezone.utc)
                 agent_manager.refresh_online(agent_id)
