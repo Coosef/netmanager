@@ -259,18 +259,39 @@ class AgentManager:
 
     async def _handle_device_status_report(self, agent_id: str, msg: dict):
         try:
-            from sqlalchemy import update, select
+            from sqlalchemy import update, select, and_
             from app.core.database import make_worker_session
             from app.models.device import Device, DeviceStatus
             from app.models.network_event import NetworkEvent
+            from app.models.maintenance_window import MaintenanceWindow
 
             results = msg.get("results", [])
             if not results:
                 return
 
             _redis = _get_sync_redis()
+            now_utc = datetime.now(timezone.utc)
 
             async with make_worker_session()() as db:
+                # Fetch active maintenance windows once for this batch
+                mw_rows = await db.execute(
+                    select(MaintenanceWindow).where(
+                        and_(
+                            MaintenanceWindow.start_time <= now_utc,
+                            MaintenanceWindow.end_time >= now_utc,
+                        )
+                    )
+                )
+                active_windows = mw_rows.scalars().all()
+
+                def _in_maintenance(device_id: int) -> bool:
+                    for w in active_windows:
+                        if w.applies_to_all:
+                            return True
+                        if w.device_ids and device_id in w.device_ids:
+                            return True
+                    return False
+
                 for r in results:
                     device_id = r.get("device_id")
                     reachable = r.get("reachable", False)
@@ -285,6 +306,11 @@ class AgentManager:
                     await db.execute(
                         update(Device).where(Device.id == device_id).values(**values)
                     )
+
+                    # Skip event creation if device is in an active maintenance window
+                    if _in_maintenance(device_id):
+                        log.debug(f"Device {device_id} in maintenance window — event suppressed")
+                        continue
 
                     # Determine event type
                     if is_flapping:
