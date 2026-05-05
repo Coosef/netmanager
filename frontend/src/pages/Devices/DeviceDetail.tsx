@@ -108,6 +108,8 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
   const [snmpVersion, setSnmpVersion] = useState<'v2c' | 'v3'>('v2c')
   const [snmpSkipSsh, setSnmpSkipSsh] = useState(false)
   const [ifaceView, setIfaceView] = useState<'visual' | 'table'>('visual')
+  const [ifaceRefreshKey, setIfaceRefreshKey] = useState(0)
+  const [vlanRefreshKey, setVlanRefreshKey] = useState(0)
   const queryClient = useQueryClient()
 
   // ── fetch-info ────────────────────────────────────────────────────────────
@@ -204,34 +206,36 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
   })
 
   // ── interfaces ────────────────────────────────────────────────────────────
-  const { data: ifaceData, isLoading: ifaceLoading, refetch: refetchIfaces } = useQuery({
-    queryKey: ['device-interfaces', currentDevice.id],
-    queryFn: () => devicesApi.getInterfaces(currentDevice.id),
+  const { data: ifaceData, isLoading: ifaceLoading, isFetching: ifaceFetching } = useQuery({
+    queryKey: ['device-interfaces', currentDevice.id, ifaceRefreshKey],
+    queryFn: () => devicesApi.getInterfaces(currentDevice.id, ifaceRefreshKey > 0),
     enabled: activeTab === 'interfaces',
+    staleTime: 5 * 60 * 1000,
   })
 
   const toggleIfaceMutation = useMutation({
     mutationFn: ({ name, action }: { name: string; action: 'shutdown' | 'no-shutdown' }) =>
       devicesApi.toggleInterface(currentDevice.id, name, action),
     onSuccess: (res) => {
-      if (res.success) { message.success('Port durumu değiştirildi'); refetchIfaces() }
+      if (res.success) { message.success('Port durumu değiştirildi'); setIfaceRefreshKey(k => k + 1) }
       else message.error(res.error || 'İşlem başarısız')
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
   })
 
   // ── vlans ─────────────────────────────────────────────────────────────────
-  const { data: vlanData, isLoading: vlanLoading, refetch: refetchVlans } = useQuery({
-    queryKey: ['device-vlans', currentDevice.id],
-    queryFn: () => devicesApi.getVlans(currentDevice.id),
+  const { data: vlanData, isLoading: vlanLoading, isFetching: vlanFetching } = useQuery({
+    queryKey: ['device-vlans', currentDevice.id, vlanRefreshKey],
+    queryFn: () => devicesApi.getVlans(currentDevice.id, vlanRefreshKey > 0),
     enabled: activeTab === 'vlans',
+    staleTime: 5 * 60 * 1000,
   })
 
   const createVlanMutation = useMutation({
     mutationFn: (vals: { vlan_id: number; name: string }) =>
       devicesApi.createVlan(currentDevice.id, vals.vlan_id, vals.name),
     onSuccess: (res) => {
-      if (res.success) { message.success('VLAN oluşturuldu'); setVlanModalOpen(false); vlanForm.resetFields(); refetchVlans() }
+      if (res.success) { message.success('VLAN oluşturuldu'); setVlanModalOpen(false); vlanForm.resetFields(); setVlanRefreshKey(k => k + 1) }
       else message.error(res.error || 'VLAN oluşturulamadı')
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
@@ -240,7 +244,7 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
   const deleteVlanMutation = useMutation({
     mutationFn: (vlan_id: number) => devicesApi.deleteVlan(currentDevice.id, vlan_id),
     onSuccess: (res) => {
-      if (res.success) { message.success('VLAN silindi'); refetchVlans() }
+      if (res.success) { message.success('VLAN silindi'); setVlanRefreshKey(k => k + 1) }
       else message.error(res.error || 'VLAN silinemedi')
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
@@ -250,7 +254,7 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
     mutationFn: (vals: { vlan_id: number; mode: 'access' | 'trunk' }) =>
       devicesApi.assignVlan(currentDevice.id, assignVlanModal!.iface.name, vals.vlan_id, vals.mode),
     onSuccess: (res) => {
-      if (res.success) { message.success('VLAN atandı'); setAssignVlanModal(null); assignForm.resetFields(); refetchIfaces() }
+      if (res.success) { message.success('VLAN atandı'); setAssignVlanModal(null); assignForm.resetFields(); setIfaceRefreshKey(k => k + 1) }
       else message.error(res.error || 'VLAN atanamadı')
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
@@ -561,8 +565,18 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
 
         {/* ── Portlar ──────────────────────────────────────────────────────── */}
         <Tabs.TabPane tab="Portlar" key="interfaces">
-          <Space style={{ marginBottom: 12 }}>
-            <Button icon={<ReloadOutlined />} onClick={() => refetchIfaces()}>Yenile</Button>
+          <Space style={{ marginBottom: 12 }} wrap>
+            <Button
+              icon={<ReloadOutlined spin={ifaceFetching} />}
+              loading={ifaceFetching}
+              onClick={() => setIfaceRefreshKey(k => k + 1)}
+            >Yenile</Button>
+            {ifaceData?.fetched_at && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Son güncelleme: {Math.round((Date.now() / 1000 - ifaceData.fetched_at) / 60)} dk önce
+                {ifaceData.cached && <Tag color="blue" style={{ marginLeft: 6, fontSize: 11 }}>Önbellekten</Tag>}
+              </Typography.Text>
+            )}
             <Button
               type={ifaceView === 'visual' ? 'primary' : 'default'}
               size="small"
@@ -599,9 +613,19 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
 
         {/* ── VLAN ─────────────────────────────────────────────────────────── */}
         <Tabs.TabPane tab="VLAN" key="vlans">
-          <Space style={{ marginBottom: 8 }}>
-            <Button icon={<ReloadOutlined />} onClick={() => refetchVlans()}>Yenile</Button>
+          <Space style={{ marginBottom: 8 }} wrap>
+            <Button
+              icon={<ReloadOutlined spin={vlanFetching} />}
+              loading={vlanFetching}
+              onClick={() => setVlanRefreshKey(k => k + 1)}
+            >Yenile</Button>
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setVlanModalOpen(true)}>VLAN Ekle</Button>
+            {vlanData?.fetched_at && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                Son güncelleme: {Math.round((Date.now() / 1000 - vlanData.fetched_at) / 60)} dk önce
+                {vlanData.cached && <Tag color="blue" style={{ marginLeft: 6, fontSize: 11 }}>Önbellekten</Tag>}
+              </Typography.Text>
+            )}
           </Space>
           {vlanLoading ? <Spin /> : !vlanData?.success ? (
             <Typography.Text type="danger">{vlanData?.error || 'VLAN listesi alınamadı'}</Typography.Text>

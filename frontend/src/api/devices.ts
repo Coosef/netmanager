@@ -48,9 +48,9 @@ export const devicesApi = {
   fetchInfo: (id: number) =>
     client.post<Device>(`/devices/${id}/fetch-info`).then((r) => r.data),
 
-  getInterfaces: (id: number) =>
-    client.get<{ success: boolean; interfaces: NetworkInterface[]; error?: string; raw?: string }>(
-      `/devices/${id}/interfaces`
+  getInterfaces: (id: number, force = false) =>
+    client.get<{ success: boolean; interfaces: NetworkInterface[]; error?: string; raw?: string; fetched_at?: number; cached?: boolean }>(
+      `/devices/${id}/interfaces`, { params: force ? { force: true } : undefined }
     ).then((r) => r.data),
 
   toggleInterface: (id: number, ifaceName: string, action: 'shutdown' | 'no-shutdown') =>
@@ -59,9 +59,9 @@ export const devicesApi = {
       { action }
     ).then((r) => r.data),
 
-  getVlans: (id: number) =>
-    client.get<{ success: boolean; vlans: Vlan[]; error?: string; raw?: string }>(
-      `/devices/${id}/vlans`
+  getVlans: (id: number, force = false) =>
+    client.get<{ success: boolean; vlans: Vlan[]; error?: string; raw?: string; fetched_at?: number; cached?: boolean }>(
+      `/devices/${id}/vlans`, { params: force ? { force: true } : undefined }
     ).then((r) => r.data),
 
   createVlan: (id: number, vlan_id: number, name: string) =>

@@ -1,8 +1,11 @@
+import json
 import re
-from fastapi import APIRouter, Depends, HTTPException, Request
+import time
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.models.device import Device
@@ -10,6 +13,29 @@ from app.services.audit_service import log_action
 from app.services.ssh_manager import ssh_manager
 
 router = APIRouter()
+
+_IFACE_CACHE_TTL = 300   # 5 minutes
+_VLAN_CACHE_TTL  = 300
+
+
+def _get_redis():
+    import redis as _r
+    return _r.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=2)
+
+
+def _cache_get(key: str):
+    try:
+        raw = _get_redis().get(key)
+        return json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+def _cache_set(key: str, value: dict, ttl: int):
+    try:
+        _get_redis().setex(key, ttl, json.dumps(value))
+    except Exception:
+        pass
 
 
 def _iface_cmd(os_type: str) -> str:
@@ -275,6 +301,7 @@ def _parse_vlans(output: str, os_type: str) -> list[dict]:
 @router.get("/{device_id}/interfaces")
 async def get_interfaces(
     device_id: int,
+    force: bool = Query(False, description="Bypass cache and fetch live from device"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
@@ -285,15 +312,25 @@ async def get_interfaces(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    cache_key = f"cache:device:{device_id}:interfaces"
+    if not force:
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
     result = await ssh_manager.execute_command(device, _iface_cmd(device.os_type))
     if not result.success:
         return {"success": False, "interfaces": [], "error": result.error}
 
-    return {
+    response = {
         "success": True,
         "interfaces": _parse_interfaces(result.output, device.os_type),
         "raw": result.output,
+        "fetched_at": time.time(),
+        "cached": False,
     }
+    _cache_set(cache_key, {**response, "cached": True}, _IFACE_CACHE_TTL)
+    return response
 
 
 @router.post("/{device_id}/interfaces/{interface_name:path}/toggle")
@@ -337,6 +374,7 @@ async def toggle_interface(
 @router.get("/{device_id}/vlans")
 async def get_vlans(
     device_id: int,
+    force: bool = Query(False, description="Bypass cache and fetch live from device"),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
@@ -347,15 +385,25 @@ async def get_vlans(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
+    cache_key = f"cache:device:{device_id}:vlans"
+    if not force:
+        cached = _cache_get(cache_key)
+        if cached:
+            return cached
+
     result = await ssh_manager.execute_command(device, _vlan_cmd(device.os_type))
     if not result.success:
         return {"success": False, "vlans": [], "error": result.error}
 
-    return {
+    response = {
         "success": True,
         "vlans": _parse_vlans(result.output, device.os_type),
         "raw": result.output,
+        "fetched_at": time.time(),
+        "cached": False,
     }
+    _cache_set(cache_key, {**response, "cached": True}, _VLAN_CACHE_TTL)
+    return response
 
 
 @router.post("/{device_id}/vlans")
