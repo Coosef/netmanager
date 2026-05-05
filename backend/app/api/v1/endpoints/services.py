@@ -42,7 +42,7 @@ def _svc_out(s: Service) -> dict:
 @router.get("/fleet/impact-summary")
 async def fleet_impact_summary(
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """Tüm aktif servisler için etki özeti — Dashboard widget için."""
     services = (await db.execute(
@@ -108,7 +108,7 @@ async def fleet_impact_summary(
 @router.get("")
 async def list_services(
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     rows = (await db.execute(select(Service).order_by(Service.name))).scalars().all()
     return {"total": len(rows), "items": [_svc_out(s) for s in rows]}
@@ -118,7 +118,7 @@ async def list_services(
 async def create_service(
     body: dict,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     if not body.get("name"):
         raise HTTPException(400, "name is required")
@@ -147,7 +147,7 @@ async def create_service(
 async def get_service(
     service_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
@@ -160,7 +160,7 @@ async def update_service(
     service_id: int,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
@@ -178,7 +178,7 @@ async def update_service(
 async def delete_service(
     service_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
@@ -194,7 +194,7 @@ async def delete_service(
 async def service_impact(
     service_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """
     Hangi cihazlar offline → bu servis etkileniyor mu?

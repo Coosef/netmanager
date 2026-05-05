@@ -139,7 +139,7 @@ async def _calc_risk(db: AsyncSession, device: Device, now: datetime) -> dict:
 async def device_risk_score(
     device_id: int,
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """0-100 risk puanı ve breakdown — tek cihaz."""
     device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
@@ -152,7 +152,7 @@ async def device_risk_score(
 async def fleet_risk(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
     location_filter: LocationNameFilter = None,
 ):
     """Tüm aktif cihazların risk skorları — en riskli N cihaz ve özet."""
@@ -188,7 +188,7 @@ async def device_mttr_mtbf(
     device_id: int,
     window_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """
     MTTR (Ort. Kurtarma Süresi): her offline→online çiftinin süresi ortalaması.
@@ -262,7 +262,7 @@ async def device_timeline(
     device_id: int,
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """
     Network event + config backup + audit log kayıtlarını tek zaman çizelgesinde birleştirir.
@@ -362,7 +362,7 @@ async def root_cause_incidents(
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """
     Son N saatteki correlation_incident olaylarını döndürür.
@@ -418,7 +418,7 @@ async def get_anomalies(
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _: dict = Depends(CurrentUser),
+    _: CurrentUser,
 ):
     """
     Son N saatteki davranış anomalisi olaylarını döndürür.
