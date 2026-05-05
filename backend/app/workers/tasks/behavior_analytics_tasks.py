@@ -100,9 +100,22 @@ def _is_dup(device_id: int, event_type: str, key: str, ttl: int = 3600) -> bool:
 
 async def _fire(db, device, event_type: str, severity: str, title: str,
                 message: str = "", details: dict = None, dedup_key: str = ""):
+    from sqlalchemy import select as _select
     from app.models.network_event import NetworkEvent
 
     if dedup_key and _is_dup(device.id, event_type, dedup_key):
+        # Even when deduped, refresh details so port lists stay current
+        if details:
+            existing = (await db.execute(
+                _select(NetworkEvent)
+                .where(NetworkEvent.device_id == device.id)
+                .where(NetworkEvent.event_type == event_type)
+                .where(NetworkEvent.acknowledged == False)
+                .order_by(NetworkEvent.created_at.desc())
+                .limit(1)
+            )).scalar_one_or_none()
+            if existing:
+                existing.details = details
         return
     evt = NetworkEvent(
         device_id=device.id,
