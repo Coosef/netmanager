@@ -1107,10 +1107,10 @@ async def agent_websocket(
     except Exception:
         pass
 
-    # Server-side keepalive: send ping to agent every 20s to prevent proxy idle timeouts
+    # Server-side keepalive: every 8s to stay well under Nginx proxy_read_timeout (60s default)
     async def _server_keepalive():
         while True:
-            await asyncio.sleep(20)
+            await asyncio.sleep(8)
             try:
                 await websocket.send_text(json.dumps({"type": "ping"}))
             except Exception:
