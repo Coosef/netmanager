@@ -490,8 +490,19 @@ async def download_installer(
 
 
 @router.get("/download/script")
-async def download_agent_script():
-    """Return the raw agent Python script (requires authentication)."""
+async def download_agent_script(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the raw agent Python script. Validates X-Agent-Key header if provided."""
+    agent_id = request.headers.get("X-Agent-ID")
+    agent_key = request.headers.get("X-Agent-Key")
+
+    if agent_id and agent_key:
+        agent = await db.get(Agent, agent_id)
+        if not agent or not verify_password(agent_key, agent.agent_key_hash):
+            raise HTTPException(status_code=403, detail="Geçersiz agent kimlik bilgileri")
+
     import os
     script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "agent_script", "netmanager_agent.py")
     script_path = os.path.normpath(script_path)

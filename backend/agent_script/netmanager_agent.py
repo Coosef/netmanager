@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.2"
+VERSION = "1.3.3"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -988,8 +988,18 @@ async def handle_message(ws, msg, loop):
             script_file = os.path.abspath(__file__)
             tmp_file = script_file + ".new"
 
-            # Download new script
-            urllib.request.urlretrieve(dl_url, tmp_file)
+            # Download new script with agent credentials
+            _req = urllib.request.Request(
+                dl_url,
+                headers={
+                    "User-Agent": "NetManager-Agent/{}".format(VERSION),
+                    "X-Agent-ID": AGENT_ID,
+                    "X-Agent-Key": os.environ.get("NETMANAGER_AGENT_KEY", AGENT_KEY),
+                },
+            )
+            with urllib.request.urlopen(_req, timeout=30) as _resp:
+                with open(tmp_file, "wb") as _f:
+                    _f.write(_resp.read())
 
             # Validate syntax before replacing
             with open(tmp_file, encoding="utf-8") as _f:
@@ -1042,7 +1052,8 @@ async def run():
             log.info("Baglaniliyor: {}/api/v1/agents/ws/{}".format(ws_base, AGENT_ID))
             async with websockets.connect(
                 ws_url,
-                ping_interval=None,
+                ping_interval=20,
+                ping_timeout=10,
                 open_timeout=30,
                 close_timeout=10,
                 max_size=10 * 1024 * 1024,
