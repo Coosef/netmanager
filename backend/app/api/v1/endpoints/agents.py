@@ -125,6 +125,43 @@ async def get_agent_live_metrics(
     return {"online": True, **live}
 
 
+@router.post("/{agent_id}/ping", response_model=dict)
+async def ping_agent(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    """Real-time WebSocket connection check. Returns online status + heartbeat age."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    online = agent_manager.is_online(agent_id)
+    live = agent_manager.get_live_metrics(agent_id) if online else None
+
+    heartbeat_age_secs: float | None = None
+    if live and live.get("last_heartbeat"):
+        try:
+            from datetime import datetime, timezone
+            hb = datetime.fromisoformat(live["last_heartbeat"])
+            heartbeat_age_secs = round((datetime.now(timezone.utc) - hb).total_seconds(), 1)
+        except Exception:
+            pass
+
+    return {
+        "online": online,
+        "agent_id": agent_id,
+        "name": agent.name,
+        "heartbeat_age_secs": heartbeat_age_secs,
+        "last_heartbeat": live.get("last_heartbeat") if live else None,
+        "version": (live.get("metrics") or {}).get("version") if live else None,
+        "cpu_pct": (live.get("metrics") or {}).get("cpu_percent") if live else None,
+        "ram_pct": (live.get("metrics") or {}).get("memory_percent") if live else None,
+        "checked_at": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+    }
+
+
 @router.post("/{agent_id}/restart", response_model=dict)
 async def restart_agent(
     agent_id: str,

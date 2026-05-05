@@ -124,6 +124,14 @@ export const agentsApi = {
   restart: (id: string) =>
     client.post<{ status: string; agent_id: string }>(`/agents/${id}/restart`).then((r) => r.data),
 
+  ping: (id: string) =>
+    client.post<{
+      online: boolean; agent_id: string; name: string;
+      heartbeat_age_secs: number | null; last_heartbeat: string | null;
+      version: string | null; cpu_pct: number | null; ram_pct: number | null;
+      checked_at: string;
+    }>(`/agents/${id}/ping`).then((r) => r.data),
+
   getLatencyMap: () =>
     client.get<AgentLatencyEntry[]>('/agents/latency-map').then((r) => r.data),
 

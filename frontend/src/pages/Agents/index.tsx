@@ -13,7 +13,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, DashboardOutlined, ApiOutlined,
   SafetyOutlined, HistoryOutlined, KeyOutlined, LockOutlined, UnlockOutlined,
   WarningOutlined, PlusCircleOutlined, SearchOutlined, WifiOutlined,
-  DatabaseOutlined, SafetyCertificateOutlined,
+  DatabaseOutlined, SafetyCertificateOutlined, AimOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -1613,6 +1613,22 @@ export default function AgentsPage() {
   const [createdAgent, setCreatedAgent] = useState<(Agent & { agent_key: string }) | null>(null)
   const [detailAgent, setDetailAgent] = useState<Agent | null>(null)
   const [form] = Form.useForm()
+  const [pingResults, setPingResults] = useState<Record<string, { online: boolean; age: number | null; cpu: number | null; ram: number | null } | 'loading'>>({})
+
+  const pingMutation = useMutation({
+    mutationFn: (agentId: string) => agentsApi.ping(agentId),
+    onMutate: (agentId) => setPingResults(prev => ({ ...prev, [agentId]: 'loading' })),
+    onSuccess: (data) => {
+      setPingResults(prev => ({
+        ...prev,
+        [data.agent_id]: { online: data.online, age: data.heartbeat_age_secs, cpu: data.cpu_pct, ram: data.ram_pct },
+      }))
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+    onError: (_e, agentId) => {
+      setPingResults(prev => ({ ...prev, [agentId]: { online: false, age: null, cpu: null, ram: null } }))
+    },
+  })
 
   const { data: agents = [], isLoading } = useQuery({
     queryKey: ['agents'],
@@ -1756,8 +1772,49 @@ export default function AgentsPage() {
         : <span style={{ color: C.dim }}>—</span>,
     },
     {
+      title: 'Ping',
+      width: 140,
+      render: (_: unknown, r: Agent) => {
+        const pr = pingResults[r.id]
+        const isLoading = pr === 'loading'
+        const result = typeof pr === 'object' ? pr : null
+        return (
+          <Space size={6} style={{ flexWrap: 'nowrap' }}>
+            <Tooltip title="Bağlantı durumunu kontrol et">
+              <Button
+                size="small"
+                icon={<AimOutlined />}
+                loading={isLoading}
+                onClick={() => pingMutation.mutate(r.id)}
+                style={{
+                  fontSize: 11, borderRadius: 6,
+                  borderColor: '#3b82f650', color: '#3b82f6', background: '#3b82f610',
+                }}
+              >
+                Ping
+              </Button>
+            </Tooltip>
+            {result && (
+              <Tooltip title={
+                result.online
+                  ? `Son heartbeat: ${result.age != null ? result.age + 's önce' : '—'}${result.cpu != null ? ` · CPU: ${result.cpu}%` : ''}${result.ram != null ? ` · RAM: ${result.ram}%` : ''}`
+                  : 'Agent bağlantısı yok'
+              }>
+                <span style={{
+                  fontSize: 11, fontWeight: 700,
+                  color: result.online ? '#22c55e' : '#ef4444',
+                }}>
+                  {result.online ? '✓ UP' : '✗ DOWN'}
+                </span>
+              </Tooltip>
+            )}
+          </Space>
+        )
+      },
+    },
+    {
       title: '',
-      width: 80,
+      width: 70,
       render: (_: unknown, r: Agent) => (
         <Space size={4}>
           <Tooltip title="Detay & Güvenlik">
