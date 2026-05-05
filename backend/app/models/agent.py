@@ -17,6 +17,7 @@ class Agent(Base):
     status: Mapped[str] = mapped_column(String(16), default="offline")
     last_heartbeat: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_ip: Mapped[Optional[str]] = mapped_column(String(64))
+    local_ip: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     platform: Mapped[Optional[str]] = mapped_column(String(32))
     machine_hostname: Mapped[Optional[str]] = mapped_column(String(255))
     version: Mapped[Optional[str]] = mapped_column(String(32))

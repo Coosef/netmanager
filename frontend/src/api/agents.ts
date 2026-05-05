@@ -6,6 +6,7 @@ export interface Agent {
   status: 'online' | 'offline'
   last_heartbeat: string | null
   last_ip: string | null
+  local_ip: string | null
   platform: string | null
   machine_hostname: string | null
   version: string | null

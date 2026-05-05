@@ -1758,11 +1758,25 @@ export default function AgentsPage() {
         : <span style={{ color: C.dim }}>—</span>,
     },
     {
-      title: t('agents.col_ip'),
-      dataIndex: 'last_ip',
-      render: (v: string) => v
-        ? <code style={{ fontSize: 11, color: '#06b6d4' }}>{v}</code>
-        : <span style={{ color: C.dim }}>—</span>,
+      title: 'IP',
+      render: (_: unknown, r: Agent) => (
+        <div style={{ lineHeight: 1.5 }}>
+          {r.last_ip ? (
+            <Tooltip title="WAN IP (sunucunun gördüğü)">
+              <code style={{ fontSize: 11, color: '#06b6d4', display: 'block' }}>
+                🌐 {r.last_ip}
+              </code>
+            </Tooltip>
+          ) : <span style={{ color: C.dim }}>—</span>}
+          {r.local_ip && r.local_ip !== r.last_ip && (
+            <Tooltip title="LAN IP (agent'ın yerel arayüzü)">
+              <code style={{ fontSize: 11, color: '#a78bfa', display: 'block' }}>
+                🔒 {r.local_ip}
+              </code>
+            </Tooltip>
+          )}
+        </div>
+      ),
     },
     {
       title: t('agents.col_heartbeat'),

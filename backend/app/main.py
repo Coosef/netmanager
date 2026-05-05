@@ -242,6 +242,9 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE agents ADD COLUMN IF NOT EXISTS total_connections INTEGER NOT NULL DEFAULT 0"
         ))
+        await conn.execute(text(
+            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS local_ip VARCHAR(64)"
+        ))
 
         # Driver template health tracking fields
         await conn.execute(text(

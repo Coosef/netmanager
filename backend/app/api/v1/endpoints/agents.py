@@ -45,6 +45,7 @@ def _agent_to_dict(agent: Agent, online_ids: set) -> dict:
         "status": "online" if agent.id in online_ids else "offline",
         "last_heartbeat": agent.last_heartbeat,
         "last_ip": agent.last_ip,
+        "local_ip": agent.local_ip,
         "platform": agent.platform,
         "machine_hostname": agent.machine_hostname,
         "version": agent.version,
@@ -1081,6 +1082,8 @@ async def agent_websocket(
                 agent.platform = msg.get("platform")
                 agent.machine_hostname = msg.get("hostname")
                 agent.version = msg.get("version")
+                if msg.get("local_ip"):
+                    agent.local_ip = msg.get("local_ip")
                 try:
                     await db.commit()
                 except Exception:

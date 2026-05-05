@@ -251,6 +251,21 @@ async def _maybe_send_anomaly(ws, anomaly_type: str, title: str,
         log.debug("[edge] Anomaly send failed: {}".format(e))
 
 
+def _get_local_ip() -> str:
+    """Return the primary local IP used for outbound connections."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return ""
+
+
 def _get_metrics():
     with _pool_lock:
         pool_size = len(_ssh_pool)
@@ -1004,6 +1019,7 @@ async def run():
                     "version":       VERSION,
                     "platform":      platform.system().lower(),
                     "hostname":      platform.node(),
+                    "local_ip":      _get_local_ip(),
                     "python_version": platform.python_version(),
                     "has_psutil":    _HAS_PSUTIL,
                     "has_snmp":      _HAS_SNMP,
