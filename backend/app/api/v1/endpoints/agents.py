@@ -176,7 +176,7 @@ async def _send_update_command(agent_id: str) -> bool:
         await ws.send_text(json.dumps({
             "type": "update_available",
             "current_version": CURRENT_AGENT_VERSION,
-            "script_path": "/api/v1/agents/script",
+            "script_path": "/api/v1/agents/download/script",
         }))
         return True
     except Exception:
@@ -1144,7 +1144,7 @@ async def agent_websocket(
                 try:
                     await db.commit()
                 except Exception:
-                    pass
+                    await db.rollback()
 
                 # Auto-update: notify agent if its version is outdated
                 agent_ver = msg.get("version") or ""
@@ -1158,7 +1158,7 @@ async def agent_websocket(
                             websocket.send_text(json.dumps({
                                 "type": "update_available",
                                 "current_version": CURRENT_AGENT_VERSION,
-                                "script_path": "/api/v1/agents/script",
+                                "script_path": "/api/v1/agents/download/script",
                             })),
                             timeout=5,
                         )
@@ -1177,7 +1177,7 @@ async def agent_websocket(
                 try:
                     await db.commit()
                 except Exception:
-                    pass
+                    await db.rollback()
 
             await agent_manager.handle_message(agent_id, raw)
 
