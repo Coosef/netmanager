@@ -509,6 +509,8 @@
     "feat_devices_desc": "SSH ile bağlantı, port durumları, toplu credential güncelleme ve konfigürasyon yönetimi.",
     "feat_topology_title": "Ağ Topolojisi",
     "feat_topology_desc": "LLDP ile otomatik ağ haritası, katman filtresi, ghost switch keşfi ve blast radius analizi.",
+    "feat_twin_title": "Network Digital Twin & Drift Analizi",
+    "feat_twin_desc": "Ağının fotoğrafını (baseline/anlık görüntü) çeker ve her değişikliği otomatik karşılaştırır. 'Yeni Bağlantı' yetkilendirilmemiş kablo veya cihaz anlamına gelir; 'Kayıp Bağlantı' kopuk veya sökülen bağlantıdır. Değişiklikler planlıysa 'Yeni Baseline Al' butonu ile mevcut durumu onaylarsın. Topoloji → Digital Twin menüsünden erişilir.",
     "feat_monitor_title": "Uyarı Merkezi",
     "feat_monitor_desc": "Cihaz çevrimdışı, CPU/bellek eşik aşımı ve diğer kritik olaylar için gerçek zamanlı uyarılar.",
     "feat_backups_title": "Yedekleme Merkezi",

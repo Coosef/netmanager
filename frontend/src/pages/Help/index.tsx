@@ -48,6 +48,7 @@ const FEATURES = [
   { icon: <DashboardOutlined />,  color: '#3b82f6', titleKey: 'feat_dashboard_title',  descKey: 'feat_dashboard_desc' },
   { icon: <LaptopOutlined />,     color: '#8b5cf6', titleKey: 'feat_devices_title',    descKey: 'feat_devices_desc' },
   { icon: <ApartmentOutlined />,  color: '#06b6d4', titleKey: 'feat_topology_title',   descKey: 'feat_topology_desc' },
+  { icon: <RadarChartOutlined />, color: '#8b5cf6', titleKey: 'feat_twin_title',        descKey: 'feat_twin_desc' },
   { icon: <AlertOutlined />,      color: '#ef4444', titleKey: 'feat_monitor_title',    descKey: 'feat_monitor_desc' },
   { icon: <CloudOutlined />,      color: '#10b981', titleKey: 'feat_backups_title',    descKey: 'feat_backups_desc' },
   { icon: <ClusterOutlined />,    color: '#f59e0b', titleKey: 'feat_ipam_title',       descKey: 'feat_ipam_desc' },

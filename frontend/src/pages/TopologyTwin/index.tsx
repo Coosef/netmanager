@@ -1,12 +1,12 @@
 import { useState } from 'react'
 import {
   Button, Table, Tag, Modal, Input, Space, Badge,
-  Descriptions, Empty, Popconfirm, Tabs, Alert, Drawer, Spin,
+  Descriptions, Empty, Popconfirm, Tabs, Alert, Drawer, Spin, Tooltip,
 } from 'antd'
 import {
   PlusOutlined, DeleteOutlined, StarOutlined, StarFilled,
   CheckCircleOutlined, WarningOutlined, ApartmentOutlined,
-  ArrowUpOutlined, ArrowDownOutlined, EyeOutlined,
+  ArrowUpOutlined, ArrowDownOutlined, EyeOutlined, CheckOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { topologyTwinApi, type TopologySnapshotMeta, type SnapshotLink } from '@/api/topologyTwin'
@@ -28,13 +28,18 @@ function mkC(isDark: boolean) {
 }
 
 const LINK_COLS = (label: string, color: string) => [
-  { title: 'Cihaz ID', dataIndex: 'device_id', width: 80, render: (v: number | null) => v ?? '—' },
+  {
+    title: 'Cihaz', dataIndex: 'device_hostname', width: 160,
+    render: (v: string | null, r: SnapshotLink) => (
+      <Tag color="geekblue">{v ?? `ID:${r.device_id ?? '—'}`}</Tag>
+    ),
+  },
   { title: 'Port', dataIndex: 'local_port', render: (v: string) => <code style={{ fontSize: 11 }}>{v}</code> },
-  { title: 'Komşu', dataIndex: 'neighbor_hostname' },
+  { title: 'Komşu', dataIndex: 'neighbor_hostname', render: (v: string) => <Tag color="default">{v}</Tag> },
   { title: 'Komşu Port', dataIndex: 'neighbor_port', render: (v: string) => <code style={{ fontSize: 11 }}>{v}</code> },
   { title: 'Protokol', dataIndex: 'protocol', width: 80, render: (v: string) => <Tag>{v.toUpperCase()}</Tag> },
   {
-    title: 'Durum', width: 100,
+    title: 'Durum', width: 80,
     render: () => <Tag color={color === '#22c55e' ? 'success' : color === '#ef4444' ? 'error' : 'default'}>{label}</Tag>,
   },
 ]
@@ -44,7 +49,9 @@ export default function TopologyTwinPage() {
   const C = mkC(isDark)
   const qc = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
+  const [acceptOpen, setAcceptOpen] = useState(false)
   const [snapName, setSnapName] = useState('')
+  const [acceptName, setAcceptName] = useState('')
   const [detailId, setDetailId] = useState<number | null>(null)
 
   const { data: snapDetail, isLoading: detailLoading } = useQuery({
@@ -83,6 +90,16 @@ export default function TopologyTwinPage() {
   const deleteMut = useMutation({
     mutationFn: (id: number) => topologyTwinApi.deleteSnapshot(id),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['topology-snapshots'] }) },
+  })
+  const acceptMut = useMutation({
+    mutationFn: (name: string) => topologyTwinApi.acceptCurrentAsGolden(name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['topology-snapshots'] })
+      qc.invalidateQueries({ queryKey: ['topology-diff'] })
+      setAcceptOpen(false)
+      setAcceptName('')
+      message.success('Mevcut durum yeni altın baseline olarak kaydedildi')
+    },
   })
 
   const columns = [
@@ -217,6 +234,22 @@ export default function TopologyTwinPage() {
                         type="warning"
                         showIcon
                         message={`Topoloji drift tespit edildi — baseline: "${diff.golden?.name}"`}
+                        description="Yeni bağlantılar veya kayıp bağlantılar var. Değişiklikler planlanmışsa mevcut durumu yeni baseline olarak kaydedebilirsiniz."
+                        action={
+                          <Tooltip title="Mevcut topolojiyi yeni altın baseline olarak kaydet">
+                            <Button
+                              size="small"
+                              type="primary"
+                              icon={<CheckOutlined />}
+                              onClick={() => {
+                                setAcceptName(`Baseline ${new Date().toLocaleDateString('tr-TR')}`)
+                                setAcceptOpen(true)
+                              }}
+                            >
+                              Yeni Baseline Al
+                            </Button>
+                          </Tooltip>
+                        }
                         style={{ marginBottom: 16 }}
                       />
                     )}
@@ -367,6 +400,29 @@ export default function TopologyTwinPage() {
           value={snapName}
           onChange={e => setSnapName(e.target.value)}
           onPressEnter={() => { if (snapName.trim()) createMut.mutate(snapName.trim()) }}
+          autoFocus
+        />
+      </Modal>
+
+      {/* Accept Current as Golden Modal */}
+      <Modal
+        title="Mevcut Durumu Yeni Baseline Yap"
+        open={acceptOpen}
+        onCancel={() => { setAcceptOpen(false); setAcceptName('') }}
+        onOk={() => { if (acceptName.trim()) acceptMut.mutate(acceptName.trim()) }}
+        confirmLoading={acceptMut.isPending}
+        okText="Onayla ve Kaydet"
+        okButtonProps={{ icon: <CheckOutlined /> }}
+        cancelText="İptal"
+      >
+        <p style={{ marginBottom: 12, color: '#64748b', fontSize: 13 }}>
+          Mevcut topoloji yeni altın baseline olarak kaydedilecek. Eski baseline silinmeyecek, sadece aktif baseline değişecek.
+        </p>
+        <Input
+          placeholder="Baseline adı"
+          value={acceptName}
+          onChange={e => setAcceptName(e.target.value)}
+          onPressEnter={() => { if (acceptName.trim()) acceptMut.mutate(acceptName.trim()) }}
           autoFocus
         />
       </Modal>

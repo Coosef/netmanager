@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.models.device import Device
 from app.models.topology import TopologyLink
 from app.models.topology_snapshot import TopologySnapshot
 
@@ -40,10 +41,15 @@ def _snap_out(s: TopologySnapshot) -> dict:
 
 
 async def _current_links(db: AsyncSession) -> list[dict]:
-    rows = (await db.execute(select(TopologyLink))).scalars().all()
+    from sqlalchemy.orm import joinedload
+    rows = (await db.execute(
+        select(TopologyLink, Device.hostname)
+        .join(Device, Device.id == TopologyLink.device_id)
+    )).all()
     return [
         {
             "device_id": r.device_id,
+            "device_hostname": hostname,
             "local_port": r.local_port,
             "neighbor_hostname": r.neighbor_hostname,
             "neighbor_port": r.neighbor_port,
@@ -52,7 +58,7 @@ async def _current_links(db: AsyncSession) -> list[dict]:
             "protocol": r.protocol,
             "last_seen": r.last_seen.isoformat() if r.last_seen else None,
         }
-        for r in rows
+        for r, hostname in rows
     ]
 
 
@@ -147,6 +153,35 @@ async def set_golden(
 
     snap.is_golden = True
     await db.commit()
+    return _snap_out(snap)
+
+
+@router.post("/snapshots/accept-current", status_code=201)
+async def accept_current_as_golden(
+    body: SnapshotCreate,
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    """Mevcut topolojiyi yeni anlık görüntü olarak kaydedip golden baseline yapar."""
+    # Clear old golden
+    prev = (await db.execute(
+        select(TopologySnapshot).where(TopologySnapshot.is_golden == True)
+    )).scalars().all()
+    for p in prev:
+        p.is_golden = False
+
+    links = await _current_links(db)
+    device_ids = {lnk["device_id"] for lnk in links}
+    snap = TopologySnapshot(
+        name=body.name,
+        is_golden=True,
+        device_count=len(device_ids),
+        link_count=len(links),
+        links=links,
+    )
+    db.add(snap)
+    await db.commit()
+    await db.refresh(snap)
     return _snap_out(snap)
 
 

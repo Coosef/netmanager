@@ -308,6 +308,8 @@
     "feat_devices_desc": "SSH-Verbindung, Port-Status, Massen-Credential-Updates und Konfigurationsverwaltung.",
     "feat_topology_title": "Netzwerktopologie",
     "feat_topology_desc": "Automatische Netzwerkkarte via LLDP, Schichtfilter, Ghost-Switch-Erkennung und Blast-Radius-Analyse.",
+    "feat_twin_title": "Network Digital Twin & Drift-Analyse",
+    "feat_twin_desc": "Erstellt einen Snapshot (Baseline) der Netzwerktopologie und vergleicht automatisch jede Änderung. 'Neue Verbindung' bedeutet ein unbekanntes Kabel oder Gerät; 'Verlorene Verbindung' ist eine getrennte Verbindung. Geplante Änderungen können mit 'Neue Baseline' bestätigt werden.",
     "feat_monitor_title": "Warnzentrale",
     "feat_monitor_desc": "Echtzeit-Warnungen bei Gerätausfall, CPU/Speicher-Schwellwertüberschreitungen und kritischen Ereignissen.",
     "feat_backups_title": "Backup-Center",

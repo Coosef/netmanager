@@ -314,6 +314,8 @@
     "feat_devices_desc": "SSH connectivity, port status, bulk credential updates and configuration management.",
     "feat_topology_title": "Network Topology",
     "feat_topology_desc": "Automatic network map via LLDP, layer filtering, ghost switch discovery and blast radius analysis.",
+    "feat_twin_title": "Network Digital Twin & Drift Analysis",
+    "feat_twin_desc": "Takes a snapshot (baseline) of your network topology and automatically compares every change. 'New Connection' means an unauthorized cable or device; 'Lost Connection' means a disconnected link. If changes were planned, click 'New Baseline' to accept the current state. Access via Topology → Digital Twin.",
     "feat_monitor_title": "Alert Center",
     "feat_monitor_desc": "Real-time alerts for device offline, CPU/memory threshold breaches and other critical events.",
     "feat_backups_title": "Backup Center",

@@ -11,6 +11,7 @@ export interface TopologySnapshotMeta {
 
 export interface SnapshotLink {
   device_id: number | null
+  device_hostname: string | null
   local_port: string
   neighbor_hostname: string
   neighbor_port: string
@@ -51,6 +52,9 @@ export const topologyTwinApi = {
 
   setGolden: (id: number) =>
     client.post<TopologySnapshotMeta>(`/topology-twin/snapshots/${id}/set-golden`).then(r => r.data),
+
+  acceptCurrentAsGolden: (name: string) =>
+    client.post<TopologySnapshotMeta>('/topology-twin/snapshots/accept-current', { name }).then(r => r.data),
 
   getDiff: () =>
     client.get<TopologyDiff>('/topology-twin/diff').then(r => r.data),
