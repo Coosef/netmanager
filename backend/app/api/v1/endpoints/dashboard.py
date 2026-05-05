@@ -400,8 +400,8 @@ async def dashboard_sparklines(
             func.count().label("cnt"),
         )
         .where(NetworkEvent.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))
-        .group_by(func.date_trunc("hour", NetworkEvent.created_at))
-        .order_by(func.date_trunc("hour", NetworkEvent.created_at))
+        .group_by(text("1"))
+        .order_by(text("1"))
     )).mappings().all()
 
     now = datetime.now(timezone.utc)
