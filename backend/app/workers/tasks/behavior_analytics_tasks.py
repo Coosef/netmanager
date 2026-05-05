@@ -359,10 +359,24 @@ async def _do_detect_anomalies():
         for r in loop_rows:
             dev = await _dev(r.device_id)
             if dev:
+                port_q = await db.execute(
+                    select(MacAddressEntry.port)
+                    .where(MacAddressEntry.device_id == r.device_id)
+                    .where(MacAddressEntry.mac_address == r.mac_address)
+                    .where(MacAddressEntry.is_active == True)
+                    .where(MacAddressEntry.port.isnot(None))
+                    .distinct()
+                )
+                ports = [row[0] for row in port_q.all()]
                 await _fire(db, dev, "mac_loop_suspicion", "warning",
                     f"Döngü Şüphesi: {dev.hostname}",
                     f"MAC {r.mac_address} → {r.port_cnt} farklı portta",
-                    details={"mac": r.mac_address, "port_count": r.port_cnt},
+                    details={
+                        "mac": r.mac_address,
+                        "port_count": r.port_cnt,
+                        "ports": ports,
+                        "device": dev.hostname,
+                    },
                     dedup_key=f"loop_{dev.id}_{r.mac_address}")
                 fired += 1
 

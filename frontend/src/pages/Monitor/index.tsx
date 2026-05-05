@@ -263,14 +263,29 @@ function buildEventDetail(ev: NetworkEvent): EventDetail {
     : '/devices'
 
   switch (ev.event_type) {
-    case 'mac_loop_suspicion':
+    case 'mac_loop_suspicion': {
+      const ports: string[] = Array.isArray(d.ports) ? d.ports : []
+      const portList = ports.length > 0
+        ? ports.map((p: string, i: number) => (
+            <Tag key={i} color="volcano" style={{ marginBottom: 2 }}>{p}</Tag>
+          ))
+        : <Tag color="red">{d.port_count ?? '—'} farklı port</Tag>
+      const actionTip = ports.length >= 2
+        ? `"${ports[0]}" veya "${ports[1]}" portunu geçici olarak devre dışı bırakın, döngü kırılır.`
+        : 'Spanning Tree durumunu ve port bağlantılarını kontrol edin.'
       return {
         icon: <SyncOutlined style={{ color: '#faad14' }} />,
-        what: 'Aynı MAC adresi birden fazla portta görüldü — ağ döngüsü riski var.',
+        what: 'Aynı MAC adresi aynı cihazda birden fazla portta görüldü — büyük olasılıkla ağ döngüsü.',
         rows: [
+          { label: 'Cihaz',      value: <Tag color="geekblue">{d.device ?? ev.device_hostname ?? '—'}</Tag> },
           { label: 'MAC Adresi', value: <Tag color="orange">{d.mac ?? '—'}</Tag> },
-          { label: 'Port Sayısı', value: <Tag color="red">{d.port_count ?? '—'} farklı port</Tag> },
-          { label: 'Öneri',      value: 'Spanning Tree durumunu ve port bağlantılarını kontrol edin.' },
+          { label: 'Etkilenen Portlar', value: <Space wrap size={4}>{portList}</Space> },
+          { label: 'Öneri', value: actionTip },
+          { label: 'Komut', value: (
+            <Text code style={{ fontSize: 11 }}>
+              show mac address-table address {d.mac ?? '<MAC>'}
+            </Text>
+          )},
         ],
         links: [
           { label: 'MAC / ARP Tablosu', path: '/mac-arp',  icon: <TableOutlined /> },
@@ -278,6 +293,7 @@ function buildEventDetail(ev: NetworkEvent): EventDetail {
           { label: 'Topoloji',          path: '/topology', icon: <ApartmentOutlined /> },
         ],
       }
+    }
 
     case 'loop_detected':
     case 'stp_anomaly':
