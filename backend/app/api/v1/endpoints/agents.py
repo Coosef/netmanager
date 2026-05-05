@@ -1228,34 +1228,42 @@ def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             fi
         fi
 
-        echo "[1/5] Python kontrol ediliyor..."
+        echo "[1/5] Python ve bağımlılıklar kontrol ediliyor..."
         if ! command -v python3 &>/dev/null; then
             if [ "$OS_TYPE" = "Darwin" ]; then
                 command -v brew &>/dev/null && brew install python3 || {{
                     echo "Python3 bulunamadı."; exit 1
                 }}
             elif command -v apt-get &>/dev/null; then
-                apt-get install -y python3 python3-pip curl
+                apt-get install -y python3 python3-venv python3-full curl
             elif command -v yum &>/dev/null; then
                 yum install -y python3 python3-pip curl
             else
                 echo "Python3 bulunamadı. Lütfen manuel kurun."; exit 1
             fi
         fi
-        PYTHON="$(which python3)"
+        # Debian/Ubuntu: python3-venv gerekli
+        if [ "$OS_TYPE" != "Darwin" ] && command -v apt-get &>/dev/null; then
+            apt-get install -y python3-venv python3-full curl 2>/dev/null || true
+        fi
+        SYS_PYTHON="$(which python3)"
 
-        echo "[2/5] Kurulum dizini hazırlanıyor..."
+        echo "[2/5] Kurulum dizini ve sanal ortam hazırlanıyor..."
         mkdir -p "$INSTALL_DIR"
+        VENV_DIR="$INSTALL_DIR/venv"
+        if [ ! -d "$VENV_DIR" ]; then
+            $SYS_PYTHON -m venv "$VENV_DIR"
+        fi
+        PYTHON="$VENV_DIR/bin/python"
 
         echo "[3/5] Agent betiği indiriliyor..."
         TOKEN=$(cat "$INSTALL_DIR/.last_token" 2>/dev/null || true)
         curl -fsSL -H "Authorization: Bearer $TOKEN" "$BACKEND_URL/api/v1/agents/download/script" -o "$INSTALL_DIR/netmanager_agent.py" || \
           curl -fsSL "$BACKEND_URL/api/v1/agents/download/script" -o "$INSTALL_DIR/netmanager_agent.py"
 
-        echo "[4/5] Bağımlılıklar kuruluyor..."
-        $PYTHON -m pip install --quiet --upgrade websockets netmiko psutil 2>/dev/null || \
-            $PYTHON -m pip install --quiet --upgrade --break-system-packages websockets netmiko psutil 2>/dev/null || \
-            $PYTHON -m pip install --quiet --upgrade --user websockets netmiko psutil
+        echo "[4/5] Bağımlılıklar kuruluyor (venv)..."
+        $PYTHON -m pip install --quiet --upgrade pip
+        $PYTHON -m pip install --quiet --upgrade websockets netmiko psutil
 
         ENV_FILE="$INSTALL_DIR/agent.env"
         cat > "$ENV_FILE" <<ENVEOF
@@ -1308,7 +1316,7 @@ User=root
 EnvironmentFile=$ENV_FILE
 ExecStart=$PYTHON $INSTALL_DIR/netmanager_agent.py
 Restart=always
-RestartSec=15
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
 
@@ -1318,7 +1326,7 @@ SVCEOF
             systemctl daemon-reload
             systemctl enable $SERVICE_NAME
             systemctl restart $SERVICE_NAME
-            echo "✓ NetManager Agent kuruldu! (Linux systemd)"
+            echo "✓ NetManager Agent kuruldu! (Linux systemd, venv: $VENV_DIR)"
         fi
     """)
 
