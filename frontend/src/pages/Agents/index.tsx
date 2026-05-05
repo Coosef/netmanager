@@ -1383,7 +1383,7 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
                             <div style={{ fontSize: 10, color: C.muted }}>Aktif bağlantı</div>
                           </div>
                           <div style={{ flex: 1 }}>
-                            {(metrics.pool_active_hosts || []).map((h: string) => (
+                            {(Array.isArray(metrics.pool_active_hosts) ? metrics.pool_active_hosts : []).map((h: string) => (
                               <Tag key={h} style={{ fontSize: 10, marginBottom: 2 }}>{h}</Tag>
                             ))}
                           </div>

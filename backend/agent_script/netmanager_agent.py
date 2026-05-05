@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.1"
+VERSION = "1.3.2"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -269,10 +269,10 @@ def _get_local_ip() -> str:
 def _get_metrics():
     with _pool_lock:
         pool_size = len(_ssh_pool)
-        pool_active_hosts = sum(
-            1 for v in _ssh_pool.values()
+        pool_active_hosts = [
+            k[0] for k, v in _ssh_pool.items()
             if v["conn"].is_alive()
-        ) if _ssh_pool else 0
+        ] if _ssh_pool else []
 
     metrics = {
         "cmd_success": _stats["cmd_success"],
