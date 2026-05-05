@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.5"
+VERSION = "1.3.6"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -1038,16 +1038,6 @@ async def handle_message(ws, msg, loop):
 # Main run loop
 # ─────────────────────────────────────────────────────────────────────────────
 
-_WS_EXTRA_HEADERS = {}
-try:
-    import websockets as _ws_ver_check
-    _ws_vi = tuple(int(x) for x in getattr(_ws_ver_check, "__version__", "0").split(".")[:2])
-    if _ws_vi >= (10, 0):
-        _WS_EXTRA_HEADERS = {"extra_headers": {"X-Agent-ID": AGENT_ID}}
-except Exception:
-    pass
-
-
 async def run():
     import random
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
@@ -1074,7 +1064,6 @@ async def run():
                 open_timeout=30,
                 close_timeout=10,
                 max_size=10 * 1024 * 1024,
-                **_WS_EXTRA_HEADERS,
             ) as ws:
                 log.info("Backend'e baglandi")
                 delay = 5
