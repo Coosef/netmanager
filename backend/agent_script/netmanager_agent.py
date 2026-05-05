@@ -1041,7 +1041,8 @@ async def run():
             log.info("Baglaniliyor: {}/api/v1/agents/ws/{}".format(ws_base, AGENT_ID))
             async with websockets.connect(
                 ws_url,
-                ping_interval=None,
+                ping_interval=25,
+                ping_timeout=15,
                 open_timeout=30,
                 close_timeout=10,
                 max_size=10 * 1024 * 1024,
@@ -1082,6 +1083,16 @@ async def run():
                             _result_queue.append(item)
 
                 async def _heartbeat():
+                    # Send immediately on connect so backend refreshes Redis TTL right away
+                    try:
+                        await ws.send(json.dumps({
+                            "type":      "heartbeat",
+                            "agent_id":  AGENT_ID,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "metrics":   _get_metrics(),
+                        }))
+                    except Exception:
+                        return
                     while True:
                         await asyncio.sleep(HEARTBEAT_INTERVAL)
                         try:
@@ -1201,7 +1212,7 @@ async def run():
                         # We can't send via ws here (disconnected) — log only
                         # The backend will detect offline agent via heartbeat timeout
                 await asyncio.sleep(delay)
-                delay = min(delay * 2, 120)
+                delay = min(delay * 2, 30)
 
 
 if __name__ == "__main__":

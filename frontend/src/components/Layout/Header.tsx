@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Switch, Popover, Button, Tag, Empty, Spin, Select, Modal, Form } from 'antd'
+import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Popover, Button, Tag, Empty, Spin, Select, Modal, Form } from 'antd'
 import {
   LogoutOutlined, KeyOutlined,
   BellOutlined, ReloadOutlined, SearchOutlined,
@@ -382,20 +382,18 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
         </Tooltip>
       ) : null}
 
-      {/* Theme toggle — mobile compact icon */}
-      {isMobile && (
-        <Tooltip title={isDark ? t('header.theme_light') : t('header.theme_dark')}>
-          <Button
-            type="text"
-            icon={isDark
-              ? <SunOutlined style={{ color: '#f59e0b', fontSize: 16 }} />
-              : <MoonOutlined style={{ color: iconColor, fontSize: 16 }} />
-            }
-            onClick={toggle}
-            style={{ padding: '0 8px' }}
-          />
-        </Tooltip>
-      )}
+      {/* Theme toggle — always visible */}
+      <Tooltip title={isDark ? t('header.theme_light') : t('header.theme_dark')}>
+        <Button
+          type="text"
+          icon={isDark
+            ? <SunOutlined style={{ color: '#f59e0b', fontSize: 16 }} />
+            : <MoonOutlined style={{ color: iconColor, fontSize: 16 }} />
+          }
+          onClick={toggle}
+          style={{ padding: '0 8px' }}
+        />
+      </Tooltip>
 
       {!isMobile && <Popover
         open={searchOpen && search.trim().length >= 2}
@@ -481,19 +479,6 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
         />
       </Popover>}
 
-      {/* Theme toggle — hidden on mobile */}
-      {!isMobile && (
-        <Tooltip title={isDark ? t('header.theme_light') : t('header.theme_dark')}>
-          <Switch
-            checked={isDark}
-            onChange={toggle}
-            checkedChildren={<MoonOutlined />}
-            unCheckedChildren={<SunOutlined />}
-            size="small"
-            style={{ background: isDark ? '#334155' : '#e2e8f0' }}
-          />
-        </Tooltip>
-      )}
 
       {!isMobile && (
         <Tooltip title={t('header.refresh_data')}>

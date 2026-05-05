@@ -34,7 +34,7 @@ services:
 
   backend:
     build: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-delay 3 --timeout-graceful-shutdown 5 --proxy-headers --forwarded-allow-ips='*' --reload-exclude '*.pyc' --reload-exclude '__pycache__' --reload-exclude '*.swp' --reload-exclude '*.tmp' --reload-exclude '.git'
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2 --timeout-graceful-shutdown 30 --proxy-headers --forwarded-allow-ips='*'
     volumes:
       - ./backend:/app
       - config_backups:/app/backups
