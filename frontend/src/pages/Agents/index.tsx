@@ -1313,7 +1313,13 @@ function AgentDetailModal({ agent, onClose }: { agent: Agent; onClose: () => voi
                     {agent.version ? <Tag style={{ fontSize: 11 }}>v{agent.version}</Tag> : '—'}
                     {metrics.python_version && <Tag style={{ marginLeft: 4, fontSize: 10, color: C.muted }}>Python {metrics.python_version}</Tag>}
                   </Descriptions.Item>
-                  <Descriptions.Item label="IP">{agent.last_ip || '—'}</Descriptions.Item>
+                  <Descriptions.Item label="WAN IP">{agent.last_ip || '—'}</Descriptions.Item>
+                  {agent.local_ip && agent.local_ip !== agent.last_ip && (
+                    <Descriptions.Item label="LAN IP">
+                      <code style={{ fontSize: 12 }}>{agent.local_ip}</code>
+                      <Text style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>(yerel ağ)</Text>
+                    </Descriptions.Item>
+                  )}
                   <Descriptions.Item label="Son heartbeat">
                     {agent.last_heartbeat ? dayjs(agent.last_heartbeat).fromNow() : '—'}
                   </Descriptions.Item>
