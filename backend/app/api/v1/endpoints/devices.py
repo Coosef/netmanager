@@ -967,6 +967,177 @@ async def bulk_fetch_info(
     return {"succeeded": succeeded, "failed": len(ssh_results) - succeeded, "results": list(ssh_results)}
 
 
+@router.post("/bulk-fetch-info-stream")
+async def bulk_fetch_info_stream(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """SSE stream — her cihaz tamamlandığında anlık progress event gönderir.
+    Frontend bunu fetch() + ReadableStream ile okur, timeout sorunu yaşanmaz."""
+    import asyncio, json, re
+    from fastapi.responses import StreamingResponse as _SR
+
+    body = await request.json()
+    device_ids: list[int] = body.get("device_ids", [])
+    if not device_ids:
+        raise HTTPException(status_code=400, detail="No device IDs provided")
+
+    result_q = await db.execute(select(Device).where(Device.id.in_(device_ids)))
+    devices_list = result_q.scalars().all()
+    if not devices_list:
+        raise HTTPException(status_code=404, detail="No matching devices found")
+
+    total = len(devices_list)
+
+    async def _ssh_fetch_stream(device: Device) -> dict:
+        try:
+            ver_result = await ssh_manager.execute_command(device, "show version")
+            if not ver_result.success:
+                return {"device_id": device.id, "hostname": device.hostname, "success": False, "error": ver_result.error}
+            output = ver_result.output
+            model = None
+            for pat in [
+                r"[Ss]ystem\s+description\s*:\s*Ruijie\s+[^(]+\(([^)]+)\)",
+                r"[Mm]odel\s*[Nn]umber\s*[:\s]+(\S+)",
+                r"[Mm]odel\s*[:\s]+(\S+)",
+                r"Cisco\s+([\w-]+)\s+(?:Software|processor|Series)",
+                r"Ruijie\s+([\w-]+)\s+Software",
+                r"RG-([\w-]+)[\s,]",
+                r"ARUBA\s+([\w-]+)",
+                r"^(\S+)\s+Software.*Version",
+            ]:
+                m = re.search(pat, output, re.MULTILINE)
+                if m:
+                    model = m.group(1).strip()
+                    break
+            firmware = None
+            for pat in [
+                r"[Vv]ersion\s+\S*RGOS\s+([\d\.]+\S*)",
+                r"[Ss]ystem\s+[Ss]oftware\s+[Vv]ersion\s*[:\s]+\S+\s+([\d\.]+\S*)",
+                r"[Vv]ersion\s+([\d\.]+\([^)]+\)[a-zA-Z0-9]*)",
+                r"[Ss]oftware\s+[Vv]ersion\s*[,:\s]+([\d\.]+\S*)",
+                r"[Vv]ersion\s+([\d\.]+)",
+            ]:
+                m = re.search(pat, output)
+                if m:
+                    firmware = m.group(1).strip().rstrip(",")
+                    break
+            serial = None
+            for pat in [
+                r"[Ss]ystem\s+[Ss]erial\s+[Nn]umber\s*[:\s]+(\S+)",
+                r"[Ss]erial\s*[Nn]umber\s*[:\s]+(\S+)",
+                r"Processor board ID\s+(\S+)",
+                r"SN:\s*(\S+)",
+            ]:
+                m = re.search(pat, output)
+                if m:
+                    serial = m.group(1).strip()
+                    break
+            if device.os_type in ("aruba_osswitch", "hp_procurve") and (not model or not serial):
+                if not model:
+                    lldp_r = await ssh_manager.execute_command(device, "show lldp info local-device")
+                    if lldp_r.success and lldp_r.output:
+                        m_lldp = re.search(
+                            r"System Description\s*:\s*HP\s+(J\w+)\s+([\w\-/+.]+(?:\s+[\w\-/+.]+)*?)\s+(?:[Ss]witch|[Rr]outer)",
+                            lldp_r.output,
+                        )
+                        if m_lldp:
+                            part2 = m_lldp.group(2).strip()
+                            model = f"{m_lldp.group(1)} {part2}" if part2 else m_lldp.group(1)
+                if not serial:
+                    mib_r = await ssh_manager.execute_command(device, "walkMIB 1.3.6.1.2.1.47.1.1.1.1.11")
+                    if mib_r.success and mib_r.output:
+                        m_mib = re.search(r"entPhysicalSerialNum\.1\s*=\s*(\S+)", mib_r.output)
+                        if m_mib:
+                            serial = m_mib.group(1).strip()
+            hostname_fetched = None
+            hn_result = await ssh_manager.execute_command(device, "show running-config | include hostname")
+            if hn_result.success and hn_result.output:
+                m = re.search(r"^hostname\s+(\S+)", hn_result.output, re.MULTILINE)
+                if m:
+                    hostname_fetched = m.group(1).strip()
+            if not hostname_fetched:
+                m = re.search(r"[Ss]ystem\s+[Nn]ame\s*[:\s]+(\S+)", output)
+                if m:
+                    hostname_fetched = m.group(1).strip()
+            updates: dict = {}
+            if hostname_fetched:
+                updates["hostname"] = hostname_fetched
+            if model:
+                updates["model"] = model
+            if firmware:
+                updates["firmware_version"] = firmware
+            if serial:
+                updates["serial_number"] = serial
+            return {"device_id": device.id, "hostname": device.hostname, "success": True, "updates": updates, "_device": device}
+        except Exception as exc:
+            return {"device_id": device.id, "hostname": device.hostname, "success": False, "error": str(exc)}
+
+    async def _ssh_fetch_safe_stream(device: Device) -> dict:
+        try:
+            return await asyncio.wait_for(_ssh_fetch_stream(device), timeout=45.0)
+        except asyncio.TimeoutError:
+            return {"device_id": device.id, "hostname": device.hostname,
+                    "success": False, "error": "SSH bağlantısı zaman aşımına uğradı (45s)"}
+
+    async def generate():
+        queue: asyncio.Queue = asyncio.Queue()
+        all_results: list = []
+
+        async def fetch_and_queue(dev: Device):
+            try:
+                res = await _ssh_fetch_safe_stream(dev)
+            except Exception as e:
+                res = {"device_id": dev.id, "hostname": dev.hostname, "success": False, "error": str(e)}
+            await queue.put(res)
+
+        for d in devices_list:
+            asyncio.create_task(fetch_and_queue(d))
+
+        for idx in range(total):
+            try:
+                result = await asyncio.wait_for(queue.get(), timeout=60.0)
+            except asyncio.TimeoutError:
+                break
+            all_results.append(result)
+            payload: dict = {
+                "device_id": result["device_id"],
+                "hostname": result["hostname"],
+                "success": result["success"],
+                "progress": idx + 1,
+                "total": total,
+            }
+            if not result["success"]:
+                payload["error"] = result.get("error", "Bilinmeyen hata")
+            if result.get("updates"):
+                payload["updates"] = result["updates"]
+            yield f"data: {json.dumps(payload)}\n\n"
+
+        for r in all_results:
+            if r.get("success") and r.get("updates") and r.get("_device"):
+                dev = r["_device"]
+                for k, v in r["updates"].items():
+                    setattr(dev, k, v)
+        try:
+            await db.commit()
+        except Exception:
+            await db.rollback()
+
+        succeeded = sum(1 for r in all_results if r.get("success"))
+        yield f"data: {json.dumps({'done': True, 'succeeded': succeeded, 'failed': total - succeeded, 'total': total})}\n\n"
+
+    return _SR(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 @router.delete("/{device_id}", status_code=204)
 async def delete_device(
     device_id: int,

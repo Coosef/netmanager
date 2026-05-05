@@ -127,6 +127,8 @@ export const devicesApi = {
       '/devices/bulk-fetch-info', { device_ids }
     ).then((r) => r.data),
 
+  bulkFetchInfoStream: '/api/v1/devices/bulk-fetch-info-stream',
+
   bulkUpdateAgent: (device_ids: number[], agent_id: string | null) =>
     client.post<{ updated: number; agent_id: string | null }>(
       '/devices/bulk-update-agent', { device_ids, agent_id }

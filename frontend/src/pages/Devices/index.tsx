@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
-  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Row, Select, Space,
+  App, Button, Card, Col, Form, Input, Modal, Popconfirm, Progress, Row, Select, Space,
   Statistic, Table, Tag, Tooltip, Drawer, Alert, Radio,
 } from 'antd'
 import {
@@ -12,9 +12,11 @@ import {
   SaveOutlined, RobotOutlined, SyncOutlined, TagOutlined, InfoCircleOutlined,
   ApartmentOutlined, ShareAltOutlined, SafetyOutlined, WifiOutlined,
   CloudServerOutlined, DatabaseOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
+import { useAuthStore } from '@/store/auth'
 import { agentsApi } from '@/api/agents'
 import { snmpApi } from '@/api/snmp'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -365,6 +367,204 @@ function BulkAgentModal({
   )
 }
 
+// ── BulkFetchProgressModal ─────────────────────────────────────────────────────
+
+interface FetchResult {
+  device_id: number
+  hostname: string
+  success: boolean
+  error?: string
+  updates?: Record<string, string>
+  progress: number
+  total: number
+}
+
+function BulkFetchProgressModal({
+  deviceIds,
+  onClose,
+}: {
+  deviceIds: number[]
+  onClose: () => void
+}) {
+  const { isDark } = useTheme()
+  const [results, setResults] = React.useState<FetchResult[]>([])
+  const [done, setDone] = React.useState(false)
+  const [summary, setSummary] = React.useState<{ succeeded: number; failed: number } | null>(null)
+  const [error, setError] = React.useState<string | null>(null)
+
+  const total = deviceIds.length
+  const progress = results.length
+
+  React.useEffect(() => {
+    const controller = new AbortController()
+    const token = useAuthStore.getState().token
+
+    const run = async () => {
+      try {
+        const res = await fetch(devicesApi.bulkFetchInfoStream, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({ device_ids: deviceIds }),
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          const text = await res.text()
+          setError(`Sunucu hatası: ${res.status} — ${text}`)
+          setDone(true)
+          return
+        }
+        const reader = res.body!.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        while (true) {
+          const { done: streamDone, value } = await reader.read()
+          if (streamDone) break
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data.done) {
+                setSummary({ succeeded: data.succeeded, failed: data.failed })
+                setDone(true)
+              } else {
+                setResults(prev => [...prev, data as FetchResult])
+              }
+            } catch {
+              // malformed SSE line — skip
+            }
+          }
+        }
+      } catch (e: any) {
+        if (e?.name !== 'AbortError') {
+          setError(e?.message || 'Bağlantı kesildi')
+          setDone(true)
+        }
+      }
+    }
+    run()
+    return () => controller.abort()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const C = {
+    bg: isDark ? '#1e293b' : '#ffffff',
+    bg2: isDark ? '#0f172a' : '#f8fafc',
+    border: isDark ? '#334155' : '#e2e8f0',
+    text: isDark ? '#f1f5f9' : '#1e293b',
+    muted: isDark ? '#64748b' : '#94a3b8',
+  }
+
+  const pct = total > 0 ? Math.round((progress / total) * 100) : 0
+  const succeeded = summary?.succeeded ?? results.filter(r => r.success).length
+  const failed = summary?.failed ?? results.filter(r => !r.success).length
+
+  return (
+    <Modal
+      open
+      title={
+        <Space>
+          <SyncOutlined spin={!done} style={{ color: '#1677ff' }} />
+          <span style={{ color: C.text }}>Toplu Bilgi Güncelleme</span>
+        </Space>
+      }
+      onCancel={done ? onClose : undefined}
+      closable={done}
+      maskClosable={false}
+      footer={
+        done ? (
+          <Button type="primary" onClick={onClose}>Kapat</Button>
+        ) : null
+      }
+      width={580}
+      styles={{
+        content: { background: C.bg },
+        header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
+      }}
+    >
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: C.muted, marginBottom: 4 }}>
+          <span>{done ? 'Tamamlandı' : 'İşleniyor…'}</span>
+          <span>{progress} / {total} cihaz</span>
+        </div>
+        <Progress
+          percent={pct}
+          status={done ? (failed > 0 ? 'exception' : 'success') : 'active'}
+          strokeColor={done && failed === 0 ? '#22c55e' : undefined}
+          showInfo={false}
+        />
+        {done && summary && (
+          <div style={{ display: 'flex', gap: 16, marginTop: 8, fontSize: 12 }}>
+            <span style={{ color: '#22c55e' }}>
+              <CheckCircleOutlined style={{ marginRight: 4 }} />{succeeded} başarılı
+            </span>
+            {failed > 0 && (
+              <span style={{ color: '#ef4444' }}>
+                <CloseCircleOutlined style={{ marginRight: 4 }} />{failed} başarısız
+              </span>
+            )}
+          </div>
+        )}
+        {error && <Alert type="error" showIcon message={error} style={{ marginTop: 8 }} />}
+      </div>
+
+      <div style={{
+        maxHeight: 320, overflowY: 'auto',
+        background: C.bg2, border: `1px solid ${C.border}`,
+        borderRadius: 8, padding: '4px 0',
+      }}>
+        {results.length === 0 && !done && (
+          <div style={{ textAlign: 'center', padding: '24px 0', color: C.muted, fontSize: 12 }}>
+            <LoadingOutlined style={{ marginRight: 6 }} />Cihazlara bağlanılıyor…
+          </div>
+        )}
+        {results.map((r) => (
+          <div
+            key={r.device_id}
+            style={{
+              display: 'flex', alignItems: 'flex-start', gap: 10,
+              padding: '6px 14px',
+              borderBottom: `1px solid ${C.border}`,
+            }}
+          >
+            <span style={{ marginTop: 1, flexShrink: 0 }}>
+              {r.success
+                ? <CheckCircleOutlined style={{ color: '#22c55e' }} />
+                : <CloseCircleOutlined style={{ color: '#ef4444' }} />
+              }
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{r.hostname}</span>
+              {r.success && r.updates && Object.keys(r.updates).length > 0 && (
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
+                  {Object.entries(r.updates).map(([k, v]) => (
+                    <Tag key={k} style={{ fontSize: 10, marginRight: 4, marginTop: 2 }}>
+                      {k}: {v}
+                    </Tag>
+                  ))}
+                </div>
+              )}
+              {r.success && (!r.updates || Object.keys(r.updates).length === 0) && (
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>Yeni bilgi bulunamadı</div>
+              )}
+              {!r.success && (
+                <div style={{ fontSize: 11, color: '#ef4444', marginTop: 1 }}>{r.error}</div>
+              )}
+            </div>
+          </div>
+        ))}
+        {done && results.length === 0 && (
+          <div style={{ textAlign: 'center', padding: '16px 0', color: C.muted, fontSize: 12 }}>Sonuç yok</div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 export default function DevicesPage() {
   const { message } = App.useApp()
   const { isDark } = useTheme()
@@ -389,6 +589,7 @@ export default function DevicesPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkCredOpen, setBulkCredOpen] = useState(false)
   const [bulkAgentOpen, setBulkAgentOpen] = useState(false)
+  const [bulkFetchOpen, setBulkFetchOpen] = useState(false)
   const [backupTaskId, setBackupTaskId] = useState<number | null>(null)
   const [csvImportOpen, setCsvImportOpen] = useState(false)
   const [csvFile, setCsvFile] = useState<File | null>(null)
@@ -502,16 +703,6 @@ export default function DevicesPage() {
     onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
   })
 
-  const bulkFetchInfoMutation = useMutation({
-    mutationFn: devicesApi.bulkFetchInfo,
-    onSuccess: (res) => {
-      message.success(t('devices.bulk_fetch_info_success', { succeeded: res.succeeded, failed: res.failed }))
-      setSelectedRowKeys([])
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
-      queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
-    },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
-  })
 
   const csvImportMutation = useMutation({
     mutationFn: (file: File) => devicesApi.importCsv(file),
@@ -718,14 +909,13 @@ export default function DevicesPage() {
                   {t('devices.bulk_backup')}
                 </Button>
               </Popconfirm>
-              <Popconfirm
-                title={t('devices.bulk_fetch_info_confirm', { count: selectedRowKeys.length })}
-                onConfirm={() => bulkFetchInfoMutation.mutate(selectedRowKeys as number[])}
+              <Button
+                icon={<InfoCircleOutlined />}
+                onClick={() => setBulkFetchOpen(true)}
+                style={{ borderColor: '#1677ff', color: '#0958d9' }}
               >
-                <Button icon={<InfoCircleOutlined />} loading={bulkFetchInfoMutation.isPending} style={{ borderColor: '#1677ff', color: '#0958d9' }}>
-                  {t('devices.bulk_fetch_info')}
-                </Button>
-              </Popconfirm>
+                {t('devices.bulk_fetch_info')}
+              </Button>
               <Popconfirm
                 title={t('devices.bulk_delete_confirm', { count: selectedRowKeys.length })}
                 description={t('devices.bulk_delete_desc')}
@@ -907,6 +1097,18 @@ export default function DevicesPage() {
           selectedIds={selectedRowKeys as number[]}
           onClose={() => setBulkCredOpen(false)}
           onSuccess={() => { setBulkCredOpen(false); setSelectedRowKeys([]); queryClient.invalidateQueries({ queryKey: ['devices'] }) }}
+        />
+      )}
+
+      {bulkFetchOpen && (
+        <BulkFetchProgressModal
+          deviceIds={selectedRowKeys as number[]}
+          onClose={() => {
+            setBulkFetchOpen(false)
+            setSelectedRowKeys([])
+            queryClient.invalidateQueries({ queryKey: ['devices'] })
+            queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+          }}
         />
       )}
 
