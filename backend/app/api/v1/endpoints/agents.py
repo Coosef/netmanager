@@ -1166,7 +1166,8 @@ async def agent_websocket(
 
                 # Auto-update: notify agent if its version is outdated
                 agent_ver = msg.get("version") or ""
-                if agent_ver and agent_ver != CURRENT_AGENT_VERSION:
+                def _ver(v): return tuple(int(x) for x in v.split(".") if x.isdigit())
+                if agent_ver and _ver(agent_ver) < _ver(CURRENT_AGENT_VERSION):
                     try:
                         import base64 as _b64
                         _sp = Path(__file__).parents[4] / "agent_script" / "netmanager_agent.py"
