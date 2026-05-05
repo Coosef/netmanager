@@ -13,7 +13,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined, DashboardOutlined, ApiOutlined,
   SafetyOutlined, HistoryOutlined, KeyOutlined, LockOutlined, UnlockOutlined,
   WarningOutlined, PlusCircleOutlined, SearchOutlined, WifiOutlined,
-  DatabaseOutlined, SafetyCertificateOutlined, AimOutlined,
+  DatabaseOutlined, SafetyCertificateOutlined, AimOutlined, SyncOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -1636,6 +1636,24 @@ export default function AgentsPage() {
     refetchInterval: 10000,
   })
 
+  const { data: currentVersionData } = useQuery({
+    queryKey: ['agent-current-version'],
+    queryFn: agentsApi.getCurrentVersion,
+    staleTime: 60_000,
+  })
+  const currentVersion = currentVersionData?.version
+
+  const updateMutation = useMutation({
+    mutationFn: (agentId: string) => agentsApi.triggerUpdate(agentId),
+    onSuccess: () => {
+      message.success(`Güncelleme komutu gönderildi — agent yeniden bağlandığında güncel olacak`)
+      queryClient.invalidateQueries({ queryKey: ['agents'] })
+    },
+    onError: (e: any) => {
+      message.error(e?.response?.data?.detail || 'Güncelleme gönderilemedi')
+    },
+  })
+
   const createMutation = useMutation({
     mutationFn: agentsApi.create,
     onSuccess: (data) => {
@@ -1753,9 +1771,35 @@ export default function AgentsPage() {
     {
       title: 'Versiyon',
       dataIndex: 'version',
-      render: (v: string) => v
-        ? <Tag style={{ fontSize: 11, color: C.muted, borderColor: C.border, background: C.bg2 }}>v{v}</Tag>
-        : <span style={{ color: C.dim }}>—</span>,
+      render: (v: string, r: Agent) => {
+        const outdated = currentVersion && v && v !== currentVersion
+        return (
+          <Space size={4} style={{ flexWrap: 'nowrap' }}>
+            {v ? (
+              <Tooltip title={outdated ? `Güncel versiyon: ${currentVersion}` : 'Güncel'}>
+                <Tag style={{
+                  fontSize: 11,
+                  color: outdated ? '#f59e0b' : C.muted,
+                  borderColor: outdated ? '#f59e0b50' : C.border,
+                  background: outdated ? '#f59e0b15' : C.bg2,
+                }}>
+                  {outdated ? '⚠ ' : ''}v{v}
+                </Tag>
+              </Tooltip>
+            ) : <span style={{ color: C.dim }}>—</span>}
+            {outdated && r.status === 'online' && (
+              <Tooltip title={`v${currentVersion}'e güncelle`}>
+                <Button
+                  size="small" type="text"
+                  icon={<SyncOutlined spin={updateMutation.isPending && updateMutation.variables === r.id} />}
+                  onClick={() => updateMutation.mutate(r.id)}
+                  style={{ color: '#f59e0b', padding: '0 2px', height: 18 }}
+                />
+              </Tooltip>
+            )}
+          </Space>
+        )
+      },
     },
     {
       title: 'IP',
@@ -1875,6 +1919,21 @@ export default function AgentsPage() {
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => queryClient.invalidateQueries({ queryKey: ['agents'] })} />
+          {currentVersion && agents.some(a => a.status === 'online' && a.version && a.version !== currentVersion) && (
+            <Tooltip title={`Tüm eski versiyonlu online agentları v${currentVersion}'e güncelle`}>
+              <Button
+                icon={<SyncOutlined />}
+                onClick={() => {
+                  const toUpdate = agents.filter(a => a.status === 'online' && a.version && a.version !== currentVersion)
+                  toUpdate.forEach(a => updateMutation.mutate(a.id))
+                  message.info(`${toUpdate.length} agent için güncelleme gönderildi`)
+                }}
+                style={{ borderColor: '#f59e0b50', color: '#f59e0b', background: '#f59e0b10' }}
+              >
+                Tümünü Güncelle
+              </Button>
+            </Tooltip>
+          )}
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}
             style={{ background: '#8b5cf6', borderColor: '#8b5cf6' }}>
             {t('agents.create')}

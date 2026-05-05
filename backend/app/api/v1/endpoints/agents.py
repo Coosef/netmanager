@@ -1,9 +1,12 @@
 import asyncio
 import json
+import os
+import re
 import secrets
 import string
 import textwrap
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import redis as _redis_lib
@@ -20,6 +23,17 @@ from app.models.agent import Agent
 from app.models.agent_command_log import AgentCommandLog
 from app.schemas.agent import AgentCreate, AgentCreateResponse, AgentResponse
 from app.services.agent_manager import agent_manager
+
+# ── Current agent version (read from script at startup) ───────────────────────
+def _read_agent_version() -> str:
+    try:
+        script = Path(__file__).parents[4] / "agent_script" / "netmanager_agent.py"
+        m = re.search(r'^VERSION\s*=\s*["\'](.+?)["\']', script.read_text(), re.MULTILINE)
+        return m.group(1) if m else "unknown"
+    except Exception:
+        return "unknown"
+
+CURRENT_AGENT_VERSION: str = _read_agent_version()
 
 router = APIRouter()
 
@@ -124,6 +138,49 @@ async def get_agent_live_metrics(
     if not live:
         return {"online": False, "metrics": {}}
     return {"online": True, **live}
+
+
+@router.get("/current-version", response_model=dict)
+async def get_current_agent_version(_: CurrentUser = None):
+    """Return the server-side current agent version."""
+    return {"version": CURRENT_AGENT_VERSION}
+
+
+@router.post("/{agent_id}/update", response_model=dict)
+async def trigger_agent_update(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    """Manually push an update_available message to a connected agent."""
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    if not agent_manager.is_online(agent_id):
+        raise HTTPException(status_code=409, detail="Agent çevrimdışı — güncelleme gönderilemez")
+
+    sent = await _send_update_command(agent_id)
+    if not sent:
+        raise HTTPException(status_code=500, detail="Güncelleme komutu gönderilemedi")
+    return {"status": "update_sent", "current_version": CURRENT_AGENT_VERSION}
+
+
+async def _send_update_command(agent_id: str) -> bool:
+    """Send update_available to the agent via its WebSocket connection."""
+    from app.services.agent_manager import agent_manager as _am
+    ws = _am._connections.get(agent_id)
+    if not ws:
+        return False
+    try:
+        await ws.send_text(json.dumps({
+            "type": "update_available",
+            "current_version": CURRENT_AGENT_VERSION,
+            "script_path": "/api/v1/agents/script",
+        }))
+        return True
+    except Exception:
+        return False
 
 
 @router.post("/{agent_id}/ping", response_model=dict)
@@ -1088,6 +1145,25 @@ async def agent_websocket(
                     await db.commit()
                 except Exception:
                     pass
+
+                # Auto-update: notify agent if its version is outdated
+                agent_ver = msg.get("version") or ""
+                if agent_ver and agent_ver != CURRENT_AGENT_VERSION:
+                    log.info(
+                        f"Agent {agent_id} eski versiyon ({agent_ver} != {CURRENT_AGENT_VERSION}), "
+                        "güncelleme bildirimi gönderiliyor"
+                    )
+                    try:
+                        await asyncio.wait_for(
+                            websocket.send_text(json.dumps({
+                                "type": "update_available",
+                                "current_version": CURRENT_AGENT_VERSION,
+                                "script_path": "/api/v1/agents/script",
+                            })),
+                            timeout=5,
+                        )
+                    except Exception:
+                        pass
 
                 # Push device list for health monitoring
                 asyncio.create_task(_push_device_sync_task(agent_id, db))

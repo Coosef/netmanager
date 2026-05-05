@@ -975,6 +975,42 @@ async def handle_message(ws, msg, loop):
     elif t == "ping":
         await _send({"type": "pong"})
 
+    elif t == "update_available":
+        server_version = msg.get("current_version", "?")
+        script_path_remote = msg.get("script_path", "/api/v1/agents/script")
+        log.info("Guncelleme mevcut: {} -> {}. Indiriliyor...".format(VERSION, server_version))
+        try:
+            import ast as _ast
+            import shutil
+            import urllib.request
+
+            dl_url = BACKEND_URL.rstrip("/") + script_path_remote
+            script_file = os.path.abspath(__file__)
+            tmp_file = script_file + ".new"
+
+            # Download new script
+            urllib.request.urlretrieve(dl_url, tmp_file)
+
+            # Validate syntax before replacing
+            with open(tmp_file, encoding="utf-8") as _f:
+                _ast.parse(_f.read())
+
+            # Backup and replace
+            shutil.copy2(script_file, script_file + ".bak")
+            shutil.move(tmp_file, script_file)
+
+            log.info("Script guncellendi. Yeniden baslatiliyor...")
+            await _send({"type": "update_ack", "agent_id": AGENT_ID, "new_version": server_version})
+            await asyncio.sleep(0.5)
+
+            # Restart: spawn new process then exit
+            import subprocess
+            subprocess.Popen([sys.executable, script_file] + sys.argv[1:])
+            sys.exit(0)
+        except Exception as _e:
+            log.error("Guncelleme basarisiz: {}".format(_e))
+            await _send({"type": "update_failed", "agent_id": AGENT_ID, "error": str(_e)})
+
     elif t == "restart":
         log.info("Yeniden baslatma istegi alindi - cikiliyor...")
         await _send({"type": "restart_ack", "agent_id": AGENT_ID})

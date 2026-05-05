@@ -143,6 +143,13 @@ class AgentManager:
         elif msg_type == "pong":
             pass
 
+        elif msg_type == "update_ack":
+            new_ver = msg.get("new_version", "?")
+            log.info(f"Agent {agent_id} güncelleme tamamlandı → v{new_ver}, yeniden başlatılıyor")
+
+        elif msg_type == "update_failed":
+            log.warning(f"Agent {agent_id} güncelleme başarısız: {msg.get('error', '?')}")
+
         elif msg_type == "restart_ack":
             log.info(f"Agent {agent_id} restart acknowledged")
 

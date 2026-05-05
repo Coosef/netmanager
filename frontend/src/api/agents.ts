@@ -125,6 +125,12 @@ export const agentsApi = {
   restart: (id: string) =>
     client.post<{ status: string; agent_id: string }>(`/agents/${id}/restart`).then((r) => r.data),
 
+  getCurrentVersion: () =>
+    client.get<{ version: string }>('/agents/current-version').then((r) => r.data),
+
+  triggerUpdate: (id: string) =>
+    client.post<{ status: string; current_version: string }>(`/agents/${id}/update`).then((r) => r.data),
+
   ping: (id: string) =>
     client.post<{
       online: boolean; agent_id: string; name: string;
