@@ -286,7 +286,7 @@ def _get_metrics():
     }
     if _HAS_PSUTIL:
         try:
-            metrics["cpu_percent"] = psutil.cpu_percent(interval=None)
+            metrics["cpu_percent"] = psutil.cpu_percent(interval=0.1)
             mem = psutil.virtual_memory()
             metrics["memory_percent"] = mem.percent
             metrics["memory_used_mb"] = round(mem.used / 1024 / 1024)
@@ -1022,6 +1022,7 @@ async def handle_message(ws, msg, loop):
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def run():
+    import random
     ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
     delay   = 5
     loop    = asyncio.get_event_loop()
@@ -1211,7 +1212,8 @@ async def run():
                         log.warning("[edge] Disconnect anomaly: {} kesinti".format(_disconnect_count))
                         # We can't send via ws here (disconnected) — log only
                         # The backend will detect offline agent via heartbeat timeout
-                await asyncio.sleep(delay)
+                jitter = random.uniform(0, min(delay, 5))
+                await asyncio.sleep(delay + jitter)
                 delay = min(delay * 2, 30)
 
 

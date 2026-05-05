@@ -56,7 +56,7 @@ def _agent_to_dict(agent: Agent, online_ids: set) -> dict:
     return {
         "id": agent.id,
         "name": agent.name,
-        "status": "online" if agent.id in online_ids else "offline",
+        "status": "online" if (agent.id in online_ids or agent_manager.is_online(agent.id)) else "offline",
         "last_heartbeat": agent.last_heartbeat,
         "last_ip": agent.last_ip,
         "local_ip": agent.local_ip,
@@ -1253,9 +1253,9 @@ def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
           curl -fsSL "$BACKEND_URL/api/v1/agents/download/script" -o "$INSTALL_DIR/netmanager_agent.py"
 
         echo "[4/5] Bağımlılıklar kuruluyor..."
-        $PYTHON -m pip install --quiet --upgrade websockets netmiko 2>/dev/null || \
-            $PYTHON -m pip install --quiet --upgrade --break-system-packages websockets netmiko 2>/dev/null || \
-            $PYTHON -m pip install --quiet --upgrade --user websockets netmiko
+        $PYTHON -m pip install --quiet --upgrade websockets netmiko psutil 2>/dev/null || \
+            $PYTHON -m pip install --quiet --upgrade --break-system-packages websockets netmiko psutil 2>/dev/null || \
+            $PYTHON -m pip install --quiet --upgrade --user websockets netmiko psutil
 
         ENV_FILE="$INSTALL_DIR/agent.env"
         cat > "$ENV_FILE" <<ENVEOF
