@@ -24,6 +24,13 @@ const { Text } = Typography
 
 // ── Event metadata config ─────────────────────────────────────────────────────
 
+// Events in this set require manual dismissal — they won't auto-close
+const PERSISTENT_TYPES = new Set([
+  'mac_loop_suspicion', 'loop_detected', 'stp_anomaly',
+  'correlation_incident', 'mac_anomaly', 'traffic_spike',
+  'vlan_anomaly', 'port_change',
+])
+
 interface EventConfig {
   icon: React.ReactNode
   summary: (ev: NetworkEvent) => React.ReactNode
@@ -492,7 +499,7 @@ export function useAlarmWatcher() {
       notification.open({
         key: notifKey,
         type: ev.severity === 'critical' ? 'error' : 'warning',
-        duration: ev.severity === 'critical' ? 0 : 12,
+        duration: (ev.severity === 'critical' || PERSISTENT_TYPES.has(ev.event_type)) ? 0 : 8,
         placement: 'bottomRight',
         style: { width: 340 },
         message: (

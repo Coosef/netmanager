@@ -68,12 +68,13 @@ const MONITOR_CSS = `
 
 // ── Timeline view ─────────────────────────────────────────────────────────────
 function TimelineView({
-  events, newIds, isDark, onAck,
+  events, newIds, isDark, onAck, onDetail,
 }: {
   events: NetworkEvent[]
   newIds: Set<number>
   isDark: boolean
   onAck: (id: number) => void
+  onDetail: (ev: NetworkEvent) => void
 }) {
   const bg = isDark ? '#0e1e38' : '#ffffff'
   const border = isDark ? '#1a3458' : '#e2e8f0'
@@ -152,8 +153,18 @@ function TimelineView({
               </Tooltip>
             </div>
 
-            {/* Ack action */}
-            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', padding: '0 10px', borderLeft: `1px solid ${border}` }}>
+            {/* Detail + Ack actions */}
+            <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '0 8px', borderLeft: `1px solid ${border}` }}>
+              <Tooltip title="Detayı Gör">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<InfoCircleOutlined style={{ color: '#1677ff' }} />}
+                  onClick={() => onDetail(ev)}
+                >
+                  <span style={{ fontSize: 11 }}>Detay</span>
+                </Button>
+              </Tooltip>
               {ev.acknowledged ? (
                 <CheckCircleFilled style={{ color: '#52c41a', fontSize: 15 }} />
               ) : (
@@ -823,6 +834,7 @@ export default function MonitorPage() {
               newIds={newIds}
               isDark={isDark}
               onAck={handleAck}
+              onDetail={(ev) => setSelectedEvent(ev)}
             />
             {total > pageSize && (
               <div style={{ padding: '10px 16px', borderTop: `1px solid ${isDark ? '#1a3458' : '#e2e8f0'}`, display: 'flex', justifyContent: 'flex-end' }}>
