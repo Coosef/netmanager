@@ -34,6 +34,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
+import { useIsMobile } from '@/hooks/useIsMobile'
 
 dayjs.extend(relativeTime)
 
@@ -454,6 +455,7 @@ export default function DashboardPage() {
   const { isDark } = useTheme()
   const { activeSite, setSite, locations } = useSite()
   const { isOrgAdmin } = useAuthStore()
+  const isMobile = useIsMobile()
   const C = isDark ? C_DARK : C_LIGHT
   const N = isDark ? N_DARK : N_LIGHT
   const wsRef     = useRef<WebSocket | null>(null)
@@ -536,8 +538,8 @@ export default function DashboardPage() {
            radial-gradient(ellipse at 85% 90%, rgba(80,0,160,0.12) 0%, transparent 45%),
            ${C.page}`
         : C.page,
-      margin: -24,
-      padding: 24,
+      margin: isMobile ? -14 : -24,
+      padding: isMobile ? 14 : 24,
       position: 'relative',
     }}>
       <style>{makeTV_CSS(isDark)}</style>
@@ -556,7 +558,7 @@ export default function DashboardPage() {
         {/* ── Top header bar ──────────────────────────────────────────────────── */}
         <div style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          padding: '10px 0',
+          padding: '10px 0', flexWrap: 'wrap', gap: 8,
         }}>
           {/* Logo / title */}
           <div>
@@ -577,8 +579,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Center: quick actions */}
-          <div style={{ display: 'flex', gap: 8 }}>
+          {/* Center: quick actions — hidden on mobile */}
+          {!isMobile && <div style={{ display: 'flex', gap: 8 }}>
             {[
               { icon: <PlusOutlined />,           label: 'Cihaz Ekle',     path: '/devices'   },
               { icon: <RadarChartOutlined />,      label: 'Keşif Başlat',   path: '/topology'  },
@@ -628,17 +630,17 @@ export default function DashboardPage() {
             >
               {t('dashboard.refresh')}
             </div>
-          </div>
+          </div>}
 
-          {/* Live clock */}
-          <LiveClock />
+          {/* Live clock — hidden on mobile */}
+          {!isMobile && <LiveClock />}
         </div>
 
         {/* ── Status hero ──────────────────────────────────────────────────────── */}
         <StatusHero s={s} liveEvents={liveEvents} />
 
         {/* ── Stat cards row ───────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {topStatCards.map((c) => <StatCard key={c.label} {...c} />)}
         </div>
 

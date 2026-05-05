@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" width="192" height="192">
+  <rect width="192" height="192" rx="42" fill="#0f172a"/>
+  <rect width="192" height="192" rx="42" fill="url(#bg)"/>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="192" y2="192" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <!-- Wifi arc outer -->
+  <path d="M96 58 C119 58 140 67 155 82" fill="none" stroke="#3b82f6" stroke-width="9" stroke-linecap="round" opacity="0.9"/>
+  <path d="M96 58 C73 58 52 67 37 82" fill="none" stroke="#3b82f6" stroke-width="9" stroke-linecap="round" opacity="0.9"/>
+  <!-- Wifi arc mid -->
+  <path d="M96 78 C112 78 126 84 136 95" fill="none" stroke="#60a5fa" stroke-width="9" stroke-linecap="round" opacity="0.85"/>
+  <path d="M96 78 C80 78 66 84 56 95" fill="none" stroke="#60a5fa" stroke-width="9" stroke-linecap="round" opacity="0.85"/>
+  <!-- Wifi arc inner -->
+  <path d="M96 98 C104 98 111 101 116 107" fill="none" stroke="#93c5fd" stroke-width="9" stroke-linecap="round" opacity="0.8"/>
+  <path d="M96 98 C88 98 81 101 76 107" fill="none" stroke="#93c5fd" stroke-width="9" stroke-linecap="round" opacity="0.8"/>
+  <!-- Center dot -->
+  <circle cx="96" cy="126" r="10" fill="#3b82f6" filter="url(#glow)"/>
+  <defs>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- NM text -->
+  <text x="96" y="162" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="18" font-weight="800" fill="#f1f5f9" letter-spacing="2">NetManager</text>
+</svg>

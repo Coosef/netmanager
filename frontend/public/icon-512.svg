@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#0f172a"/>
+  <rect width="512" height="512" rx="112" fill="url(#bg512)"/>
+  <defs>
+    <linearGradient id="bg512" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <!-- Wifi arc outer -->
+  <path d="M256 148 C318 148 374 172 413 212" fill="none" stroke="#3b82f6" stroke-width="24" stroke-linecap="round" opacity="0.9"/>
+  <path d="M256 148 C194 148 138 172 99 212" fill="none" stroke="#3b82f6" stroke-width="24" stroke-linecap="round" opacity="0.9"/>
+  <!-- Wifi arc mid -->
+  <path d="M256 204 C300 204 338 220 363 248" fill="none" stroke="#60a5fa" stroke-width="24" stroke-linecap="round" opacity="0.85"/>
+  <path d="M256 204 C212 204 174 220 149 248" fill="none" stroke="#60a5fa" stroke-width="24" stroke-linecap="round" opacity="0.85"/>
+  <!-- Wifi arc inner -->
+  <path d="M256 260 C280 260 300 269 313 284" fill="none" stroke="#93c5fd" stroke-width="24" stroke-linecap="round" opacity="0.8"/>
+  <path d="M256 260 C232 260 212 269 199 284" fill="none" stroke="#93c5fd" stroke-width="24" stroke-linecap="round" opacity="0.8"/>
+  <!-- Center dot -->
+  <circle cx="256" cy="330" r="28" fill="#3b82f6" filter="url(#glow512)"/>
+  <defs>
+    <filter id="glow512" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="8" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <!-- NM text -->
+  <text x="256" y="432" text-anchor="middle" font-family="system-ui, -apple-system, sans-serif" font-size="48" font-weight="800" fill="#f1f5f9" letter-spacing="4">NetManager</text>
+</svg>

@@ -141,7 +141,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
   }
 
   const notifContent = (
-    <div style={{ width: 360, background: notifBg }}>
+    <div style={{ width: '100%', background: notifBg }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: `1px solid ${notifBorder}` }}>
         <Typography.Text style={{ fontWeight: 700, fontSize: 14, color: textColor }}>
@@ -289,6 +289,49 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
 
       <div style={{ flex: 1 }} />
 
+      {/* Location selector — mobile compact dropdown */}
+      {isMobile && locations.length > 0 && (
+        <Dropdown
+          trigger={['click']}
+          placement="bottomLeft"
+          menu={{
+            selectedKeys: activeSite ? [activeSite] : ['__all__'],
+            items: [
+              {
+                key: '__all__',
+                label: 'Tüm Lokasyonlar',
+                onClick: () => { setSite(null); qc.invalidateQueries() },
+              },
+              ...locations.map((loc) => ({
+                key: loc.name,
+                label: (
+                  <Space size={6}>
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: loc.color || '#3b82f6', display: 'inline-block' }} />
+                    {loc.name}
+                  </Space>
+                ),
+                onClick: () => { setSite(loc.name); qc.invalidateQueries() },
+              })),
+            ],
+          }}
+        >
+          <Button type="text" style={{ padding: '0 6px' }}>
+            <Space size={4}>
+              <div style={{
+                width: 8, height: 8, borderRadius: '50%',
+                background: activeLocation?.color || (activeSite ? '#38bdf8' : iconColor),
+                flexShrink: 0,
+              }} />
+              {activeSite && (
+                <span style={{ fontSize: 11, color: '#38bdf8', maxWidth: 56, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {activeSite}
+                </span>
+              )}
+            </Space>
+          </Button>
+        </Dropdown>
+      )}
+
       {/* Location selector — hidden on mobile */}
       {!isMobile && (
         <Space size={6}>
@@ -338,6 +381,21 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           />
         </Tooltip>
       ) : null}
+
+      {/* Theme toggle — mobile compact icon */}
+      {isMobile && (
+        <Tooltip title={isDark ? t('header.theme_light') : t('header.theme_dark')}>
+          <Button
+            type="text"
+            icon={isDark
+              ? <SunOutlined style={{ color: '#f59e0b', fontSize: 16 }} />
+              : <MoonOutlined style={{ color: iconColor, fontSize: 16 }} />
+            }
+            onClick={toggle}
+            style={{ padding: '0 8px' }}
+          />
+        </Tooltip>
+      )}
 
       {!isMobile && <Popover
         open={searchOpen && search.trim().length >= 2}
@@ -453,7 +511,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
         onOpenChange={setNotifOpen}
         placement="bottomRight"
         arrow={false}
-        overlayInnerStyle={{ padding: 0, borderRadius: 10, overflow: 'hidden' }}
+        overlayInnerStyle={{ padding: 0, borderRadius: 10, overflow: 'hidden', width: isMobile ? 'calc(100vw - 16px)' : 360, maxWidth: 360 }}
       >
         <Badge count={unacked} size="small" overflowCount={99}>
           <BellOutlined

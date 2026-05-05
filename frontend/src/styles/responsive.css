@@ -1,58 +1,133 @@
 /* ── Responsive utilities for NetManager ── */
 
-/* Tables: horizontal scroll on all viewports */
+/* ── Tables: horizontal scroll globally ── */
 .ant-table-wrapper {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
 
-/* Mobile breakpoint */
+/* ── Safe area support (iPhone notch / Dynamic Island / home bar) ── */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* Sticky header must clear the status bar notch */
+.ant-layout-header {
+  padding-left: calc(24px + var(--safe-left)) !important;
+  padding-right: calc(24px + var(--safe-right)) !important;
+}
+
+/* ── Tablet breakpoint (768–1024 px) ── */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .ant-card-body { padding: 14px !important; }
+  .ant-statistic-content-value { font-size: 26px !important; }
+}
+
+/* ── Mobile breakpoint (≤ 768 px) ── */
 @media (max-width: 768px) {
 
-  /* Ant Design card padding */
-  .ant-card-body {
-    padding: 12px !important;
-  }
+  /* ── Card padding ── */
+  .ant-card-body { padding: 12px !important; }
 
-  /* Stat / summary cards that use fixed min-width */
-  .ant-statistic-content-value {
-    font-size: 22px !important;
-  }
+  /* ── Stat values ── */
+  .ant-statistic-content-value { font-size: 22px !important; }
 
-  /* Page-level headings */
+  /* ── Headings ── */
   h1 { font-size: 18px !important; }
   h2 { font-size: 16px !important; }
 
-  /* Ant grid: force 1 column on small screens */
+  /* ── Ant Grid: force full-width columns ── */
   .ant-row > .ant-col-xs-24,
   .ant-row > [class*='ant-col-'] {
     flex: 0 0 100%;
     max-width: 100%;
   }
 
-  /* Tooltip/popover: prevent overflow */
+  /* ── Tooltip / Popover overflow fix ── */
   .ant-tooltip { max-width: 90vw !important; }
+  .ant-popover-inner { max-width: calc(100vw - 16px) !important; }
 
-  /* Drawer body full height */
+  /* ── Drawer: no extra body padding ── */
   .ant-drawer-body { padding: 0 !important; }
 
-  /* Modal: full width on mobile */
-  .ant-modal { max-width: 96vw !important; margin: 8px auto !important; }
+  /* ── Modal: nearly full-screen on mobile ── */
+  .ant-modal {
+    max-width: 96vw !important;
+    margin: 8px auto !important;
+  }
+  .ant-modal-content { border-radius: 12px !important; }
 
-  /* Form: stacked labels */
+  /* ── Form: stacked labels ── */
   .ant-form-item-label { padding-bottom: 2px; }
 
-  /* Hide text-only columns in tables on very small screens */
-  .hide-mobile { display: none !important; }
-
-  /* Buttons: larger tap targets */
+  /* ── Buttons: larger tap targets (44px min) ── */
   .ant-btn { min-height: 36px; }
 
-  /* Input: comfortable size */
-  .ant-input, .ant-select-selector {
-    font-size: 16px !important; /* prevents iOS zoom on focus */
+  /* ── Inputs: prevent iOS auto-zoom on focus (needs 16px+) ── */
+  .ant-input,
+  .ant-input-password input,
+  .ant-select-selector,
+  .ant-picker-input input,
+  textarea.ant-input {
+    font-size: 16px !important;
   }
 
-  /* AI Assistant: override the viewport escape margin for mobile */
-  /* (uses different padding — 12px 14px — so offset must match) */
+  /* ── Table: comfortable on phone ── */
+  .ant-table-thead > tr > th { padding: 8px 10px !important; font-size: 12px !important; }
+  .ant-table-tbody > tr > td { padding: 8px 10px !important; font-size: 13px !important; }
+
+  /* ── Tags: slightly more padding for touch ── */
+  .ant-tag { padding: 2px 7px; }
+
+  /* ── Collapse: tighter padding ── */
+  .ant-collapse-header { padding: 10px 14px !important; }
+
+  /* ── Tabs ── */
+  .ant-tabs-nav { margin-bottom: 12px !important; }
+  .ant-tabs-tab { padding: 8px 10px !important; font-size: 13px !important; }
+
+  /* ── Descriptions ── */
+  .ant-descriptions-item-label,
+  .ant-descriptions-item-content {
+    padding: 8px 10px !important;
+    font-size: 13px !important;
+  }
+
+  /* ── Utility: hide desktop-only elements ── */
+  .hide-mobile { display: none !important; }
+
+  /* ── Utility: show only on mobile ── */
+  .show-mobile { display: block !important; }
+
+  /* ── Page content bottom padding (home-bar safe area) ── */
+  .ant-layout-content {
+    padding-bottom: max(16px, var(--safe-bottom)) !important;
+  }
+}
+
+/* ── Extra small (≤ 375 px — older iPhones) ── */
+@media (max-width: 375px) {
+  .ant-card-body { padding: 10px !important; }
+  .ant-table-thead > tr > th { padding: 6px 8px !important; }
+  .ant-table-tbody > tr > td { padding: 6px 8px !important; }
+  .ant-btn { padding: 0 10px; }
+}
+
+/* ── Touch-device: remove hover effects that look broken on tap ── */
+@media (hover: none) and (pointer: coarse) {
+  .ant-btn:hover,
+  .ant-menu-item:hover {
+    background: transparent !important;
+  }
+}
+
+/* ── Print: hide sidebar and header ── */
+@media print {
+  .ant-layout-sider,
+  .ant-layout-header,
+  .ant-drawer { display: none !important; }
+  .ant-layout-content { padding: 0 !important; }
 }
