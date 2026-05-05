@@ -138,8 +138,8 @@ async def _calc_risk(db: AsyncSession, device: Device, now: datetime) -> dict:
 @router.get("/devices/{device_id}/risk-score")
 async def device_risk_score(
     device_id: int,
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     """0-100 risk puanı ve breakdown — tek cihaz."""
     device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
@@ -150,9 +150,9 @@ async def device_risk_score(
 
 @router.get("/fleet/risk")
 async def fleet_risk(
+    _: CurrentUser,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser,
     location_filter: LocationNameFilter = None,
 ):
     """Tüm aktif cihazların risk skorları — en riskli N cihaz ve özet."""
@@ -186,9 +186,9 @@ async def fleet_risk(
 @router.get("/devices/{device_id}/mttr-mtbf")
 async def device_mttr_mtbf(
     device_id: int,
+    _: CurrentUser,
     window_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser,
 ):
     """
     MTTR (Ort. Kurtarma Süresi): her offline→online çiftinin süresi ortalaması.
@@ -260,9 +260,9 @@ async def device_mttr_mtbf(
 @router.get("/devices/{device_id}/timeline")
 async def device_timeline(
     device_id: int,
+    _: CurrentUser,
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser,
 ):
     """
     Network event + config backup + audit log kayıtlarını tek zaman çizelgesinde birleştirir.
@@ -359,10 +359,10 @@ async def device_timeline(
 
 @router.get("/root-cause-incidents")
 async def root_cause_incidents(
+    _: CurrentUser,
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser,
 ):
     """
     Son N saatteki correlation_incident olaylarını döndürür.
@@ -415,10 +415,10 @@ _ANOMALY_LABEL = {
 
 @router.get("/anomalies")
 async def get_anomalies(
+    _: CurrentUser,
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser,
 ):
     """
     Son N saatteki davranış anomalisi olaylarını döndürür.

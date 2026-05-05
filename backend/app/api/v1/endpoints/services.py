@@ -41,8 +41,8 @@ def _svc_out(s: Service) -> dict:
 
 @router.get("/fleet/impact-summary")
 async def fleet_impact_summary(
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     """Tüm aktif servisler için etki özeti — Dashboard widget için."""
     services = (await db.execute(
@@ -107,8 +107,8 @@ async def fleet_impact_summary(
 
 @router.get("")
 async def list_services(
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     rows = (await db.execute(select(Service).order_by(Service.name))).scalars().all()
     return {"total": len(rows), "items": [_svc_out(s) for s in rows]}
@@ -117,8 +117,8 @@ async def list_services(
 @router.post("")
 async def create_service(
     body: dict,
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     if not body.get("name"):
         raise HTTPException(400, "name is required")
@@ -146,8 +146,8 @@ async def create_service(
 @router.get("/{service_id}")
 async def get_service(
     service_id: int,
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
@@ -159,8 +159,8 @@ async def get_service(
 async def update_service(
     service_id: int,
     body: dict,
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
@@ -177,8 +177,8 @@ async def update_service(
 @router.delete("/{service_id}")
 async def delete_service(
     service_id: int,
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
@@ -193,8 +193,8 @@ async def delete_service(
 @router.get("/{service_id}/impact")
 async def service_impact(
     service_id: int,
-    db: AsyncSession = Depends(get_db),
     _: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Hangi cihazlar offline → bu servis etkileniyor mu?
