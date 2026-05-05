@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   App, Row, Col, Card, Table, Tag, Button, Space, Select, Typography,
-  Badge, Tooltip, Popconfirm, Segmented,
+  Badge, Tooltip, Popconfirm, Segmented, Modal, Descriptions, Divider,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
+import { useNavigate } from 'react-router-dom'
 import {
   SyncOutlined, CheckOutlined, BellOutlined, FilterOutlined,
   ThunderboltOutlined, CloseCircleOutlined, WarningOutlined,
   InfoCircleOutlined, CheckCircleFilled, AlertOutlined,
   UnorderedListOutlined, MenuOutlined, ClearOutlined,
+  ApiOutlined, ApartmentOutlined, BranchesOutlined,
+  DisconnectOutlined, LineChartOutlined, RobotOutlined,
+  TableOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
@@ -213,16 +217,229 @@ function SevCard({ label, value, color, isDark, glow }: {
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  device_offline: 'Cihaz Offline',
-  device_online: 'Cihaz Online',
-  stp_anomaly: 'STP Anomali',
-  loop_detected: 'Loop Tespit',
-  port_change: 'Port Değişimi',
-  new_device_connected: 'Yeni Cihaz Bağlandı',
-  threshold_alert: 'Eşik Alarmı (SNMP)',
-  high_cpu: 'Yüksek CPU',
-  config_change: 'Config Değişimi',
-  backup_failed: 'Yedek Hatası',
+  device_offline:        'Cihaz Offline',
+  device_online:         'Cihaz Online',
+  stp_anomaly:           'STP Anomali',
+  loop_detected:         'Loop Tespit',
+  port_change:           'Port Değişimi',
+  new_device_connected:  'Yeni Cihaz Bağlandı',
+  threshold_alert:       'Eşik Alarmı (SNMP)',
+  high_cpu:              'Yüksek CPU',
+  config_change:         'Config Değişimi',
+  backup_failed:         'Yedek Hatası',
+  mac_loop_suspicion:    'MAC Döngü Şüphesi',
+  mac_anomaly:           'MAC Anomalisi',
+  traffic_spike:         'Trafik Artışı',
+  vlan_anomaly:          'VLAN Anomalisi',
+  device_flapping:       'Cihaz Flapping',
+  agent_outage:          'Agent Kesintisi',
+  correlation_incident:  'Kök Neden Analizi',
+}
+
+// ── Event detail modal helpers ────────────────────────────────────────────────
+
+interface EventDetail {
+  icon: React.ReactNode
+  what: string                           // 1-line explanation
+  rows: { label: string; value: React.ReactNode }[]  // key-value detail rows
+  links: { label: string; path: string; icon: React.ReactNode }[]
+}
+
+function buildEventDetail(ev: NetworkEvent): EventDetail {
+  const d = (ev.details || {}) as Record<string, any>
+  const devSearch = ev.device_hostname
+    ? `/devices?search=${encodeURIComponent(ev.device_hostname)}`
+    : '/devices'
+
+  switch (ev.event_type) {
+    case 'mac_loop_suspicion':
+      return {
+        icon: <SyncOutlined style={{ color: '#faad14' }} />,
+        what: 'Aynı MAC adresi birden fazla portta görüldü — ağ döngüsü riski var.',
+        rows: [
+          { label: 'MAC Adresi', value: <Tag color="orange">{d.mac ?? '—'}</Tag> },
+          { label: 'Port Sayısı', value: <Tag color="red">{d.port_count ?? '—'} farklı port</Tag> },
+          { label: 'Öneri',      value: 'Spanning Tree durumunu ve port bağlantılarını kontrol edin.' },
+        ],
+        links: [
+          { label: 'MAC / ARP Tablosu', path: '/mac-arp',  icon: <TableOutlined /> },
+          { label: 'Cihaza Git',        path: devSearch,   icon: <ApiOutlined /> },
+          { label: 'Topoloji',          path: '/topology', icon: <ApartmentOutlined /> },
+        ],
+      }
+
+    case 'loop_detected':
+    case 'stp_anomaly':
+      return {
+        icon: <ExclamationCircleOutlined style={{ color: '#ff4d4f' }} />,
+        what: ev.event_type === 'stp_anomaly'
+          ? 'Spanning Tree anomalisi tespit edildi — port döngüsü veya topoloji değişimi olabilir.'
+          : 'Cihaz log\'unda döngü/flap pattern\'i bulundu.',
+        rows: [
+          { label: 'Pattern', value: d.pattern ? <Tag color="red">{d.pattern}</Tag> : '—' },
+          ...(d.snippet ? [{ label: 'Log Satırı', value: (
+            <Text code style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {String(d.snippet).slice(0, 400)}
+            </Text>
+          )}] : []),
+          { label: 'Öneri', value: 'Terminal\'den "show spanning-tree" çalıştırın ve port durumlarını inceleyin.' },
+        ],
+        links: [
+          { label: 'Cihaza Git',  path: devSearch,   icon: <ApiOutlined /> },
+          { label: 'Topoloji',    path: '/topology', icon: <ApartmentOutlined /> },
+        ],
+      }
+
+    case 'device_offline':
+      return {
+        icon: <DisconnectOutlined style={{ color: '#ff4d4f' }} />,
+        what: 'Cihaza SSH bağlantısı kurulamıyor — erişilemiyor olabilir.',
+        rows: [
+          { label: 'Hata', value: ev.message || '—' },
+          { label: 'Öneri', value: 'Güç kaynağını, kablo bağlantısını ve routing\'i kontrol edin.' },
+        ],
+        links: [
+          { label: 'Cihaza Git', path: devSearch,   icon: <ApiOutlined /> },
+          { label: 'Topoloji',   path: '/topology', icon: <ApartmentOutlined /> },
+        ],
+      }
+
+    case 'device_flapping':
+      return {
+        icon: <WarningOutlined style={{ color: '#ff4d4f' }} />,
+        what: 'Cihaz kısa sürede defalarca online/offline döngüsüne giriyor.',
+        rows: [
+          { label: 'Detay', value: ev.message || '—' },
+          { label: 'Öneri', value: 'Güç kaynağı, NIC veya uplink kablosunu kontrol edin. Bireysel olaylar bastırılmış olabilir.' },
+        ],
+        links: [
+          { label: 'Cihaza Git', path: devSearch, icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'agent_outage':
+      return {
+        icon: <RobotOutlined style={{ color: '#ff4d4f' }} />,
+        what: 'Proxy agent bağlantısı kesildi — aynı segmentteki cihazlar etkileniyor.',
+        rows: [
+          { label: 'Detay', value: ev.message || '—' },
+          { label: 'Öneri', value: 'Agent servisini yeniden başlatın veya agent\'ın ağ bağlantısını kontrol edin.' },
+        ],
+        links: [
+          { label: 'Agent Yönetimi', path: '/agents', icon: <RobotOutlined /> },
+          { label: 'Topoloji',       path: '/topology', icon: <ApartmentOutlined /> },
+        ],
+      }
+
+    case 'correlation_incident':
+      return {
+        icon: <ApartmentOutlined style={{ color: '#ff4d4f' }} />,
+        what: 'Kök neden analizi: tek cihaz arızası cascade etkisi yarattı.',
+        rows: [
+          { label: 'Etkilenen Cihaz Sayısı', value: <Tag color="red">{d.affected_count ?? '—'}</Tag> },
+          ...(d.affected_devices?.length ? [{ label: 'Etkilenen Cihazlar', value: (
+            <Space wrap size={4}>
+              {(d.affected_devices as any[]).map((x: any) => (
+                <Tag key={x.id} color="orange">{x.hostname}</Tag>
+              ))}
+            </Space>
+          )}] : []),
+          { label: 'Öneri', value: 'Topoloji haritasında kök cihazdan itibaren cascade\'i takip edin.' },
+        ],
+        links: [
+          { label: 'Topoloji',    path: '/topology', icon: <ApartmentOutlined /> },
+          { label: 'Kök Cihaza Git', path: devSearch, icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'mac_anomaly':
+      return {
+        icon: <TableOutlined style={{ color: '#faad14' }} />,
+        what: 'MAC tablosu boyutu normalin çok üstünde — olağandışı trafik veya MAC flood saldırısı olabilir.',
+        rows: [
+          { label: 'Şu Anki MAC Sayısı', value: <Tag color="red">{d.current ?? '—'}</Tag> },
+          { label: 'Normal Baseline',    value: <Tag color="blue">{d.baseline ?? '—'}</Tag> },
+          { label: 'Öneri',              value: 'MAC/ARP tablosunu inceleyin, port güvenliği (port-security) konfigürasyonunu kontrol edin.' },
+        ],
+        links: [
+          { label: 'MAC / ARP Tablosu', path: '/mac-arp', icon: <TableOutlined /> },
+          { label: 'Cihaza Git',        path: devSearch,  icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'traffic_spike':
+      return {
+        icon: <LineChartOutlined style={{ color: '#faad14' }} />,
+        what: `${d.direction === 'gelen' ? 'Gelen' : 'Giden'} trafik baseline'ın 2 katına ulaştı.`,
+        rows: [
+          { label: 'Yön',      value: <Tag>{d.direction === 'gelen' ? '↓ Gelen' : '↑ Giden'}</Tag> },
+          { label: 'Kullanım', value: <Tag color="red">%{d.current_pct ?? '—'}</Tag> },
+          { label: 'Baseline', value: <Tag color="blue">%{d.baseline_pct ?? '—'}</Tag> },
+          { label: 'Öneri',    value: 'Bant genişliği grafiğini inceleyip trafik kaynağını belirleyin.' },
+        ],
+        links: [
+          { label: 'Bant Genişliği', path: '/bandwidth', icon: <LineChartOutlined /> },
+          { label: 'Cihaza Git',     path: devSearch,    icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'vlan_anomaly':
+      return {
+        icon: <BranchesOutlined style={{ color: '#faad14' }} />,
+        what: 'Cihazda daha önce görülmemiş VLAN\'lar tespit edildi.',
+        rows: [
+          { label: 'Yeni VLAN\'lar', value: (
+            <Space wrap size={4}>
+              {(d.new_vlans || []).map((v: number) => <Tag key={v} color="orange">VLAN {v}</Tag>)}
+            </Space>
+          )},
+          { label: 'Bilinen VLAN\'lar', value: (
+            <Space wrap size={4}>
+              {(d.known_vlans || []).slice(0, 10).map((v: number) => <Tag key={v}>{v}</Tag>)}
+              {(d.known_vlans || []).length > 10 && <Tag>+{(d.known_vlans || []).length - 10}</Tag>}
+            </Space>
+          )},
+          { label: 'Öneri', value: 'Yetkisiz VLAN eklenip eklenmediğini kontrol edin.' },
+        ],
+        links: [
+          { label: 'VLAN Yönetimi', path: '/vlan',    icon: <BranchesOutlined /> },
+          { label: 'Cihaza Git',    path: devSearch,  icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'port_change':
+      return {
+        icon: <DisconnectOutlined style={{ color: '#faad14' }} />,
+        what: 'Port durum değişikliği log\'da tespit edildi.',
+        rows: [
+          { label: 'Log Satırı', value: (
+            <Text code style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {d.log_line || ev.message || '—'}
+            </Text>
+          )},
+        ],
+        links: [
+          { label: 'Cihaza Git', path: devSearch, icon: <ApiOutlined /> },
+        ],
+      }
+
+    default:
+      return {
+        icon: <AlertOutlined style={{ color: '#faad14' }} />,
+        what: ev.message || 'Detay için ilgili sayfaları kontrol edin.',
+        rows: [
+          ...(ev.message ? [{ label: 'Mesaj', value: ev.message }] : []),
+          ...(Object.keys(d).length > 0 ? [{ label: 'Detaylar', value: (
+            <Text code style={{ fontSize: 11, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {JSON.stringify(d, null, 2)}
+            </Text>
+          )}] : []),
+        ],
+        links: [
+          ...(ev.device_hostname ? [{ label: 'Cihaza Git', path: devSearch, icon: <ApiOutlined /> }] : []),
+        ],
+      }
+  }
 }
 
 export default function MonitorPage() {
@@ -230,6 +447,7 @@ export default function MonitorPage() {
   const { t } = useTranslation()
   const { isDark } = useTheme()
   const { activeSite } = useSite()
+  const navigate = useNavigate()
   const qc = useQueryClient()
   const wsRef = useRef<WebSocket | null>(null)
   const [liveCount, setLiveCount] = useState(0)
@@ -242,6 +460,7 @@ export default function MonitorPage() {
   const [unackedOnly, setUnackedOnly] = useState(false)
   const [hours, setHours] = useState(24)
   const [page, setPage] = useState(1)
+  const [selectedEvent, setSelectedEvent] = useState<NetworkEvent | null>(null)
   const pageSize = 50
 
   const { data: eventsData, isFetching, refetch } = useQuery({
@@ -620,12 +839,101 @@ export default function MonitorPage() {
               `mon-row-${r.severity}${!r.acknowledged ? ' mon-row-unacked' : ''}`
             }
             onRow={(r) => ({
-              style: { borderLeft: `3px solid ${SEV_HEX[r.severity] || '#3b82f640'}` },
+              style: { borderLeft: `3px solid ${SEV_HEX[r.severity] || '#3b82f640'}`, cursor: 'pointer' },
+              onClick: () => setSelectedEvent(r),
             })}
             style={{ minHeight: 400 }}
           />
         )}
       </Card>
+
+      {/* ── Event Detail Modal ─────────────────────────────────────────── */}
+      {selectedEvent && (() => {
+        const ev = selectedEvent
+        const detail = buildEventDetail(ev)
+        const sevColor = ev.severity === 'critical' ? '#ff4d4f' : ev.severity === 'warning' ? '#faad14' : '#1677ff'
+        return (
+          <Modal
+            open
+            onCancel={() => setSelectedEvent(null)}
+            footer={null}
+            width={560}
+            title={
+              <Space size={10}>
+                {detail.icon}
+                <span style={{ fontSize: 15 }}>{ev.title}</span>
+                <Tag color={sevColor} style={{ fontSize: 11 }}>{ev.severity}</Tag>
+              </Space>
+            }
+          >
+            {/* Meta */}
+            <Descriptions size="small" column={2} style={{ marginBottom: 12 }}>
+              <Descriptions.Item label="Olay Türü">
+                <Tag>{TYPE_LABELS[ev.event_type] || ev.event_type}</Tag>
+              </Descriptions.Item>
+              {ev.device_hostname && (
+                <Descriptions.Item label="Cihaz">
+                  <Tag color="geekblue">{ev.device_hostname}</Tag>
+                </Descriptions.Item>
+              )}
+              <Descriptions.Item label="Zaman" span={2}>
+                {dayjs(ev.created_at).format('DD.MM.YYYY HH:mm:ss')}
+                <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                  ({dayjs(ev.created_at).fromNow()})
+                </Text>
+              </Descriptions.Item>
+            </Descriptions>
+
+            {/* What happened */}
+            <div style={{
+              background: ev.severity === 'critical' ? '#fff1f0' : ev.severity === 'warning' ? '#fffbe6' : '#e6f4ff',
+              border: `1px solid ${sevColor}30`,
+              borderRadius: 8, padding: '10px 14px', marginBottom: 14,
+            }}>
+              <Text style={{ fontSize: 13 }}>{detail.what}</Text>
+            </div>
+
+            {/* Detail rows */}
+            {detail.rows.length > 0 && (
+              <Descriptions size="small" column={1} bordered style={{ marginBottom: 16 }}>
+                {detail.rows.map((row, i) => (
+                  <Descriptions.Item key={i} label={<Text style={{ fontSize: 12 }}>{row.label}</Text>}>
+                    {typeof row.value === 'string'
+                      ? <Text style={{ fontSize: 12 }}>{row.value}</Text>
+                      : row.value}
+                  </Descriptions.Item>
+                ))}
+              </Descriptions>
+            )}
+
+            <Divider style={{ margin: '12px 0' }} />
+
+            {/* Navigation links */}
+            <div style={{ marginBottom: 8 }}>
+              <Text type="secondary" style={{ fontSize: 12 }}>İlgili sayfalar:</Text>
+            </div>
+            <Space wrap size={8}>
+              {detail.links.map((link, i) => (
+                <Button
+                  key={i}
+                  icon={link.icon}
+                  onClick={() => { setSelectedEvent(null); navigate(link.path) }}
+                >
+                  {link.label}
+                </Button>
+              ))}
+              {!ev.acknowledged && (
+                <Button
+                  icon={<CheckOutlined />}
+                  onClick={async () => { await handleAck(ev.id); setSelectedEvent(null) }}
+                >
+                  Onayla
+                </Button>
+              )}
+            </Space>
+          </Modal>
+        )
+      })()}
 
     </div>
   )
