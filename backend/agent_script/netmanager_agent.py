@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.3"
+VERSION = "1.3.4"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -978,28 +978,35 @@ async def handle_message(ws, msg, loop):
     elif t == "update_available":
         server_version = msg.get("current_version", "?")
         script_path_remote = msg.get("script_path", "/api/v1/agents/script")
-        log.info("Guncelleme mevcut: {} -> {}. Indiriliyor...".format(VERSION, server_version))
+        script_content_b64 = msg.get("script_content")
+        log.info("Guncelleme mevcut: {} -> {}. Yukleniyor...".format(VERSION, server_version))
         try:
             import ast as _ast
             import shutil
-            import urllib.request
 
-            dl_url = BACKEND_URL.rstrip("/") + script_path_remote
             script_file = os.path.abspath(__file__)
             tmp_file = script_file + ".new"
 
-            # Download new script with agent credentials
-            _req = urllib.request.Request(
-                dl_url,
-                headers={
-                    "User-Agent": "NetManager-Agent/{}".format(VERSION),
-                    "X-Agent-ID": AGENT_ID,
-                    "X-Agent-Key": os.environ.get("NETMANAGER_AGENT_KEY", AGENT_KEY),
-                },
-            )
-            with urllib.request.urlopen(_req, timeout=30) as _resp:
+            if script_content_b64:
+                # Preferred: use content delivered directly via WebSocket
+                _decoded = base64.b64decode(script_content_b64)
                 with open(tmp_file, "wb") as _f:
-                    _f.write(_resp.read())
+                    _f.write(_decoded)
+            else:
+                # Fallback: HTTP download with agent credentials
+                import urllib.request
+                dl_url = BACKEND_URL.rstrip("/") + script_path_remote
+                _req = urllib.request.Request(
+                    dl_url,
+                    headers={
+                        "User-Agent": "NetManager-Agent/{}".format(VERSION),
+                        "X-Agent-ID": AGENT_ID,
+                        "X-Agent-Key": os.environ.get("NETMANAGER_AGENT_KEY", AGENT_KEY),
+                    },
+                )
+                with urllib.request.urlopen(_req, timeout=30) as _resp:
+                    with open(tmp_file, "wb") as _f:
+                        _f.write(_resp.read())
 
             # Validate syntax before replacing
             with open(tmp_file, encoding="utf-8") as _f:

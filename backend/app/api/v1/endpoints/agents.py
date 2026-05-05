@@ -167,16 +167,23 @@ async def trigger_agent_update(
 
 
 async def _send_update_command(agent_id: str) -> bool:
-    """Send update_available to the agent via its WebSocket connection."""
+    """Send update_available to the agent via its WebSocket connection.
+    Embeds script content directly in the message to avoid HTTP download issues."""
     from app.services.agent_manager import agent_manager as _am
+    import base64
     ws = _am._connections.get(agent_id)
     if not ws:
         return False
     try:
+        script_path = Path(__file__).parents[4] / "agent_script" / "netmanager_agent.py"
+        script_content_b64 = None
+        if script_path.exists():
+            script_content_b64 = base64.b64encode(script_path.read_bytes()).decode()
         await ws.send_text(json.dumps({
             "type": "update_available",
             "current_version": CURRENT_AGENT_VERSION,
             "script_path": "/api/v1/agents/download/script",
+            "script_content": script_content_b64,
         }))
         return True
     except Exception:
@@ -1161,11 +1168,15 @@ async def agent_websocket(
                 agent_ver = msg.get("version") or ""
                 if agent_ver and agent_ver != CURRENT_AGENT_VERSION:
                     try:
+                        import base64 as _b64
+                        _sp = Path(__file__).parents[4] / "agent_script" / "netmanager_agent.py"
+                        _sc = _b64.b64encode(_sp.read_bytes()).decode() if _sp.exists() else None
                         await asyncio.wait_for(
                             websocket.send_text(json.dumps({
                                 "type": "update_available",
                                 "current_version": CURRENT_AGENT_VERSION,
                                 "script_path": "/api/v1/agents/download/script",
+                                "script_content": _sc,
                             })),
                             timeout=5,
                         )
