@@ -668,7 +668,7 @@ class TopologyService:
                     edge_set.add(key)
                     util_g = util_map.get((link.device_id, link.local_port))
                     edges.append({
-                        "id": f"eg-{link.device_id}-{link.neighbor_hostname}",
+                        "id": f"eg-{link.device_id}-{link.neighbor_hostname}-{link.local_port}",
                         "source": f"d-{link.device_id}",
                         "target": gid,
                         "label": f"{link.local_port} ↔ {link.neighbor_port}",
