@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 export function buildWsUrl(path: string): string {
   const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const host = window.location.hostname
-  const port = import.meta.env.DEV ? '8000' : window.location.port
+  const port = window.location.port
   const portSuffix = port ? `:${port}` : ''
   const token = useAuthStore.getState().token
   const base = `${proto}://${host}${portSuffix}${path}`
