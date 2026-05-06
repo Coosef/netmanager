@@ -182,7 +182,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
   // ── Refresh node Three.js materials directly ───────────────────────────────
   const refreshNodes = useCallback(() => {
-    if (!fgRef.current) return
+    if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
     const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
     const isolated = isolateIdRef.current
 
@@ -374,7 +374,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
   // ── Blast radius: trigger animation when blastDeviceIds changes ───────────
   useEffect(() => {
-    if (!blastDeviceIds.length || !fgRef.current) return
+    if (!blastDeviceIds.length || !fgRef.current || typeof fgRef.current.graphData !== 'function') return
     blastNodeIds.current = new Set(blastDeviceIds)
     refreshNodes()
 
