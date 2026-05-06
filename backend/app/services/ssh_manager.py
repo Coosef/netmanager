@@ -143,19 +143,78 @@ class SSHManager:
         fallbacks = getattr(device, "fallback_agent_ids", None) or []
         candidates.extend(f for f in fallbacks if f and f != primary)
 
-        # Only route through agents that have an active WebSocket in THIS process.
-        # Celery workers have no WebSocket connections (those live in the FastAPI
-        # process), so is_online via Redis is not sufficient — we must verify the
-        # connection is actually held here, otherwise _send_request raises
-        # "Agent not connected" immediately and all devices fail.
-        online = [aid for aid in candidates
-                  if aid in agent_manager._connections and agent_manager.is_online(aid)]
+        online = [aid for aid in candidates if agent_manager.is_online(aid)]
         if not online:
             return None
 
         # Sort by measured latency ascending; unknown latency → infinity (try last)
         online.sort(key=lambda aid: agent_manager.get_latency(aid, device.id) or float("inf"))
         return online[0]
+
+    def _relay_payload(self, device) -> dict:
+        return {
+            "device_id": device.id,
+            "hostname": getattr(device, "hostname", ""),
+            "ip_address": device.ip_address,
+            "ssh_username": getattr(device, "ssh_username", None),
+            "ssh_password_enc": getattr(device, "ssh_password_enc", None),
+            "ssh_port": getattr(device, "ssh_port", None) or 22,
+            "os_type": getattr(device, "os_type", None) or "cisco_ios",
+            "enable_secret_enc": getattr(device, "enable_secret_enc", None),
+            "credential_profile_id": getattr(device, "credential_profile_id", None),
+        }
+
+    def _relay_ssh(self, agent_id: str, device, command: str) -> CommandResult:
+        """Relay SSH command via FastAPI backend HTTP endpoint (used by Celery workers)."""
+        import requests as _req
+        payload = {"agent_id": agent_id, "command": command, **self._relay_payload(device)}
+        try:
+            resp = _req.post(
+                "http://backend:8000/api/v1/internal/agent-relay",
+                json=payload,
+                headers={"X-Internal-Key": settings.SECRET_KEY},
+                timeout=120,
+            )
+            data = resp.json()
+            return CommandResult(
+                device_id=device.id, hostname=getattr(device, "hostname", ""),
+                ip_address=device.ip_address,
+                success=data.get("success", False),
+                output=data.get("output", ""),
+                error=data.get("error", ""),
+                duration_ms=data.get("duration_ms", 0),
+            )
+        except Exception as e:
+            return CommandResult(
+                device_id=device.id, hostname=getattr(device, "hostname", ""),
+                ip_address=device.ip_address, success=False, error=f"Relay error: {e}",
+            )
+
+    def _relay_config(self, agent_id: str, device, commands: list) -> CommandResult:
+        """Relay config commands via FastAPI backend HTTP endpoint (used by Celery workers)."""
+        import requests as _req
+        payload = {"agent_id": agent_id, "commands": commands, **self._relay_payload(device)}
+        try:
+            resp = _req.post(
+                "http://backend:8000/api/v1/internal/agent-relay-config",
+                json=payload,
+                headers={"X-Internal-Key": settings.SECRET_KEY},
+                timeout=120,
+            )
+            data = resp.json()
+            return CommandResult(
+                device_id=device.id, hostname=getattr(device, "hostname", ""),
+                ip_address=device.ip_address,
+                success=data.get("success", False),
+                output=data.get("output", ""),
+                error=data.get("error", ""),
+                duration_ms=data.get("duration_ms", 0),
+            )
+        except Exception as e:
+            return CommandResult(
+                device_id=device.id, hostname=getattr(device, "hostname", ""),
+                ip_address=device.ip_address, success=False, error=f"Relay error: {e}",
+            )
 
     def _agent_result(self, device, res: dict) -> CommandResult:
         return CommandResult(
@@ -211,12 +270,17 @@ class SSHManager:
         agent_id = self._via_agent(device)
         if agent_id:
             from app.services.agent_manager import agent_manager
-            try:
-                res = await agent_manager.execute_ssh_command(agent_id, device, command)
-                return self._agent_result(device, res)
-            except Exception as e:
-                return CommandResult(device_id=device.id, hostname=device.hostname,
-                                     ip_address=device.ip_address, success=False, error=str(e))
+            if agent_id in agent_manager._connections:
+                # FastAPI process: direct WebSocket call
+                try:
+                    res = await agent_manager.execute_ssh_command(agent_id, device, command)
+                    return self._agent_result(device, res)
+                except Exception as e:
+                    return CommandResult(device_id=device.id, hostname=device.hostname,
+                                         ip_address=device.ip_address, success=False, error=str(e))
+            else:
+                # Celery worker: relay via backend HTTP endpoint
+                return self._relay_ssh(agent_id, device, command)
 
         loop = asyncio.get_running_loop()
         start = time.time()
@@ -246,12 +310,17 @@ class SSHManager:
         agent_id = self._via_agent(device)
         if agent_id:
             from app.services.agent_manager import agent_manager
-            try:
-                res = await agent_manager.execute_ssh_config(agent_id, device, config_commands)
-                return self._agent_result(device, res)
-            except Exception as e:
-                return CommandResult(device_id=device.id, hostname=device.hostname,
-                                     ip_address=device.ip_address, success=False, error=str(e))
+            if agent_id in agent_manager._connections:
+                # FastAPI process: direct WebSocket call
+                try:
+                    res = await agent_manager.execute_ssh_config(agent_id, device, config_commands)
+                    return self._agent_result(device, res)
+                except Exception as e:
+                    return CommandResult(device_id=device.id, hostname=device.hostname,
+                                         ip_address=device.ip_address, success=False, error=str(e))
+            else:
+                # Celery worker: relay via backend HTTP endpoint
+                return self._relay_config(agent_id, device, config_commands)
 
         loop = asyncio.get_running_loop()
         start = time.time()
