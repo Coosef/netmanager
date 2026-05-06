@@ -448,7 +448,6 @@ def poll_device_status():
             _correlate_offline_events(db, stable_for_correlation)
 
     finally:
-        _run_async(ssh.close_all())
         db.close()
 
 
