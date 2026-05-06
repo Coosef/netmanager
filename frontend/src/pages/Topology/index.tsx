@@ -478,6 +478,7 @@ function TopologyFlow() {
 
   const [selectMode, setSelectMode] = useState(false)
   const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set())
+  const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null)
 
   useTaskProgress(hopTaskId, {
     title: 'Atlama Keşfi',
@@ -562,14 +563,34 @@ function TopologyFlow() {
   })
 
   const bulkLldpMutation = useMutation({
-    mutationFn: (ids: number[]) => topologyApi.triggerDiscovery(ids),
+    mutationFn: async (ids: number[]) => {
+      let completed = 0
+      let failed = 0
+      setBulkProgress({ current: 0, total: ids.length })
+      for (const id of ids) {
+        try {
+          await topologyApi.discoverSingle(id)
+          completed++
+        } catch {
+          failed++
+        }
+        setBulkProgress({ current: completed + failed, total: ids.length })
+      }
+      return { completed, failed, total: ids.length }
+    },
     onSuccess: (data) => {
-      setBulkTaskId(data.task_id)
+      setBulkProgress(null)
       setSelectMode(false)
       setBulkSelected(new Set())
-      message.success(`${data.device_count} cihaz için LLDP keşfi başlatıldı (Görev #${data.task_id})`)
+      queryClient.invalidateQueries({ queryKey: ['topology-graph'] })
+      queryClient.invalidateQueries({ queryKey: ['topology-stats'] })
+      if (data.failed === 0) {
+        message.success(`${data.completed}/${data.total} cihaz LLDP keşfi tamamlandı`)
+      } else {
+        message.warning(`${data.completed}/${data.total} başarılı, ${data.failed} başarısız`)
+      }
     },
-    onError: () => message.error('LLDP başlatılamadı'),
+    onError: () => { setBulkProgress(null); message.error('LLDP başlatılamadı') },
   })
 
   const refreshGraph = useMutation({
@@ -1206,7 +1227,9 @@ function TopologyFlow() {
                       onClick={() => bulkLldpMutation.mutate(Array.from(bulkSelected))}
                       style={{ marginTop: 4 }}
                     >
-                      Seçilileri LLDP ({bulkSelected.size})
+                      {bulkProgress
+                        ? `${bulkProgress.current}/${bulkProgress.total} keşfediliyor…`
+                        : `Seçilileri LLDP (${bulkSelected.size})`}
                     </Button>
                   </>
                 )}
