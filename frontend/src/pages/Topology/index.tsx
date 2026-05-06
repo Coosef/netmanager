@@ -13,7 +13,7 @@ import {
   SyncOutlined, ApartmentOutlined, ReloadOutlined,
   ThunderboltOutlined, BranchesOutlined, LoginOutlined, CheckCircleOutlined,
   NodeIndexOutlined, ApiOutlined, WarningOutlined, RadarChartOutlined,
-  BugOutlined, ExportOutlined, AppstoreOutlined, RadiusSettingOutlined,
+  BugOutlined, ExportOutlined,
   BorderOuterOutlined, DeploymentUnitOutlined,
   FullscreenOutlined, FullscreenExitOutlined,
 } from '@ant-design/icons'
@@ -455,7 +455,7 @@ function TopologyFlow() {
   const { fitView } = useReactFlow()
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [layout, setLayout] = useState<LayoutType>('TB')
+  const [layout, setLayout] = useState<LayoutType>('force')
   const [filterGroup, setFilterGroup] = useState<number>()
   const [filterLayer, setFilterLayer] = useState<string>()
   const [filterSite, setFilterSite] = useState<string>()
@@ -479,6 +479,8 @@ function TopologyFlow() {
   const [selectMode, setSelectMode] = useState(false)
   const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set())
   const [bulkProgress, setBulkProgress] = useState<{ current: number; total: number } | null>(null)
+  const [bulkResultModal, setBulkResultModal] = useState(false)
+  const [bulkResults, setBulkResults] = useState<Array<{ hostname: string; neighbor_count: number; success: boolean; error?: string }>>([])
 
   useTaskProgress(hopTaskId, {
     title: 'Atlama Keşfi',
@@ -564,31 +566,27 @@ function TopologyFlow() {
 
   const bulkLldpMutation = useMutation({
     mutationFn: async (ids: number[]) => {
-      let completed = 0
-      let failed = 0
+      const rows: typeof bulkResults = []
       setBulkProgress({ current: 0, total: ids.length })
       for (const id of ids) {
         try {
-          await topologyApi.discoverSingle(id)
-          completed++
-        } catch {
-          failed++
+          const res = await topologyApi.discoverSingle(id)
+          rows.push({ hostname: res.hostname, neighbor_count: res.neighbor_count, success: true })
+        } catch (e: any) {
+          rows.push({ hostname: `#${id}`, neighbor_count: 0, success: false, error: e?.response?.data?.detail || 'Hata' })
         }
-        setBulkProgress({ current: completed + failed, total: ids.length })
+        setBulkProgress({ current: rows.length, total: ids.length })
       }
-      return { completed, failed, total: ids.length }
+      return rows
     },
-    onSuccess: (data) => {
+    onSuccess: (rows) => {
       setBulkProgress(null)
       setSelectMode(false)
       setBulkSelected(new Set())
+      setBulkResults(rows)
+      setBulkResultModal(true)
       queryClient.invalidateQueries({ queryKey: ['topology-graph'] })
       queryClient.invalidateQueries({ queryKey: ['topology-stats'] })
-      if (data.failed === 0) {
-        message.success(`${data.completed}/${data.total} cihaz LLDP keşfi tamamlandı`)
-      } else {
-        message.warning(`${data.completed}/${data.total} başarılı, ${data.failed} başarısız`)
-      }
     },
     onError: () => { setBulkProgress(null); message.error('LLDP başlatılamadı') },
   })
@@ -1136,10 +1134,11 @@ function TopologyFlow() {
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginBottom: 6 }}>
                     {([
-                      { value: 'TB' as LayoutType, icon: <ApartmentOutlined />, label: '↕ Hiyerarşi' },
-                      { value: 'LR' as LayoutType, icon: <ApartmentOutlined style={{ transform: 'rotate(90deg)' }} />, label: '↔ Yatay' },
-                      { value: 'grid' as LayoutType, icon: <AppstoreOutlined />, label: '⊞ Izgara' },
-                      { value: 'circle' as LayoutType, icon: <RadiusSettingOutlined />, label: '⭕ Daire' },
+                      { value: 'force'  as LayoutType, label: '⬡ Kuvvet' },
+                      { value: 'TB'     as LayoutType, label: '↕ Hiyerarşi' },
+                      { value: 'LR'     as LayoutType, label: '↔ Yatay' },
+                      { value: 'grid'   as LayoutType, label: '⊞ Izgara' },
+                      { value: 'circle' as LayoutType, label: '⭕ Daire' },
                     ]).map(({ value, label }) => (
                       <Button
                         key={value}
@@ -1748,6 +1747,59 @@ function TopologyFlow() {
             />
           </>
         )}
+      </Modal>
+
+      {/* Bulk LLDP Results Modal */}
+      <Modal
+        title={<span><ThunderboltOutlined style={{ color: '#22c55e', marginRight: 8 }} />Toplu LLDP Keşif Sonuçları</span>}
+        open={bulkResultModal}
+        onCancel={() => setBulkResultModal(false)}
+        footer={<Button type="primary" onClick={() => setBulkResultModal(false)}>Kapat</Button>}
+        width={560}
+      >
+        <div style={{ marginBottom: 12, display: 'flex', gap: 12 }}>
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 8, padding: '8px 16px', flex: 1, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#16a34a' }}>{bulkResults.filter(r => r.success).length}</div>
+            <div style={{ fontSize: 11, color: '#15803d' }}>Başarılı</div>
+          </div>
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, padding: '8px 16px', flex: 1, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#dc2626' }}>{bulkResults.filter(r => !r.success).length}</div>
+            <div style={{ fontSize: 11, color: '#b91c1c' }}>Başarısız</div>
+          </div>
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '8px 16px', flex: 1, textAlign: 'center' }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: '#2563eb' }}>{bulkResults.reduce((s, r) => s + r.neighbor_count, 0)}</div>
+            <div style={{ fontSize: 11, color: '#1d4ed8' }}>Toplam Komşu</div>
+          </div>
+        </div>
+        <Table
+          size="small"
+          dataSource={bulkResults.map((r, i) => ({ ...r, key: i }))}
+          pagination={false}
+          scroll={{ y: 320 }}
+          columns={[
+            {
+              title: 'Cihaz',
+              dataIndex: 'hostname',
+              render: (v: string, r: any) => (
+                <span style={{ fontWeight: 600 }}>{r.success ? '🟢' : '🔴'} {v}</span>
+              ),
+            },
+            {
+              title: 'Komşu',
+              dataIndex: 'neighbor_count',
+              width: 70,
+              align: 'center' as const,
+              render: (v: number) => <Tag color="blue">{v}</Tag>,
+            },
+            {
+              title: 'Durum',
+              dataIndex: 'success',
+              width: 110,
+              render: (v: boolean, r: any) =>
+                v ? <Tag color="success">Başarılı</Tag> : <Tag color="error">{r.error || 'Hata'}</Tag>,
+            },
+          ]}
+        />
       </Modal>
     </div>
   )
