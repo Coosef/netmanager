@@ -169,28 +169,41 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   // ── Expose handle ──────────────────────────────────────────────────────────
   useImperativeHandle(ref, () => ({
     flyToQuery: (q: string) => {
-      if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
+      if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
       const ql = q.trim().toLowerCase()
-      const { nodes } = fgRef.current.graphData() as { nodes: any[] }
-      const m = nodes.find((n: any) =>
-        (n.label || '').toLowerCase().includes(ql) || (n.ip || '').toLowerCase().includes(ql))
-      if (!m) return
-      const px = m.x || 0; const py = m.y || 0; const pz = m.z || 0
-      fgRef.current.cameraPosition({ x: px + 60, y: py + 80, z: pz + 100 }, { x: px, y: py, z: pz }, 1200)
+      const scene = fgRef.current.scene() as THREE.Scene
+      if (!scene) return
+      let found: { x: number; y: number; z: number } | null = null
+      scene.traverse((obj: any) => {
+        if (found || obj.__graphObjType !== 'node') return
+        const n = obj.__data
+        if (!n) return
+        if ((n.label || '').toLowerCase().includes(ql) || (n.ip || '').toLowerCase().includes(ql))
+          found = { x: obj.position.x, y: obj.position.y, z: obj.position.z }
+      })
+      if (!found) return
+      const { x, y, z } = found as { x: number; y: number; z: number }
+      fgRef.current.cameraPosition({ x: x + 60, y: y + 80, z: z + 100 }, { x, y, z }, 1200)
     },
     startTour: () => {
-      if (!fgRef.current) return
-      const controls = fgRef.current.controls()
-      if (controls) { controls.autoRotate = false }
+      if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
       const tick = () => {
-        if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
-        const { nodes } = fgRef.current.graphData() as { nodes: any[] }
-        const real = nodes.filter((n: any) => !n.ghost && n.x !== undefined)
-        if (real.length === 0) return
-        tourIdxRef.current = (tourIdxRef.current + 1) % real.length
-        const m = real[tourIdxRef.current]
-        const px = m.x || 0; const py = m.y || 0; const pz = m.z || 0
-        fgRef.current.cameraPosition({ x: px + 50, y: py + 80, z: pz + 100 }, { x: px, y: py, z: pz }, 1800)
+        if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
+        const scene = fgRef.current.scene() as THREE.Scene
+        if (!scene) return
+        const positions: { x: number; y: number; z: number }[] = []
+        scene.traverse((obj: any) => {
+          if (obj.__graphObjType === 'node' && obj.__data && !obj.__data.ghost)
+            positions.push({ x: obj.position.x, y: obj.position.y, z: obj.position.z })
+        })
+        if (positions.length === 0) return
+        tourIdxRef.current = (tourIdxRef.current + 1) % positions.length
+        const m = positions[tourIdxRef.current]
+        fgRef.current.cameraPosition(
+          { x: m.x + 50, y: m.y + 80, z: m.z + 100 },
+          { x: m.x, y: m.y, z: m.z },
+          1800,
+        )
       }
       tick()
       tourTimer.current = setInterval(tick, 2800)
