@@ -12,16 +12,16 @@ const STATUS_EMISSIVE: Record<string, number> = {
   online: 0x00e676, offline: 0xff3d6a, unknown: 0x445566, unreachable: 0xffb300,
 }
 const STATUS_EMISSIVE_INT: Record<string, number> = {
-  online: 0.7, offline: 0.5, unknown: 0.1, unreachable: 0.5,
+  online: 0.6, offline: 0.4, unknown: 0.1, unreachable: 0.4,
 }
 
 // ─── Layer config ────────────────────────────────────────────────────────────
 const LAYER_CFG: Record<string, { y: number; color: number; hex: string; label: string; radius: number }> = {
-  core:         { y: 200,  color: 0xef4444, hex: '#ef4444', label: 'CORE',         radius: 16 },
-  distribution: { y: 100,  color: 0xf97316, hex: '#f97316', label: 'DISTRIBUTION', radius: 13 },
-  access:       { y: 0,    color: 0x3b82f6, hex: '#3b82f6', label: 'ACCESS',       radius: 10 },
-  edge:         { y: -100, color: 0x22c55e, hex: '#22c55e', label: 'EDGE',         radius: 8  },
-  wireless:     { y: -200, color: 0xa855f7, hex: '#a855f7', label: 'WIRELESS',     radius: 7  },
+  core:         { y: 180,  color: 0xef4444, hex: '#ef4444', label: 'CORE',         radius: 14 },
+  distribution: { y: 90,   color: 0xf97316, hex: '#f97316', label: 'DISTRIBUTION', radius: 11 },
+  access:       { y: 0,    color: 0x3b82f6, hex: '#3b82f6', label: 'ACCESS',       radius: 9  },
+  edge:         { y: -90,  color: 0x22c55e, hex: '#22c55e', label: 'EDGE',         radius: 7  },
+  wireless:     { y: -180, color: 0xa855f7, hex: '#a855f7', label: 'WIRELESS',     radius: 6  },
 }
 
 // ─── BFS shortest path ───────────────────────────────────────────────────────
@@ -48,18 +48,18 @@ function bfsPath(nodes: any[], links: any[], srcId: string, dstId: string): stri
 // ─── Canvas text sprite ──────────────────────────────────────────────────────
 function makeTextSprite(text: string, color = '#ddeeff', glowColor = '#00d4ff'): THREE.Sprite {
   const canvas = document.createElement('canvas')
-  canvas.width = 320; canvas.height = 56
+  canvas.width = 256; canvas.height = 48
   const ctx = canvas.getContext('2d')!
-  ctx.clearRect(0, 0, 320, 56)
-  ctx.font = 'bold 17px "SF Pro Display",system-ui,monospace'
+  ctx.clearRect(0, 0, 256, 48)
+  ctx.font = 'bold 15px system-ui,monospace'
   ctx.textAlign = 'center'
-  ctx.shadowColor = glowColor; ctx.shadowBlur = 10
+  ctx.shadowColor = glowColor; ctx.shadowBlur = 8
   ctx.fillStyle = color
-  ctx.fillText(text.length > 24 ? text.slice(0, 22) + '…' : text, 160, 38)
+  ctx.fillText(text.length > 20 ? text.slice(0, 18) + '…' : text, 128, 34)
   const tex = new THREE.CanvasTexture(canvas)
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true })
   const sprite = new THREE.Sprite(mat)
-  sprite.scale.set(38, 7, 1)
+  sprite.scale.set(32, 6, 1)
   return sprite
 }
 
@@ -90,7 +90,6 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 ) {
   const fgRef = useRef<any>(null)
 
-  // Visual-mode refs
   const isolateIdRef  = useRef<string | null>(null)
   const pathSrcRef    = useRef<string | null>(null)
   const pathNodeIds   = useRef<Set<string>>(new Set())
@@ -99,34 +98,26 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
   const [linkVis, setLinkVis] = useState(0)
 
-  // Tour
-  const tourTimer   = useRef<ReturnType<typeof setInterval> | null>(null)
-  const tourIdxRef  = useRef(0)
+  const tourTimer  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const tourIdxRef = useRef(0)
 
-  // Blast animation
-  const blastRings  = useRef<Array<{ mesh: THREE.Mesh; age: number; maxAge: number }>>([])
-  const rafRef      = useRef<number>(0)
+  const blastRings = useRef<Array<{ mesh: THREE.Mesh; age: number; maxAge: number }>>([])
+  const rafRef     = useRef<number>(0)
+  const sceneReady = useRef(false)
 
-  // Scene setup flag — ensures we only add lights/floors once
-  const sceneReady  = useRef(false)
-
-  // ── refreshNodes: traverse scene to find node objects directly ────────────
-  // This approach works even when graphData prop changes (useMemo recreates objects)
-  // because we use __graphObjType and __data set by the library on the actual Three.js objects
+  // ── refreshNodes: scene traversal (works even when graphData prop changes) ──
   const refreshNodes = useCallback(() => {
     if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
     const scene = fgRef.current.scene() as THREE.Scene
     if (!scene) return
 
-    // Get links for isolation neighbor calculation
     let links: any[] = []
-    if (typeof fgRef.current.graphData === 'function') {
-      try { links = (fgRef.current.graphData() as { links: any[] }).links } catch { /**/ }
-    }
+    try {
+      if (typeof fgRef.current.graphData === 'function')
+        links = (fgRef.current.graphData() as { links: any[] }).links
+    } catch { /**/ }
 
     const isolated = isolateIdRef.current
-
-    // Build neighbor set for isolate
     let neighbors: Set<string> | null = null
     if (isolated) {
       neighbors = new Set([isolated])
@@ -139,7 +130,6 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     }
 
     scene.traverse((obj: any) => {
-      // Only process top-level node objects set by the library
       if (obj.__graphObjType !== 'node') return
       const n = obj.__data
       if (!n) return
@@ -159,22 +149,16 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
           mat.transparent = opacity < 1
           mat.opacity = opacity
           if (isBlast && !n.ghost) {
-            mat.emissive.setHex(0xff2222)
-            mat.emissiveIntensity = 0.9
-          } else if (isPath && !n.ghost) {
-            mat.emissive.setHex(0xfbbf24)
-            mat.emissiveIntensity = 0.8
-          } else if (isPathSrc && !n.ghost) {
-            mat.emissive.setHex(0xfbbf24)
-            mat.emissiveIntensity = 1.0
+            mat.emissive.setHex(0xff2222); mat.emissiveIntensity = 0.9
+          } else if ((isPath || isPathSrc) && !n.ghost) {
+            mat.emissive.setHex(0xfbbf24); mat.emissiveIntensity = isPathSrc ? 1.0 : 0.8
           } else {
             mat.emissive.setHex(STATUS_EMISSIVE[n.status] ?? 0x445566)
             mat.emissiveIntensity = STATUS_EMISSIVE_INT[n.status] ?? 0.1
           }
         }
         if (child instanceof THREE.Sprite) {
-          const mat = child.material as THREE.SpriteMaterial
-          mat.opacity = Math.max(opacity, 0.03)
+          ;(child.material as THREE.SpriteMaterial).opacity = Math.max(opacity, 0.03)
         }
       })
     })
@@ -189,16 +173,13 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       const m = nodes.find((n: any) =>
         (n.label || '').toLowerCase().includes(ql) || (n.ip || '').toLowerCase().includes(ql))
       if (!m) return
-      const nodePos = { x: m.x || 0, y: m.y || 0, z: m.z || 0 }
-      const dist = Math.max(80, Math.hypot(nodePos.x, nodePos.y, nodePos.z) * 0.3 + 80)
-      fgRef.current.cameraPosition(
-        { x: nodePos.x + dist * 0.5, y: nodePos.y + dist * 0.7, z: nodePos.z + dist },
-        nodePos, 1200)
+      const px = m.x || 0; const py = m.y || 0; const pz = m.z || 0
+      fgRef.current.cameraPosition({ x: px + 60, y: py + 80, z: pz + 100 }, { x: px, y: py, z: pz }, 1200)
     },
     startTour: () => {
       if (!fgRef.current) return
       const controls = fgRef.current.controls()
-      if (controls) controls.autoRotate = false
+      if (controls) { controls.autoRotate = false }
       const tick = () => {
         if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
         const { nodes } = fgRef.current.graphData() as { nodes: any[] }
@@ -207,30 +188,19 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         tourIdxRef.current = (tourIdxRef.current + 1) % real.length
         const m = real[tourIdxRef.current]
         const px = m.x || 0; const py = m.y || 0; const pz = m.z || 0
-        // Camera flies to a position above and behind the node
-        fgRef.current.cameraPosition(
-          { x: px + 60, y: py + 90, z: pz + 120 },
-          { x: px, y: py, z: pz }, 1800)
+        fgRef.current.cameraPosition({ x: px + 50, y: py + 80, z: pz + 100 }, { x: px, y: py, z: pz }, 1800)
       }
       tick()
       tourTimer.current = setInterval(tick, 2800)
     },
     stopTour: () => {
       if (tourTimer.current) { clearInterval(tourTimer.current); tourTimer.current = null }
-      const controls = fgRef.current?.controls()
-      if (controls) controls.autoRotate = true
     },
     clearPath: () => {
-      pathSrcRef.current = null
-      pathNodeIds.current = new Set()
-      pathLinkIds.current = new Set()
-      setLinkVis((v) => v + 1)
-      refreshNodes()
+      pathSrcRef.current = null; pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
+      setLinkVis((v) => v + 1); refreshNodes()
     },
-    clearIsolate: () => {
-      isolateIdRef.current = null
-      refreshNodes()
-    },
+    clearIsolate: () => { isolateIdRef.current = null; refreshNodes() },
   }), [refreshNodes])
 
   // ── Graph data ─────────────────────────────────────────────────────────────
@@ -246,8 +216,8 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         vendor: n.data.vendor || 'other', status: n.data.status || 'unknown',
         layer, device_id: n.data.device_id, ghost: isGhost,
         dimmed: q ? (!label.includes(q) && !ip.includes(q)) : false,
-        // Soft Y guidance: nudge toward layer Y without hard-pinning
-        // fy removed — let force simulation spread nodes freely in 3D
+        // Pin to layer Y so nodes appear on the correct floor
+        fy: isGhost ? undefined : (LAYER_CFG[layer]?.y ?? 0),
       }
     })
     const links = graph.edges.map((e) => ({
@@ -257,64 +227,51 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     return { nodes, links }
   }, [graph, searchQuery])
 
-  // ── Node Three.js object builder ───────────────────────────────────────────
+  // ── Node Three.js object ───────────────────────────────────────────────────
   const nodeThreeObject = useCallback((node: any) => {
     const vColor  = VENDOR_COLOR[node.vendor] || VENDOR_COLOR.other
     const eColor  = STATUS_EMISSIVE[node.status] || STATUS_EMISSIVE.unknown
     const eInt    = STATUS_EMISSIVE_INT[node.status] || 0.1
-    const radius  = node.ghost ? 4 : (LAYER_CFG[node.layer]?.radius ?? 10)
+    const radius  = node.ghost ? 4 : (LAYER_CFG[node.layer]?.radius ?? 9)
     const group   = new THREE.Group()
 
-    // Core sphere
-    const geo = new THREE.SphereGeometry(radius, 24, 24)
+    const geo = new THREE.SphereGeometry(radius, 16, 16)   // 16 segments = lighter than 24
     const op  = node.ghost ? 0.45 : (node.dimmed ? 0.08 : 1)
-    const mat = new THREE.MeshPhongMaterial({
-      color: vColor, emissive: eColor, emissiveIntensity: node.dimmed ? 0 : eInt,
-      shininess: 160, transparent: node.ghost || node.dimmed, opacity: op,
+    const mat = new THREE.MeshLambertMaterial({             // Lambert = cheaper than Phong
+      color: vColor, emissive: eColor,
+      emissiveIntensity: node.dimmed ? 0 : eInt,
+      transparent: node.ghost || node.dimmed, opacity: op,
     })
     if (node.ghost) mat.wireframe = true
     group.add(new THREE.Mesh(geo, mat))
 
-    // Status glow ring
-    if (!node.ghost) {
-      const rg = new THREE.RingGeometry(radius + 2, radius + 4, 36)
+    // Thin status ring (online only to reduce geometry count)
+    if (!node.ghost && node.status === 'online') {
+      const rg = new THREE.RingGeometry(radius + 1.5, radius + 3, 24)
       const rm = new THREE.MeshBasicMaterial({
-        color: eColor, transparent: true,
-        opacity: node.status === 'online' ? 0.55 : 0.25, side: THREE.DoubleSide,
+        color: eColor, transparent: true, opacity: 0.45, side: THREE.DoubleSide,
       })
       const ring = new THREE.Mesh(rg, rm)
       ring.rotation.x = Math.PI / 2
       group.add(ring)
     }
 
-    // Core layer extra ring
-    if (node.layer === 'core' && !node.ghost) {
-      const og = new THREE.RingGeometry(radius + 5, radius + 7, 36)
-      const om = new THREE.MeshBasicMaterial({
-        color: vColor, transparent: true, opacity: 0.2, side: THREE.DoubleSide,
-      })
-      const outer = new THREE.Mesh(og, om)
-      outer.rotation.x = Math.PI / 2
-      group.add(outer)
-    }
-
     // Label sprite
-    const glowCol = node.status === 'online' ? '#00e676' : node.status === 'offline' ? '#ff3d6a' : '#00d4ff'
-    const sprite  = makeTextSprite(node.label, '#ddeeff', glowCol)
-    sprite.position.y = radius + 12
+    const sprite = makeTextSprite(node.label, '#ddeeff',
+      node.status === 'online' ? '#00e676' : node.status === 'offline' ? '#ff3d6a' : '#00d4ff')
+    sprite.position.y = radius + 10
     group.add(sprite)
 
     return group
   }, [])
 
-  // ── Link color/width (reactive via linkVis) ────────────────────────────────
-  const linkColorFn = useCallback((link: any) => {
-    if (pathLinkIds.current.has(link.id as string)) return '#fbbf24'
-    return 'rgba(0,195,255,0.18)'
-  }, [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
+  // ── Link color/width ───────────────────────────────────────────────────────
+  const linkColorFn = useCallback((link: any) =>
+    pathLinkIds.current.has(link.id as string) ? '#fbbf24' : 'rgba(0,195,255,0.20)'
+  , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const linkWidthFn = useCallback((link: any) =>
-    pathLinkIds.current.has(link.id as string) ? 3.5 : 0.8
+    pathLinkIds.current.has(link.id as string) ? 3 : 0.7
   , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const particleColorFn = useCallback((link: any) =>
@@ -325,89 +282,70 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     pathLinkIds.current.has(link.id as string) ? 0.016 : 0.004
   , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Node click (normal OR path mode) ──────────────────────────────────────
+  // ── Node click ─────────────────────────────────────────────────────────────
   const handleNodeClick = useCallback((node: any) => {
     if (!fgRef.current) return
 
     if (pathMode) {
       if (!pathSrcRef.current) {
-        pathSrcRef.current = node.id
-        refreshNodes()
+        pathSrcRef.current = node.id; refreshNodes()
       } else if (pathSrcRef.current === node.id) {
-        pathSrcRef.current = null
-        pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
+        pathSrcRef.current = null; pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
         setLinkVis((v) => v + 1); refreshNodes()
-      } else {
-        // Find path using graphData for BFS (links need source/target resolved)
-        if (typeof fgRef.current.graphData === 'function') {
-          const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
-          const path = bfsPath(nodes, links, pathSrcRef.current, node.id)
-          pathNodeIds.current = new Set(path)
-          const lids = new Set<string>()
-          for (let i = 0; i < path.length - 1; i++) {
-            lids.add(`${path[i]}|${path[i + 1]}`); lids.add(`${path[i + 1]}|${path[i]}`)
-          }
-          pathLinkIds.current = lids
-          pathSrcRef.current = null
-          setLinkVis((v) => v + 1); refreshNodes()
-          // Fly to path midpoint
-          if (path.length > 0) {
-            const mid = nodes.find((n: any) => n.id === path[Math.floor(path.length / 2)])
-            if (mid) {
-              fgRef.current.cameraPosition(
-                { x: (mid.x || 0) + 80, y: (mid.y || 0) + 100, z: (mid.z || 0) + 80 },
-                { x: mid.x || 0, y: mid.y || 0, z: mid.z || 0 }, 1200)
-            }
-          }
+      } else if (typeof fgRef.current.graphData === 'function') {
+        const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
+        const path = bfsPath(nodes, links, pathSrcRef.current!, node.id)
+        pathNodeIds.current = new Set(path)
+        const lids = new Set<string>()
+        for (let i = 0; i < path.length - 1; i++) {
+          lids.add(`${path[i]}|${path[i + 1]}`); lids.add(`${path[i + 1]}|${path[i]}`)
         }
+        pathLinkIds.current = lids; pathSrcRef.current = null
+        setLinkVis((v) => v + 1); refreshNodes()
+        const mid = nodes.find((n: any) => n.id === path[Math.floor(path.length / 2)])
+        if (mid) fgRef.current.cameraPosition(
+          { x: (mid.x || 0) + 60, y: (mid.y || 0) + 80, z: (mid.z || 0) + 80 },
+          { x: mid.x || 0, y: mid.y || 0, z: mid.z || 0 }, 1200)
       }
       return
     }
 
-    // Normal mode: open drawer + fly camera
     if (node.device_id && onNodeClick) onNodeClick(node.device_id)
-    const px = node.x || 0; const py = node.y || 0; const pz = node.z || 0
     fgRef.current.cameraPosition(
-      { x: px + 50, y: py + 70, z: pz + 80 },
-      { x: px, y: py, z: pz }, 1000)
+      { x: (node.x || 0) + 40, y: (node.y || 0) + 60, z: (node.z || 0) + 70 },
+      { x: node.x || 0, y: node.y || 0, z: node.z || 0 }, 1000)
   }, [pathMode, onNodeClick, refreshNodes])
 
-  // ── Right-click → isolate toggle ──────────────────────────────────────────
+  // ── Right-click: isolate ───────────────────────────────────────────────────
   const handleNodeRightClick = useCallback((node: any) => {
-    if (isolateIdRef.current === node.id) {
-      isolateIdRef.current = null
-    } else {
-      isolateIdRef.current = node.id
-    }
+    isolateIdRef.current = isolateIdRef.current === node.id ? null : node.id
     refreshNodes()
   }, [refreshNodes])
 
-  // ── Refresh nodes when pathMode exits (skip initial mount) ────────────────
-  const pathModeMountedRef = useRef(false)
+  // ── pathMode exit: clear path data (skip initial mount) ───────────────────
+  const pathModeMounted = useRef(false)
   useEffect(() => {
-    if (!pathModeMountedRef.current) { pathModeMountedRef.current = true; return }
+    if (!pathModeMounted.current) { pathModeMounted.current = true; return }
     if (!pathMode) {
-      pathSrcRef.current = null
-      pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
+      pathSrcRef.current = null; pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
       setLinkVis((v) => v + 1); refreshNodes()
     }
   }, [pathMode, refreshNodes])
 
-  // ── Blast radius: trigger animation when blastDeviceIds changes ───────────
+  // ── Blast radius animation ─────────────────────────────────────────────────
   useEffect(() => {
     if (!blastDeviceIds.length) return
     blastNodeIds.current = new Set(blastDeviceIds)
     refreshNodes()
 
-    if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
+    if (!fgRef.current || typeof fgRef.current.scene !== 'function' || typeof fgRef.current.graphData !== 'function') return
     const scene = fgRef.current.scene() as THREE.Scene
-    if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
     const { nodes } = fgRef.current.graphData() as { nodes: any[] }
     for (const devId of blastDeviceIds) {
       const n = nodes.find((nd: any) => nd.device_id === devId)
       if (!n) continue
       for (let wave = 0; wave < 3; wave++) {
-        const rg  = new THREE.RingGeometry(10, 13, 32)
+        const rg  = new THREE.RingGeometry(10, 13, 24)
         const rm  = new THREE.MeshBasicMaterial({ color: 0xff2244, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
         const mesh = new THREE.Mesh(rg, rm)
         mesh.position.set(n.x || 0, n.y || 0, n.z || 0)
@@ -416,34 +354,31 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         blastRings.current.push({ mesh, age: wave * 0.4, maxAge: 2.5 })
       }
     }
-
-    const t = setTimeout(() => {
-      blastNodeIds.current = new Set()
-      refreshNodes()
-    }, 4000)
+    const t = setTimeout(() => { blastNodeIds.current = new Set(); refreshNodes() }, 4000)
     return () => clearTimeout(t)
   }, [blastDeviceIds, refreshNodes])
 
-  // ── RAF loop: animate blast rings ─────────────────────────────────────────
+  // ── RAF: blast ring animation ──────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
       rafRef.current = requestAnimationFrame(tick)
-      if (blastRings.current.length === 0) return
+      if (!blastRings.current.length) return
       const scene = fgRef.current?.scene() as THREE.Scene | null
-      blastRings.current = blastRings.current.filter(({ mesh, age, maxAge }) => {
-        const t = age / maxAge
-        mesh.scale.setScalar(1 + t * 5)
-        ;(mesh.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - t)
-        blastRings.current.find(r => r.mesh === mesh)!.age += 0.016
-        if (age >= maxAge) { scene?.remove(mesh); return false }
-        return true
-      })
+      const next: typeof blastRings.current = []
+      for (const r of blastRings.current) {
+        r.age += 0.016
+        const t = r.age / r.maxAge
+        r.mesh.scale.setScalar(1 + t * 5)
+        ;(r.mesh.material as THREE.MeshBasicMaterial).opacity = 0.55 * (1 - t)
+        if (r.age >= r.maxAge) { scene?.remove(r.mesh) } else { next.push(r) }
+      }
+      blastRings.current = next
     }
     rafRef.current = requestAnimationFrame(tick)
-    return () => { cancelAnimationFrame(rafRef.current) }
+    return () => cancelAnimationFrame(rafRef.current)
   }, [])
 
-  // ── Scene setup (runs once after engine stops, via onEngineStop) ──────────
+  // ── One-time scene setup (after first engine stop) ─────────────────────────
   const setupScene = useCallback(() => {
     if (sceneReady.current) return
     if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
@@ -452,85 +387,63 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     const scene    = fgRef.current.scene() as THREE.Scene
     const controls = fgRef.current.controls()
 
-    // Extra lights (library adds ambient + directional by default)
-    const addPt = (color: number, int: number, dist: number, x: number, y: number, z: number) => {
-      const l = new THREE.PointLight(color, int, dist); l.position.set(x, y, z); scene.add(l)
-    }
-    addPt(0x00e676, 2.5, 700, -200, 150, 200)
-    addPt(0x00d4ff, 2.0, 600, 0, 300, 0)
-    addPt(0xa78bfa, 1.2, 500, 200, -100, -200)
-    addPt(0xff3d6a, 0.8, 400, -200, -150, -100)
+    // Single ambient boost (library already adds ambient + directional)
+    scene.add(new THREE.AmbientLight(0x334466, 0.4))
 
-    // Stars
-    const makeStars = (count: number, color: number, size: number, op: number) => {
-      const pos = new Float32Array(count * 3)
-      for (let i = 0; i < pos.length; i++) pos[i] = (Math.random() - 0.5) * 4000
-      const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
-      return new THREE.Points(geo, new THREE.PointsMaterial({ color, size, transparent: true, opacity: op, sizeAttenuation: true }))
-    }
-    scene.add(makeStars(5000, 0xffffff, 0.55, 0.50))
-    scene.add(makeStars(1200, 0x88ccff, 0.80, 0.30))
-    scene.add(makeStars(600,  0xaa88ff, 1.00, 0.25))
-    scene.add(makeStars(300,  0x00e676, 0.70, 0.20))
+    // Minimal starfield (1 draw call, 600 points total)
+    const starPos = new Float32Array(600 * 3)
+    for (let i = 0; i < starPos.length; i++) starPos[i] = (Math.random() - 0.5) * 3000
+    const starGeo = new THREE.BufferGeometry()
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3))
+    scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({
+      color: 0xaaccff, size: 0.8, transparent: true, opacity: 0.45, sizeAttenuation: true,
+    })))
 
-    // Grid floor
-    const grid = new THREE.GridHelper(1600, 40, 0x00d4ff, 0x001a2e)
-    ;(grid.material as THREE.Material).opacity = 0.05
+    // Grid
+    const grid = new THREE.GridHelper(1400, 30, 0x00d4ff, 0x001a2e)
+    ;(grid.material as THREE.Material).opacity = 0.04
     ;(grid.material as THREE.Material).transparent = true
-    grid.position.y = -240; scene.add(grid)
+    grid.position.y = -220; scene.add(grid)
 
-    // Layer floor planes
+    // Layer floor planes (1 per layer, very low opacity)
     for (const [, cfg] of Object.entries(LAYER_CFG)) {
-      const planeGeo = new THREE.PlaneGeometry(800, 800)
-      const planeMat = new THREE.MeshBasicMaterial({
-        color: cfg.color, transparent: true, opacity: 0.018,
-        side: THREE.DoubleSide,
-      })
-      const plane = new THREE.Mesh(planeGeo, planeMat)
+      const plane = new THREE.Mesh(
+        new THREE.PlaneGeometry(700, 700),
+        new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.015, side: THREE.DoubleSide }),
+      )
       plane.rotation.x = -Math.PI / 2
       plane.position.y = cfg.y - 5
       scene.add(plane)
 
-      // Border ring
-      const borderGeo = new THREE.RingGeometry(370, 376, 64)
-      const borderMat = new THREE.MeshBasicMaterial({
-        color: cfg.color, transparent: true, opacity: 0.10,
-        side: THREE.DoubleSide,
-      })
-      const border = new THREE.Mesh(borderGeo, borderMat)
+      // Border
+      const border = new THREE.Mesh(
+        new THREE.RingGeometry(320, 325, 48),
+        new THREE.MeshBasicMaterial({ color: cfg.color, transparent: true, opacity: 0.08, side: THREE.DoubleSide }),
+      )
       border.rotation.x = -Math.PI / 2
       border.position.y = cfg.y - 4
       scene.add(border)
 
-      // Layer label sprite
-      const canvas = document.createElement('canvas')
-      canvas.width = 360; canvas.height = 48
-      const ctx = canvas.getContext('2d')!
-      ctx.clearRect(0, 0, 360, 48)
-      ctx.font = 'bold 22px "SF Pro Display",system-ui,monospace'
-      ctx.fillStyle = cfg.hex
-      ctx.globalAlpha = 0.55
-      ctx.shadowColor = cfg.hex; ctx.shadowBlur = 12
-      ctx.textAlign = 'left'
-      ctx.fillText(`— ${cfg.label}`, 8, 34)
-      const tex    = new THREE.CanvasTexture(canvas)
-      const sprMat = new THREE.SpriteMaterial({ map: tex, transparent: true })
-      const spr    = new THREE.Sprite(sprMat)
-      spr.scale.set(80, 10, 1)
-      spr.position.set(-400, cfg.y, 0)
+      // Label
+      const cv = document.createElement('canvas'); cv.width = 320; cv.height = 44
+      const cx = cv.getContext('2d')!
+      cx.font = 'bold 20px system-ui,monospace'
+      cx.fillStyle = cfg.hex; cx.globalAlpha = 0.5
+      cx.shadowColor = cfg.hex; cx.shadowBlur = 10; cx.textAlign = 'left'
+      cx.fillText(`— ${cfg.label}`, 6, 32)
+      const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }))
+      spr.scale.set(72, 9, 1); spr.position.set(-360, cfg.y + 2, 0)
       scene.add(spr)
     }
 
+    // Controls: no auto-rotate to keep rendering lightweight
     if (controls) {
-      controls.autoRotate      = true
-      controls.autoRotateSpeed = 0.30
-      controls.enableDamping   = true
-      controls.dampingFactor   = 0.07
+      controls.autoRotate   = false
+      controls.enableDamping = false
     }
   }, [])
 
-  // ── Engine stop: setup scene + refresh materials ───────────────────────────
+  // ── Engine stop: setup scene once, then refresh node materials ────────────
   const handleEngineStop = useCallback(() => {
     setupScene()
     refreshNodes()
@@ -547,29 +460,29 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       nodeThreeObjectExtend={false}
       linkColor={linkColorFn}
       linkWidth={linkWidthFn}
-      linkOpacity={0.45}
-      linkDirectionalParticles={3}
+      linkOpacity={0.4}
+      linkDirectionalParticles={2}
       linkDirectionalParticleSpeed={particleSpeedFn}
-      linkDirectionalParticleWidth={2}
+      linkDirectionalParticleWidth={1.5}
       linkDirectionalParticleColor={particleColorFn}
       onNodeClick={handleNodeClick}
       onNodeRightClick={handleNodeRightClick}
       onEngineStop={handleEngineStop}
       nodeLabel={(node: any) =>
-        `<div style="background:rgba(3,12,30,0.96);color:#ddeeff;padding:10px 14px;border-radius:10px;font-size:12px;line-height:1.8;border:1px solid rgba(0,195,255,0.25);box-shadow:0 4px 20px rgba(0,195,255,0.1)">` +
+        `<div style="background:rgba(3,12,30,0.95);color:#ddeeff;padding:8px 12px;border-radius:8px;font-size:12px;line-height:1.7;border:1px solid rgba(0,195,255,0.22)">` +
         `<strong style="color:#00d4ff">${node.label}</strong><br/>` +
-        (node.ip ? `<span style="color:#6080a0">IP: </span>${node.ip}<br/>` : '') +
-        (node.layer ? `<span style="color:#6080a0">Katman: </span><span style="color:${LAYER_CFG[node.layer]?.hex ?? '#94a3b8'}">${node.layer.toUpperCase()}</span><br/>` : '') +
-        `<span style="color:#6080a0">Vendor: </span>${node.vendor}<br/>` +
-        `<span style="color:#6080a0">Durum: </span><span style="color:${node.status === 'online' ? '#00e676' : node.status === 'offline' ? '#ff3d6a' : '#ffb300'}">${node.status}</span>` +
+        (node.ip ? `IP: ${node.ip}<br/>` : '') +
+        (node.layer ? `<span style="color:${LAYER_CFG[node.layer]?.hex ?? '#94a3b8'}">${node.layer.toUpperCase()}</span> — ` : '') +
+        `<span style="color:${node.status === 'online' ? '#00e676' : node.status === 'offline' ? '#ff3d6a' : '#ffb300'}">${node.status}</span>` +
         `</div>`
       }
       enableNodeDrag
       enableNavigationControls
       showNavInfo={false}
-      d3AlphaDecay={0.02}
-      d3VelocityDecay={0.3}
-      cooldownTicks={120}
+      d3AlphaDecay={0.03}
+      d3VelocityDecay={0.4}
+      cooldownTicks={80}
+      warmupTicks={30}
     />
   )
 })
