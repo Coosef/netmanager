@@ -304,10 +304,13 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   }, [hiddenLayers, refreshNodes])
 
   // ── Toggle floor decorations and reheat sim when layerMode changes ─────────
+  const layerModeMounted = useRef(false)
   useEffect(() => {
     for (const obj of floorObjectsRef.current) {
       obj.visible = layerMode
     }
+    // Skip d3ReheatSimulation on initial mount — only call on actual mode toggle
+    if (!layerModeMounted.current) { layerModeMounted.current = true; return }
     if (fgRef.current?.d3ReheatSimulation) {
       fgRef.current.d3ReheatSimulation()
     }
