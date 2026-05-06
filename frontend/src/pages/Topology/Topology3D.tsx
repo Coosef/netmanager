@@ -106,6 +106,8 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
   const hiddenLayersRef  = useRef<Set<string>>(new Set())
   const floorObjectsRef  = useRef<THREE.Object3D[]>([])
+  const layerModeRef     = useRef(layerMode)
+  layerModeRef.current   = layerMode
   // Track whether we've ever had real data — prevents ForceGraph3D from
   // initializing with 0 nodes (library crashes: state.layout undefined)
   const hasEverHadData   = useRef(false)
@@ -247,7 +249,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         layer, device_id: n.data.device_id, ghost: isGhost,
         dimmed: q ? (!label.includes(q) && !ip.includes(q)) : false,
         // Pin to layer Y only in layerMode; classic mode lets force sim place freely
-        fy: layerMode
+        fy: layerModeRef.current
           ? (LAYER_CFG[layer] ? LAYER_CFG[layer].y : (isGhost ? undefined : 0))
           : undefined,
       }
@@ -259,7 +261,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     const result = { nodes, links }
     graphDataRef.current = result
     return result
-  }, [graph, searchQuery, layerMode])
+  }, [graph, searchQuery])
 
   // ── Node Three.js object ───────────────────────────────────────────────────
   const nodeThreeObject = useCallback((node: any) => {
@@ -312,11 +314,16 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     for (const obj of floorObjectsRef.current) {
       obj.visible = layerMode
     }
-    // Skip d3ReheatSimulation on initial mount — only call on actual mode toggle
+    // Skip on initial mount — only act on actual mode toggle
     if (!layerModeMounted.current) { layerModeMounted.current = true; return }
-    if (fgRef.current?.d3ReheatSimulation) {
-      fgRef.current.d3ReheatSimulation()
+    // Imperatively update fy on existing nodes so force sim reflects new mode
+    for (const n of graphDataRef.current.nodes) {
+      const layer = n.layer as string
+      n.fy = layerMode
+        ? (LAYER_CFG[layer]?.y ?? (n.ghost ? undefined : 0))
+        : undefined
     }
+    fgRef.current?.d3ReheatSimulation?.()
   }, [layerMode])
 
   // ── Link color/width ───────────────────────────────────────────────────────
