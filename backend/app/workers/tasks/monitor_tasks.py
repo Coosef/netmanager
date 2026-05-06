@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import sys
 from datetime import datetime, timezone, timedelta
 
 import redis
@@ -46,6 +47,44 @@ PORT_UP_PATTERNS   = ["changed state to up",   "came up",    "link up"]
 
 def _run_async(coro):
     return asyncio.run(coro)
+
+
+async def _icmp_ping(ip: str, timeout: int = 3) -> bool:
+    """Single ICMP ping; returns True if host responds."""
+    flag = "-n" if sys.platform == "win32" else "-c"
+    w_flag = ["-w", str(timeout * 1000)] if sys.platform == "win32" else ["-W", str(timeout)]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "ping", flag, "1", *w_flag, ip,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
+        return proc.returncode == 0
+    except Exception:
+        return False
+
+
+def _agent_is_online(agent_id: str) -> bool:
+    """True if the agent has sent a heartbeat within the last 120 s."""
+    return bool(_redis.exists(f"agent:{agent_id}:heartbeat"))
+
+
+async def _check_device_reachable(device) -> bool:
+    """
+    Reachability check used by the Celery poller.
+
+    • Agent-proxied devices whose agent is online → skip (the agent's own
+      device_status_report loop already keeps DB/Redis up to date).
+      Return current DB status so the poller doesn't create a spurious change.
+    • Everything else → ICMP ping directly from the backend host.
+    """
+    agent_id = getattr(device, "agent_id", None)
+    if agent_id and _agent_is_online(agent_id):
+        from app.models.device import DeviceStatus
+        return device.status == DeviceStatus.ONLINE
+
+    return await _icmp_ping(device.ip_address)
 
 
 def _get_db():
@@ -260,7 +299,8 @@ def _correlate_offline_events(db, newly_offline: list) -> None:
 def poll_device_status():
     """
     Two-pass polling:
-      Pass 1 — Test all devices, update DB/Redis status.
+      Pass 1 — Test all devices via ICMP ping (agent-side ping fallback for private-LAN devices),
+               update DB/Redis status.
       Pass 2 — Group status changes and fire deduplicated events:
         • N+ devices from the same agent going offline → single "agent_outage" event
         • Devices beyond FLAP_THRESHOLD → single "device_flapping" event (no per-poll events)
@@ -272,14 +312,13 @@ def poll_device_status():
     AGENT_GROUP_MIN = 3
 
     db = _get_db()
-    ssh = SSHManager()
     try:
         devices = db.execute(select(Device).where(Device.is_active == True)).scalars().all()
         total = len(devices)
         if total == 0:
             return
 
-        # ── Pass 1: Test connections, update DB/Redis ───────────────────────
+        # ── Pass 1: Ping devices, update DB/Redis ──────────────────────────
         # changes: (device, new_status, error_msg)
         changes: list[tuple] = []
         for device in devices:
@@ -289,16 +328,12 @@ def poll_device_status():
                     continue
 
                 prev_status = device.status
-                try:
-                    result = _run_async(asyncio.wait_for(ssh.test_connection(device), timeout=30.0))
-                except asyncio.TimeoutError:
-                    logger.warning("poll timeout: %s (30s)", device.hostname)
-                    result = type("R", (), {"success": False, "error": "timeout"})()
-                new_status = DeviceStatus.ONLINE if result.success else DeviceStatus.OFFLINE
+                reachable = _run_async(_check_device_reachable(device))
+                new_status = DeviceStatus.ONLINE if reachable else DeviceStatus.OFFLINE
 
                 db.execute(update(Device).where(Device.id == device.id).values(
                     status=new_status,
-                    last_seen=datetime.now(timezone.utc) if result.success else device.last_seen,
+                    last_seen=datetime.now(timezone.utc) if reachable else device.last_seen,
                 ))
                 db.commit()
                 _redis.setex(
@@ -307,7 +342,8 @@ def poll_device_status():
                 )
 
                 if prev_status != new_status:
-                    changes.append((device, new_status, result.error or ""))
+                    error_msg = "" if reachable else "no ping response"
+                    changes.append((device, new_status, error_msg))
             except Exception as exc:
                 logger.warning("poll error for %s: %s", device.hostname, exc)
 

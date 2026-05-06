@@ -230,6 +230,13 @@ class AgentManager:
                 self._handle_snmp_trap(agent_id, msg)
             )
 
+        elif msg_type == "ping_result":
+            req_id = msg.get("req_id", "")
+            if req_id and req_id in self._pending:
+                fut = self._pending.pop(req_id)
+                if not fut.done():
+                    fut.set_result(msg.get("reachable", False))
+
         # Sprint 14C: Agent edge intelligence anomaly report
         elif msg_type == "local_anomaly":
             asyncio.get_running_loop().create_task(
@@ -757,6 +764,29 @@ class AgentManager:
             blocked=False, block_reason=None, request_id=rid,
         )
         return result
+
+    async def ping_check(self, agent_id: str, ip: str, timeout: int = 3) -> bool:
+        """Ask the agent to ICMP-ping `ip`; returns True if reachable."""
+        loop = asyncio.get_running_loop()
+        req_id = uuid.uuid4().hex
+        fut: asyncio.Future = loop.create_future()
+        self._pending[req_id] = fut
+        ws = self._connections.get(agent_id)
+        if not ws:
+            self._pending.pop(req_id, None)
+            return False
+        try:
+            await ws.send_text(json.dumps({
+                "type": "ping_check",
+                "req_id": req_id,
+                "ip": ip,
+                "timeout": timeout,
+            }))
+            return await asyncio.wait_for(fut, timeout=timeout + 2)
+        except Exception:
+            return False
+        finally:
+            self._pending.pop(req_id, None)
 
     # ── Feature 2: Device sync ────────────────────────────────────────────────
 

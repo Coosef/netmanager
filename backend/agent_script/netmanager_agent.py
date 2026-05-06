@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.8"
+VERSION = "1.3.9"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -1044,6 +1044,30 @@ async def handle_message(ws, msg, loop):
         _snmp_trap_enabled = msg.get("enabled", False)
         _snmp_trap_port = int(msg.get("port", 162))
         log.info("SNMP Trap konfig guncellendi: enabled={}, port={}".format(_snmp_trap_enabled, _snmp_trap_port))
+        return
+
+    # Ping check — lightweight reachability probe (used by backend poller)
+    if t == "ping_check":
+        ip = msg.get("ip", "")
+        timeout = int(msg.get("timeout", 3))
+        req_id = msg.get("req_id", rid)
+
+        async def _do_ping():
+            try:
+                flag = "-n" if sys.platform == "win32" else "-c"
+                w_flag = ["-w", str(timeout * 1000)] if sys.platform == "win32" else ["-W", str(timeout)]
+                proc = await asyncio.create_subprocess_exec(
+                    "ping", flag, "1", *w_flag, ip,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
+                reachable = proc.returncode == 0
+            except Exception:
+                reachable = False
+            await _send({"type": "ping_result", "req_id": req_id, "ip": ip, "reachable": reachable})
+
+        asyncio.ensure_future(_do_ping())
         return
 
     # Feature 8: credential bundle
