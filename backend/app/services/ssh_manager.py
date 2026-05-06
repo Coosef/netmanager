@@ -143,7 +143,13 @@ class SSHManager:
         fallbacks = getattr(device, "fallback_agent_ids", None) or []
         candidates.extend(f for f in fallbacks if f and f != primary)
 
-        online = [aid for aid in candidates if agent_manager.is_online(aid)]
+        # Only route through agents that have an active WebSocket in THIS process.
+        # Celery workers have no WebSocket connections (those live in the FastAPI
+        # process), so is_online via Redis is not sufficient — we must verify the
+        # connection is actually held here, otherwise _send_request raises
+        # "Agent not connected" immediately and all devices fail.
+        online = [aid for aid in candidates
+                  if aid in agent_manager._connections and agent_manager.is_online(aid)]
         if not online:
             return None
 
