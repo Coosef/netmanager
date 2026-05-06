@@ -470,6 +470,11 @@ function TopologyFlow() {
   const canvasContainerRef = useRef<HTMLDivElement>(null)
   const topo3dRef = useRef<Topology3DHandle>(null)
 
+  // 3D feature states
+  const [topo3dPathMode, setTopo3dPathMode] = useState(false)
+  const [topo3dTourActive, setTopo3dTourActive] = useState(false)
+  const [blast3dIds, setBlast3dIds] = useState<number[]>([])
+
   const [discoverResult, setDiscoverResult] = useState<DiscoverSingleResult | null>(null)
   const [discoverModalOpen, setDiscoverModalOpen] = useState(false)
 
@@ -629,7 +634,13 @@ function TopologyFlow() {
 
   const blastRadiusMutation = useMutation({
     mutationFn: (device_id: number) => topologyApi.getBlastRadius(device_id),
-    onSuccess: () => setBlastModalOpen(true),
+    onSuccess: (data) => {
+      setBlastModalOpen(true)
+      if (viewMode === '3d') {
+        setBlast3dIds(data.affected_devices.map((d) => d.id))
+        setTimeout(() => setBlast3dIds([]), 5000)
+      }
+    },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Blast radius analizi başarısız'),
   })
 
@@ -991,15 +1002,19 @@ function TopologyFlow() {
             height={canvasContainerRef.current?.clientHeight || window.innerHeight - 200}
             onNodeClick={openDeviceById}
             searchQuery={searchQuery}
+            pathMode={topo3dPathMode}
+            blastDeviceIds={blast3dIds}
           />
         )}
 
         {viewMode === '3d' && (
           <div style={{
-            position: 'absolute', top: 12, right: 12, zIndex: 10, width: 230,
-            background: 'rgba(3,12,30,0.88)', borderRadius: 10, padding: '8px 10px',
-            border: '1px solid rgba(0,195,255,0.22)', backdropFilter: 'blur(10px)',
+            position: 'absolute', top: 12, right: 12, zIndex: 10, width: 238,
+            background: 'rgba(3,12,30,0.92)', borderRadius: 12, padding: '10px 12px',
+            border: '1px solid rgba(0,195,255,0.22)', backdropFilter: 'blur(12px)',
+            display: 'flex', flexDirection: 'column', gap: 8,
           }}>
+            {/* Search */}
             <Input.Search
               placeholder="Hostname veya IP ara…"
               allowClear size="small"
@@ -1009,10 +1024,76 @@ function TopologyFlow() {
               style={{ width: '100%' }}
             />
             {searchMatchCount !== null && (
-              <div style={{ fontSize: 10, marginTop: 4, color: searchMatchCount > 0 ? '#00d4ff' : '#ff4d4f', textAlign: 'right' }}>
+              <div style={{ fontSize: 10, color: searchMatchCount > 0 ? '#00d4ff' : '#ff4d4f', textAlign: 'right', marginTop: -4 }}>
                 {searchMatchCount > 0 ? `${searchMatchCount} cihaz eşleşti` : 'Eşleşme yok'}
               </div>
             )}
+
+            {/* Divider */}
+            <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)' }} />
+
+            {/* Tour */}
+            <div>
+              <div style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
+                Otomatik Tur
+              </div>
+              <Button
+                block size="small"
+                type={topo3dTourActive ? 'primary' : 'default'}
+                style={topo3dTourActive ? { background: '#7c3aed', borderColor: '#7c3aed' } : {}}
+                onClick={() => {
+                  if (topo3dTourActive) {
+                    topo3dRef.current?.stopTour()
+                    setTopo3dTourActive(false)
+                  } else {
+                    topo3dRef.current?.startTour()
+                    setTopo3dTourActive(true)
+                  }
+                }}
+              >
+                {topo3dTourActive ? '⏹ Turu Durdur' : '▶ Turu Başlat'}
+              </Button>
+            </div>
+
+            {/* Path tracing */}
+            <div>
+              <div style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
+                Yol Bul
+              </div>
+              <Button
+                block size="small"
+                type={topo3dPathMode ? 'primary' : 'default'}
+                style={topo3dPathMode ? { background: '#d97706', borderColor: '#d97706' } : {}}
+                onClick={() => {
+                  const next = !topo3dPathMode
+                  setTopo3dPathMode(next)
+                  if (!next) topo3dRef.current?.clearPath()
+                }}
+              >
+                {topo3dPathMode ? '🔶 Yol Modu Aktif' : '🔀 Yol Bul Modu'}
+              </Button>
+              {topo3dPathMode && (
+                <div style={{ fontSize: 10, color: '#fbbf24', marginTop: 4, lineHeight: 1.4 }}>
+                  1. cihaza tıkla → kaynak<br />2. cihaza tıkla → yol gösterilir
+                </div>
+              )}
+            </div>
+
+            {/* Isolate hint */}
+            <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)', paddingTop: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 9, color: '#94a3b8', letterSpacing: 0.5 }}>
+                  🖱 Sağ tık → cihazı izole et
+                </span>
+                <Button
+                  size="small" type="text"
+                  style={{ fontSize: 9, color: '#94a3b8', padding: '0 4px', height: 18 }}
+                  onClick={() => topo3dRef.current?.clearIsolate()}
+                >
+                  Temizle
+                </Button>
+              </div>
+            </div>
           </div>
         )}
 
