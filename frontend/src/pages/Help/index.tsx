@@ -7,7 +7,7 @@ import {
   CalendarOutlined, RiseOutlined, RobotOutlined, HddOutlined, BuildOutlined,
   AimOutlined, BarChartOutlined, RadarChartOutlined, QuestionCircleOutlined,
   SearchOutlined, CheckCircleOutlined, UserOutlined, QuestionOutlined,
-  TagOutlined,
+  TagOutlined, CodeOutlined,
 } from '@ant-design/icons'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
@@ -36,12 +36,21 @@ const ROLE_META = [
 ]
 
 const FAQ_ITEMS = [
-  { qKey: 'faq_ssh_q',      aKey: 'faq_ssh_a' },
-  { qKey: 'faq_agent_q',    aKey: 'faq_agent_a' },
-  { qKey: 'faq_backup_q',   aKey: 'faq_backup_a' },
-  { qKey: 'faq_snmp_q',     aKey: 'faq_snmp_a' },
-  { qKey: 'faq_invite_q',   aKey: 'faq_invite_a' },
-  { qKey: 'faq_location_q', aKey: 'faq_location_a' },
+  { qKey: 'faq_ssh_q',         aKey: 'faq_ssh_a' },
+  { qKey: 'faq_agent_q',       aKey: 'faq_agent_a' },
+  { qKey: 'faq_trap_q',        aKey: 'faq_trap_a' },
+  { qKey: 'faq_flap_q',        aKey: 'faq_flap_a' },
+  { qKey: 'faq_maintenance_q', aKey: 'faq_maintenance_a' },
+  { qKey: 'faq_backup_q',      aKey: 'faq_backup_a' },
+  { qKey: 'faq_drift_q',       aKey: 'faq_drift_a' },
+  { qKey: 'faq_interface_q',   aKey: 'faq_interface_a' },
+  { qKey: 'faq_vlan_q',        aKey: 'faq_vlan_a' },
+  { qKey: 'faq_snmp_q',        aKey: 'faq_snmp_a' },
+  { qKey: 'faq_readonly_q',    aKey: 'faq_readonly_a' },
+  { qKey: 'faq_policy_q',      aKey: 'faq_policy_a' },
+  { qKey: 'faq_csv_q',         aKey: 'faq_csv_a' },
+  { qKey: 'faq_invite_q',      aKey: 'faq_invite_a' },
+  { qKey: 'faq_location_q',    aKey: 'faq_location_a' },
 ]
 
 const FEATURES = [
@@ -66,6 +75,10 @@ const FEATURES = [
   { icon: <BuildOutlined />,      color: '#84cc16', titleKey: 'feat_floor_title',      descKey: 'feat_floor_desc' },
   { icon: <AimOutlined />,        color: '#06b6d4', titleKey: 'feat_diagnostics_title',descKey: 'feat_diagnostics_desc' },
   { icon: <BarChartOutlined />,   color: '#8b5cf6', titleKey: 'feat_reports_title',    descKey: 'feat_reports_desc' },
+  { icon: <RadarChartOutlined />, color: '#ef4444', titleKey: 'feat_snmptrap_title',  descKey: 'feat_snmptrap_desc' },
+  { icon: <SafetyOutlined />,     color: '#10b981', titleKey: 'feat_maintenance_title', descKey: 'feat_maintenance_desc' },
+  { icon: <CodeOutlined />,       color: '#0ea5e9', titleKey: 'feat_terminal_title',  descKey: 'feat_terminal_desc' },
+  { icon: <CloudOutlined />,      color: '#64748b', titleKey: 'feat_syslog_title',    descKey: 'feat_syslog_desc' },
 ]
 
 const QS_STEPS = [
