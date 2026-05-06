@@ -145,16 +145,18 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
       obj.traverse((child: any) => {
         if (child instanceof THREE.Mesh) {
-          const mat = child.material as THREE.MeshPhongMaterial
+          const mat = child.material as any
           mat.transparent = opacity < 1
           mat.opacity = opacity
-          if (isBlast && !n.ghost) {
-            mat.emissive.setHex(0xff2222); mat.emissiveIntensity = 0.9
-          } else if ((isPath || isPathSrc) && !n.ghost) {
-            mat.emissive.setHex(0xfbbf24); mat.emissiveIntensity = isPathSrc ? 1.0 : 0.8
-          } else {
-            mat.emissive.setHex(STATUS_EMISSIVE[n.status] ?? 0x445566)
-            mat.emissiveIntensity = STATUS_EMISSIVE_INT[n.status] ?? 0.1
+          if (mat.emissive) {
+            if (isBlast && !n.ghost) {
+              mat.emissive.setHex(0xff2222); mat.emissiveIntensity = 0.9
+            } else if ((isPath || isPathSrc) && !n.ghost) {
+              mat.emissive.setHex(0xfbbf24); mat.emissiveIntensity = isPathSrc ? 1.0 : 0.8
+            } else {
+              mat.emissive.setHex(STATUS_EMISSIVE[n.status] ?? 0x445566)
+              mat.emissiveIntensity = STATUS_EMISSIVE_INT[n.status] ?? 0.1
+            }
           }
         }
         if (child instanceof THREE.Sprite) {
