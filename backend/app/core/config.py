@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     # AI / LLM
     ANTHROPIC_API_KEY: str = ""
 
+    # Agent WebSocket URL override — set this to the direct (non-Cloudflare) URL
+    # so installer scripts embed the correct WebSocket endpoint.
+    # Example: https://ws.systrack.app
+    AGENT_WS_URL: str = ""
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

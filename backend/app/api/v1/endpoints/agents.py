@@ -472,6 +472,8 @@ async def download_installer(
 
     if server_url:
         base_url = server_url.rstrip("/")
+    elif settings.AGENT_WS_URL:
+        base_url = settings.AGENT_WS_URL.rstrip("/")
     else:
         forwarded_host = request.headers.get("x-forwarded-host")
         forwarded_proto = request.headers.get("x-forwarded-proto", "http")
