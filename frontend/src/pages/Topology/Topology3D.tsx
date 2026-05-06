@@ -219,6 +219,9 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   }), [refreshNodes])
 
   // ── Graph data ─────────────────────────────────────────────────────────────
+  // Keep a ref so handleNodeClick can access nodes/links without graphData() ref method
+  const graphDataRef = useRef<{ nodes: any[]; links: any[] }>({ nodes: [], links: [] })
+
   const graphData = useMemo(() => {
     const q = searchQuery?.trim()?.toLowerCase() || ''
     const nodes = graph.nodes.map((n) => {
@@ -239,7 +242,9 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       id: `${e.source}|${e.target}`,
       source: e.source, target: e.target, label: e.label || '',
     }))
-    return { nodes, links }
+    const result = { nodes, links }
+    graphDataRef.current = result
+    return result
   }, [graph, searchQuery])
 
   // ── Node Three.js object ───────────────────────────────────────────────────
@@ -307,8 +312,8 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       } else if (pathSrcRef.current === node.id) {
         pathSrcRef.current = null; pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
         setLinkVis((v) => v + 1); refreshNodes()
-      } else if (typeof fgRef.current.graphData === 'function') {
-        const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
+      } else {
+        const { nodes, links } = graphDataRef.current
         const path = bfsPath(nodes, links, pathSrcRef.current!, node.id)
         pathNodeIds.current = new Set(path)
         const lids = new Set<string>()
@@ -317,10 +322,17 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         }
         pathLinkIds.current = lids; pathSrcRef.current = null
         setLinkVis((v) => v + 1); refreshNodes()
-        const mid = nodes.find((n: any) => n.id === path[Math.floor(path.length / 2)])
-        if (mid) fgRef.current.cameraPosition(
-          { x: (mid.x || 0) + 60, y: (mid.y || 0) + 80, z: (mid.z || 0) + 80 },
-          { x: mid.x || 0, y: mid.y || 0, z: mid.z || 0 }, 1200)
+        // Fly to midpoint of path via scene traverse
+        if (path.length > 0 && typeof fgRef.current.scene === 'function') {
+          const midId = path[Math.floor(path.length / 2)]
+          const scene = fgRef.current.scene() as THREE.Scene
+          scene.traverse((obj: any) => {
+            if (obj.__graphObjType === 'node' && obj.__data?.id === midId)
+              fgRef.current.cameraPosition(
+                { x: obj.position.x + 60, y: obj.position.y + 80, z: obj.position.z + 80 },
+                { x: obj.position.x, y: obj.position.y, z: obj.position.z }, 1200)
+          })
+        }
       }
       return
     }

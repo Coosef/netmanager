@@ -626,7 +626,7 @@ class TopologyService:
                         util_b["speed_mbps"] if util_b else None,
                     ] if v is not None]
                     edges.append({
-                        "id": f"e-{a}-{b}-{pa}",
+                        "id": f"e-{a}-{b}-{pa}-{pb}",
                         "source": f"d-{a}",
                         "target": f"d-{b}",
                         "label": f"{pa} ↔ {pb}",

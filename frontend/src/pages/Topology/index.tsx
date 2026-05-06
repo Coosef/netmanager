@@ -993,10 +993,10 @@ function TopologyFlow() {
           </div>
         )}
 
-        {viewMode === '3d' && graph && (
+        {viewMode === '3d' && (
           <Topology3D
             ref={topo3dRef}
-            graph={graph}
+            graph={graph ?? { nodes: [], edges: [], stats: { total_nodes: 0, known_nodes: 0, ghost_nodes: 0, total_edges: 0 } }}
             isDark={isDark}
             width={canvasContainerRef.current?.clientWidth || window.innerWidth - 240}
             height={canvasContainerRef.current?.clientHeight || window.innerHeight - 200}
