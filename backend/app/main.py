@@ -393,17 +393,43 @@ async def lifespan(app: FastAPI):
 
 
 async def _agent_device_status_loop():
-    """Poll device reachability every 5 minutes using the live ssh_manager (agent-aware)."""
+    """Poll device reachability every 5 minutes using ICMP ping (agent-side ping for private LANs)."""
     import asyncio as _asyncio
     import logging
+    import sys
     from datetime import datetime, timezone
     from sqlalchemy import select, update
     from app.core.database import AsyncSessionLocal
     from app.models.device import Device, DeviceStatus
-    from app.services.ssh_manager import ssh_manager
+    from app.services.agent_manager import agent_manager
 
     _log = logging.getLogger("device-status-poller")
     await _asyncio.sleep(30)  # wait for app to fully start
+
+    async def _icmp_ping(ip: str, timeout: int = 3) -> bool:
+        flag = "-n" if sys.platform == "win32" else "-c"
+        w_flag = ["-w", str(timeout * 1000)] if sys.platform == "win32" else ["-W", str(timeout)]
+        try:
+            proc = await _asyncio.create_subprocess_exec(
+                "ping", flag, "1", *w_flag, ip,
+                stdout=_asyncio.subprocess.DEVNULL,
+                stderr=_asyncio.subprocess.DEVNULL,
+            )
+            await _asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
+            return proc.returncode == 0
+        except Exception:
+            return False
+
+    async def _check_reachable(device) -> bool:
+        agent_id = getattr(device, "agent_id", None)
+        if agent_id and agent_manager.is_online(agent_id):
+            # Agent-proxied and agent is live: ask agent to ping (no SSH)
+            try:
+                return await agent_manager.ping_check(agent_id, device.ip_address, timeout=3)
+            except Exception:
+                return device.status == DeviceStatus.ONLINE
+        # Direct device or agent offline: ICMP from backend
+        return await _icmp_ping(device.ip_address)
 
     while True:
         try:
@@ -412,28 +438,28 @@ async def _agent_device_status_loop():
                     select(Device).where(Device.is_active == True)
                 )).scalars().all()
 
-            sem = _asyncio.Semaphore(5)
+            sem = _asyncio.Semaphore(20)
 
             async def _check(device):
                 async with sem:
                     try:
-                        result = await ssh_manager.test_connection(device)
-                        new_status = DeviceStatus.ONLINE if result.success else DeviceStatus.OFFLINE
+                        reachable = await _check_reachable(device)
+                        new_status = DeviceStatus.ONLINE if reachable else DeviceStatus.OFFLINE
                         values = {"status": new_status}
-                        if result.success:
+                        if reachable:
                             values["last_seen"] = datetime.now(timezone.utc)
-                        async with AsyncSessionLocal() as db:
-                            await db.execute(
+                        async with AsyncSessionLocal() as db2:
+                            await db2.execute(
                                 update(Device).where(Device.id == device.id).values(**values)
                             )
-                            await db.commit()
+                            await db2.commit()
                     except Exception:
                         pass
 
             await _asyncio.gather(*[_check(d) for d in devices])
             _log.debug(f"Device status poll complete: {len(devices)} devices checked")
         except Exception as exc:
-            logging.getLogger("device-status-poller").warning(f"Poll cycle error: {exc}")
+            _log.warning(f"Poll cycle error: {exc}")
 
         await _asyncio.sleep(300)  # 5 minutes
 
