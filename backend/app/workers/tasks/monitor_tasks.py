@@ -66,8 +66,8 @@ async def _icmp_ping(ip: str, timeout: int = 3) -> bool:
 
 
 def _agent_is_online(agent_id: str) -> bool:
-    """True if the agent has sent a heartbeat within the last 120 s."""
-    return bool(_redis.exists(f"agent:{agent_id}:heartbeat"))
+    """True if the agent is currently online (refreshed every 15s, TTL 60s)."""
+    return bool(_redis.exists(f"agent:{agent_id}:online"))
 
 
 async def _check_device_reachable(device) -> bool:
