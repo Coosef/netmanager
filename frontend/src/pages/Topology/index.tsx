@@ -474,6 +474,7 @@ function TopologyFlow() {
   const [topo3dPathMode, setTopo3dPathMode] = useState(false)
   const [topo3dTourActive, setTopo3dTourActive] = useState(false)
   const [blast3dIds, setBlast3dIds] = useState<number[]>([])
+  const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set())
 
   const [discoverResult, setDiscoverResult] = useState<DiscoverSingleResult | null>(null)
   const [discoverModalOpen, setDiscoverModalOpen] = useState(false)
@@ -1004,6 +1005,7 @@ function TopologyFlow() {
             searchQuery={searchQuery}
             pathMode={topo3dPathMode}
             blastDeviceIds={blast3dIds}
+            hiddenLayers={hiddenLayers}
           />
         )}
 
@@ -1092,6 +1094,47 @@ function TopologyFlow() {
                 >
                   Temizle
                 </Button>
+              </div>
+            </div>
+
+            {/* Layer toggles */}
+            <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)', paddingTop: 6 }}>
+              <div style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
+                Katmanlar
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {([
+                  { key: 'core',         label: 'Core',         color: '#ef4444' },
+                  { key: 'distribution', label: 'Distribution', color: '#f97316' },
+                  { key: 'access',       label: 'Access',       color: '#3b82f6' },
+                  { key: 'edge',         label: 'Edge',         color: '#22c55e' },
+                  { key: 'wireless',     label: 'Wireless',     color: '#a855f7' },
+                  { key: 'ap',           label: 'AP',           color: '#00bcd4' },
+                ] as const).map(({ key, label, color }) => {
+                  const visible = !hiddenLayers.has(key)
+                  return (
+                    <div
+                      key={key}
+                      onClick={() => setHiddenLayers((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(key)) next.delete(key); else next.add(key)
+                        return next
+                      })}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+                        padding: '3px 6px', borderRadius: 4, userSelect: 'none',
+                        background: visible ? `${color}18` : 'transparent',
+                        border: `1px solid ${visible ? color + '44' : 'rgba(255,255,255,0.06)'}`,
+                        opacity: visible ? 1 : 0.4,
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: visible ? color : '#334155', flexShrink: 0 }} />
+                      <span style={{ fontSize: 10, color: visible ? color : '#64748b', flex: 1 }}>{label}</span>
+                      <span style={{ fontSize: 10, color: visible ? '#94a3b8' : '#475569' }}>{visible ? '●' : '○'}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           </div>

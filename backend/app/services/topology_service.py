@@ -659,8 +659,9 @@ class TopologyService:
                         "ip": link.neighbor_ip,
                         "platform": link.neighbor_platform,
                         "device_type": ntype,
-                        "source_device_id": link.device_id,  # which device reported this neighbor
+                        "source_device_id": link.device_id,
                         "ghost": True,
+                        "layer": "ap" if ntype == "ap" else None,
                     },
                 }
                 key = (link.device_id, link.neighbor_hostname, link.local_port)

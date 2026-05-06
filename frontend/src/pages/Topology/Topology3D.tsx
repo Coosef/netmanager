@@ -22,6 +22,7 @@ const LAYER_CFG: Record<string, { y: number; color: number; hex: string; label: 
   access:       { y: 0,    color: 0x3b82f6, hex: '#3b82f6', label: 'ACCESS',       radius: 9  },
   edge:         { y: -90,  color: 0x22c55e, hex: '#22c55e', label: 'EDGE',         radius: 7  },
   wireless:     { y: -180, color: 0xa855f7, hex: '#a855f7', label: 'WIRELESS',     radius: 6  },
+  ap:           { y: -270, color: 0x00bcd4, hex: '#00bcd4', label: 'AP',           radius: 5  },
 }
 
 // ─── BFS shortest path ───────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ interface Props {
   searchQuery?: string
   pathMode?: boolean
   blastDeviceIds?: number[]
+  hiddenLayers?: Set<string>
 }
 
 export interface Topology3DHandle {
@@ -85,7 +87,7 @@ export interface Topology3DHandle {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
-  { graph, width, height, onNodeClick, searchQuery, pathMode = false, blastDeviceIds = [] },
+  { graph, width, height, onNodeClick, searchQuery, pathMode = false, blastDeviceIds = [], hiddenLayers },
   ref,
 ) {
   const fgRef = useRef<any>(null)
@@ -101,6 +103,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   const tourTimer  = useRef<ReturnType<typeof setInterval> | null>(null)
   const tourIdxRef = useRef(0)
 
+  const hiddenLayersRef = useRef<Set<string>>(new Set())
   const blastRings = useRef<Array<{ mesh: THREE.Mesh; age: number; maxAge: number }>>([])
   const rafRef     = useRef<number>(0)
   const sceneReady = useRef(false)
@@ -134,14 +137,18 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       const n = obj.__data
       if (!n) return
 
+      const isHiddenLayer = hiddenLayersRef.current.has(n.layer as string)
       const isPath    = pathNodeIds.current.has(n.id)
       const isBlast   = blastNodeIds.current.has(n.device_id as number)
       const isIsoVis  = !isolated || neighbors!.has(n.id)
       const isPathSrc = n.id === pathSrcRef.current
 
+      // Fully hide layer-toggled or isolated non-neighbor nodes (obj.visible avoids alpha sorting cost)
+      obj.visible = !isHiddenLayer && isIsoVis
+      if (!obj.visible) return
+
       let opacity = n.ghost ? 0.45 : 1
-      if (!isIsoVis) opacity = 0.03
-      else if (n.dimmed) opacity = 0.08
+      if (n.dimmed) opacity = 0.08
 
       obj.traverse((child: any) => {
         if (child instanceof THREE.Mesh) {
@@ -234,8 +241,8 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         vendor: n.data.vendor || 'other', status: n.data.status || 'unknown',
         layer, device_id: n.data.device_id, ghost: isGhost,
         dimmed: q ? (!label.includes(q) && !ip.includes(q)) : false,
-        // Pin to layer Y so nodes appear on the correct floor
-        fy: isGhost ? undefined : (LAYER_CFG[layer]?.y ?? 0),
+        // Pin to layer Y (including AP ghost nodes that have a layer assigned)
+        fy: LAYER_CFG[layer] ? LAYER_CFG[layer].y : (isGhost ? undefined : 0),
       }
     })
     const links = graph.edges.map((e) => ({
@@ -285,22 +292,39 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     return group
   }, [])
 
+  // ── Sync hiddenLayers prop → ref, trigger refresh ─────────────────────────
+  useEffect(() => {
+    hiddenLayersRef.current = hiddenLayers ?? new Set()
+    setLinkVis((v) => v + 1)
+    refreshNodes()
+  }, [hiddenLayers, refreshNodes])
+
   // ── Link color/width ───────────────────────────────────────────────────────
-  const linkColorFn = useCallback((link: any) =>
-    pathLinkIds.current.has(link.id as string) ? '#fbbf24' : 'rgba(0,195,255,0.20)'
-  , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
+  const isLinkHidden = (link: any) => {
+    const sl = (typeof link.source === 'object' ? link.source.layer : '') as string
+    const tl = (typeof link.target === 'object' ? link.target.layer : '') as string
+    return hiddenLayersRef.current.has(sl) || hiddenLayersRef.current.has(tl)
+  }
 
-  const linkWidthFn = useCallback((link: any) =>
-    pathLinkIds.current.has(link.id as string) ? 3 : 0.7
-  , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
+  const linkColorFn = useCallback((link: any) => {
+    if (isLinkHidden(link)) return 'rgba(0,0,0,0)'
+    return pathLinkIds.current.has(link.id as string) ? '#fbbf24' : 'rgba(0,195,255,0.20)'
+  }, [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const particleColorFn = useCallback((link: any) =>
-    pathLinkIds.current.has(link.id as string) ? '#fbbf24' : '#00d4ff'
-  , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
+  const linkWidthFn = useCallback((link: any) => {
+    if (isLinkHidden(link)) return 0
+    return pathLinkIds.current.has(link.id as string) ? 3 : 0.7
+  }, [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  const particleSpeedFn = useCallback((link: any) =>
-    pathLinkIds.current.has(link.id as string) ? 0.016 : 0.004
-  , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
+  const particleColorFn = useCallback((link: any) => {
+    if (isLinkHidden(link)) return 'rgba(0,0,0,0)'
+    return pathLinkIds.current.has(link.id as string) ? '#fbbf24' : '#00d4ff'
+  }, [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const particleSpeedFn = useCallback((link: any) => {
+    if (isLinkHidden(link)) return 0
+    return pathLinkIds.current.has(link.id as string) ? 0.016 : 0.004
+  }, [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Node click ─────────────────────────────────────────────────────────────
   const handleNodeClick = useCallback((node: any) => {
