@@ -1099,8 +1099,26 @@ function TopologyFlow() {
 
             {/* Layer toggles */}
             <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)', paddingTop: 6 }}>
-              <div style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
-                Katmanlar
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+                <span style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                  Katmanlar
+                </span>
+                <div
+                  onClick={() => setHiddenLayers((prev) =>
+                    prev.size === 0
+                      ? new Set(['core', 'distribution', 'access', 'edge', 'wireless', 'ap'])
+                      : new Set()
+                  )}
+                  style={{
+                    fontSize: 9, cursor: 'pointer', padding: '2px 6px',
+                    borderRadius: 3, border: '1px solid rgba(0,195,255,0.25)',
+                    color: hiddenLayers.size === 0 ? '#94a3b8' : '#00d4ff',
+                    background: hiddenLayers.size === 0 ? 'transparent' : 'rgba(0,195,255,0.08)',
+                    userSelect: 'none', transition: 'all 0.15s',
+                  }}
+                >
+                  {hiddenLayers.size === 0 ? '○ Gizle' : '● Göster'}
+                </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                 {([

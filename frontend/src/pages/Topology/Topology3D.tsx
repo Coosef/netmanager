@@ -140,7 +140,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       const isHiddenLayer = hiddenLayersRef.current.has(n.layer as string)
       const isPath    = pathNodeIds.current.has(n.id)
       const isBlast   = blastNodeIds.current.has(n.device_id as number)
-      const isIsoVis  = !isolated || neighbors!.has(n.id)
+      const isIsoVis  = !isolated || neighbors!.has(n.id) || pathNodeIds.current.has(n.id)
       const isPathSrc = n.id === pathSrcRef.current
 
       // Fully hide layer-toggled or isolated non-neighbor nodes (obj.visible avoids alpha sorting cost)
