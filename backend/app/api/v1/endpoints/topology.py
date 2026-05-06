@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ async def trigger_discovery(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    device_ids: list[int] | None = None,
+    device_ids: list[int] | None = Body(default=None),
 ):
     """Trigger LLDP/CDP topology discovery. If device_ids is empty, discovers all active devices."""
     if not current_user.has_permission("task:create"):

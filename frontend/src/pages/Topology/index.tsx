@@ -476,6 +476,9 @@ function TopologyFlow() {
   const [hopTaskId, setHopTaskId] = useState<number | null>(null)
   const [bulkTaskId, setBulkTaskId] = useState<number | null>(null)
 
+  const [selectMode, setSelectMode] = useState(false)
+  const [bulkSelected, setBulkSelected] = useState<Set<number>>(new Set())
+
   useTaskProgress(hopTaskId, {
     title: 'Atlama Keşfi',
     invalidateKeys: [['topology-graph'], ['topology-stats'], ['devices']],
@@ -556,6 +559,17 @@ function TopologyFlow() {
     mutationFn: () => topologyApi.triggerDiscovery(),
     onSuccess: (data) => { setBulkTaskId(data.task_id) },
     onError: () => message.error(t('topology.discover_failed')),
+  })
+
+  const bulkLldpMutation = useMutation({
+    mutationFn: (ids: number[]) => topologyApi.triggerDiscovery(ids),
+    onSuccess: (data) => {
+      setBulkTaskId(data.task_id)
+      setSelectMode(false)
+      setBulkSelected(new Set())
+      message.success(`${data.device_count} cihaz için LLDP keşfi başlatıldı (Görev #${data.task_id})`)
+    },
+    onError: () => message.error('LLDP başlatılamadı'),
   })
 
   const refreshGraph = useMutation({
@@ -649,16 +663,25 @@ function TopologyFlow() {
 
   const displayNodes = useMemo(() => {
     const typedNodes = nodes as Node[]
-    if (!searchQuery.trim()) return typedNodes
-    const q = searchQuery.toLowerCase()
-    return typedNodes.map((n) => ({
-      ...n,
-      hidden: !(
-        ((n.data?.label as string) || '').toLowerCase().includes(q) ||
-        ((n.data?.ip as string) || '').toLowerCase().includes(q)
-      ),
-    }))
-  }, [nodes, searchQuery])
+    let result = typedNodes
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      result = typedNodes.map((n) => ({
+        ...n,
+        hidden: !(
+          ((n.data?.label as string) || '').toLowerCase().includes(q) ||
+          ((n.data?.ip as string) || '').toLowerCase().includes(q)
+        ),
+      }))
+    }
+    if (selectMode && bulkSelected.size > 0) {
+      return result.map((n) => ({
+        ...n,
+        selected: bulkSelected.has(n.data?.device_id as number),
+      }))
+    }
+    return result
+  }, [nodes, searchQuery, selectMode, bulkSelected])
 
   const displayEdges = useMemo(() => {
     const typedEdges = edges as Edge[]
@@ -749,6 +772,7 @@ function TopologyFlow() {
 
   const onNodeClick = useCallback(async (_: unknown, node: Node) => {
     if (node.type === 'ghostNode') {
+      if (selectMode) return
       const dtype = node.data?.device_type as string
       if (dtype === 'switch' || dtype === 'router') {
         setGhostTarget({
@@ -761,8 +785,18 @@ function TopologyFlow() {
       return
     }
     const deviceId = node.data?.device_id as number
-    if (deviceId) openDeviceById(deviceId)
-  }, [openDeviceById])
+    if (!deviceId) return
+    if (selectMode) {
+      setBulkSelected((prev) => {
+        const next = new Set(prev)
+        if (next.has(deviceId)) next.delete(deviceId)
+        else next.add(deviceId)
+        return next
+      })
+      return
+    }
+    openDeviceById(deviceId)
+  }, [openDeviceById, selectMode])
 
   const onNodeMouseEnter = useCallback((_: unknown, node: Node) => {
     setEdges((eds) => eds.map((e) => ({
@@ -964,6 +998,16 @@ function TopologyFlow() {
         )}
 
         <div style={{ display: viewMode === '3d' ? 'none' : 'contents' }}>
+        {selectMode && (
+          <div style={{
+            position: 'absolute', top: 12, left: 12, zIndex: 20,
+            background: 'rgba(21,128,61,0.92)', borderRadius: 8,
+            padding: '5px 12px', fontSize: 12, fontWeight: 600, color: '#fff',
+            border: '1px solid #22c55e', pointerEvents: 'none',
+          }}>
+            ✓ Seçim Modu — cihaza tıkla
+          </div>
+        )}
         <ReactFlow
           nodes={displayNodes as any} edges={displayEdges as any}
           onNodesChange={onNodesChange as any} onEdgesChange={onEdgesChange as any}
@@ -976,6 +1020,7 @@ function TopologyFlow() {
           minZoom={0.05} maxZoom={3}
           attributionPosition="bottom-right"
           colorMode={isDark ? 'dark' : 'light'}
+          style={{ cursor: selectMode ? 'crosshair' : undefined }}
         >
           <Background color={bgDotColor} gap={20} />
           <Controls style={{ background: panelCardBg, border: `1px solid ${panelCardBorder}` }} />
@@ -1108,10 +1153,63 @@ function TopologyFlow() {
                   block size="small" type="primary"
                   icon={<SyncOutlined />}
                   loading={discoverMutation.isPending}
+                  disabled={selectMode}
                   onClick={() => discoverMutation.mutate()}
                 >
                   {t('topology.discover_all')}
                 </Button>
+                <Button
+                  block size="small"
+                  icon={<CheckCircleOutlined />}
+                  type={selectMode ? 'primary' : 'default'}
+                  onClick={() => { setSelectMode((v) => !v); setBulkSelected(new Set()) }}
+                  style={{
+                    marginTop: 6,
+                    ...(selectMode
+                      ? { background: '#15803d', borderColor: '#22c55e', color: '#fff' }
+                      : {}),
+                  }}
+                >
+                  {selectMode ? `Seçim Modu: ${bulkSelected.size} cihaz` : 'Çoklu Seçim'}
+                </Button>
+                {selectMode && (
+                  <>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, marginTop: 4 }}>
+                      <Button
+                        size="small"
+                        onClick={() => {
+                          const allIds = new Set(
+                            (nodes as Node[])
+                              .filter((n) => n.type !== 'ghostNode' && n.data?.device_id)
+                              .map((n) => n.data.device_id as number)
+                          )
+                          setBulkSelected(allIds)
+                        }}
+                        style={{ fontSize: 10 }}
+                      >
+                        Tümünü Seç
+                      </Button>
+                      <Button
+                        size="small"
+                        disabled={bulkSelected.size === 0}
+                        onClick={() => setBulkSelected(new Set())}
+                        style={{ fontSize: 10 }}
+                      >
+                        Temizle
+                      </Button>
+                    </div>
+                    <Button
+                      block size="small" type="primary"
+                      icon={<ThunderboltOutlined />}
+                      loading={bulkLldpMutation.isPending}
+                      disabled={bulkSelected.size === 0}
+                      onClick={() => bulkLldpMutation.mutate(Array.from(bulkSelected))}
+                      style={{ marginTop: 4 }}
+                    >
+                      Seçilileri LLDP ({bulkSelected.size})
+                    </Button>
+                  </>
+                )}
                 <Button
                   block size="small"
                   icon={<BugOutlined />}
@@ -1141,7 +1239,7 @@ function TopologyFlow() {
                 >
                   HTML Dışa Aktar
                 </Button>
-                {selectedDevice && (
+                {selectedDevice && !selectMode && (
                   <Button
                     block size="small" style={{ marginTop: 6 }}
                     icon={<ThunderboltOutlined />}
