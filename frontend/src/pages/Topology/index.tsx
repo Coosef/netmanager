@@ -475,6 +475,7 @@ function TopologyFlow() {
   const [topo3dTourActive, setTopo3dTourActive] = useState(false)
   const [blast3dIds, setBlast3dIds] = useState<number[]>([])
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set())
+  const [layerMode, setLayerMode] = useState(true)
 
   const [discoverResult, setDiscoverResult] = useState<DiscoverSingleResult | null>(null)
   const [discoverModalOpen, setDiscoverModalOpen] = useState(false)
@@ -1006,6 +1007,7 @@ function TopologyFlow() {
             pathMode={topo3dPathMode}
             blastDeviceIds={blast3dIds}
             hiddenLayers={hiddenLayers}
+            layerMode={layerMode}
           />
         )}
 
@@ -1099,6 +1101,22 @@ function TopologyFlow() {
 
             {/* Layer toggles */}
             <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)', paddingTop: 6 }}>
+              {/* Mode toggle */}
+              <div
+                onClick={() => setLayerMode((v) => !v)}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  cursor: 'pointer', marginBottom: 6, padding: '4px 8px', borderRadius: 5,
+                  background: layerMode ? 'rgba(0,195,255,0.07)' : 'rgba(99,102,241,0.10)',
+                  border: `1px solid ${layerMode ? 'rgba(0,195,255,0.25)' : 'rgba(99,102,241,0.35)'}`,
+                  userSelect: 'none', transition: 'all 0.15s',
+                }}
+              >
+                <span style={{ fontSize: 13 }}>{layerMode ? '⬛' : '🌐'}</span>
+                <span style={{ fontSize: 10, fontWeight: 600, color: layerMode ? '#00d4ff' : '#818cf8' }}>
+                  {layerMode ? 'Katman Modu' : 'Klasik Mod'}
+                </span>
+              </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
                 <span style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
                   Katmanlar

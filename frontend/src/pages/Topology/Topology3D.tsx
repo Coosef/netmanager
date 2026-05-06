@@ -75,6 +75,7 @@ interface Props {
   pathMode?: boolean
   blastDeviceIds?: number[]
   hiddenLayers?: Set<string>
+  layerMode?: boolean
 }
 
 export interface Topology3DHandle {
@@ -87,7 +88,7 @@ export interface Topology3DHandle {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
-  { graph, width, height, onNodeClick, searchQuery, pathMode = false, blastDeviceIds = [], hiddenLayers },
+  { graph, width, height, onNodeClick, searchQuery, pathMode = false, blastDeviceIds = [], hiddenLayers, layerMode = true },
   ref,
 ) {
   const fgRef = useRef<any>(null)
@@ -103,7 +104,8 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   const tourTimer  = useRef<ReturnType<typeof setInterval> | null>(null)
   const tourIdxRef = useRef(0)
 
-  const hiddenLayersRef = useRef<Set<string>>(new Set())
+  const hiddenLayersRef  = useRef<Set<string>>(new Set())
+  const floorObjectsRef  = useRef<THREE.Object3D[]>([])
   const blastRings = useRef<Array<{ mesh: THREE.Mesh; age: number; maxAge: number }>>([])
   const rafRef     = useRef<number>(0)
   const sceneReady = useRef(false)
@@ -241,8 +243,10 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
         vendor: n.data.vendor || 'other', status: n.data.status || 'unknown',
         layer, device_id: n.data.device_id, ghost: isGhost,
         dimmed: q ? (!label.includes(q) && !ip.includes(q)) : false,
-        // Pin to layer Y (including AP ghost nodes that have a layer assigned)
-        fy: LAYER_CFG[layer] ? LAYER_CFG[layer].y : (isGhost ? undefined : 0),
+        // Pin to layer Y only in layerMode; classic mode lets force sim place freely
+        fy: layerMode
+          ? (LAYER_CFG[layer] ? LAYER_CFG[layer].y : (isGhost ? undefined : 0))
+          : undefined,
       }
     })
     const links = graph.edges.map((e) => ({
@@ -252,7 +256,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     const result = { nodes, links }
     graphDataRef.current = result
     return result
-  }, [graph, searchQuery])
+  }, [graph, searchQuery, layerMode])
 
   // ── Node Three.js object ───────────────────────────────────────────────────
   const nodeThreeObject = useCallback((node: any) => {
@@ -298,6 +302,16 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     setLinkVis((v) => v + 1)
     refreshNodes()
   }, [hiddenLayers, refreshNodes])
+
+  // ── Toggle floor decorations and reheat sim when layerMode changes ─────────
+  useEffect(() => {
+    for (const obj of floorObjectsRef.current) {
+      obj.visible = layerMode
+    }
+    if (fgRef.current?.d3ReheatSimulation) {
+      fgRef.current.d3ReheatSimulation()
+    }
+  }, [layerMode])
 
   // ── Link color/width ───────────────────────────────────────────────────────
   const isLinkHidden = (link: any) => {
@@ -457,6 +471,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     grid.position.y = -220; scene.add(grid)
 
     // Layer floor planes (1 per layer, very low opacity)
+    floorObjectsRef.current = []
     for (const [, cfg] of Object.entries(LAYER_CFG)) {
       const plane = new THREE.Mesh(
         new THREE.PlaneGeometry(700, 700),
@@ -465,6 +480,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       plane.rotation.x = -Math.PI / 2
       plane.position.y = cfg.y - 5
       scene.add(plane)
+      floorObjectsRef.current.push(plane)
 
       // Border
       const border = new THREE.Mesh(
@@ -474,6 +490,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       border.rotation.x = -Math.PI / 2
       border.position.y = cfg.y - 4
       scene.add(border)
+      floorObjectsRef.current.push(border)
 
       // Label
       const cv = document.createElement('canvas'); cv.width = 320; cv.height = 44
@@ -485,6 +502,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(cv), transparent: true }))
       spr.scale.set(72, 9, 1); spr.position.set(-360, cfg.y + 2, 0)
       scene.add(spr)
+      floorObjectsRef.current.push(spr)
     }
 
     // Controls: no auto-rotate to keep rendering lightweight
