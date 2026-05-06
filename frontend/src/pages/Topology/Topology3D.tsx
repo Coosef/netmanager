@@ -106,6 +106,9 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
   const hiddenLayersRef  = useRef<Set<string>>(new Set())
   const floorObjectsRef  = useRef<THREE.Object3D[]>([])
+  // Track whether we've ever had real data — prevents ForceGraph3D from
+  // initializing with 0 nodes (library crashes: state.layout undefined)
+  const hasEverHadData   = useRef(false)
   const blastRings = useRef<Array<{ mesh: THREE.Mesh; age: number; maxAge: number }>>([])
   const rafRef     = useRef<number>(0)
   const sceneReady = useRef(false)
@@ -520,6 +523,22 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     setupScene()
     refreshNodes()
   }, [setupScene, refreshNodes])
+
+  // Once we have real data, latch true permanently so ForceGraph3D stays mounted
+  if (graphData.nodes.length > 0) hasEverHadData.current = true
+
+  if (!hasEverHadData.current) {
+    return (
+      <div style={{
+        width, height, background: '#030c1e',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <div style={{ color: '#00d4ff', fontSize: 13, letterSpacing: 1, opacity: 0.7 }}>
+          Topoloji yükleniyor…
+        </div>
+      </div>
+    )
+  }
 
   return (
     <ForceGraph3D
