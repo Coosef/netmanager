@@ -753,6 +753,7 @@ class AgentManager:
             "ssh_port": device.ssh_port or 22,
             "os_type": device.os_type,
             "enable_secret": decrypt_credential(device.enable_secret_enc) if device.enable_secret_enc else "",
+            "full_auth": True,
         }
         t0 = time.perf_counter()
         result = await self._send_request(agent_id, payload, timeout=30, device_id=device.id)

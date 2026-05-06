@@ -67,7 +67,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.9"
+VERSION = "1.3.10"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -1112,8 +1112,24 @@ async def handle_message(ws, msg, loop):
         return
 
     if t == "ssh_test":
-        log.info("SSH test -> {}".format(msg.get("device_ip")))
-        result = await loop.run_in_executor(None, _ssh_test, msg)
+        ip        = msg.get("device_ip", "")
+        port      = int(msg.get("ssh_port", 22))
+        full_auth = msg.get("full_auth", False)
+        if full_auth:
+            # User-triggered test: full SSH auth to verify credentials
+            log.info("SSH test -> {}".format(ip))
+            result = await loop.run_in_executor(None, _ssh_test, msg)
+        else:
+            # Monitoring poll: lightweight TCP probe — no SSH handshake/auth
+            log.info("TCP probe -> {}:{}".format(ip, port))
+            t0 = time.time()
+            reachable = await loop.run_in_executor(None, _tcp_probe, ip, port, 5.0)
+            result = {
+                "success": reachable,
+                "output": "Erisim basarili" if reachable else "",
+                "error":  "" if reachable else "Erisim saglanamadi",
+                "duration_ms": round((time.time() - t0) * 1000),
+            }
         _record_result(result)
         await _send({"type": "ssh_result", "request_id": rid, **result})
 
