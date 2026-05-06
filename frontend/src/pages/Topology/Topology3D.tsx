@@ -15,13 +15,13 @@ const STATUS_EMISSIVE_INT: Record<string, number> = {
   online: 0.7, offline: 0.5, unknown: 0.1, unreachable: 0.5,
 }
 
-// ─── Layer config (Y position + floor color + label) ────────────────────────
+// ─── Layer config ────────────────────────────────────────────────────────────
 const LAYER_CFG: Record<string, { y: number; color: number; hex: string; label: string; radius: number }> = {
-  core:         { y: 140, color: 0xef4444, hex: '#ef4444', label: 'CORE',         radius: 10 },
-  distribution: { y:  70, color: 0xf97316, hex: '#f97316', label: 'DISTRIBUTION', radius: 8  },
-  access:       { y:   0, color: 0x3b82f6, hex: '#3b82f6', label: 'ACCESS',       radius: 6  },
-  edge:         { y: -70, color: 0x22c55e, hex: '#22c55e', label: 'EDGE',         radius: 5  },
-  wireless:     { y:-140, color: 0xa855f7, hex: '#a855f7', label: 'WIRELESS',     radius: 4  },
+  core:         { y: 200,  color: 0xef4444, hex: '#ef4444', label: 'CORE',         radius: 16 },
+  distribution: { y: 100,  color: 0xf97316, hex: '#f97316', label: 'DISTRIBUTION', radius: 13 },
+  access:       { y: 0,    color: 0x3b82f6, hex: '#3b82f6', label: 'ACCESS',       radius: 10 },
+  edge:         { y: -100, color: 0x22c55e, hex: '#22c55e', label: 'EDGE',         radius: 8  },
+  wireless:     { y: -200, color: 0xa855f7, hex: '#a855f7', label: 'WIRELESS',     radius: 7  },
 }
 
 // ─── BFS shortest path ───────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ function makeTextSprite(text: string, color = '#ddeeff', glowColor = '#00d4ff'):
   const tex = new THREE.CanvasTexture(canvas)
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true })
   const sprite = new THREE.Sprite(mat)
-  sprite.scale.set(34, 6.5, 1)
+  sprite.scale.set(38, 7, 1)
   return sprite
 }
 
@@ -71,8 +71,8 @@ interface Props {
   height: number
   onNodeClick?: (deviceId: number) => void
   searchQuery?: string
-  pathMode?: boolean           // parent toggles "path tracing" mode
-  blastDeviceIds?: number[]   // affected device IDs → animate blast
+  pathMode?: boolean
+  blastDeviceIds?: number[]
 }
 
 export interface Topology3DHandle {
@@ -90,100 +90,40 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 ) {
   const fgRef = useRef<any>(null)
 
-  // Visual-mode refs (avoid re-render for Three.js mutations)
+  // Visual-mode refs
   const isolateIdRef  = useRef<string | null>(null)
   const pathSrcRef    = useRef<string | null>(null)
   const pathNodeIds   = useRef<Set<string>>(new Set())
   const pathLinkIds   = useRef<Set<string>>(new Set())
   const blastNodeIds  = useRef<Set<number>>(new Set())
 
-  // State that forces link-color re-evaluation
   const [linkVis, setLinkVis] = useState(0)
 
   // Tour
   const tourTimer   = useRef<ReturnType<typeof setInterval> | null>(null)
   const tourIdxRef  = useRef(0)
 
-  // Blast animation objects
+  // Blast animation
   const blastRings  = useRef<Array<{ mesh: THREE.Mesh; age: number; maxAge: number }>>([])
   const rafRef      = useRef<number>(0)
 
-  // ── Expose handle ──────────────────────────────────────────────────────────
-  useImperativeHandle(ref, () => ({
-    flyToQuery: (q: string) => {
-      if (!fgRef.current) return
-      const ql = q.trim().toLowerCase()
-      const { nodes } = fgRef.current.graphData() as { nodes: any[] }
-      const m = nodes.find((n: any) =>
-        (n.label || '').toLowerCase().includes(ql) || (n.ip || '').toLowerCase().includes(ql))
-      if (!m) return
-      const dist = 1 + 90 / (Math.hypot(m.x || 1, m.y || 1, m.z || 1))
-      fgRef.current.cameraPosition(
-        { x: (m.x || 0) * dist, y: (m.y || 0) * dist, z: (m.z || 0) * dist }, m, 1200)
-    },
-    startTour: () => {
-      if (!fgRef.current) return
-      const controls = fgRef.current.controls()
-      if (controls) controls.autoRotate = false
-      const tick = () => {
-        const { nodes } = fgRef.current.graphData() as { nodes: any[] }
-        const real = nodes.filter((n: any) => !n.ghost)
-        if (real.length === 0) return
-        tourIdxRef.current = (tourIdxRef.current + 1) % real.length
-        const m = real[tourIdxRef.current]
-        const dist = 1 + 80 / (Math.hypot(m.x || 1, m.y || 1, m.z || 1))
-        fgRef.current.cameraPosition(
-          { x: (m.x || 0) * dist, y: (m.y || 0) * dist, z: (m.z || 0) * dist }, m, 1800)
-      }
-      tick()
-      tourTimer.current = setInterval(tick, 2800)
-    },
-    stopTour: () => {
-      if (tourTimer.current) { clearInterval(tourTimer.current); tourTimer.current = null }
-      const controls = fgRef.current?.controls()
-      if (controls) controls.autoRotate = true
-    },
-    clearPath: () => {
-      pathSrcRef.current = null
-      pathNodeIds.current = new Set()
-      pathLinkIds.current = new Set()
-      
-      setLinkVis((v) => v + 1)
-      refreshNodes()
-    },
-    clearIsolate: () => {
-      isolateIdRef.current = null
-      refreshNodes()
-    },
-  }), [])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Scene setup flag — ensures we only add lights/floors once
+  const sceneReady  = useRef(false)
 
-  // ── Graph data ─────────────────────────────────────────────────────────────
-  const graphData = useMemo(() => {
-    const q = searchQuery?.trim()?.toLowerCase() || ''
-    const nodes = graph.nodes.map((n) => {
-      const isGhost = n.type === 'ghostNode'
-      const layer   = n.data.layer || ''
-      const label   = (n.data.label || '').toLowerCase()
-      const ip      = (n.data.ip   || '').toLowerCase()
-      return {
-        id: n.id, label: n.data.label || '', ip: n.data.ip || '',
-        vendor: n.data.vendor || 'other', status: n.data.status || 'unknown',
-        layer, device_id: n.data.device_id, ghost: isGhost,
-        dimmed: q ? (!label.includes(q) && !ip.includes(q)) : false,
-        fy: isGhost ? undefined : (LAYER_CFG[layer]?.y ?? 0),
-      }
-    })
-    const links = graph.edges.map((e) => ({
-      id: `${e.source}|${e.target}`,
-      source: e.source, target: e.target, label: e.label || '',
-    }))
-    return { nodes, links }
-  }, [graph, searchQuery])
-
-  // ── Refresh node Three.js materials directly ───────────────────────────────
+  // ── refreshNodes: traverse scene to find node objects directly ────────────
+  // This approach works even when graphData prop changes (useMemo recreates objects)
+  // because we use __graphObjType and __data set by the library on the actual Three.js objects
   const refreshNodes = useCallback(() => {
-    if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
-    const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
+    if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
+    const scene = fgRef.current.scene() as THREE.Scene
+    if (!scene) return
+
+    // Get links for isolation neighbor calculation
+    let links: any[] = []
+    if (typeof fgRef.current.graphData === 'function') {
+      try { links = (fgRef.current.graphData() as { links: any[] }).links } catch { /**/ }
+    }
+
     const isolated = isolateIdRef.current
 
     // Build neighbor set for isolate
@@ -198,9 +138,11 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       }
     }
 
-    for (const n of nodes) {
-      const obj = n.__threeObj as THREE.Group | null
-      if (!obj) continue
+    scene.traverse((obj: any) => {
+      // Only process top-level node objects set by the library
+      if (obj.__graphObjType !== 'node') return
+      const n = obj.__data
+      if (!n) return
 
       const isPath    = pathNodeIds.current.has(n.id)
       const isBlast   = blastNodeIds.current.has(n.device_id as number)
@@ -211,7 +153,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       if (!isIsoVis) opacity = 0.03
       else if (n.dimmed) opacity = 0.08
 
-      obj.traverse((child) => {
+      obj.traverse((child: any) => {
         if (child instanceof THREE.Mesh) {
           const mat = child.material as THREE.MeshPhongMaterial
           mat.transparent = opacity < 1
@@ -235,15 +177,92 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
           mat.opacity = Math.max(opacity, 0.03)
         }
       })
-    }
+    })
   }, [])
+
+  // ── Expose handle ──────────────────────────────────────────────────────────
+  useImperativeHandle(ref, () => ({
+    flyToQuery: (q: string) => {
+      if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
+      const ql = q.trim().toLowerCase()
+      const { nodes } = fgRef.current.graphData() as { nodes: any[] }
+      const m = nodes.find((n: any) =>
+        (n.label || '').toLowerCase().includes(ql) || (n.ip || '').toLowerCase().includes(ql))
+      if (!m) return
+      const nodePos = { x: m.x || 0, y: m.y || 0, z: m.z || 0 }
+      const dist = Math.max(80, Math.hypot(nodePos.x, nodePos.y, nodePos.z) * 0.3 + 80)
+      fgRef.current.cameraPosition(
+        { x: nodePos.x + dist * 0.5, y: nodePos.y + dist * 0.7, z: nodePos.z + dist },
+        nodePos, 1200)
+    },
+    startTour: () => {
+      if (!fgRef.current) return
+      const controls = fgRef.current.controls()
+      if (controls) controls.autoRotate = false
+      const tick = () => {
+        if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
+        const { nodes } = fgRef.current.graphData() as { nodes: any[] }
+        const real = nodes.filter((n: any) => !n.ghost && n.x !== undefined)
+        if (real.length === 0) return
+        tourIdxRef.current = (tourIdxRef.current + 1) % real.length
+        const m = real[tourIdxRef.current]
+        const px = m.x || 0; const py = m.y || 0; const pz = m.z || 0
+        // Camera flies to a position above and behind the node
+        fgRef.current.cameraPosition(
+          { x: px + 60, y: py + 90, z: pz + 120 },
+          { x: px, y: py, z: pz }, 1800)
+      }
+      tick()
+      tourTimer.current = setInterval(tick, 2800)
+    },
+    stopTour: () => {
+      if (tourTimer.current) { clearInterval(tourTimer.current); tourTimer.current = null }
+      const controls = fgRef.current?.controls()
+      if (controls) controls.autoRotate = true
+    },
+    clearPath: () => {
+      pathSrcRef.current = null
+      pathNodeIds.current = new Set()
+      pathLinkIds.current = new Set()
+      setLinkVis((v) => v + 1)
+      refreshNodes()
+    },
+    clearIsolate: () => {
+      isolateIdRef.current = null
+      refreshNodes()
+    },
+  }), [refreshNodes])
+
+  // ── Graph data ─────────────────────────────────────────────────────────────
+  const graphData = useMemo(() => {
+    const q = searchQuery?.trim()?.toLowerCase() || ''
+    const nodes = graph.nodes.map((n) => {
+      const isGhost = n.type === 'ghostNode'
+      const layer   = n.data.layer || ''
+      const label   = (n.data.label || '').toLowerCase()
+      const ip      = (n.data.ip   || '').toLowerCase()
+      return {
+        id: n.id, label: n.data.label || '', ip: n.data.ip || '',
+        vendor: n.data.vendor || 'other', status: n.data.status || 'unknown',
+        layer, device_id: n.data.device_id, ghost: isGhost,
+        dimmed: q ? (!label.includes(q) && !ip.includes(q)) : false,
+        // Soft Y guidance: nudge toward layer Y without hard-pinning
+        // fy removed — let force simulation spread nodes freely in 3D
+      }
+    })
+    const links = graph.edges.map((e) => ({
+      id: `${e.source}|${e.target}`,
+      source: e.source, target: e.target, label: e.label || '',
+    }))
+    return { nodes, links }
+  }, [graph, searchQuery])
 
   // ── Node Three.js object builder ───────────────────────────────────────────
   const nodeThreeObject = useCallback((node: any) => {
     const vColor  = VENDOR_COLOR[node.vendor] || VENDOR_COLOR.other
     const eColor  = STATUS_EMISSIVE[node.status] || STATUS_EMISSIVE.unknown
     const eInt    = STATUS_EMISSIVE_INT[node.status] || 0.1
-    const radius  = node.ghost ? 3.5 : (LAYER_CFG[node.layer]?.radius ?? 6)
+    const radius  = node.ghost ? 4 : (LAYER_CFG[node.layer]?.radius ?? 10)
     const group   = new THREE.Group()
 
     // Core sphere
@@ -258,7 +277,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
     // Status glow ring
     if (!node.ghost) {
-      const rg = new THREE.RingGeometry(radius + 1.5, radius + 3.2, 36)
+      const rg = new THREE.RingGeometry(radius + 2, radius + 4, 36)
       const rm = new THREE.MeshBasicMaterial({
         color: eColor, transparent: true,
         opacity: node.status === 'online' ? 0.55 : 0.25, side: THREE.DoubleSide,
@@ -270,7 +289,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
     // Core layer extra ring
     if (node.layer === 'core' && !node.ghost) {
-      const og = new THREE.RingGeometry(radius + 4, radius + 5.5, 36)
+      const og = new THREE.RingGeometry(radius + 5, radius + 7, 36)
       const om = new THREE.MeshBasicMaterial({
         color: vColor, transparent: true, opacity: 0.2, side: THREE.DoubleSide,
       })
@@ -282,7 +301,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     // Label sprite
     const glowCol = node.status === 'online' ? '#00e676' : node.status === 'offline' ? '#ff3d6a' : '#00d4ff'
     const sprite  = makeTextSprite(node.label, '#ddeeff', glowCol)
-    sprite.position.y = radius + 9
+    sprite.position.y = radius + 12
     group.add(sprite)
 
     return group
@@ -295,7 +314,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   }, [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const linkWidthFn = useCallback((link: any) =>
-    pathLinkIds.current.has(link.id as string) ? 3.5 : 0.7
+    pathLinkIds.current.has(link.id as string) ? 3.5 : 0.8
   , [linkVis])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const particleColorFn = useCallback((link: any) =>
@@ -312,34 +331,33 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
     if (pathMode) {
       if (!pathSrcRef.current) {
-        // Select first node
         pathSrcRef.current = node.id
-        
         refreshNodes()
       } else if (pathSrcRef.current === node.id) {
-        // Deselect
-        pathSrcRef.current = null; 
+        pathSrcRef.current = null
         pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
         setLinkVis((v) => v + 1); refreshNodes()
       } else {
-        // Find path
-        const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
-        const path = bfsPath(nodes, links, pathSrcRef.current, node.id)
-        pathNodeIds.current = new Set(path)
-        const lids = new Set<string>()
-        for (let i = 0; i < path.length - 1; i++) {
-          lids.add(`${path[i]}|${path[i + 1]}`); lids.add(`${path[i + 1]}|${path[i]}`)
-        }
-        pathLinkIds.current = lids
-        pathSrcRef.current = null; 
-        setLinkVis((v) => v + 1); refreshNodes()
-        // Fly to path center
-        if (path.length > 0) {
-          const mid = nodes.find((n: any) => n.id === path[Math.floor(path.length / 2)])
-          if (mid) {
-            const dist = 1 + 120 / (Math.hypot(mid.x || 1, mid.y || 1, mid.z || 1))
-            fgRef.current.cameraPosition(
-              { x: (mid.x || 0) * dist, y: (mid.y || 0) * dist, z: (mid.z || 0) * dist }, mid, 1200)
+        // Find path using graphData for BFS (links need source/target resolved)
+        if (typeof fgRef.current.graphData === 'function') {
+          const { nodes, links } = fgRef.current.graphData() as { nodes: any[]; links: any[] }
+          const path = bfsPath(nodes, links, pathSrcRef.current, node.id)
+          pathNodeIds.current = new Set(path)
+          const lids = new Set<string>()
+          for (let i = 0; i < path.length - 1; i++) {
+            lids.add(`${path[i]}|${path[i + 1]}`); lids.add(`${path[i + 1]}|${path[i]}`)
+          }
+          pathLinkIds.current = lids
+          pathSrcRef.current = null
+          setLinkVis((v) => v + 1); refreshNodes()
+          // Fly to path midpoint
+          if (path.length > 0) {
+            const mid = nodes.find((n: any) => n.id === path[Math.floor(path.length / 2)])
+            if (mid) {
+              fgRef.current.cameraPosition(
+                { x: (mid.x || 0) + 80, y: (mid.y || 0) + 100, z: (mid.z || 0) + 80 },
+                { x: mid.x || 0, y: mid.y || 0, z: mid.z || 0 }, 1200)
+            }
           }
         }
       }
@@ -348,9 +366,10 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
     // Normal mode: open drawer + fly camera
     if (node.device_id && onNodeClick) onNodeClick(node.device_id)
-    const dist = 1 + 90 / (Math.hypot(node.x || 1, node.y || 1, node.z || 1))
+    const px = node.x || 0; const py = node.y || 0; const pz = node.z || 0
     fgRef.current.cameraPosition(
-      { x: node.x * dist, y: node.y * dist, z: node.z * dist }, node, 1000)
+      { x: px + 50, y: py + 70, z: pz + 80 },
+      { x: px, y: py, z: pz }, 1000)
   }, [pathMode, onNodeClick, refreshNodes])
 
   // ── Right-click → isolate toggle ──────────────────────────────────────────
@@ -363,10 +382,12 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     refreshNodes()
   }, [refreshNodes])
 
-  // ── Refresh nodes when pathMode exits ─────────────────────────────────────
+  // ── Refresh nodes when pathMode exits (skip initial mount) ────────────────
+  const pathModeMountedRef = useRef(false)
   useEffect(() => {
+    if (!pathModeMountedRef.current) { pathModeMountedRef.current = true; return }
     if (!pathMode) {
-      pathSrcRef.current = null; 
+      pathSrcRef.current = null
       pathNodeIds.current = new Set(); pathLinkIds.current = new Set()
       setLinkVis((v) => v + 1); refreshNodes()
     }
@@ -374,18 +395,19 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
 
   // ── Blast radius: trigger animation when blastDeviceIds changes ───────────
   useEffect(() => {
-    if (!blastDeviceIds.length || !fgRef.current || typeof fgRef.current.graphData !== 'function') return
+    if (!blastDeviceIds.length) return
     blastNodeIds.current = new Set(blastDeviceIds)
     refreshNodes()
 
-    // Add expanding ring to each affected node
+    if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
     const scene = fgRef.current.scene() as THREE.Scene
+    if (!fgRef.current || typeof fgRef.current.graphData !== 'function') return
     const { nodes } = fgRef.current.graphData() as { nodes: any[] }
     for (const devId of blastDeviceIds) {
       const n = nodes.find((nd: any) => nd.device_id === devId)
       if (!n) continue
       for (let wave = 0; wave < 3; wave++) {
-        const rg  = new THREE.RingGeometry(8, 10, 32)
+        const rg  = new THREE.RingGeometry(10, 13, 32)
         const rm  = new THREE.MeshBasicMaterial({ color: 0xff2244, transparent: true, opacity: 0.6, side: THREE.DoubleSide })
         const mesh = new THREE.Mesh(rg, rm)
         mesh.position.set(n.x || 0, n.y || 0, n.z || 0)
@@ -395,7 +417,6 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       }
     }
 
-    // Auto-clear after 4s
     const t = setTimeout(() => {
       blastNodeIds.current = new Set()
       refreshNodes()
@@ -422,28 +443,28 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     return () => { cancelAnimationFrame(rafRef.current) }
   }, [])
 
-  // ── One-time scene setup ───────────────────────────────────────────────────
-  useEffect(() => {
-    if (!fgRef.current) return
+  // ── Scene setup (runs once after engine stops, via onEngineStop) ──────────
+  const setupScene = useCallback(() => {
+    if (sceneReady.current) return
+    if (!fgRef.current || typeof fgRef.current.scene !== 'function') return
+    sceneReady.current = true
+
     const scene    = fgRef.current.scene() as THREE.Scene
     const controls = fgRef.current.controls()
 
-    // Lights
-    scene.add(new THREE.AmbientLight(0x112244, 0.6))
-    const dir = new THREE.DirectionalLight(0xaaccff, 1.1)
-    dir.position.set(100, 200, 100); scene.add(dir)
+    // Extra lights (library adds ambient + directional by default)
     const addPt = (color: number, int: number, dist: number, x: number, y: number, z: number) => {
       const l = new THREE.PointLight(color, int, dist); l.position.set(x, y, z); scene.add(l)
     }
-    addPt(0x00e676, 2.5, 600, -200, 80, 200)
-    addPt(0x00d4ff, 2.0, 500, 0, 200, 0)
-    addPt(0xa78bfa, 1.2, 400, 200, -100, -200)
-    addPt(0xff3d6a, 0.8, 300, -200, -150, -100)
+    addPt(0x00e676, 2.5, 700, -200, 150, 200)
+    addPt(0x00d4ff, 2.0, 600, 0, 300, 0)
+    addPt(0xa78bfa, 1.2, 500, 200, -100, -200)
+    addPt(0xff3d6a, 0.8, 400, -200, -150, -100)
 
     // Stars
     const makeStars = (count: number, color: number, size: number, op: number) => {
       const pos = new Float32Array(count * 3)
-      for (let i = 0; i < pos.length; i++) pos[i] = (Math.random() - 0.5) * 3600
+      for (let i = 0; i < pos.length; i++) pos[i] = (Math.random() - 0.5) * 4000
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
       return new THREE.Points(geo, new THREE.PointsMaterial({ color, size, transparent: true, opacity: op, sizeAttenuation: true }))
@@ -454,37 +475,35 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     scene.add(makeStars(300,  0x00e676, 0.70, 0.20))
 
     // Grid floor
-    const grid = new THREE.GridHelper(1400, 40, 0x00d4ff, 0x001a2e)
-    ;(grid.material as THREE.Material).opacity = 0.06
+    const grid = new THREE.GridHelper(1600, 40, 0x00d4ff, 0x001a2e)
+    ;(grid.material as THREE.Material).opacity = 0.05
     ;(grid.material as THREE.Material).transparent = true
-    grid.position.y = -180; scene.add(grid)
+    grid.position.y = -240; scene.add(grid)
 
-    // ── Layer floors ──────────────────────────────────────────────────────────
-    const layersWithData = Object.entries(LAYER_CFG)
-    for (const [, cfg] of layersWithData) {
-      // Transparent plane
-      const planeGeo = new THREE.PlaneGeometry(720, 720)
+    // Layer floor planes
+    for (const [, cfg] of Object.entries(LAYER_CFG)) {
+      const planeGeo = new THREE.PlaneGeometry(800, 800)
       const planeMat = new THREE.MeshBasicMaterial({
-        color: cfg.color, transparent: true, opacity: 0.025,
+        color: cfg.color, transparent: true, opacity: 0.018,
         side: THREE.DoubleSide,
       })
       const plane = new THREE.Mesh(planeGeo, planeMat)
       plane.rotation.x = -Math.PI / 2
-      plane.position.y = cfg.y - 2
+      plane.position.y = cfg.y - 5
       scene.add(plane)
 
-      // Glowing border ring
-      const borderGeo = new THREE.RingGeometry(340, 345, 64)
+      // Border ring
+      const borderGeo = new THREE.RingGeometry(370, 376, 64)
       const borderMat = new THREE.MeshBasicMaterial({
-        color: cfg.color, transparent: true, opacity: 0.12,
+        color: cfg.color, transparent: true, opacity: 0.10,
         side: THREE.DoubleSide,
       })
       const border = new THREE.Mesh(borderGeo, borderMat)
       border.rotation.x = -Math.PI / 2
-      border.position.y = cfg.y - 1
+      border.position.y = cfg.y - 4
       scene.add(border)
 
-      // Layer label — floating text sprite
+      // Layer label sprite
       const canvas = document.createElement('canvas')
       canvas.width = 360; canvas.height = 48
       const ctx = canvas.getContext('2d')!
@@ -495,35 +514,27 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       ctx.shadowColor = cfg.hex; ctx.shadowBlur = 12
       ctx.textAlign = 'left'
       ctx.fillText(`— ${cfg.label}`, 8, 34)
-      const tex     = new THREE.CanvasTexture(canvas)
-      const sprMat  = new THREE.SpriteMaterial({ map: tex, transparent: true })
-      const spr     = new THREE.Sprite(sprMat)
-      spr.scale.set(70, 9, 1)
-      spr.position.set(-355, cfg.y, 0)
+      const tex    = new THREE.CanvasTexture(canvas)
+      const sprMat = new THREE.SpriteMaterial({ map: tex, transparent: true })
+      const spr    = new THREE.Sprite(sprMat)
+      spr.scale.set(80, 10, 1)
+      spr.position.set(-400, cfg.y, 0)
       scene.add(spr)
     }
 
     if (controls) {
       controls.autoRotate      = true
-      controls.autoRotateSpeed = 0.35
+      controls.autoRotateSpeed = 0.30
       controls.enableDamping   = true
       controls.dampingFactor   = 0.07
     }
   }, [])
 
-  // ── After simulation stabilises, refresh materials (e.g. blast rings need positions) ──
+  // ── Engine stop: setup scene + refresh materials ───────────────────────────
   const handleEngineStop = useCallback(() => {
+    setupScene()
     refreshNodes()
-    // Re-position any pending blast rings to final node positions
-    if (blastNodeIds.current.size > 0 && fgRef.current) {
-      const { nodes } = fgRef.current.graphData() as { nodes: any[] }
-      for (const { mesh } of blastRings.current) {
-        const devId = [...blastNodeIds.current][0]
-        const n = nodes.find((nd: any) => nd.device_id === devId)
-        if (n) mesh.position.set(n.x || 0, n.y || 0, n.z || 0)
-      }
-    }
-  }, [refreshNodes])
+  }, [setupScene, refreshNodes])
 
   return (
     <ForceGraph3D
@@ -539,7 +550,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       linkOpacity={0.45}
       linkDirectionalParticles={3}
       linkDirectionalParticleSpeed={particleSpeedFn}
-      linkDirectionalParticleWidth={1.8}
+      linkDirectionalParticleWidth={2}
       linkDirectionalParticleColor={particleColorFn}
       onNodeClick={handleNodeClick}
       onNodeRightClick={handleNodeRightClick}
@@ -558,7 +569,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       showNavInfo={false}
       d3AlphaDecay={0.02}
       d3VelocityDecay={0.3}
-      cooldownTicks={100}
+      cooldownTicks={120}
     />
   )
 })
