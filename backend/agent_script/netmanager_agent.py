@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.14"
+VERSION = "1.3.15"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -415,7 +415,15 @@ class _ParamikoDirectConn:
     def send_command(self, command, read_timeout=120, **kwargs):
         self._drain()
         self._channel.send(command + "\n")
-        return self._read_until_idle(read_timeout)
+        time.sleep(0.3)
+        raw = self._read_until_idle(read_timeout)
+        # Strip echoed command (first line) and trailing prompt lines
+        lines = raw.splitlines()
+        if lines and command.strip().lower() in lines[0].lower():
+            lines = lines[1:]
+        while lines and (not lines[-1].strip() or lines[-1].strip().rstrip(" \t").endswith(("#", ">", "$"))):
+            lines.pop()
+        return "\n".join(lines) if lines else raw
 
     def send_command_timing(self, command, read_timeout=120, **kwargs):
         return self.send_command(command, read_timeout=read_timeout)

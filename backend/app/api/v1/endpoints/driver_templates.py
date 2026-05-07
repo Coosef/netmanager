@@ -609,12 +609,20 @@ async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
             raise HTTPException(502, detail)
 
     # Step 2: AI identifies the device (from SSH output or HTTP info)
-    identify_input = version_output or f"HTTP web panel bilgisi: {http_info}\nDevice IP: {device.ip_address}"
+    # Always include hostname/vendor hint so AI has context even for minimal outputs
+    device_hint = ""
+    if device.hostname:
+        device_hint += f"Device hostname: {device.hostname}\n"
+    if device.vendor:
+        device_hint += f"Known vendor hint: {device.vendor}\n"
+    if device.ip_address:
+        device_hint += f"Device IP: {device.ip_address}\n"
+    identify_input = version_output or f"HTTP web panel bilgisi: {http_info}"
     try:
         detection = await _call_driver_ai(
             db,
             DETECT_SYSTEM_PROMPT,
-            f"CLI output:\n{identify_input[:3000]}",
+            f"{device_hint}CLI output:\n{identify_input[:3000]}",
         )
     except HTTPException:
         raise
