@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.12"
+VERSION = "1.3.13"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -377,6 +377,106 @@ async def _pool_evict_loop():
 # SSH helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+class _ParamikoDirectConn:
+    """Raw paramiko channel for devices with non-standard SSH auth (e.g. Grandstream allowed_types=[''])."""
+
+    def __init__(self, transport, channel):
+        import select as _sel
+        self._transport = transport
+        self._channel = channel
+        self._sel = _sel
+        self._channel.settimeout(120)
+        time.sleep(2)
+        self._drain()
+
+    def _drain(self):
+        try:
+            while self._channel.recv_ready():
+                self._channel.recv(65535)
+        except Exception:
+            pass
+
+    def _read_until_idle(self, timeout):
+        output = b""
+        deadline = time.time() + timeout
+        last_data = time.time()
+        while time.time() < deadline:
+            r, _, _ = self._sel.select([self._channel], [], [], 0.2)
+            if r:
+                chunk = self._channel.recv(65535)
+                if not chunk:
+                    break
+                output += chunk
+                last_data = time.time()
+            elif output and time.time() - last_data > 1.5:
+                break
+        return output.decode("utf-8", errors="replace")
+
+    def send_command(self, command, read_timeout=120, **kwargs):
+        self._drain()
+        self._channel.send(command + "\n")
+        return self._read_until_idle(read_timeout)
+
+    def send_command_timing(self, command, read_timeout=120, **kwargs):
+        return self.send_command(command, read_timeout=read_timeout)
+
+    def send_config_set(self, commands, read_timeout=120, **kwargs):
+        if isinstance(commands, str):
+            commands = [commands]
+        output = ""
+        for cmd in commands:
+            output += self.send_command(cmd, read_timeout=30)
+        return output
+
+    def save_config(self):
+        return self.send_command("write", read_timeout=15)
+
+    def is_alive(self):
+        try:
+            return self._transport.is_active() and not self._channel.closed
+        except Exception:
+            return False
+
+    def disconnect(self):
+        try:
+            self._channel.close()
+        except Exception:
+            pass
+        try:
+            self._transport.close()
+        except Exception:
+            pass
+
+
+def _connect_keyboard_interactive(params: dict) -> _ParamikoDirectConn:
+    """Keyboard-interactive auth fallback for devices that return allowed_types=['']."""
+    import paramiko
+    password = params["password"]
+    username = params["username"]
+    host = params["host"]
+    port = int(params.get("port", 22))
+    timeout = int(params.get("timeout", 30))
+
+    t = paramiko.Transport((host, port))
+    t.start_client(timeout=timeout)
+    try:
+        t.auth_password(username, password)
+    except paramiko.BadAuthenticationType:
+        try:
+            t.auth_interactive_dumb(
+                username,
+                lambda title, instructions, prompt_list: [password] * max(1, len(prompt_list)),
+            )
+        except Exception as exc:
+            t.close()
+            raise NetmikoAuthenticationException("Keyboard-interactive auth failed: {}".format(exc))
+
+    chan = t.open_session()
+    chan.get_pty(term="vt100", width=200, height=48)
+    chan.invoke_shell()
+    return _ParamikoDirectConn(t, chan)
+
+
 def _build_params(msg):
     """Build netmiko ConnectHandler params, using vault credentials if available."""
     os_type = msg.get("os_type", "cisco_ios")
@@ -429,21 +529,29 @@ def _get_connection(msg):
     os_type = params["device_type"]
     enable_secret = params.get("secret", "")
 
-    if os_type == "ruijie_os" and not enable_secret:
-        # Use auto_connect=False so we can skip the automatic enable() call
-        conn = ConnectHandler(**{**params, "auto_connect": False})
-        conn.establish_connection()
-        conn.set_base_prompt()
-        try:
-            conn.disable_paging(command="terminal length 0")
-        except Exception:
-            pass
-        conn.clear_buffer()
-    else:
-        conn = ConnectHandler(**params)
-        # For non-Ruijie devices the driver doesn't auto-enable; call explicitly
-        if enable_secret and os_type != "ruijie_os":
-            conn.enable()
+    try:
+        if os_type == "ruijie_os" and not enable_secret:
+            # Use auto_connect=False so we can skip the automatic enable() call
+            conn = ConnectHandler(**{**params, "auto_connect": False})
+            conn.establish_connection()
+            conn.set_base_prompt()
+            try:
+                conn.disable_paging(command="terminal length 0")
+            except Exception:
+                pass
+            conn.clear_buffer()
+        else:
+            conn = ConnectHandler(**params)
+            # For non-Ruijie devices the driver doesn't auto-enable; call explicitly
+            if enable_secret and os_type != "ruijie_os":
+                conn.enable()
+    except NetmikoAuthenticationException as exc:
+        # Grandstream and some embedded devices return allowed_types=[''] which
+        # means they use keyboard-interactive but don't advertise it.
+        if "allowed types: ['']" in str(exc):
+            conn = _connect_keyboard_interactive(params)
+        else:
+            raise
 
     return conn
 
