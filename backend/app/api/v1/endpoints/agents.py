@@ -1250,7 +1250,11 @@ def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         OS_TYPE="$(uname -s)"
 
         if [ "$OS_TYPE" = "Darwin" ]; then
-            INSTALL_DIR="$HOME/.netmanager-agent"
+            if [ "$EUID" -eq 0 ]; then
+                INSTALL_DIR="/opt/netmanager-agent"
+            else
+                INSTALL_DIR="$HOME/.netmanager-agent"
+            fi
             RUN_AS_ROOT=0
         else
             INSTALL_DIR="/opt/netmanager-agent"
@@ -1295,8 +1299,8 @@ def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
           curl -fsSL "$BACKEND_URL/api/v1/agents/download/script" -o "$INSTALL_DIR/netmanager_agent.py"
 
         echo "[4/5] Bağımlılıklar kuruluyor (venv)..."
-        $PYTHON -m pip install --quiet --upgrade pip
-        $PYTHON -m pip install --quiet --upgrade websockets netmiko psutil
+        $PYTHON -m pip install --quiet --no-cache-dir --upgrade pip
+        $PYTHON -m pip install --quiet --no-cache-dir websockets netmiko psutil
 
         ENV_FILE="$INSTALL_DIR/agent.env"
         cat > "$ENV_FILE" <<ENVEOF
@@ -1308,7 +1312,13 @@ ENVEOF
 
         echo "[5/5] Servis kuruluyor..."
         if [ "$OS_TYPE" = "Darwin" ]; then
-            PLIST_PATH="$HOME/Library/LaunchAgents/com.netmanager.agent.plist"
+            if [ "$EUID" -eq 0 ]; then
+                PLIST_DIR="/Library/LaunchDaemons"
+            else
+                PLIST_DIR="$HOME/Library/LaunchAgents"
+                mkdir -p "$PLIST_DIR"
+            fi
+            PLIST_PATH="$PLIST_DIR/com.netmanager.agent.plist"
             cat > "$PLIST_PATH" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -1333,8 +1343,14 @@ ENVEOF
 </dict>
 </plist>
 PLISTEOF
-            launchctl unload "$PLIST_PATH" 2>/dev/null || true
-            launchctl load -w "$PLIST_PATH"
+            chmod 644 "$PLIST_PATH"
+            if [ "$EUID" -eq 0 ]; then
+                launchctl bootout system/com.netmanager.agent 2>/dev/null || true
+                launchctl bootstrap system "$PLIST_PATH"
+            else
+                launchctl unload "$PLIST_PATH" 2>/dev/null || true
+                launchctl load -w "$PLIST_PATH"
+            fi
             echo "✓ NetManager Agent kuruldu! (macOS launchd)"
         else
             cat > /etc/systemd/system/$SERVICE_NAME.service <<SVCEOF
