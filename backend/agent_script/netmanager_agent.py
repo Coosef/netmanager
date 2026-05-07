@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.11"
+VERSION = "1.3.12"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -409,7 +409,7 @@ def _build_params(msg):
         "blocking_timeout":   40,
         "fast_cli":           False,
         "global_delay_factor": 3,
-        "look_for_keys":      False,
+        "use_keys":           False,
         "allow_agent":        False,
     }
     if enable_secret:

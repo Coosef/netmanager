@@ -73,7 +73,7 @@ class SSHManager:
             "blocking_timeout": 40,
             "fast_cli": False,
             "global_delay_factor": 3,
-            "look_for_keys": False,
+            "use_keys": False,
             "allow_agent": False,
         }
         if enable_enc:
