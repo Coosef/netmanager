@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.15"
+VERSION = "1.3.16"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -412,11 +412,19 @@ class _ParamikoDirectConn:
                 break
         return output.decode("utf-8", errors="replace")
 
+    @staticmethod
+    def _clean(text: str) -> str:
+        import re as _re
+        # Strip ANSI escape sequences and control chars
+        text = _re.sub(r"\x1b\[[0-9;]*[mGKHFJA-Z]", "", text)
+        text = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+        return text
+
     def send_command(self, command, read_timeout=120, **kwargs):
         self._drain()
         self._channel.send(command + "\n")
         time.sleep(0.3)
-        raw = self._read_until_idle(read_timeout)
+        raw = self._clean(self._read_until_idle(read_timeout))
         # Strip echoed command (first line) and trailing prompt lines
         lines = raw.splitlines()
         if lines and command.strip().lower() in lines[0].lower():

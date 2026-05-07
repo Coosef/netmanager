@@ -527,9 +527,19 @@ async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: 
     else:
         raise HTTPException(400, f"Bilinmeyen AI sağlayıcısı: {provider}")
 
-    if raw_response.startswith("```"):
-        raw_response = re.sub(r"^```[a-z]*\n?", "", raw_response)
-        raw_response = re.sub(r"\n?```$", "", raw_response)
+    # Strip markdown fences
+    if "```" in raw_response:
+        raw_response = re.sub(r"```[a-z]*\n?", "", raw_response)
+        raw_response = raw_response.replace("```", "")
+
+    # Extract the first {...} block — handles extra text before/after JSON
+    m = re.search(r"\{.*\}", raw_response, re.DOTALL)
+    if m:
+        raw_response = m.group(0)
+
+    # Strip ASCII control chars that break JSON (ANSI codes, \x00-\x1f except \t\n\r)
+    raw_response = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", raw_response)
+    raw_response = re.sub(r"\x1b\[[0-9;]*[mGKHF]", "", raw_response)
 
     try:
         return json.loads(raw_response)
@@ -623,6 +633,7 @@ async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
             db,
             DETECT_SYSTEM_PROMPT,
             f"{device_hint}CLI output:\n{identify_input[:3000]}",
+            max_tokens=512,
         )
     except HTTPException:
         raise
