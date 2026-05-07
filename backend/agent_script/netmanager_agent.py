@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.13"
+VERSION = "1.3.14"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -449,7 +449,7 @@ class _ParamikoDirectConn:
 
 
 def _connect_keyboard_interactive(params: dict) -> _ParamikoDirectConn:
-    """Keyboard-interactive auth fallback for devices that return allowed_types=['']."""
+    """Exhaustive auth fallback for devices that return allowed_types=[''] (e.g. Grandstream)."""
     import paramiko
     password = params["password"]
     username = params["username"]
@@ -459,17 +459,33 @@ def _connect_keyboard_interactive(params: dict) -> _ParamikoDirectConn:
 
     t = paramiko.Transport((host, port))
     t.start_client(timeout=timeout)
-    try:
-        t.auth_password(username, password)
-    except paramiko.BadAuthenticationType:
+
+    def _kbd_handler(title, instructions, prompt_list):
+        # Return password for every prompt; empty list if no prompts
+        return [password] * len(prompt_list) if prompt_list else []
+
+    # Try auth methods in order; check is_authenticated() after each one
+    # because some buggy servers raise BadAuthenticationType but auth anyway
+    for auth_fn in (
+        lambda: t.auth_none(username),
+        lambda: t.auth_password(username, password),
+        lambda: t.auth_interactive_dumb(username, _kbd_handler),
+        lambda: t.auth_interactive(username, _kbd_handler),
+    ):
         try:
-            t.auth_interactive_dumb(
-                username,
-                lambda title, instructions, prompt_list: [password] * max(1, len(prompt_list)),
-            )
-        except Exception as exc:
-            t.close()
-            raise NetmikoAuthenticationException("Keyboard-interactive auth failed: {}".format(exc))
+            auth_fn()
+        except (paramiko.BadAuthenticationType, paramiko.AuthenticationException):
+            pass
+        except Exception:
+            pass
+        if t.is_authenticated():
+            break
+    else:
+        t.close()
+        raise NetmikoAuthenticationException(
+            "SSH kimlik dogrulama basarisiz (tum yontemler denendi). "
+            "Lutfen cihazin SSH kullanici adi ve sifresini kontrol edin."
+        )
 
     chan = t.open_session()
     chan.get_pty(term="vt100", width=200, height=48)
