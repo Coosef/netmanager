@@ -355,6 +355,7 @@ async def list_devices(
                 Device.location.ilike(f"%{search}%"),
                 Device.alias.ilike(f"%{search}%"),
                 Device.tags.ilike(f"%{search}%"),
+                Device.serial_number.ilike(f"%{search}%"),
             )
         )
     if vendor:
