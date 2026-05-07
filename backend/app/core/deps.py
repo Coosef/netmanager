@@ -58,12 +58,16 @@ def require_roles(*roles: UserRole):
 async def get_tenant_context(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Optional[int]:
-    """Returns tenant_id for row-level filtering. SUPER_ADMIN gets None (no filter).
-    Non-SA users with no tenant get -1 so they match nothing rather than everything."""
-    if current_user.role == UserRole.SUPER_ADMIN:
-        return None
-    # -1 is an impossible PK — caller's `if tenant_filter is not None` will apply it
-    # and match zero rows, preventing NULL from falling through as "no filter".
+    """Returns tenant_id for row-level filtering.
+    - SUPER_ADMIN or ADMIN without a tenant → None (fully unrestricted / platform admin)
+    - ADMIN with a tenant → restricted to that tenant
+    - All other roles without a tenant → -1 (matches nothing, prevents NULL bypass)
+    - All other roles with a tenant → restricted to that tenant
+    """
+    if current_user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+        # ADMIN with no tenant assigned is treated as a platform admin — unrestricted
+        return current_user.tenant_id  # None if no tenant → no filter applied
+    # Scoped roles: null tenant must not fall through as "no filter"
     return current_user.tenant_id if current_user.tenant_id is not None else -1
 
 

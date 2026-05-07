@@ -17,6 +17,11 @@ router = APIRouter()
 AdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN))
 
 
+def _is_platform_admin(user: User) -> bool:
+    """True for SUPER_ADMIN or ADMIN with no tenant — both have unrestricted access."""
+    return user.role == UserRole.SUPER_ADMIN or (user.role == UserRole.ADMIN and not user.tenant_id)
+
+
 async def _with_tenant_name(db, user: User) -> dict:
     tenant_name = None
     if user.tenant_id:
@@ -51,7 +56,9 @@ async def list_users(
     limit: int = 100,
 ):
     q = select(User)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    # SUPER_ADMIN and tenant-less ADMIN are platform admins — see all users
+    if not (current_user.role == UserRole.SUPER_ADMIN or
+            (current_user.role == UserRole.ADMIN and not current_user.tenant_id)):
         q = q.where(User.tenant_id == current_user.tenant_id)
     result = await db.execute(q.offset(skip).limit(limit))
     users = result.scalars().all()
@@ -65,12 +72,14 @@ async def create_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
 ):
-    if current_user.role == UserRole.ADMIN:
+    if _is_platform_admin(current_user):
+        # SA or tenant-less ADMIN: can create anyone, pick tenant from payload
+        tenant_id = payload.tenant_id
+    else:
+        # Tenant-scoped ADMIN: cannot create ADMIN/SA and always creates in own tenant
         if payload.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
             raise HTTPException(status_code=403, detail="ADMIN cannot create ADMIN or SUPER_ADMIN users")
         tenant_id = current_user.tenant_id
-    else:
-        tenant_id = payload.tenant_id
 
     # SaaS quota: check tenant user limit
     if tenant_id:
@@ -113,7 +122,7 @@ async def get_user(
     current_user: User = AdminRequired,
 ):
     q = select(User).where(User.id == user_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user):
         q = q.where(User.tenant_id == current_user.tenant_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
@@ -130,7 +139,7 @@ async def update_user(
     current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user):
         q = q.where(User.tenant_id == current_user.tenant_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
@@ -138,7 +147,8 @@ async def update_user(
 
     data = payload.model_dump(exclude_unset=True)
 
-    if current_user.role == UserRole.ADMIN:
+    if current_user.role == UserRole.ADMIN and current_user.tenant_id:
+        # Tenant-scoped admin: cannot change tenant or escalate to SA
         data.pop("tenant_id", None)
         if data.get("role") == UserRole.SUPER_ADMIN:
             raise HTTPException(status_code=403, detail="Cannot elevate to SUPER_ADMIN")
@@ -160,14 +170,15 @@ async def delete_user(
     current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user):
         q = q.where(User.tenant_id == current_user.tenant_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
-    if current_user.role == UserRole.ADMIN and user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+    # Tenant-scoped ADMIN cannot delete ADMIN or SA users
+    if current_user.role == UserRole.ADMIN and current_user.tenant_id and user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="ADMIN cannot delete ADMIN or SUPER_ADMIN users")
 
     await db.execute(delete(UserLocation).where(UserLocation.user_id == user.id))
@@ -185,12 +196,12 @@ async def admin_reset_password(
     current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user):
         q = q.where(User.tenant_id == current_user.tenant_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if current_user.role == UserRole.ADMIN and user.role == UserRole.SUPER_ADMIN:
+    if current_user.role == UserRole.ADMIN and current_user.tenant_id and user.role == UserRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Cannot reset SUPER_ADMIN password")
 
     user.hashed_password = hash_password(payload.new_password)
@@ -224,7 +235,7 @@ async def get_user_locations(
     current_user: User = AdminRequired,
 ):
     q = select(User).where(User.id == user_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user):
         q = q.where(User.tenant_id == current_user.tenant_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
@@ -258,7 +269,7 @@ async def set_user_locations(
 ):
     """Replace all location assignments for a user at once."""
     q = select(User).where(User.id == user_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user):
         q = q.where(User.tenant_id == current_user.tenant_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
@@ -267,15 +278,15 @@ async def set_user_locations(
     # Delete all existing assignments
     await db.execute(delete(UserLocation).where(UserLocation.user_id == user_id))
 
-    # Collect valid location IDs that belong to this tenant
-    if current_user.role != UserRole.SUPER_ADMIN:
+    # Collect valid location IDs scoped to the caller's tenant (platform admins unrestricted)
+    if not _is_platform_admin(current_user) and current_user.tenant_id:
         allowed_locs = set(
             (await db.execute(
                 select(Location.id).where(Location.tenant_id == current_user.tenant_id)
             )).scalars().all()
         )
     else:
-        allowed_locs = None  # SA has no restriction
+        allowed_locs = None  # platform admin / SA: no restriction
 
     valid_loc_roles = {"location_manager", "location_operator", "location_viewer"}
     for item in payload:
