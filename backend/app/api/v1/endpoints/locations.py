@@ -74,6 +74,8 @@ async def list_locations(
         if tenant_id:
             query = query.where(Location.tenant_id == tenant_id)
     elif current_user.role in (UserRole.ADMIN, UserRole.ORG_VIEWER):
+        if not current_user.tenant_id:
+            return {"items": [], "total": 0}
         query = query.where(Location.tenant_id == current_user.tenant_id)
     else:
         # location-scoped roles: only show assigned locations

@@ -179,6 +179,10 @@ export default function UsersPage() {
   const deleteMutation = useMutation({
     mutationFn: usersApi.delete,
     onSuccess: () => { message.success(t('users.deleted')); queryClient.invalidateQueries({ queryKey: ['users'] }) },
+    onError: (e: any) => {
+      const d = e?.response?.data?.detail
+      message.error(typeof d === 'string' ? d : 'Kullanıcı silinemedi')
+    },
   })
 
   const resetPasswordMutation = useMutation({
@@ -240,7 +244,7 @@ export default function UsersPage() {
 
   const ROLE_OPTIONS_FILTERED = isSA
     ? ROLE_OPTIONS
-    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin')
+    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin' && o.value !== 'admin')
 
   const locNameMap = Object.fromEntries(
     (locationsData?.items || []).map((l) => [l.id, l.name])
@@ -412,10 +416,13 @@ export default function UsersPage() {
                   />
                   <Popconfirm
                     title={t('users.delete_confirm', { name: r.username })}
-                    disabled={r.id === currentUser?.id}
+                    disabled={r.id === currentUser?.id || (!isSA && (r.role === 'admin' || r.role === 'super_admin'))}
                     onConfirm={() => deleteMutation.mutate(r.id)}
                   >
-                    <Button size="small" icon={<DeleteOutlined />} danger disabled={r.id === currentUser?.id} />
+                    <Button
+                      size="small" icon={<DeleteOutlined />} danger
+                      disabled={r.id === currentUser?.id || (!isSA && (r.role === 'admin' || r.role === 'super_admin'))}
+                    />
                   </Popconfirm>
                 </Space>
               ),

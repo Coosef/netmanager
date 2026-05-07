@@ -66,8 +66,8 @@ async def create_user(
     current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
 ):
     if current_user.role == UserRole.ADMIN:
-        if payload.role == UserRole.SUPER_ADMIN:
-            raise HTTPException(status_code=403, detail="ADMIN cannot create SUPER_ADMIN users")
+        if payload.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+            raise HTTPException(status_code=403, detail="ADMIN cannot create ADMIN or SUPER_ADMIN users")
         tenant_id = current_user.tenant_id
     else:
         tenant_id = payload.tenant_id
@@ -167,7 +167,10 @@ async def delete_user(
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    if current_user.role == UserRole.ADMIN and user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+        raise HTTPException(status_code=403, detail="ADMIN cannot delete ADMIN or SUPER_ADMIN users")
 
+    await db.execute(delete(UserLocation).where(UserLocation.user_id == user.id))
     await db.delete(user)
     await db.commit()
     await log_action(db, current_user, "user_deleted", "user", user_id, user.username, request=request)

@@ -58,10 +58,13 @@ def require_roles(*roles: UserRole):
 async def get_tenant_context(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Optional[int]:
-    """Returns tenant_id for row-level filtering. SUPER_ADMIN gets None (no filter)."""
+    """Returns tenant_id for row-level filtering. SUPER_ADMIN gets None (no filter).
+    Non-SA users with no tenant get -1 so they match nothing rather than everything."""
     if current_user.role == UserRole.SUPER_ADMIN:
         return None
-    return current_user.tenant_id
+    # -1 is an impossible PK — caller's `if tenant_filter is not None` will apply it
+    # and match zero rows, preventing NULL from falling through as "no filter".
+    return current_user.tenant_id if current_user.tenant_id is not None else -1
 
 
 async def get_accessible_location_ids(
@@ -80,6 +83,8 @@ async def get_accessible_location_ids(
         return None
 
     if current_user.role == UserRole.ORG_VIEWER:
+        if not current_user.tenant_id:
+            return []
         rows = (await db.execute(
             select(Location.id).where(Location.tenant_id == current_user.tenant_id)
         )).fetchall()
@@ -107,6 +112,8 @@ async def get_accessible_location_names(
         return None
 
     if current_user.role == UserRole.ORG_VIEWER:
+        if not current_user.tenant_id:
+            return []
         rows = (await db.execute(
             select(Location.name).where(Location.tenant_id == current_user.tenant_id)
         )).fetchall()
