@@ -166,7 +166,10 @@ export default function UsersPage() {
   const createMutation = useMutation({
     mutationFn: usersApi.create,
     onSuccess: () => { message.success(t('users.created')); setDrawerOpen(false); queryClient.invalidateQueries({ queryKey: ['users'] }) },
-    onError: (e: any) => message.error(e?.response?.data?.detail || t('users.create_error')),
+    onError: (e: any) => {
+      const d = e?.response?.data?.detail
+      message.error(typeof d === 'string' ? d : Array.isArray(d) ? d.map((x: any) => x.msg).join(', ') : t('users.create_error'))
+    },
   })
 
   const updateMutation = useMutation({
@@ -482,6 +485,11 @@ export default function UsersPage() {
           {!editUser && (
             <Form.Item label={t('users.form_username')} name="username" rules={[{ required: true }]}>
               <Input prefix={<UserOutlined style={{ color: C.muted }} />} />
+            </Form.Item>
+          )}
+          {!editUser && (
+            <Form.Item label="E-posta" name="email" rules={[{ required: true, type: 'email', message: 'Geçerli bir e-posta girin' }]}>
+              <Input prefix={<MailOutlined style={{ color: C.muted }} />} />
             </Form.Item>
           )}
           {!editUser && (
