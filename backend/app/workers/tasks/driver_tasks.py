@@ -45,8 +45,8 @@ def probe_device_task(self, task_id: int, device_id: int):
 
 
 async def _do_probe(device_id: int) -> dict:
-    """Run the full probe logic with a fresh async session."""
-    from app.core.database import AsyncSessionLocal
+    """Run the full probe logic using NullPool session (safe for Celery event loops)."""
+    from app.core.database import make_worker_session
     from app.api.v1.endpoints.driver_templates import _run_probe_logic
-    async with AsyncSessionLocal() as db:
+    async with make_worker_session()() as db:
         return await _run_probe_logic(db, device_id)
