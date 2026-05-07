@@ -1346,12 +1346,20 @@ PLISTEOF
             chmod 644 "$PLIST_PATH"
             if [ "$EUID" -eq 0 ]; then
                 launchctl bootout system/com.netmanager.agent 2>/dev/null || true
-                launchctl bootstrap system "$PLIST_PATH"
+                launchctl bootout system "$PLIST_PATH" 2>/dev/null || true
+                launchctl bootstrap system "$PLIST_PATH" 2>/dev/null || \
+                    launchctl load -w "$PLIST_PATH" 2>/dev/null || true
             else
                 launchctl unload "$PLIST_PATH" 2>/dev/null || true
                 launchctl load -w "$PLIST_PATH"
             fi
-            echo "✓ NetManager Agent kuruldu! (macOS launchd)"
+            sleep 1
+            if launchctl list 2>/dev/null | grep -q com.netmanager.agent; then
+                echo "✓ NetManager Agent kuruldu ve başlatıldı! (macOS launchd)"
+            else
+                echo "⚠ Plist yüklendi ancak servis başlamadı. Manuel başlatın:"
+                echo "  sudo launchctl load -w $PLIST_PATH"
+            fi
         else
             cat > /etc/systemd/system/$SERVICE_NAME.service <<SVCEOF
 [Unit]
