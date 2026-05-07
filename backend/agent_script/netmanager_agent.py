@@ -393,8 +393,11 @@ def _build_params(msg):
         ssh_password = msg.get("ssh_password", "")
         enable_secret = msg.get("enable_secret", "")
 
+    # generic devices often have non-standard SSH auth (allowed_types=['']);
+    # linux driver + look_for_keys/allow_agent=False avoids paramiko auth confusion.
+    effective_type = "linux" if os_type == "generic" else os_type
     params = {
-        "device_type":        os_type,
+        "device_type":        effective_type,
         "host":               msg["device_ip"],
         "username":           ssh_username,
         "password":           ssh_password,
@@ -406,6 +409,8 @@ def _build_params(msg):
         "blocking_timeout":   40,
         "fast_cli":           False,
         "global_delay_factor": 3,
+        "look_for_keys":      False,
+        "allow_agent":        False,
     }
     if enable_secret:
         params["secret"] = enable_secret

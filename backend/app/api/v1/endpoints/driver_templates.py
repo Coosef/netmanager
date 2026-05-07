@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -540,47 +541,70 @@ async def probe_device(
     )
     existing_cmd_types = {row[0] for row in existing_q.all()}
 
-    # Step 4: For each missing command_type, try candidates and generate template
+    # Step 4: Gather SSH outputs in parallel, then generate templates in parallel
     templates_created = 0
     templates_skipped = 0
     details = []
 
-    for cmd_type, candidates in _COMMAND_CANDIDATES.items():
+    missing_types = [
+        (cmd_type, candidates)
+        for cmd_type, candidates in _COMMAND_CANDIDATES.items()
+        if cmd_type not in existing_cmd_types
+    ]
+    for cmd_type in _COMMAND_CANDIDATES:
         if cmd_type in existing_cmd_types:
             templates_skipped += 1
             details.append({"command_type": cmd_type, "status": "skipped", "reason": "template already exists"})
-            continue
 
-        # Try candidate commands
-        cmd_output = ""
-        used_cmd = ""
-        for candidate in candidates:
-            try:
-                res = await ssh_manager.execute_command(device, candidate)
-                if res.success and len(res.output.strip()) > 10:
-                    cmd_output = res.output
-                    used_cmd = candidate
-                    break
-            except Exception:
-                continue
+    # Parallel SSH: max 5 concurrent connections
+    _ssh_sem = asyncio.Semaphore(5)
 
-        if not cmd_output:
-            details.append({"command_type": cmd_type, "status": "skipped", "reason": "all candidate commands failed"})
-            continue
+    async def _try_ssh(cmd_type, candidates):
+        async with _ssh_sem:
+            for candidate in candidates:
+                try:
+                    res = await ssh_manager.execute_command(device, candidate)
+                    if res.success and len(res.output.strip()) > 10:
+                        return (cmd_type, res.output, candidate)
+                except Exception:
+                    continue
+        return (cmd_type, "", "")
 
-        # Generate template via AI
-        field_hint = COMMAND_TYPE_DESCRIPTIONS.get(cmd_type, "relevant network data")
-        try:
-            ai_data = await _call_driver_ai(
+    ssh_results = await asyncio.gather(*[_try_ssh(ct, cands) for ct, cands in missing_types])
+
+    # Read AI settings once to avoid N parallel DB reads
+    from app.models.ai_settings import AISettings
+    ai_cfg = await db.get(AISettings, 1)
+    if ai_cfg is None or not ai_cfg.active_provider:
+        raise HTTPException(400, "AI sağlayıcısı yapılandırılmamış. Lütfen Ayarlar → AI Asistanı bölümünden yapılandırın.")
+
+    # Parallel AI calls for command types that got SSH output
+    _ai_sem = asyncio.Semaphore(3)
+
+    async def _gen_template(cmd_type, cmd_output, used_cmd):
+        async with _ai_sem:
+            field_hint = COMMAND_TYPE_DESCRIPTIONS.get(cmd_type, "relevant network data")
+            return (cmd_type, cmd_output, used_cmd, await _call_driver_ai(
                 db,
                 AI_SYSTEM_PROMPT,
                 f"OS type: {detected_os}\nCommand type: {cmd_type} (extract: {field_hint})\nCommand used: {used_cmd}\n\nRaw CLI output:\n---\n{cmd_output[:3000]}\n---\n\nGenerate a parser.",
                 max_tokens=2048,
-            )
-        except Exception as e:
-            details.append({"command_type": cmd_type, "status": "error", "reason": str(e)})
-            continue
+            ))
 
+    valid_ssh = [(ct, out, cmd) for ct, out, cmd in ssh_results if out]
+    for ct, _, _ in [(ct, out, cmd) for ct, out, cmd in ssh_results if not out]:
+        details.append({"command_type": ct, "status": "skipped", "reason": "all candidate commands failed"})
+
+    ai_results = await asyncio.gather(
+        *[_gen_template(ct, out, cmd) for ct, out, cmd in valid_ssh],
+        return_exceptions=True,
+    )
+
+    for item in ai_results:
+        if isinstance(item, Exception):
+            details.append({"command_type": "unknown", "status": "error", "reason": str(item)})
+            continue
+        cmd_type, cmd_output, used_cmd, ai_data = item
         t = DriverTemplate(
             os_type=detected_os,
             command_type=cmd_type,

@@ -55,8 +55,13 @@ class SSHManager:
         port = (src.ssh_port if src.ssh_port else device.ssh_port) or 22
         enable_enc = src.enable_secret_enc if src.enable_secret_enc else device.enable_secret_enc
 
+        os_type = device.os_type or "generic"
+        # Some embedded/generic devices have non-standard SSH auth (returns allowed_types=['']);
+        # paramiko needs look_for_keys=False + allow_agent=False to avoid confusing them.
+        # Also, generic devices often work better with linux driver (handles keyboard-interactive).
+        effective_type = "linux" if os_type == "generic" else os_type
         params = {
-            "device_type": device.os_type,
+            "device_type": effective_type,
             "host": device.ip_address,
             "username": username,
             "password": decrypt_credential(password_enc),
@@ -68,6 +73,8 @@ class SSHManager:
             "blocking_timeout": 40,
             "fast_cli": False,
             "global_delay_factor": 3,
+            "look_for_keys": False,
+            "allow_agent": False,
         }
         if enable_enc:
             params["secret"] = decrypt_credential(enable_enc)
