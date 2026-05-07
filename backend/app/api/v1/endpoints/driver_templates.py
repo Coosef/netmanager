@@ -1,4 +1,3 @@
-import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -8,9 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.security import decrypt_credential_safe
 from app.models.driver_template import DriverTemplate
 from app.models.command_execution import CommandExecution
 from app.schemas.driver_template import (
@@ -294,14 +293,6 @@ async def ai_suggest(
     db: AsyncSession = Depends(get_db),
     _current_user: CurrentUser = None,
 ):
-    if not settings.ANTHROPIC_API_KEY:
-        raise HTTPException(400, "ANTHROPIC_API_KEY is not configured")
-
-    try:
-        import anthropic
-    except ImportError:
-        raise HTTPException(500, "anthropic package not installed")
-
     field_hint = COMMAND_TYPE_DESCRIPTIONS.get(payload.command_type, "relevant network data")
     version_hint = f"Firmware/OS version: {payload.firmware_version}" if payload.firmware_version else ""
 
@@ -316,25 +307,7 @@ Raw CLI output:
 
 Generate a parser for this output."""
 
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=2048,
-        system=AI_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": user_message}],
-    )
-
-    raw_response = message.content[0].text.strip()
-
-    # Strip markdown fences if present
-    if raw_response.startswith("```"):
-        raw_response = re.sub(r"^```[a-z]*\n?", "", raw_response)
-        raw_response = re.sub(r"\n?```$", "", raw_response)
-
-    try:
-        data = json.loads(raw_response)
-    except json.JSONDecodeError as e:
-        raise HTTPException(500, f"AI returned invalid JSON: {e}") from e
+    data = await _call_driver_ai(db, AI_SYSTEM_PROMPT, user_message, max_tokens=2048)
 
     # Save as unverified template in DB
     t = DriverTemplate(
@@ -397,19 +370,99 @@ Respond with ONLY a JSON object:
 }"""
 
 
-def _call_ai_sync(client, system: str, user: str, max_tokens: int = 1024) -> dict:
-    """Synchronous Claude call — used inside thread executor."""
-    msg = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=max_tokens,
-        system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-    raw = msg.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = re.sub(r"^```[a-z]*\n?", "", raw)
-        raw = re.sub(r"\n?```$", "", raw)
-    return json.loads(raw)
+async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: int = 1024) -> dict:
+    """Call the configured AI provider (from Settings → AI) and return parsed JSON."""
+    from app.models.ai_settings import AISettings
+
+    ai_cfg = await db.get(AISettings, 1)
+    if ai_cfg is None or not ai_cfg.active_provider:
+        raise HTTPException(400, "AI sağlayıcısı yapılandırılmamış. Lütfen Ayarlar → AI Asistanı bölümünden yapılandırın.")
+
+    provider = ai_cfg.active_provider
+    raw_response = ""
+
+    if provider == "claude":
+        try:
+            from anthropic import AsyncAnthropic
+        except ImportError:
+            raise HTTPException(500, "anthropic paketi yüklü değil")
+        api_key = decrypt_credential_safe(ai_cfg.claude_api_key_enc)
+        if not api_key:
+            raise HTTPException(400, "Claude API anahtarı ayarlanmamış")
+        client = AsyncAnthropic(api_key=api_key, timeout=60.0)
+        resp = await client.messages.create(
+            model=ai_cfg.claude_model or "claude-sonnet-4-6",
+            max_tokens=max_tokens,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+        )
+        raw_response = resp.content[0].text.strip()
+
+    elif provider == "openai":
+        try:
+            from openai import AsyncOpenAI
+        except ImportError:
+            raise HTTPException(500, "openai paketi yüklü değil")
+        api_key = decrypt_credential_safe(ai_cfg.openai_api_key_enc)
+        if not api_key:
+            raise HTTPException(400, "OpenAI API anahtarı ayarlanmamış")
+        client = AsyncOpenAI(api_key=api_key, timeout=60.0)
+        resp = await client.chat.completions.create(
+            model=ai_cfg.openai_model or "gpt-4o",
+            max_tokens=max_tokens,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        )
+        raw_response = resp.choices[0].message.content.strip()
+
+    elif provider == "gemini":
+        try:
+            import google.genai as genai
+            from google.genai import types as genai_types
+        except ImportError:
+            raise HTTPException(500, "google-genai paketi yüklü değil")
+        api_key = decrypt_credential_safe(ai_cfg.gemini_api_key_enc)
+        if not api_key:
+            raise HTTPException(400, "Gemini API anahtarı ayarlanmamış")
+        gclient = genai.Client(api_key=api_key)
+        resp = await gclient.aio.models.generate_content(
+            model=ai_cfg.gemini_model or "gemini-2.0-flash",
+            contents=f"{system}\n\n{user}",
+            config=genai_types.GenerateContentConfig(max_output_tokens=max_tokens),
+        )
+        raw_response = resp.text.strip()
+
+    elif provider == "ollama":
+        import httpx
+        base_url = (ai_cfg.ollama_base_url or "http://localhost:11434").rstrip("/")
+        model = ai_cfg.ollama_model or "llama3.2"
+        async with httpx.AsyncClient(timeout=120.0) as hclient:
+            r = await hclient.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
+                    ],
+                    "stream": False,
+                },
+            )
+            raw_response = r.json()["message"]["content"].strip()
+
+    else:
+        raise HTTPException(400, f"Bilinmeyen AI sağlayıcısı: {provider}")
+
+    if raw_response.startswith("```"):
+        raw_response = re.sub(r"^```[a-z]*\n?", "", raw_response)
+        raw_response = re.sub(r"\n?```$", "", raw_response)
+
+    try:
+        return json.loads(raw_response)
+    except json.JSONDecodeError as e:
+        raise HTTPException(500, f"AI geçersiz JSON döndürdü: {e}") from e
 
 
 @router.post("/probe-device/{device_id}", response_model=ProbeDeviceResponse)
@@ -422,14 +475,6 @@ async def probe_device(
     SSH into a device, auto-detect vendor/model/firmware via AI,
     then generate missing parser templates for all command types.
     """
-    if not settings.ANTHROPIC_API_KEY:
-        raise HTTPException(400, "ANTHROPIC_API_KEY is not configured")
-
-    try:
-        import anthropic
-    except ImportError:
-        raise HTTPException(500, "anthropic package not installed")
-
     from sqlalchemy import select as sa_select
     from app.models.device import Device
     from app.services.ssh_manager import ssh_manager
@@ -439,9 +484,6 @@ async def probe_device(
     device = result.scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
-
-    ai_client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    loop = asyncio.get_running_loop()
 
     # Step 1: Get show version output
     version_output = ""
@@ -459,15 +501,14 @@ async def probe_device(
 
     # Step 2: AI identifies the device
     try:
-        detection = await loop.run_in_executor(
-            None,
-            lambda: _call_ai_sync(
-                ai_client,
-                DETECT_SYSTEM_PROMPT,
-                f"CLI output:\n{version_output[:3000]}",
-            ),
+        detection = await _call_driver_ai(
+            db,
+            DETECT_SYSTEM_PROMPT,
+            f"CLI output:\n{version_output[:3000]}",
         )
-    except (json.JSONDecodeError, Exception) as e:
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(500, f"AI detection failed: {e}") from e
 
     detected_os = detection.get("os_type") or device.os_type
@@ -530,14 +571,11 @@ async def probe_device(
         # Generate template via AI
         field_hint = COMMAND_TYPE_DESCRIPTIONS.get(cmd_type, "relevant network data")
         try:
-            ai_data = await loop.run_in_executor(
-                None,
-                lambda cmd=cmd_output, hint=field_hint, cmd_str=used_cmd: _call_ai_sync(
-                    ai_client,
-                    AI_SYSTEM_PROMPT,
-                    f"OS type: {detected_os}\nCommand type: {cmd_type} (extract: {hint})\nCommand used: {cmd_str}\n\nRaw CLI output:\n---\n{cmd[:3000]}\n---\n\nGenerate a parser.",
-                    max_tokens=2048,
-                ),
+            ai_data = await _call_driver_ai(
+                db,
+                AI_SYSTEM_PROMPT,
+                f"OS type: {detected_os}\nCommand type: {cmd_type} (extract: {field_hint})\nCommand used: {used_cmd}\n\nRaw CLI output:\n---\n{cmd_output[:3000]}\n---\n\nGenerate a parser.",
+                max_tokens=2048,
             )
         except Exception as e:
             details.append({"command_type": cmd_type, "status": "error", "reason": str(e)})
