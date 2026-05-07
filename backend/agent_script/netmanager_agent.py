@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 NetManager Proxy Agent v1.3
 Yerel ağa kurulur, NetManager backend'e WebSocket ile bağlanır.
