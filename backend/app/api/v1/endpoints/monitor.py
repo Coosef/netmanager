@@ -9,11 +9,12 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter
+from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
 from app.models.topology import TopologyLink
+from app.models.user import UserRole
 
 router = APIRouter()
 
@@ -103,11 +104,22 @@ async def acknowledge_event(
 @router.post("/events/acknowledge-all")
 async def acknowledge_all(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+    location_filter: LocationNameFilter = None,
 ):
-    await db.execute(
-        update(NetworkEvent).where(NetworkEvent.acknowledged == False).values(acknowledged=True)
-    )
+    q = update(NetworkEvent).where(NetworkEvent.acknowledged == False)
+    if tenant_filter is not None or location_filter is not None:
+        # Restrict to devices visible to this user
+        dev_q = select(Device.id).where(Device.is_active == True)
+        if tenant_filter is not None:
+            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+        if location_filter is not None:
+            if not location_filter:
+                return {"ok": True}
+            dev_q = dev_q.where(Device.site.in_(location_filter))
+        q = q.where(NetworkEvent.device_id.in_(dev_q))
+    await db.execute(q)
     await db.commit()
     return {"ok": True}
 
@@ -115,23 +127,25 @@ async def acknowledge_all(
 @router.post("/events/purge-noise")
 async def purge_noise_events(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
     older_than_hours: int = Query(1, description="Purge noisy events older than N hours"),
 ):
     """
     Delete accumulated flapping/correlation noise events.
-    Removes device_flapping, correlation_incident, and agent_outage events
-    older than `older_than_hours` to clear backlog from a flapping period.
+    Scoped to tenant; SUPER_ADMIN purges globally.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=older_than_hours)
     noisy_types = ("device_flapping", "correlation_incident", "agent_outage")
 
-    result = await db.execute(
-        delete(NetworkEvent).where(
-            NetworkEvent.event_type.in_(noisy_types),
-            NetworkEvent.created_at < cutoff,
-        )
+    q = delete(NetworkEvent).where(
+        NetworkEvent.event_type.in_(noisy_types),
+        NetworkEvent.created_at < cutoff,
     )
+    if tenant_filter is not None:
+        dev_q = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        q = q.where(NetworkEvent.device_id.in_(dev_q))
+    result = await db.execute(q)
     await db.commit()
     return {"deleted": result.rowcount, "event_types": list(noisy_types), "cutoff": cutoff.isoformat()}
 
@@ -236,15 +250,23 @@ async def monitor_stats(
 async def events_timeline(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+    location_filter: LocationNameFilter = None,
     hours: int = Query(24),
 ):
     """Hourly event counts for charting (last N hours)."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    result = await db.execute(
-        select(NetworkEvent.created_at, NetworkEvent.severity)
-        .where(NetworkEvent.created_at >= since)
-        .order_by(NetworkEvent.created_at)
-    )
+    q = select(NetworkEvent.created_at, NetworkEvent.severity).where(NetworkEvent.created_at >= since)
+    if tenant_filter is not None or location_filter is not None:
+        dev_q = select(Device.id).where(Device.is_active == True)
+        if tenant_filter is not None:
+            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+        if location_filter is not None:
+            if not location_filter:
+                return {"timeline": []}
+            dev_q = dev_q.where(Device.site.in_(location_filter))
+        q = q.where(NetworkEvent.device_id.in_(dev_q))
+    result = await db.execute(q.order_by(NetworkEvent.created_at))
     rows = result.fetchall()
 
     # Group by hour (Istanbul time — UTC+3)
@@ -263,15 +285,22 @@ async def events_timeline(
 async def trigger_scan(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+    location_filter: LocationNameFilter = None,
 ):
-    """Trigger an immediate full anomaly scan on all active devices."""
+    """Trigger an immediate full anomaly scan on accessible devices."""
     from app.workers.tasks.monitor_tasks import (
         check_stp_anomalies, check_loop_detection, poll_device_status,
         check_port_status, check_lldp_changes,
     )
-    devices = (await db.execute(
-        select(Device).where(Device.is_active == True)
-    )).scalars().all()
+    dev_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+    if location_filter is not None:
+        if not location_filter:
+            return {"queued": False, "device_count": 0}
+        dev_q = dev_q.where(Device.site.in_(location_filter))
+    devices = (await db.execute(dev_q)).scalars().all()
     ids = [d.id for d in devices]
 
     poll_device_status.apply_async(queue="monitor")

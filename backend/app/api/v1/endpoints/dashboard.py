@@ -298,13 +298,19 @@ async def dashboard_analytics(
 async def snmp_summary(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """SNMP fleet overview: enabled count, last poll, top interfaces, critical/warning counts."""
+    dev_base = select(Device.id).where(Device.is_active == True)
+    if tenant_filter is not None:
+        dev_base = dev_base.where(Device.tenant_id == tenant_filter)
+    accessible_ids = (await db.execute(dev_base)).scalars().all()
+
     snmp_row = (await db.execute(
         select(
             func.count(Device.id).label("total"),
             func.sum(case((Device.snmp_enabled == True, 1), else_=0)).label("enabled"),
-        ).where(Device.is_active == True)
+        ).where(Device.is_active == True, Device.id.in_(accessible_ids) if accessible_ids is not None else text("true"))
     )).one()
 
     last_poll_row = (await db.execute(
@@ -392,17 +398,24 @@ async def snmp_summary(
 async def dashboard_sparklines(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+    location_filter: LocationNameFilter = None,
 ):
     """24-hour hourly event counts for sparkline charts."""
-    rows = (await db.execute(
-        select(
-            func.date_trunc("hour", NetworkEvent.created_at).label("hour"),
-            func.count().label("cnt"),
-        )
-        .where(NetworkEvent.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))
-        .group_by(text("1"))
-        .order_by(text("1"))
-    )).mappings().all()
+    ev_q = select(
+        func.date_trunc("hour", NetworkEvent.created_at).label("hour"),
+        func.count().label("cnt"),
+    ).where(NetworkEvent.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))
+    if tenant_filter is not None or location_filter is not None:
+        dev_q = select(Device.id).where(Device.is_active == True)
+        if tenant_filter is not None:
+            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+        if location_filter is not None:
+            if not location_filter:
+                return {"events_24h": []}
+            dev_q = dev_q.where(Device.site.in_(location_filter))
+        ev_q = ev_q.where(NetworkEvent.device_id.in_(dev_q))
+    rows = (await db.execute(ev_q.group_by(text("1")).order_by(text("1")))).mappings().all()
 
     now = datetime.now(timezone.utc)
     hourly: dict = {

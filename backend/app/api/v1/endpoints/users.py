@@ -267,6 +267,16 @@ async def set_user_locations(
     # Delete all existing assignments
     await db.execute(delete(UserLocation).where(UserLocation.user_id == user_id))
 
+    # Collect valid location IDs that belong to this tenant
+    if current_user.role != UserRole.SUPER_ADMIN:
+        allowed_locs = set(
+            (await db.execute(
+                select(Location.id).where(Location.tenant_id == current_user.tenant_id)
+            )).scalars().all()
+        )
+    else:
+        allowed_locs = None  # SA has no restriction
+
     valid_loc_roles = {"location_manager", "location_operator", "location_viewer"}
     for item in payload:
         loc_id = item.get("location_id")
@@ -275,6 +285,8 @@ async def set_user_locations(
             continue
         if loc_role not in valid_loc_roles:
             continue
+        if allowed_locs is not None and loc_id not in allowed_locs:
+            continue  # silently skip locations from other tenants
         ul = UserLocation(
             user_id=user_id,
             location_id=loc_id,

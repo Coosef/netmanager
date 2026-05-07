@@ -302,6 +302,8 @@ async def assign_user_to_location(
     )).scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+    if current_user.role == UserRole.ADMIN and target_user.tenant_id != current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Bu kullanıcıya erişim yetkiniz yok")
 
     valid_loc_roles = {"location_manager", "location_operator", "location_viewer"}
     if payload.loc_role not in valid_loc_roles:

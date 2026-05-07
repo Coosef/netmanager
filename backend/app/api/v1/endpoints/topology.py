@@ -3,7 +3,7 @@ from sqlalchemy import select, func, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter
+from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
 from app.core.redis_client import get_json, set_json
 from app.core.security import encrypt_credential, decrypt_credential
 from app.models.device import Device
@@ -65,6 +65,7 @@ async def trigger_discovery(
 async def get_topology_graph(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
     group_id: int = Query(None),
     site: str = Query(None),
     refresh: bool = Query(False),
@@ -79,17 +80,17 @@ async def get_topology_graph(
         effective_sites = eff
         site = None
 
+    # Only use cache for unrestricted (SA) requests
     cache_key = f"topology:graph:{group_id or 'all'}:{site or 'all'}"
-
-    if not refresh:
+    if not refresh and tenant_filter is None and effective_sites is None:
         cached = await get_json(cache_key)
-        if cached and effective_sites is None:
+        if cached:
             return cached
 
     svc = TopologyService(ssh_manager)
-    graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites)
+    graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites, tenant_id=tenant_filter)
 
-    if effective_sites is None:
+    if tenant_filter is None and effective_sites is None:
         await set_json(cache_key, graph, ttl=300)
     return graph
 

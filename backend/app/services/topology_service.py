@@ -540,6 +540,7 @@ class TopologyService:
         group_id: int | None = None,
         site: str | None = None,
         sites: list[str] | None = None,
+        tenant_id: int | None = None,
     ) -> dict:
         """Build React Flow compatible graph from topology_links."""
         # Opportunistically re-link any ghost nodes that are now in inventory
@@ -547,6 +548,8 @@ class TopologyService:
 
         # Fetch all devices
         device_query = select(Device).where(Device.is_active == True)
+        if tenant_id is not None:
+            device_query = device_query.where(Device.tenant_id == tenant_id)
         if group_id:
             device_query = device_query.where(Device.group_id == group_id)
         if sites is not None:

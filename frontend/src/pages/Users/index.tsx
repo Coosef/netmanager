@@ -203,14 +203,26 @@ export default function UsersPage() {
   const onSubmit = async (values: Record<string, unknown>) => {
     try {
       let userId: number
+      let updatedUser: any = null
       if (editUser) {
-        await updateMutation.mutateAsync({ id: editUser.id, data: values })
+        updatedUser = await updateMutation.mutateAsync({ id: editUser.id, data: values })
         userId = editUser.id
       } else {
         const newUser = await createMutation.mutateAsync(values)
         userId = (newUser as any).id
       }
-      await usersApi.setLocations(userId, locAssignments)
+      try {
+        await usersApi.setLocations(userId, locAssignments)
+      } catch (locErr: any) {
+        const d = locErr?.response?.data?.detail
+        message.error(typeof d === 'string' ? d : 'Lokasyon atamaları kaydedilemedi')
+        return
+      }
+      // If the current user edited their own profile, refresh the auth store
+      if (editUser && editUser.id === currentUser?.id && updatedUser) {
+        const { setAuth, token } = useAuthStore.getState()
+        setAuth(token!, { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role, tenant_id: updatedUser.tenant_id })
+      }
       message.success(editUser ? t('users.updated') : t('users.created'))
       setDrawerOpen(false)
       queryClient.invalidateQueries({ queryKey: ['users'] })
