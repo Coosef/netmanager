@@ -70,13 +70,15 @@ async def list_locations(
 ):
     query = select(Location)
 
-    if current_user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN) and not current_user.tenant_id:
-        # Platform admin (no tenant assigned) — sees everything, optional tenant filter
+    if current_user.role == UserRole.SUPER_ADMIN:
+        # Always unrestricted — optional tenant filter for SA
         if tenant_id:
             query = query.where(Location.tenant_id == tenant_id)
     elif current_user.role == UserRole.ADMIN:
-        # Tenant-scoped admin — only their tenant's locations
-        query = query.where(Location.tenant_id == current_user.tenant_id)
+        if current_user.tenant_id:
+            # Tenant-scoped admin — only their tenant's locations
+            query = query.where(Location.tenant_id == current_user.tenant_id)
+        # else: platform admin (ADMIN with no tenant) — sees everything, no filter
     elif current_user.role == UserRole.ORG_VIEWER:
         if not current_user.tenant_id:
             return {"items": [], "total": 0}
