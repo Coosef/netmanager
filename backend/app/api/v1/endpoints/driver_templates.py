@@ -363,12 +363,59 @@ Given CLI output from an unknown device, extract vendor, model, firmware version
 
 Respond with ONLY a JSON object:
 {
-  "vendor": "<vendor name, e.g. Cisco, Ruijie, Aruba, H3C, Juniper, MikroTik, Fortinet>",
+  "vendor": "<vendor name, e.g. Cisco, Ruijie, Aruba, H3C, Juniper, MikroTik, Fortinet, Grandstream>",
   "model": "<model number/name>",
   "firmware": "<firmware/OS version string>",
-  "os_type": "<netmiko driver name: cisco_ios | cisco_nxos | cisco_sg300 | ruijie_os | aruba_osswitch | aruba_aoscx | hp_procurve | h3c_comware | fortios | junos | mikrotik_routeros | generic>",
+  "os_type": "<netmiko driver name: cisco_ios | cisco_nxos | cisco_sg300 | ruijie_os | aruba_osswitch | aruba_aoscx | hp_procurve | h3c_comware | fortios | junos | mikrotik_routeros | linux | generic>",
   "confidence": "high" | "medium" | "low"
 }"""
+
+DEVICE_COMMANDS_SYSTEM_PROMPT = """You are a network engineer expert with deep knowledge of CLI commands
+for ALL network vendors including niche and embedded devices (Grandstream, MikroTik, Ubiquiti, TP-Link,
+Netgear, D-Link, Zyxel, Huawei, H3C, Fortinet, Palo Alto, etc.).
+
+Given a device identification, provide the exact CLI commands that work on that specific device.
+Use your training knowledge. If you know the device has a web-only UI with no CLI, say so.
+
+Return ONLY a JSON object:
+{
+  "commands": {
+    "show_interfaces":    "<exact command or null if not supported>",
+    "show_vlan":          "<exact command or null>",
+    "show_lldp":          "<exact command or null>",
+    "show_mac_table":     "<exact command or null>",
+    "show_arp":           "<exact command or null>",
+    "show_running_config":"<exact command or null>",
+    "show_power_inline":  "<exact command or null>",
+    "show_switchport":    "<exact command or null>"
+  },
+  "prompt_hint": "<short description of the CLI prompt pattern, e.g. 'hostname#' or '(GWN7811)>'>",
+  "has_cli": true,
+  "notes": "<any connection or compatibility notes>"
+}"""
+
+
+async def _web_search_device_docs(vendor: str, model: str) -> str:
+    """Search DuckDuckGo for device CLI documentation. Returns combined snippet text."""
+    query = f"{vendor} {model} CLI commands reference guide"
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            r = await client.get(
+                "https://api.duckduckgo.com/",
+                params={"q": query, "format": "json", "no_html": "1", "no_redirect": "1"},
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            data = r.json()
+            snippets = []
+            if data.get("AbstractText"):
+                snippets.append(data["AbstractText"])
+            for topic in data.get("RelatedTopics", [])[:5]:
+                if isinstance(topic, dict) and topic.get("Text"):
+                    snippets.append(topic["Text"])
+            return " | ".join(snippets) if snippets else ""
+    except Exception:
+        return ""
 
 
 async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: int = 1024) -> dict:
@@ -532,6 +579,30 @@ async def probe_device(
             device.os_type = detected_os
         await db.commit()
 
+    # Step 2.5: AI generates device-specific command map from its training knowledge
+    # Also search the web for extra context if the device is niche/unknown
+    web_context = ""
+    if detected_vendor and detected_model and detection.get("confidence") != "high":
+        web_context = await _web_search_device_docs(detected_vendor, detected_model)
+
+    ai_command_map: dict[str, str] = {}
+    try:
+        cmd_query = (
+            f"Vendor: {detected_vendor}\n"
+            f"Model: {detected_model}\n"
+            f"Firmware: {detected_firmware}\n"
+            f"Detected OS type: {detected_os}\n"
+        )
+        if web_context:
+            cmd_query += f"\nWeb search context:\n{web_context[:1000]}\n"
+        cmd_query += "\nProvide the exact CLI commands for this device."
+        cmd_result = await _call_driver_ai(db, DEVICE_COMMANDS_SYSTEM_PROMPT, cmd_query, max_tokens=1024)
+        raw_cmds = cmd_result.get("commands", {})
+        # Filter out null/None entries
+        ai_command_map = {k: v for k, v in raw_cmds.items() if v}
+    except Exception:
+        pass  # Fall back to generic candidates
+
     # Step 3: Find which command_types already have templates for this os_type
     existing_q = await db.execute(
         sa_select(DriverTemplate.command_type).where(
@@ -546,12 +617,24 @@ async def probe_device(
     templates_skipped = 0
     details = []
 
+    # Merge AI-discovered commands with generic candidates (AI-suggested comes first)
+    merged_candidates: dict[str, list[str]] = {}
+    all_cmd_types = set(_COMMAND_CANDIDATES.keys()) | set(ai_command_map.keys())
+    for cmd_type in all_cmd_types:
+        candidates = []
+        if cmd_type in ai_command_map:
+            candidates.append(ai_command_map[cmd_type])
+        candidates.extend(_COMMAND_CANDIDATES.get(cmd_type, []))
+        # Deduplicate while preserving order
+        seen: set[str] = set()
+        merged_candidates[cmd_type] = [c for c in candidates if not (c in seen or seen.add(c))]  # type: ignore[func-returns-value]
+
     missing_types = [
-        (cmd_type, candidates)
-        for cmd_type, candidates in _COMMAND_CANDIDATES.items()
+        (cmd_type, cands)
+        for cmd_type, cands in merged_candidates.items()
         if cmd_type not in existing_cmd_types
     ]
-    for cmd_type in _COMMAND_CANDIDATES:
+    for cmd_type in merged_candidates:
         if cmd_type in existing_cmd_types:
             templates_skipped += 1
             details.append({"command_type": cmd_type, "status": "skipped", "reason": "template already exists"})
