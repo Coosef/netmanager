@@ -560,11 +560,7 @@ async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
     if not device:
         raise HTTPException(404, "Device not found")
 
-    # Step 1: Test SSH connection first to get a clear error, then probe version
-    conn_test = await ssh_manager.test_connection(device)
-    if not conn_test.success:
-        raise HTTPException(502, f"SSH bağlantısı başarısız: {conn_test.error}")
-
+    # Step 1: Try version probe commands; capture the real SSH error if all fail
     version_output = ""
     last_error = ""
     for probe_cmd in _VERSION_PROBES:
@@ -580,7 +576,7 @@ async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
             continue
 
     if not version_output:
-        detail = f"SSH bağlı ama komut çıktısı alınamadı. Son hata: {last_error}" if last_error else "Versiyon bilgisi alınamadı — komutlar boş döndü"
+        detail = f"SSH bağlantısı başarısız: {last_error}" if last_error else "Versiyon bilgisi alınamadı — komutlar boş döndü"
         raise HTTPException(502, detail)
 
     # Step 2: AI identifies the device
