@@ -513,16 +513,43 @@ async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: 
         raise HTTPException(500, f"AI geçersiz JSON döndürdü: {e}") from e
 
 
-@router.post("/probe-device/{device_id}", response_model=ProbeDeviceResponse)
+@router.post("/probe-device/{device_id}")
 async def probe_device(
     device_id: int,
     db: AsyncSession = Depends(get_db),
-    _current_user: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
-    """
-    SSH into a device, auto-detect vendor/model/firmware via AI,
-    then generate missing parser templates for all command types.
-    """
+    """Queue a Celery probe task and return task_id immediately (avoids Cloudflare 100s timeout)."""
+    from sqlalchemy import select as sa_select
+    from app.models.device import Device
+    from app.models.task import Task, TaskStatus, TaskType
+    from app.workers.tasks.driver_tasks import probe_device_task
+
+    result = await db.execute(sa_select(Device).where(Device.id == device_id))
+    device = result.scalar_one_or_none()
+    if not device:
+        raise HTTPException(404, "Device not found")
+
+    task = Task(
+        name=f"Probe: {device.hostname or device.ip_address}",
+        type=TaskType.PROBE_DEVICE,
+        status=TaskStatus.PENDING,
+        device_ids=[device_id],
+        total_devices=1,
+        parameters={"device_id": device_id},
+        created_by=current_user.id,
+        tenant_id=current_user.tenant_id,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    probe_device_task.apply_async(args=[task.id, device_id], queue="default")
+    return {"task_id": task.id, "status": "queued"}
+
+
+async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
+    """Core probe logic — called from Celery task via async wrapper."""
     from sqlalchemy import select as sa_select
     from app.models.device import Device
     from app.services.ssh_manager import ssh_manager
@@ -710,14 +737,14 @@ async def probe_device(
     if templates_created > 0:
         await db.commit()
 
-    return ProbeDeviceResponse(
-        device_id=device_id,
-        detected_vendor=detected_vendor,
-        detected_model=detected_model,
-        detected_firmware=detected_firmware,
-        detected_os_type=detected_os,
-        templates_created=templates_created,
-        templates_skipped=templates_skipped,
-        firmware_changed=firmware_changed,
-        details=details,
-    )
+    return {
+        "device_id": device_id,
+        "detected_vendor": detected_vendor,
+        "detected_model": detected_model,
+        "detected_firmware": detected_firmware,
+        "detected_os_type": detected_os,
+        "templates_created": templates_created,
+        "templates_skipped": templates_skipped,
+        "firmware_changed": firmware_changed,
+        "details": details,
+    }

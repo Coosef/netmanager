@@ -107,7 +107,7 @@ export const driverTemplatesApi = {
     client.post<TestParseResponse>('/driver-templates/test-parse', data).then((r) => r.data),
 
   probeDevice: (deviceId: number) =>
-    client.post<ProbeDeviceResponse>(`/driver-templates/probe-device/${deviceId}`).then((r) => r.data),
+    client.post<{ task_id: number; status: string }>(`/driver-templates/probe-device/${deviceId}`).then((r) => r.data),
 
   getHealth: () =>
     client.get<TemplateHealthSummary[]>('/driver-templates/health').then((r) => r.data),

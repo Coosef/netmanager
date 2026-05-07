@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Badge,
@@ -37,6 +37,7 @@ import {
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
+import { tasksApi } from '@/api/tasks'
 import {
   COMMAND_TYPE_OPTIONS,
   OS_TYPE_OPTIONS,
@@ -522,6 +523,14 @@ function ProbeDeviceModal({ onDone }: { onDone: () => void }) {
   const [deviceId, setDeviceId] = useState<number | null>(null)
   const [result, setResult] = useState<ProbeDeviceResponse | null>(null)
   const [loading, setLoading] = useState(false)
+  const [pollStatus, setPollStatus] = useState('')
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  const stopPoll = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
+  }
+
+  useEffect(() => () => stopPoll(), [])
 
   const { data: devices = [] } = useQuery({
     queryKey: ['devices-list-probe'],
@@ -533,14 +542,28 @@ function ProbeDeviceModal({ onDone }: { onDone: () => void }) {
     if (!deviceId) { message.warning('Cihaz seçin'); return }
     setLoading(true)
     setResult(null)
+    setPollStatus('Tarama kuyruğa alındı...')
     try {
-      const res = await driverTemplatesApi.probeDevice(deviceId)
-      setResult(res)
-      onDone()
+      const { task_id } = await driverTemplatesApi.probeDevice(deviceId)
+      setPollStatus('SSH bağlantısı kuruluyor ve AI analizi yapılıyor...')
+      pollRef.current = setInterval(async () => {
+        try {
+          const task = await tasksApi.get(task_id)
+          if (task.status === 'success') {
+            stopPoll()
+            setLoading(false)
+            setResult(task.result as unknown as ProbeDeviceResponse)
+            onDone()
+          } else if (task.status === 'failed' || task.status === 'cancelled') {
+            stopPoll()
+            setLoading(false)
+            message.error(task.error || 'Tarama başarısız')
+          }
+        } catch { /* network hiccup — keep polling */ }
+      }, 3000)
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
-      message.error(err?.response?.data?.detail || 'Tarama başarısız')
-    } finally {
+      message.error(err?.response?.data?.detail || 'Tarama başlatılamadı')
       setLoading(false)
     }
   }
@@ -556,11 +579,11 @@ function ProbeDeviceModal({ onDone }: { onDone: () => void }) {
       <Modal
         title="Cihaz Otomatik Tarama"
         open={open}
-        onCancel={() => { setOpen(false); setResult(null) }}
+        onCancel={() => { setOpen(false); setResult(null); stopPoll(); setLoading(false) }}
         width={680}
         footer={
           <Space>
-            <Button onClick={() => { setOpen(false); setResult(null) }}>Kapat</Button>
+            <Button onClick={() => { setOpen(false); setResult(null); stopPoll(); setLoading(false) }}>Kapat</Button>
             <Button type="primary" icon={<ScanOutlined />} loading={loading} onClick={handleProbe}>
               Taramayı Başlat
             </Button>
@@ -589,7 +612,7 @@ function ProbeDeviceModal({ onDone }: { onDone: () => void }) {
           <div style={{ textAlign: 'center', padding: 32 }}>
             <Spin size="large" />
             <div style={{ marginTop: 12, color: '#64748b' }}>
-              Cihaza bağlanıyor, komutları çalıştırıyor ve AI şablon üretiyor...
+              {pollStatus || 'Cihaza bağlanıyor, komutları çalıştırıyor ve AI şablon üretiyor...'}
             </div>
           </div>
         )}

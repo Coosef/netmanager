@@ -20,6 +20,7 @@ class TaskType(str, Enum):
     VLAN_PUSH = "vlan_push"
     FIRMWARE_UPGRADE = "firmware_upgrade"
     MONITOR_POLL = "monitor_poll"
+    PROBE_DEVICE = "probe_device"
 
 
 class TaskStatus(str, Enum):
