@@ -418,6 +418,30 @@ async def _web_search_device_docs(vendor: str, model: str) -> str:
         return ""
 
 
+async def _http_identify_device(ip: str) -> str:
+    """Grab HTTP/HTTPS page title or meta content from a device's web panel."""
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=5.0, verify=False, follow_redirects=True) as client:
+            for scheme in ("http", "https"):
+                try:
+                    r = await client.get(f"{scheme}://{ip}/", headers={"User-Agent": "Mozilla/5.0"})
+                    text = r.text[:8000]
+                    # Try <title>
+                    m = re.search(r'<title[^>]*>([^<]{3,100})</title>', text, re.IGNORECASE)
+                    if m:
+                        return m.group(1).strip()
+                    # Fallback: look for model/vendor keywords in meta tags or body
+                    m = re.search(r'(?:model|system|device)["\s:]+([A-Za-z0-9\-_. ]{4,60})', text, re.IGNORECASE)
+                    if m:
+                        return m.group(1).strip()
+                except Exception:
+                    continue
+    except Exception:
+        pass
+    return ""
+
+
 async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: int = 1024) -> dict:
     """Call the configured AI provider (from Settings → AI) and return parsed JSON."""
     from app.models.ai_settings import AISettings
@@ -575,16 +599,22 @@ async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
             last_error = str(exc)
             continue
 
-    if not version_output:
-        detail = f"SSH bağlantısı başarısız: {last_error}" if last_error else "Versiyon bilgisi alınamadı — komutlar boş döndü"
-        raise HTTPException(502, detail)
+    ssh_failed = not version_output
+    http_info = ""
+    if ssh_failed:
+        # SSH failed — try HTTP title to identify the device (no credentials needed)
+        http_info = await _http_identify_device(device.ip_address)
+        if not http_info:
+            detail = f"SSH bağlantısı başarısız: {last_error}" if last_error else "Versiyon bilgisi alınamadı — komutlar boş döndü"
+            raise HTTPException(502, detail)
 
-    # Step 2: AI identifies the device
+    # Step 2: AI identifies the device (from SSH output or HTTP info)
+    identify_input = version_output or f"HTTP web panel bilgisi: {http_info}\nDevice IP: {device.ip_address}"
     try:
         detection = await _call_driver_ai(
             db,
             DETECT_SYSTEM_PROMPT,
-            f"CLI output:\n{version_output[:3000]}",
+            f"CLI output:\n{identify_input[:3000]}",
         )
     except HTTPException:
         raise
@@ -685,7 +715,13 @@ async def _run_probe_logic(db: AsyncSession, device_id: int) -> dict:
                     continue
         return (cmd_type, "", "")
 
-    ssh_results = await asyncio.gather(*[_try_ssh(ct, cands) for ct, cands in missing_types])
+    if ssh_failed:
+        # SSH unavailable — skip command gathering, return identification-only result
+        ssh_results = [(ct, "", "") for ct, _ in missing_types]
+        for ct, _ in missing_types:
+            details.append({"command_type": ct, "status": "skipped", "reason": f"SSH bağlanamadı ({last_error[:80]})"})
+    else:
+        ssh_results = await asyncio.gather(*[_try_ssh(ct, cands) for ct, cands in missing_types])
 
     # Read AI settings once to avoid N parallel DB reads
     from app.models.ai_settings import AISettings

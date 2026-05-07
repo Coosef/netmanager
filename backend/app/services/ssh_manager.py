@@ -82,7 +82,16 @@ class SSHManager:
 
     def _connect_sync(self, device, profile=None) -> ConnectHandler:
         params = self._build_netmiko_params(device, profile)
-        conn = ConnectHandler(**params)
+        try:
+            conn = ConnectHandler(**params)
+        except NetmikoAuthenticationException as exc:
+            # Grandstream and some embedded devices respond with allowed_types=['']
+            # meaning they use keyboard-interactive but don't advertise it.
+            # Retry by patching paramiko transport to use auth_interactive_dumb.
+            if "allowed types: ['']" in str(exc) and params["device_type"] in ("linux", "generic"):
+                conn = self._connect_keyboard_interactive(params)
+            else:
+                raise
         enable_enc = (profile.enable_secret_enc if profile else None) or device.enable_secret_enc
         if enable_enc:
             try:
@@ -90,6 +99,12 @@ class SSHManager:
             except Exception:
                 pass
         return conn
+
+    def _connect_keyboard_interactive(self, params: dict) -> ConnectHandler:
+        """Retry with disabled RSA-SHA2 pubkey algorithms for non-standard SSH (e.g. Grandstream)."""
+        patched = dict(params)
+        patched["disabled_algorithms"] = {"pubkeys": ["rsa-sha2-256", "rsa-sha2-512"]}
+        return ConnectHandler(**patched)
 
     def _is_alive(self, entry: ConnectionEntry) -> bool:
         try:
