@@ -102,16 +102,16 @@ function PermMatrix({
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr style={{ background: t.tableHead }}>
-            <th style={{ textAlign: 'left', padding: '8px 12px', color: t.textSec, fontWeight: 600, borderBottom: `1px solid ${t.border}`, width: 180 }}>Modül</th>
+            <th style={{ textAlign: 'left', padding: '8px 10px', color: t.textSec, fontWeight: 600, borderBottom: `1px solid ${t.border}`, width: 150 }}>Modül</th>
             {ALL_ACTIONS.map(a => (
-              <th key={a} style={{ textAlign: 'center', padding: '8px 8px', color: t.textMuted, fontWeight: 500, borderBottom: `1px solid ${t.border}`, minWidth: 72, fontSize: 11 }}>
+              <th key={a} style={{ textAlign: 'center', padding: '8px 4px', color: t.textMuted, fontWeight: 500, borderBottom: `1px solid ${t.border}`, minWidth: 58, fontSize: 11 }}>
                 {a === 'view' ? 'Görüntüle' : a === 'edit' ? 'Düzenle' : a === 'delete' ? 'Sil' :
                   a === 'create' ? 'Oluştur' : a === 'ssh' ? 'SSH' : a === 'run' ? 'Çalıştır' :
                   a === 'cancel' ? 'İptal' : a === 'invite' ? 'Davet' : a}
               </th>
             ))}
             {!readOnly && (
-              <th style={{ textAlign: 'center', padding: '8px 8px', color: t.textMuted, fontSize: 11, borderBottom: `1px solid ${t.border}` }}>Tümü</th>
+              <th style={{ textAlign: 'center', padding: '8px 4px', color: t.textMuted, fontSize: 11, borderBottom: `1px solid ${t.border}`, minWidth: 58 }}>Tümü</th>
             )}
           </tr>
         </thead>
@@ -123,12 +123,12 @@ function PermMatrix({
                 key={mod.key}
                 style={{ background: idx % 2 === 0 ? 'transparent' : t.tableStripe }}
               >
-                <td style={{ padding: '7px 12px', color: t.textPrimary, fontWeight: 500 }}>{mod.label}</td>
+                <td style={{ padding: '6px 10px', color: t.textPrimary, fontWeight: 500, fontSize: 12 }}>{mod.label}</td>
                 {ALL_ACTIONS.map(action => {
                   const hasDef = mod.actions.some(a => a.key === action)
                   const val = hasDef ? getPermValue(permissions, mod.key, action) : null
                   return (
-                    <td key={action} style={{ textAlign: 'center', padding: '7px 0' }}>
+                    <td key={action} style={{ textAlign: 'center', padding: '6px 0' }}>
                       {val === null ? (
                         <span style={{ color: t.border, fontSize: 16 }}>—</span>
                       ) : readOnly ? (
@@ -150,10 +150,10 @@ function PermMatrix({
                       size="small"
                       type={allGranted ? 'primary' : 'default'}
                       danger={allGranted}
-                      style={{ fontSize: 11, padding: '0 8px', height: 24 }}
+                      style={{ fontSize: 10, padding: '0 6px', height: 22 }}
                       onClick={() => toggleAll(mod.key, !allGranted)}
                     >
-                      {allGranted ? 'Kaldır' : 'Tümünü Ver'}
+                      {allGranted ? 'Kaldır' : 'Tümü'}
                     </Button>
                   </td>
                 )}
@@ -523,7 +523,8 @@ export default function PermissionsPage() {
         }
         open={!!editingPermSet}
         onCancel={() => setEditingPermSet(null)}
-        width={820}
+        width={1000}
+        style={{ maxWidth: '95vw' }}
         footer={
           editingPermSet?.org_id !== null && canEdit ? (
             <Space>
