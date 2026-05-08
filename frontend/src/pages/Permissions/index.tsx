@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
-  Table, Select, Tag, Button, Modal, Checkbox, Space, Tooltip,
-  message, Spin, Typography, Divider, Popconfirm, Badge,
+  Select, Tag, Button, Modal, Checkbox, Space, Tooltip,
+  message, Spin, Typography, Divider, Popconfirm,
 } from 'antd'
 import {
   UserOutlined, SafetyOutlined, CheckCircleFilled, CloseCircleFilled,
@@ -239,65 +239,45 @@ export default function PermissionsPage() {
     setEditName(ps.name)
   }
 
-  const userColumns = [
-    {
-      title: 'Kullanıcı',
-      render: (_: any, r: OrgUser) => (
-        <div
-          style={{
-            cursor: 'pointer',
-            padding: '4px 8px',
-            borderRadius: 6,
-            background: selectedUser?.id === r.id ? '#1d4ed820' : 'transparent',
-            borderLeft: selectedUser?.id === r.id ? '3px solid #3b82f6' : '3px solid transparent',
-          }}
-          onClick={() => setSelectedUser(r)}
-        >
-          <div style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 13 }}>{r.username}</div>
-          <div style={{ color: '#64748b', fontSize: 11 }}>{r.email}</div>
-        </div>
-      ),
-    },
-    {
-      title: 'Rol',
-      dataIndex: 'system_role',
-      width: 110,
-      render: (v: string) => (
-        <Tag color={v === 'org_admin' ? 'blue' : v === 'super_admin' ? 'red' : 'default'} style={{ fontSize: 11 }}>
-          {v === 'org_admin' ? 'Yönetici' : v === 'super_admin' ? 'Süper Admin' : 'Üye'}
-        </Tag>
-      ),
-    },
-    {
-      title: 'Yetki Seti',
-      width: 140,
-      render: (_: any, r: OrgUser) => {
-        if (r.system_role === 'super_admin' || r.system_role === 'org_admin') {
-          return <Tag color="gold" style={{ fontSize: 11 }}>Tam Yetki</Tag>
-        }
-        return <Tag color="default" style={{ fontSize: 11, color: '#64748b' }}>—</Tag>
-      },
-    },
-  ]
-
   const cardBg = '#0e1e38'
   const border = '#1a3458'
 
+  const ROLE_COLOR: Record<string, string> = {
+    super_admin: '#ef4444',
+    org_admin: '#3b82f6',
+    member: '#475569',
+  }
+  const ROLE_LABEL: Record<string, string> = {
+    super_admin: 'Süper Admin',
+    org_admin: 'Yönetici',
+    member: 'Üye',
+  }
+
   return (
-    <div style={{ padding: 24, background: '#030c1e', minHeight: '100vh', display: 'flex', flexDirection: 'column', gap: 0 }}>
+    <div style={{ padding: 24, background: '#030c1e', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
       <Title level={4} style={{ color: '#f1f5f9', marginBottom: 4 }}>Yetki Yönetimi</Title>
-      <Text style={{ color: '#64748b', marginBottom: 20, display: 'block' }}>
+      <Text style={{ color: '#64748b', marginBottom: 16, display: 'block' }}>
         Yetki setlerini düzenle, kullanıcılara ata
       </Text>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, flex: 1, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, flex: 1, alignItems: 'start' }}>
 
-        {/* ── Left: User list ── */}
-        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 160px)' }}>
+        {/* ── Left: User list (custom, no Ant Table) ── */}
+        <div style={{
+          background: cardBg, border: `1px solid ${border}`, borderRadius: 10,
+          overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          position: 'sticky', top: 24,
+          maxHeight: 'calc(100vh - 120px)',
+        }}>
           <div style={{ padding: '12px 16px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <UserOutlined style={{ color: '#3b82f6' }} />
-            <Text style={{ color: '#f1f5f9', fontWeight: 600 }}>Kullanıcılar</Text>
-            <Badge count={users.length} style={{ backgroundColor: '#1d4ed8', marginLeft: 'auto' }} showZero={false} />
+            <Text style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 13 }}>Kullanıcılar</Text>
+            {users.length > 0 && (
+              <span style={{
+                marginLeft: 'auto', background: '#1d4ed8', color: '#fff',
+                borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 600,
+              }}>{users.length}</span>
+            )}
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {usersLoading ? (
@@ -311,18 +291,53 @@ export default function PermissionsPage() {
               <div style={{ padding: '32px 16px', textAlign: 'center', color: '#475569', fontSize: 13 }}>
                 Henüz kullanıcı yok
               </div>
-            ) : (
-              <Table
-                dataSource={users}
-                columns={userColumns}
-                rowKey="id"
-                size="small"
-                pagination={false}
-                showHeader={false}
-                style={{ background: 'transparent' }}
-                rowClassName={() => 'perm-user-row'}
-              />
-            )}
+            ) : users.map((u, idx) => {
+              const isSelected = selectedUser?.id === u.id
+              return (
+                <div
+                  key={u.id}
+                  onClick={() => setSelectedUser(u)}
+                  style={{
+                    cursor: 'pointer',
+                    padding: '10px 16px',
+                    borderBottom: idx < users.length - 1 ? `1px solid ${border}` : 'none',
+                    borderLeft: `3px solid ${isSelected ? '#3b82f6' : 'transparent'}`,
+                    background: isSelected ? '#1d4ed815' : 'transparent',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    transition: 'background 0.12s',
+                  }}
+                  onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = '#ffffff08' }}
+                  onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                >
+                  <div style={{
+                    width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
+                    background: isSelected ? '#1d4ed840' : '#1a3458',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 13, fontWeight: 700, color: isSelected ? '#60a5fa' : '#64748b',
+                  }}>
+                    {u.username[0].toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      color: isSelected ? '#f1f5f9' : '#cbd5e1',
+                      fontWeight: isSelected ? 600 : 400,
+                      fontSize: 13,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{u.username}</div>
+                    <div style={{ color: '#64748b', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                  </div>
+                  <div style={{
+                    flexShrink: 0,
+                    fontSize: 10, fontWeight: 600,
+                    color: ROLE_COLOR[u.system_role] ?? '#475569',
+                    background: `${ROLE_COLOR[u.system_role] ?? '#475569'}18`,
+                    padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
+                  }}>
+                    {ROLE_LABEL[u.system_role] ?? u.system_role}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         </div>
 
