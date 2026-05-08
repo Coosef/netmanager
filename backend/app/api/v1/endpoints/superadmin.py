@@ -13,6 +13,8 @@ from app.models.network_event import NetworkEvent
 from app.models.task import Task
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole, SystemRole
+from app.models.shared.organization import Organization
+from app.models.shared.plan import Plan
 
 router = APIRouter()
 
@@ -115,13 +117,97 @@ async def update_tenant_plan(
     return {"ok": True}
 
 
+@router.get("/organizations")
+async def list_organizations(
+    db: AsyncSession = Depends(get_db),
+    _=SuperAdminRequired,
+):
+    """List all organizations with plan and usage info."""
+    orgs = (await db.execute(select(Organization).order_by(Organization.name))).scalars().all()
+    plans = {p.id: p for p in (await db.execute(select(Plan))).scalars().all()}
+    result = []
+    for org in orgs:
+        user_count = (await db.execute(
+            select(func.count()).select_from(User).where(User.org_id == org.id)
+        )).scalar() or 0
+        plan = plans.get(org.plan_id) if org.plan_id else None
+        result.append({
+            "id": org.id,
+            "name": org.name,
+            "slug": org.slug,
+            "description": org.description,
+            "is_active": org.is_active,
+            "contact_email": org.contact_email,
+            "trial_ends_at": org.trial_ends_at.isoformat() if org.trial_ends_at else None,
+            "subscription_ends_at": org.subscription_ends_at.isoformat() if org.subscription_ends_at else None,
+            "plan": {"id": plan.id, "name": plan.name, "slug": plan.slug,
+                     "max_devices": plan.max_devices, "max_users": plan.max_users,
+                     "max_locations": plan.max_locations} if plan else None,
+            "user_count": user_count,
+        })
+    return result
+
+
+@router.get("/plans")
+async def list_plans(
+    db: AsyncSession = Depends(get_db),
+    _=SuperAdminRequired,
+):
+    """List all available plans."""
+    plans = (await db.execute(select(Plan).where(Plan.is_active == True).order_by(Plan.max_users))).scalars().all()
+    return [{"id": p.id, "name": p.name, "slug": p.slug,
+             "max_devices": p.max_devices, "max_users": p.max_users,
+             "max_locations": p.max_locations, "max_agents": p.max_agents,
+             "price_monthly": p.price_monthly, "features": p.features} for p in plans]
+
+
+@router.patch("/organizations/{org_id}/plan")
+async def update_org_plan(
+    org_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=SuperAdminRequired,
+    plan_id: Optional[int] = Body(None),
+    trial_ends_at: Optional[str] = Body(None),
+    subscription_ends_at: Optional[str] = Body(None),
+    is_active: Optional[bool] = Body(None),
+):
+    """Assign plan / update subscription for an organization."""
+    from datetime import datetime
+    org = (await db.execute(select(Organization).where(Organization.id == org_id))).scalar_one_or_none()
+    if not org:
+        raise HTTPException(404, "Organization not found")
+    if plan_id is not None:
+        org.plan_id = plan_id
+    if trial_ends_at is not None:
+        org.trial_ends_at = datetime.fromisoformat(trial_ends_at) if trial_ends_at else None
+    if subscription_ends_at is not None:
+        org.subscription_ends_at = datetime.fromisoformat(subscription_ends_at) if subscription_ends_at else None
+    if is_active is not None:
+        org.is_active = is_active
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/organizations/{org_id}/users")
+async def list_org_users(
+    org_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=SuperAdminRequired,
+):
+    """List all users belonging to an organization."""
+    users = (await db.execute(
+        select(User).where(User.org_id == org_id).order_by(User.username)
+    )).scalars().all()
+    return [_user_dict(u) for u in users]
+
+
 @router.get("/tenants/{tenant_id}/users")
 async def list_tenant_users(
     tenant_id: int,
     db: AsyncSession = Depends(get_db),
     _=SuperAdminRequired,
 ):
-    """List all users belonging to a tenant (for super_admin panel)."""
+    """List all users belonging to a tenant (legacy, kept for compat)."""
     users = (await db.execute(
         select(User).where(User.tenant_id == tenant_id).order_by(User.username)
     )).scalars().all()
