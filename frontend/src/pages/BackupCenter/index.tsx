@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react'
 import {
-  Typography, Table, Tag, Button, Space, Row, Col,
+  Typography, Table, Tag, Button, Space, Row, Col, Card,
   Checkbox, Alert, Tooltip, Progress, App, Popconfirm, Badge,
   Tabs, Modal, Form, Input, Select, TimePicker, Switch, Checkbox as AntCheckbox,
   Divider,
@@ -10,7 +10,7 @@ import {
   WarningOutlined, CloseCircleOutlined, SyncOutlined, DownloadOutlined,
   LoadingOutlined, DiffOutlined, DatabaseOutlined, PlusOutlined,
   EditOutlined, DeleteOutlined, ClockCircleOutlined, CalendarOutlined,
-  PlayCircleOutlined,
+  PlayCircleOutlined, SearchOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { reportsApi } from '@/api/reports'
@@ -487,6 +487,90 @@ function SchedulesTab({ isDark }: { isDark: boolean }) {
   )
 }
 
+// ── Config Search Tab ─────────────────────────────────────────────────────────
+
+function ConfigSearchTab({ isDark, C }: { isDark: boolean; C: ReturnType<typeof mkC> }) {
+  const { Text } = Typography
+  const [query, setQuery] = useState('')
+  const [submitted, setSubmitted] = useState('')
+
+  const { data, isFetching } = useQuery({
+    queryKey: ['config-search', submitted],
+    queryFn: () => devicesApi.configSearch(submitted),
+    enabled: submitted.length >= 2,
+    staleTime: 30_000,
+  })
+
+  const handleSearch = () => {
+    if (query.trim().length >= 2) setSubmitted(query.trim())
+  }
+
+  return (
+    <div style={{ padding: '16px 0' }}>
+      <Space.Compact style={{ width: '100%', maxWidth: 600, marginBottom: 20 }}>
+        <Input
+          prefix={<SearchOutlined />}
+          placeholder="Config içinde ara... örn: 'ospf', 'ip access-list', 'spanning-tree'"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          onPressEnter={handleSearch}
+          style={{ background: isDark ? '#0f172a' : undefined }}
+          allowClear
+        />
+        <Button type="primary" onClick={handleSearch} loading={isFetching} icon={<SearchOutlined />}>
+          Ara
+        </Button>
+      </Space.Compact>
+
+      {submitted && data && (
+        <div>
+          <Text style={{ color: C.muted, fontSize: 12 }}>
+            "{submitted}" için {data.total} cihazda eşleşme bulundu
+          </Text>
+          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {data.items.map((item) => (
+              <Card
+                key={item.device_id}
+                size="small"
+                style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10 }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <Tag color={item.status === 'online' ? 'green' : item.status === 'offline' ? 'red' : 'default'}>
+                    {item.status}
+                  </Tag>
+                  <Text strong style={{ color: C.text }}>{item.hostname}</Text>
+                  <Text style={{ color: C.muted, fontSize: 12 }}>{item.ip_address}</Text>
+                  <Tag color="blue" style={{ marginLeft: 'auto' }}>{item.match_count} eşleşme</Tag>
+                </div>
+                {item.snippets.map((snip, i) => (
+                  <pre key={i} style={{
+                    background: isDark ? '#0d1117' : '#f8fafc',
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 6,
+                    padding: '6px 10px',
+                    fontSize: 11,
+                    fontFamily: 'monospace',
+                    color: C.text,
+                    margin: '4px 0',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}>
+                    {snip}
+                  </pre>
+                ))}
+              </Card>
+            ))}
+            {data.total === 0 && (
+              <Alert type="info" message={`"${submitted}" için config yedeklerinde eşleşme bulunamadı.`} showIcon />
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function BackupCenterPage() {
@@ -899,6 +983,11 @@ export default function BackupCenterPage() {
             key: 'schedules',
             label: <Space size={4}><ClockCircleOutlined />Zamanlamalar</Space>,
             children: <SchedulesTab isDark={isDark} />,
+          },
+          {
+            key: 'search',
+            label: <Space size={4}><SearchOutlined />Config Arama</Space>,
+            children: <ConfigSearchTab isDark={isDark} C={C} />,
           },
         ]}
       />

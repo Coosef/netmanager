@@ -708,6 +708,71 @@ async def import_devices_csv(
     }
 
 
+@router.get("/config-search", response_model=dict)
+async def config_search(
+    q: str = Query(..., min_length=2, description="Text to search in backup configs (case-insensitive)"),
+    limit: int = Query(50, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+):
+    """Search the latest backup config of every device for a keyword or regex snippet."""
+    if not current_user.has_permission("config:view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    latest_sq = (
+        select(
+            ConfigBackup.device_id,
+            func.max(ConfigBackup.created_at).label("max_ts"),
+        )
+        .group_by(ConfigBackup.device_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(ConfigBackup, Device.hostname, Device.ip_address, Device.status)
+        .join(Device, ConfigBackup.device_id == Device.id)
+        .join(
+            latest_sq,
+            (ConfigBackup.device_id == latest_sq.c.device_id)
+            & (ConfigBackup.created_at == latest_sq.c.max_ts),
+        )
+        .where(ConfigBackup.config_text.ilike(f"%{q}%"))
+        .where(Device.is_active == True)
+    )
+    if tenant_filter is not None:
+        stmt = stmt.where(Device.tenant_id == tenant_filter)
+
+    rows = (await db.execute(stmt.limit(limit))).all()
+
+    import re
+    pattern = re.compile(re.escape(q), re.IGNORECASE)
+    results = []
+
+    for backup, hostname, ip, status in rows:
+        lines = backup.config_text.splitlines()
+        snippets = []
+        for i, line in enumerate(lines):
+            if pattern.search(line):
+                start = max(0, i - 1)
+                end = min(len(lines), i + 2)
+                snippets.append("\n".join(lines[start:end]))
+                if len(snippets) >= 3:
+                    break
+        results.append({
+            "device_id": backup.device_id,
+            "hostname": hostname,
+            "ip_address": ip,
+            "status": status,
+            "backup_id": backup.id,
+            "backup_at": backup.created_at.isoformat(),
+            "match_count": len(pattern.findall(backup.config_text)),
+            "snippets": snippets,
+        })
+
+    return {"query": q, "total": len(results), "items": results}
+
+
 @router.get("/{device_id}", response_model=DeviceResponse)
 async def get_device(device_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = None):
     return await _get_device_scoped(db, device_id, current_user)

@@ -282,6 +282,22 @@ export const devicesApi = {
       }[]
       avg_score: number
     }>('/devices/health-scores').then((r) => r.data),
+
+  configSearch: (q: string, limit = 50) =>
+    client.get<{
+      query: string
+      total: number
+      items: {
+        device_id: number
+        hostname: string
+        ip_address: string
+        status: string
+        backup_id: number
+        backup_at: string
+        match_count: number
+        snippets: string[]
+      }[]
+    }>('/devices/config-search', { params: { q, limit } }).then((r) => r.data),
 }
 
 export interface GroupSuggestion {
