@@ -9,7 +9,7 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter
+from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
 from app.models.sla_policy import SlaPolicy
@@ -169,11 +169,14 @@ async def uptime_report(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
     location_filter: LocationNameFilter = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Return uptime % for every active device (or a subset) over the window."""
     now = datetime.now(timezone.utc)
 
     q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        q = q.where(Device.tenant_id == tenant_filter)
     if device_ids:
         ids = [int(x) for x in device_ids.split(",") if x.strip().isdigit()]
         q = q.where(Device.id.in_(ids))
@@ -215,6 +218,7 @@ async def uptime_report(
 async def sla_compliance(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Check all SLA policies and return compliance status per policy."""
     now = datetime.now(timezone.utc)
@@ -223,9 +227,10 @@ async def sla_compliance(
     if not policies:
         return []
 
-    all_devices = (await db.execute(
-        select(Device).where(Device.is_active == True)
-    )).scalars().all()
+    dev_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+    all_devices = (await db.execute(dev_q)).scalars().all()
     device_map = {d.id: d for d in all_devices}
 
     results = []
@@ -279,10 +284,14 @@ async def device_uptime(
     window_days: int = Query(30, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Return uptime % for a specific device plus daily breakdown."""
     now = datetime.now(timezone.utc)
-    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    q = select(Device).where(Device.id == device_id)
+    if tenant_filter is not None:
+        q = q.where(Device.tenant_id == tenant_filter)
+    device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Cihaz bulunamadı")
 
@@ -362,10 +371,13 @@ async def fleet_summary(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
     location_filter: LocationNameFilter = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Aggregated uptime stats for the whole fleet."""
     now = datetime.now(timezone.utc)
     fleet_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        fleet_q = fleet_q.where(Device.tenant_id == tenant_filter)
     if location_filter is not None:
         eff = [s for s in location_filter if not site or s == site] if site else location_filter
         if not eff:

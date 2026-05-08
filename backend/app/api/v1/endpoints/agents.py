@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, TenantFilter
 from app.core.security import hash_password, verify_password
 from app.models.agent import Agent
 from app.models.agent_command_log import AgentCommandLog
@@ -116,8 +116,11 @@ async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
 # ── REST ─────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[dict])
-async def list_agents(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
-    result = await db.execute(select(Agent).where(Agent.is_active == True).order_by(Agent.created_at.desc()))
+async def list_agents(db: AsyncSession = Depends(get_db), _: CurrentUser = None, tenant_filter: TenantFilter = None):
+    q = select(Agent).where(Agent.is_active == True)
+    if tenant_filter is not None:
+        q = q.where(Agent.tenant_id == tenant_filter)
+    result = await db.execute(q.order_by(Agent.created_at.desc()))
     agents = result.scalars().all()
     online_ids = set(agent_manager.online_agent_ids())
     return [_agent_to_dict(a, online_ids) for a in agents]
@@ -258,6 +261,7 @@ async def create_agent(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -272,6 +276,7 @@ async def create_agent(
         status="offline",
         created_by=current_user.id,
         command_mode="all",
+        tenant_id=tenant_filter,
     )
     db.add(agent)
     await db.commit()

@@ -3,14 +3,14 @@ import {
   Typography, Table, Tag, Button, Space, Row, Col, Card,
   Checkbox, Alert, Tooltip, Progress, App, Popconfirm, Badge,
   Tabs, Modal, Form, Input, Select, TimePicker, Switch, Checkbox as AntCheckbox,
-  Divider,
+  Divider, Spin,
 } from 'antd'
 import {
   CloudDownloadOutlined, ThunderboltOutlined, CheckCircleOutlined,
   WarningOutlined, CloseCircleOutlined, SyncOutlined, DownloadOutlined,
   LoadingOutlined, DiffOutlined, DatabaseOutlined, PlusOutlined,
   EditOutlined, DeleteOutlined, ClockCircleOutlined, CalendarOutlined,
-  PlayCircleOutlined, SearchOutlined,
+  PlayCircleOutlined, SearchOutlined, CrownOutlined, HistoryOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { reportsApi } from '@/api/reports'
@@ -20,6 +20,7 @@ import { backupSchedulesApi, type BackupSchedule } from '@/api/backupSchedules'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import ConfigDiffModal from './ConfigDiffModal'
+import type { ConfigBackup } from '@/types'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -571,6 +572,89 @@ function ConfigSearchTab({ isDark, C }: { isDark: boolean; C: ReturnType<typeof 
 }
 
 
+// ── Device Backup History (expanded row) ─────────────────────────────────────
+
+function DeviceBackupsExpanded({ deviceId, C, isDark }: { deviceId: number; C: ReturnType<typeof mkC>; isDark: boolean }) {
+  const { message } = App.useApp()
+  const qc = useQueryClient()
+
+  const { data: backups = [], isLoading } = useQuery<ConfigBackup[]>({
+    queryKey: ['device-backups', deviceId],
+    queryFn: () => devicesApi.getBackups(deviceId),
+    staleTime: 30_000,
+  })
+
+  const goldenMut = useMutation({
+    mutationFn: (backupId: number) => devicesApi.setGoldenBackup(deviceId, backupId),
+    onSuccess: () => {
+      message.success('Golden config ayarlandı — Config Drift bu yedeği baz alacak')
+      qc.invalidateQueries({ queryKey: ['device-backups', deviceId] })
+    },
+    onError: () => message.error('Golden ayarlanamadı'),
+  })
+
+  if (isLoading) return <div style={{ padding: '12px 0', textAlign: 'center' }}><Spin size="small" /></div>
+  if (!backups.length) return <div style={{ padding: '12px 24px', color: C.muted, fontSize: 12 }}>Yedek bulunamadı</div>
+
+  return (
+    <div style={{ padding: '8px 40px 8px 52px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        {backups.map((b) => (
+          <div
+            key={b.id}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
+              background: b.is_golden
+                ? (isDark ? '#854d0e18' : '#fef9c3')
+                : (isDark ? '#0f172a' : '#f8fafc'),
+              border: `1px solid ${b.is_golden ? '#f59e0b40' : (isDark ? '#1e293b' : '#e2e8f0')}`,
+              borderRadius: 6, fontSize: 12,
+            }}
+          >
+            {b.is_golden && (
+              <Tooltip title="Golden Config — Config Drift baz alır">
+                <CrownOutlined style={{ color: '#f59e0b', flexShrink: 0 }} />
+              </Tooltip>
+            )}
+            <Text style={{ color: C.muted, flexShrink: 0, minWidth: 130 }}>
+              {dayjs(b.created_at).format('DD.MM.YYYY HH:mm')}
+            </Text>
+            <Text style={{ color: C.muted, fontSize: 11, flexShrink: 0 }}>
+              {b.size_bytes > 0 ? `${(b.size_bytes / 1024).toFixed(1)} KB` : '—'}
+            </Text>
+            <Text style={{ color: C.dim, fontSize: 10, fontFamily: 'monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {b.config_hash?.slice(0, 12)}
+            </Text>
+            {b.is_golden && (
+              <Tag color="warning" style={{ fontSize: 10, flexShrink: 0 }}>Golden</Tag>
+            )}
+            <Tooltip title={b.is_golden ? 'Zaten Golden olarak işaretli' : 'Golden Config Olarak İşaretle (Config Drift baz alır)'}>
+              <Button
+                size="small"
+                type={b.is_golden ? 'default' : 'text'}
+                icon={<CrownOutlined />}
+                disabled={b.is_golden}
+                loading={goldenMut.isPending}
+                style={{ color: b.is_golden ? '#f59e0b' : C.muted, flexShrink: 0 }}
+                onClick={() => goldenMut.mutate(b.id)}
+              />
+            </Tooltip>
+            <Tooltip title="İndir">
+              <Button
+                size="small"
+                type="text"
+                icon={<DownloadOutlined />}
+                style={{ color: C.muted, flexShrink: 0 }}
+                onClick={() => devicesApi.downloadBackup(deviceId, b.id)}
+              />
+            </Tooltip>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function BackupCenterPage() {
@@ -743,7 +827,12 @@ export default function BackupCenterPage() {
       dataIndex: 'backup_count',
       width: 100,
       sorter: (a: BackupRow, b: BackupRow) => a.backup_count - b.backup_count,
-      render: (v: number) => <Tag color={v > 5 ? 'blue' : v > 0 ? 'geekblue' : 'default'}>{v} yedek</Tag>,
+      render: (v: number) => (
+        <Space size={4}>
+          <Tag color={v > 5 ? 'blue' : v > 0 ? 'geekblue' : 'default'}>{v} yedek</Tag>
+          {v > 0 && <Tooltip title="Yedek geçmişini gör / Golden işaretle"><HistoryOutlined style={{ color: C.muted, fontSize: 12 }} /></Tooltip>}
+        </Space>
+      ),
     },
     {
       title: '',
@@ -908,6 +997,13 @@ export default function BackupCenterPage() {
             r.backupStatus === 'never' ? 'backup-row-never'
             : r.backupStatus === 'stale' ? 'backup-row-stale' : ''
           }
+          expandable={{
+            rowExpandable: (r) => r.backup_count > 0,
+            expandedRowRender: (r) => (
+              <DeviceBackupsExpanded deviceId={Number(r.device_id)} C={C} isDark={isDark} />
+            ),
+            expandRowByClick: false,
+          }}
         />
       </div>
 

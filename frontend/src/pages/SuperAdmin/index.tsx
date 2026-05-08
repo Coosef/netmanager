@@ -1,16 +1,16 @@
 import { useState } from 'react'
 import {
-  Button, Col, Form, InputNumber, Modal, Popconfirm, Row, Select,
-  Space, Spin, Table, Tag, Tooltip, Typography,
+  App, Button, Col, Form, InputNumber, Modal, Popconfirm, Row, Select,
+  Segmented, Space, Spin, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
   CrownOutlined, LaptopOutlined, TeamOutlined, EnvironmentOutlined,
   AlertOutlined, ReloadOutlined, PoweroffOutlined, EditOutlined,
   CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined,
-  GlobalOutlined,
+  GlobalOutlined, SwapOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { superadminApi, type SystemStats } from '@/api/superadmin'
+import { superadminApi, type SystemStats, type ResourceDevice, type ResourceAgent } from '@/api/superadmin'
 import { tenantsApi, type Tenant } from '@/api/tenants'
 import { useTheme } from '@/contexts/ThemeContext'
 
@@ -73,9 +73,269 @@ function UsageBar({ used, max, color }: { used: number; max: number; color: stri
   )
 }
 
+// ── Assign Modal ─────────────────────────────────────────────────────────────
+
+function AssignModal({
+  open,
+  onClose,
+  resourceType,
+  selectedIds,
+  tenants,
+  onAssign,
+  loading,
+}: {
+  open: boolean
+  onClose: () => void
+  resourceType: 'device' | 'agent'
+  selectedIds: (number | string)[]
+  tenants: Tenant[]
+  onAssign: (tenantId: number) => void
+  loading: boolean
+}) {
+  const [targetTenantId, setTargetTenantId] = useState<number | null>(null)
+  return (
+    <Modal
+      open={open}
+      onCancel={() => { setTargetTenantId(null); onClose() }}
+      onOk={() => { if (targetTenantId) onAssign(targetTenantId) }}
+      okText="Taşı"
+      cancelText="İptal"
+      okButtonProps={{ disabled: !targetTenantId, loading }}
+      title={
+        <Space>
+          <SwapOutlined style={{ color: '#3b82f6' }} />
+          {`${selectedIds.length} ${resourceType === 'device' ? 'Cihaz' : 'Agent'} Taşı`}
+        </Space>
+      }
+      width={420}
+      afterClose={() => setTargetTenantId(null)}
+    >
+      <div style={{ marginTop: 16 }}>
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          Seçilen {selectedIds.length} kaynağı hangi organizasyona taşımak istiyorsunuz?
+        </Text>
+        <Select
+          placeholder="Hedef organizasyonu seçin..."
+          style={{ width: '100%' }}
+          value={targetTenantId}
+          onChange={setTargetTenantId}
+          showSearch
+          optionFilterProp="label"
+          options={tenants.map((t) => ({
+            label: `${t.name} (${t.slug})`,
+            value: t.id,
+          }))}
+        />
+      </div>
+    </Modal>
+  )
+}
+
+// ── Resource Assignment Tab ───────────────────────────────────────────────────
+
+function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
+  const { isDark } = useTheme()
+  const { message } = App.useApp()
+  const qc = useQueryClient()
+  const cardBg = isDark ? '#0e1e38' : '#ffffff'
+  const border = isDark ? '#1a3458' : '#e2e8f0'
+
+  const [resourceType, setResourceType] = useState<'device' | 'agent'>('device')
+  const [filterTenantId, setFilterTenantId] = useState<number | null>(null)
+  const [showUnassigned, setShowUnassigned] = useState(false)
+  const [selectedDeviceIds, setSelectedDeviceIds] = useState<number[]>([])
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [singleAssignId, setSingleAssignId] = useState<number | string | null>(null)
+
+  const { data: devData, isLoading: devLoading, refetch: refetchDevices } = useQuery({
+    queryKey: ['sa-devices', filterTenantId, showUnassigned],
+    queryFn: () => superadminApi.listDevices({
+      tenant_id: filterTenantId ?? undefined,
+      unassigned: showUnassigned || undefined,
+      limit: 500,
+    }),
+    enabled: resourceType === 'device',
+  })
+
+  const { data: agentData, isLoading: agentLoading, refetch: refetchAgents } = useQuery({
+    queryKey: ['sa-agents', showUnassigned],
+    queryFn: () => superadminApi.listAgents({ unassigned: showUnassigned || undefined }),
+    enabled: resourceType === 'agent',
+  })
+
+  const assignMut = useMutation({
+    mutationFn: ({ ids, tenantId }: { ids: (number | string)[]; tenantId: number }) =>
+      superadminApi.assignResources(resourceType, ids, tenantId),
+    onSuccess: (res) => {
+      message.success(`${res.assigned} kaynak "${res.tenant_name}" organizasyonuna taşındı`)
+      setAssignOpen(false)
+      setSingleAssignId(null)
+      setSelectedDeviceIds([])
+      setSelectedAgentIds([])
+      qc.invalidateQueries({ queryKey: ['sa-devices'] })
+      qc.invalidateQueries({ queryKey: ['sa-agents'] })
+      qc.invalidateQueries({ queryKey: ['tenants'] })
+      qc.invalidateQueries({ queryKey: ['superadmin-stats'] })
+    },
+    onError: () => message.error('Taşıma başarısız'),
+  })
+
+  const activeIds: (number | string)[] = singleAssignId !== null
+    ? [singleAssignId]
+    : resourceType === 'device' ? selectedDeviceIds : selectedAgentIds
+
+  const openBulkAssign = () => { setSingleAssignId(null); setAssignOpen(true) }
+  const openSingleAssign = (id: number | string) => { setSingleAssignId(id); setAssignOpen(true) }
+
+  const tenantTag = (tenantName: string | null) =>
+    tenantName
+      ? <Tag color="blue" style={{ fontSize: 11 }}>{tenantName}</Tag>
+      : <Tag color="warning" style={{ fontSize: 11 }}>Atanmamış</Tag>
+
+  const deviceCols = [
+    { title: 'Cihaz', dataIndex: 'hostname', key: 'hostname', render: (h: string, r: ResourceDevice) => (
+      <div><Text strong style={{ fontSize: 13 }}>{h}</Text><div style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8' }}>{r.ip_address}{r.site ? ` · ${r.site}` : ''}</div></div>
+    )},
+    { title: 'Durum', dataIndex: 'status', key: 'status', width: 90,
+      render: (s: string) => <Tag color={s === 'online' ? 'success' : 'default'} style={{ fontSize: 11 }}>{s}</Tag>,
+    },
+    { title: 'Organizasyon', key: 'tenant', width: 160,
+      render: (_: unknown, r: ResourceDevice) => tenantTag(r.tenant_name),
+    },
+    { title: '', key: 'action', width: 70,
+      render: (_: unknown, r: ResourceDevice) => (
+        <Tooltip title="Taşı">
+          <Button size="small" type="text" icon={<SwapOutlined />} onClick={() => openSingleAssign(r.id)} />
+        </Tooltip>
+      ),
+    },
+  ]
+
+  const agentCols = [
+    { title: 'Agent', dataIndex: 'name', key: 'name', render: (n: string, r: ResourceAgent) => (
+      <div><Text strong style={{ fontSize: 13 }}>{n}</Text><div style={{ fontSize: 11, color: isDark ? '#64748b' : '#94a3b8' }}>{r.platform ?? ''}{r.version ? ` v${r.version}` : ''}</div></div>
+    )},
+    { title: 'Durum', dataIndex: 'status', key: 'status', width: 90,
+      render: (s: string) => <Tag color={s === 'online' ? 'success' : 'default'} style={{ fontSize: 11 }}>{s}</Tag>,
+    },
+    { title: 'Organizasyon', key: 'tenant', width: 160,
+      render: (_: unknown, r: ResourceAgent) => tenantTag(r.tenant_name),
+    },
+    { title: '', key: 'action', width: 70,
+      render: (_: unknown, r: ResourceAgent) => (
+        <Tooltip title="Taşı">
+          <Button size="small" type="text" icon={<SwapOutlined />} onClick={() => openSingleAssign(r.id)} />
+        </Tooltip>
+      ),
+    },
+  ]
+
+  const hasSelection = resourceType === 'device' ? selectedDeviceIds.length > 0 : selectedAgentIds.length > 0
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <Segmented
+          value={resourceType}
+          onChange={(v) => { setResourceType(v as 'device' | 'agent'); setSelectedDeviceIds([]); setSelectedAgentIds([]) }}
+          options={[
+            { label: <Space><LaptopOutlined />Cihazlar</Space>, value: 'device' },
+            { label: <Space><RobotOutlined />Agentlar</Space>, value: 'agent' },
+          ]}
+        />
+        {resourceType === 'device' && (
+          <Select
+            allowClear
+            placeholder="Organizasyona göre filtrele..."
+            style={{ width: 220 }}
+            value={filterTenantId}
+            onChange={setFilterTenantId}
+            showSearch
+            optionFilterProp="label"
+            options={tenants.map((t) => ({ label: t.name, value: t.id }))}
+          />
+        )}
+        <Button
+          type={showUnassigned ? 'primary' : 'default'}
+          size="small"
+          onClick={() => setShowUnassigned(!showUnassigned)}
+        >
+          Atanmamışlar
+        </Button>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={() => resourceType === 'device' ? refetchDevices() : refetchAgents()}
+        />
+        {hasSelection && (
+          <Button
+            type="primary"
+            icon={<SwapOutlined />}
+            onClick={openBulkAssign}
+          >
+            {resourceType === 'device' ? selectedDeviceIds.length : selectedAgentIds.length} Seçiliyi Taşı
+          </Button>
+        )}
+      </div>
+
+      <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
+        {resourceType === 'device' ? (
+          <Table
+            columns={deviceCols}
+            dataSource={devData?.devices ?? []}
+            rowKey="id"
+            loading={devLoading}
+            size="small"
+            pagination={{ pageSize: 50, showSizeChanger: false }}
+            locale={{ emptyText: 'Cihaz bulunamadı' }}
+            rowSelection={{
+              selectedRowKeys: selectedDeviceIds,
+              onChange: (keys) => setSelectedDeviceIds(keys as number[]),
+            }}
+            footer={() => devData ? (
+              <Text type="secondary" style={{ fontSize: 11 }}>Toplam {devData.total} cihaz</Text>
+            ) : null}
+          />
+        ) : (
+          <Table
+            columns={agentCols}
+            dataSource={agentData?.agents ?? []}
+            rowKey="id"
+            loading={agentLoading}
+            size="small"
+            pagination={{ pageSize: 50, showSizeChanger: false }}
+            locale={{ emptyText: 'Agent bulunamadı' }}
+            rowSelection={{
+              selectedRowKeys: selectedAgentIds,
+              onChange: (keys) => setSelectedAgentIds(keys as string[]),
+            }}
+            footer={() => agentData ? (
+              <Text type="secondary" style={{ fontSize: 11 }}>Toplam {agentData.agents.length} agent</Text>
+            ) : null}
+          />
+        )}
+      </div>
+
+      <AssignModal
+        open={assignOpen}
+        onClose={() => { setAssignOpen(false); setSingleAssignId(null) }}
+        resourceType={resourceType}
+        selectedIds={activeIds}
+        tenants={tenants}
+        onAssign={(tenantId) => assignMut.mutate({ ids: activeIds, tenantId })}
+        loading={assignMut.isPending}
+      />
+    </div>
+  )
+}
+
+// ── Main Page ─────────────────────────────────────────────────────────────────
+
 export default function SuperAdminPage() {
   const { isDark } = useTheme()
   const qc = useQueryClient()
+  const [activeTab, setActiveTab] = useState<'overview' | 'assign'>('overview')
   const [planModal, setPlanModal] = useState<Tenant | null>(null)
   const [planForm] = Form.useForm()
 
@@ -226,94 +486,111 @@ export default function SuperAdminPage() {
             Tüm organizasyonların sistem geneli görünümü — yalnızca super_admin erişimi
           </Text>
         </div>
-        <Button
-          icon={<ReloadOutlined />}
-          onClick={() => { refetchStats(); refetchTenants() }}
-        >
-          Yenile
-        </Button>
+        <Space>
+          <Segmented
+            value={activeTab}
+            onChange={(v) => setActiveTab(v as 'overview' | 'assign')}
+            options={[
+              { label: <Space><GlobalOutlined />Genel Bakış</Space>, value: 'overview' },
+              { label: <Space><SwapOutlined />Kaynak Atama</Space>, value: 'assign' },
+            ]}
+          />
+          {activeTab === 'overview' && (
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => { refetchStats(); refetchTenants() }}
+            >
+              Yenile
+            </Button>
+          )}
+        </Space>
       </div>
 
-      {/* System stat cards */}
-      {statsLoading ? (
-        <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
-      ) : s && (
+      {activeTab === 'overview' ? (
         <>
-          <Row gutter={[14, 14]} style={{ marginBottom: 20 }}>
-            <Col xs={12} sm={8} lg={4}>
-              <StatCard icon={<CrownOutlined />} label="Organizasyonlar" value={s.tenants.total} sub={`${s.tenants.active} aktif`} color="#f97316" />
-            </Col>
-            <Col xs={12} sm={8} lg={4}>
-              <StatCard icon={<TeamOutlined />} label="Toplam Kullanıcı" value={s.users.total} color="#8b5cf6" />
-            </Col>
-            <Col xs={12} sm={8} lg={4}>
-              <StatCard icon={<LaptopOutlined />} label="Toplam Cihaz" value={s.devices.total} sub={`${s.devices.online} online`} color="#3b82f6" />
-            </Col>
-            <Col xs={12} sm={8} lg={4}>
-              <StatCard icon={<EnvironmentOutlined />} label="Lokasyonlar" value={s.locations.total} color="#22c55e" />
-            </Col>
-            <Col xs={12} sm={8} lg={4}>
-              <StatCard icon={<AlertOutlined />} label="Olaylar (24h)" value={s.events_24h.total} sub={`${s.events_24h.critical} kritik`} color="#ef4444" />
-            </Col>
-            <Col xs={12} sm={8} lg={4}>
-              <StatCard icon={<ThunderboltOutlined />} label="Çalışan Görev" value={s.tasks.running} color="#06b6d4" />
-            </Col>
-          </Row>
+          {/* System stat cards */}
+          {statsLoading ? (
+            <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+          ) : s && (
+            <>
+              <Row gutter={[14, 14]} style={{ marginBottom: 20 }}>
+                <Col xs={12} sm={8} lg={4}>
+                  <StatCard icon={<CrownOutlined />} label="Organizasyonlar" value={s.tenants.total} sub={`${s.tenants.active} aktif`} color="#f97316" />
+                </Col>
+                <Col xs={12} sm={8} lg={4}>
+                  <StatCard icon={<TeamOutlined />} label="Toplam Kullanıcı" value={s.users.total} color="#8b5cf6" />
+                </Col>
+                <Col xs={12} sm={8} lg={4}>
+                  <StatCard icon={<LaptopOutlined />} label="Toplam Cihaz" value={s.devices.total} sub={`${s.devices.online} online`} color="#3b82f6" />
+                </Col>
+                <Col xs={12} sm={8} lg={4}>
+                  <StatCard icon={<EnvironmentOutlined />} label="Lokasyonlar" value={s.locations.total} color="#22c55e" />
+                </Col>
+                <Col xs={12} sm={8} lg={4}>
+                  <StatCard icon={<AlertOutlined />} label="Olaylar (24h)" value={s.events_24h.total} sub={`${s.events_24h.critical} kritik`} color="#ef4444" />
+                </Col>
+                <Col xs={12} sm={8} lg={4}>
+                  <StatCard icon={<ThunderboltOutlined />} label="Çalışan Görev" value={s.tasks.running} color="#06b6d4" />
+                </Col>
+              </Row>
 
-          {/* Plan distribution */}
-          <Row gutter={[14, 14]} style={{ marginBottom: 20 }}>
-            <Col xs={24} md={10}>
-              <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 16 }}>
-                <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>Plan Dağılımı</Text>
-                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                  {Object.entries(s.tenants.by_plan).map(([plan, count]) => (
-                    <div key={plan} style={{
-                      background: PLAN_COLOR[plan] + '18', border: `1px solid ${PLAN_COLOR[plan]}40`,
-                      borderRadius: 8, padding: '10px 16px', textAlign: 'center',
-                    }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: PLAN_COLOR[plan] }}>{count}</div>
-                      <div style={{ fontSize: 11, color: PLAN_COLOR[plan], fontWeight: 600, textTransform: 'uppercase' }}>{plan}</div>
+              <Row gutter={[14, 14]} style={{ marginBottom: 20 }}>
+                <Col xs={24} md={10}>
+                  <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 16 }}>
+                    <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>Plan Dağılımı</Text>
+                    <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                      {Object.entries(s.tenants.by_plan).map(([plan, count]) => (
+                        <div key={plan} style={{
+                          background: PLAN_COLOR[plan] + '18', border: `1px solid ${PLAN_COLOR[plan]}40`,
+                          borderRadius: 8, padding: '10px 16px', textAlign: 'center',
+                        }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: PLAN_COLOR[plan] }}>{count}</div>
+                          <div style={{ fontSize: 11, color: PLAN_COLOR[plan], fontWeight: 600, textTransform: 'uppercase' }}>{plan}</div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </Col>
-            <Col xs={24} md={14}>
-              <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 16 }}>
-                <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>En Fazla Cihaza Sahip Organizasyonlar</Text>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {s.top_tenants_by_devices.slice(0, 6).map((t) => (
-                    <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <Tag style={{ fontSize: 10, color: PLAN_COLOR[t.plan_tier], borderColor: PLAN_COLOR[t.plan_tier] + '40', background: PLAN_COLOR[t.plan_tier] + '15', margin: 0 }}>
-                        {t.plan_tier}
-                      </Tag>
-                      <Text style={{ flex: 1, fontSize: 13 }}>{t.name}</Text>
-                      <Tag icon={<LaptopOutlined />} color="blue">{t.device_count}</Tag>
+                  </div>
+                </Col>
+                <Col xs={24} md={14}>
+                  <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 16 }}>
+                    <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>En Fazla Cihaza Sahip Organizasyonlar</Text>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {s.top_tenants_by_devices.slice(0, 6).map((t) => (
+                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <Tag style={{ fontSize: 10, color: PLAN_COLOR[t.plan_tier], borderColor: PLAN_COLOR[t.plan_tier] + '40', background: PLAN_COLOR[t.plan_tier] + '15', margin: 0 }}>
+                            {t.plan_tier}
+                          </Tag>
+                          <Text style={{ flex: 1, fontSize: 13 }}>{t.name}</Text>
+                          <Tag icon={<LaptopOutlined />} color="blue">{t.device_count}</Tag>
+                        </div>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              </div>
-            </Col>
-          </Row>
+                  </div>
+                </Col>
+              </Row>
+            </>
+          )}
+
+          {/* Tenants table */}
+          <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text strong>Tüm Organizasyonlar</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{tenants?.length ?? 0} toplam</Text>
+            </div>
+            <Table
+              columns={columns}
+              dataSource={tenants ?? []}
+              rowKey="id"
+              loading={tenantsLoading}
+              pagination={false}
+              size="small"
+              locale={{ emptyText: 'Organizasyon bulunamadı' }}
+            />
+          </div>
         </>
+      ) : (
+        <ResourceAssignTab tenants={tenants ?? []} />
       )}
-
-      {/* Tenants table */}
-      <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Text strong>Tüm Organizasyonlar</Text>
-          <Text type="secondary" style={{ fontSize: 12 }}>{tenants?.length ?? 0} toplam</Text>
-        </div>
-        <Table
-          columns={columns}
-          dataSource={tenants ?? []}
-          rowKey="id"
-          loading={tenantsLoading}
-          pagination={false}
-          size="small"
-          locale={{ emptyText: 'Organizasyon bulunamadı' }}
-        />
-      </div>
 
       {/* Plan edit modal */}
       <Modal

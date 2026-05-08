@@ -2,9 +2,9 @@
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import List, Optional, Union
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_db
 from app.core.deps import SuperAdminOnly
 from app.core.security import hash_password
+from app.models.agent import Agent
 from app.models.device import Device
 from app.models.invite_token import InviteToken
 from app.models.location import Location
@@ -427,6 +428,16 @@ def _deep_merge(base: dict, override: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Resource assignment schemas
+# ---------------------------------------------------------------------------
+
+class AssignResourcesPayload(BaseModel):
+    resource_type: str          # "device" | "agent"
+    resource_ids: List[Union[int, str]]
+    tenant_id: int              # target tenant
+
+
+# ---------------------------------------------------------------------------
 # System stats
 # ---------------------------------------------------------------------------
 
@@ -576,3 +587,114 @@ def _user_dict(u: User) -> dict:
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Resource listing & assignment (super-admin moves devices/agents between orgs)
+# ---------------------------------------------------------------------------
+
+@router.get("/resources/devices")
+async def list_resources_devices(
+    _: SuperAdminOnly,
+    db: AsyncSession = Depends(get_db),
+    tenant_id: Optional[int] = Query(None),
+    unassigned: bool = Query(False),
+    skip: int = Query(0),
+    limit: int = Query(100, le=500),
+):
+    q = (
+        select(Device, Tenant)
+        .outerjoin(Tenant, Tenant.id == Device.tenant_id)
+        .where(Device.is_active == True)
+    )
+    if unassigned:
+        q = q.where(Device.tenant_id.is_(None))
+    elif tenant_id is not None:
+        q = q.where(Device.tenant_id == tenant_id)
+    q = q.order_by(Device.hostname).offset(skip).limit(limit)
+    rows = (await db.execute(q)).all()
+
+    cnt_q = select(func.count()).select_from(Device).where(Device.is_active == True)
+    if unassigned:
+        cnt_q = cnt_q.where(Device.tenant_id.is_(None))
+    elif tenant_id is not None:
+        cnt_q = cnt_q.where(Device.tenant_id == tenant_id)
+    total = (await db.execute(cnt_q)).scalar() or 0
+
+    return {
+        "total": total,
+        "devices": [
+            {
+                "id": d.id,
+                "hostname": d.hostname,
+                "ip_address": d.ip_address,
+                "site": d.site,
+                "status": d.status,
+                "tenant_id": d.tenant_id,
+                "tenant_name": t.name if t else None,
+            }
+            for d, t in rows
+        ],
+    }
+
+
+@router.get("/resources/agents")
+async def list_resources_agents(
+    _: SuperAdminOnly,
+    db: AsyncSession = Depends(get_db),
+    unassigned: bool = Query(False),
+):
+    q = (
+        select(Agent, Tenant)
+        .outerjoin(Tenant, Tenant.id == Agent.tenant_id)
+        .where(Agent.is_active == True)
+    )
+    if unassigned:
+        q = q.where(Agent.tenant_id.is_(None))
+    rows = (await db.execute(q)).all()
+    return {
+        "agents": [
+            {
+                "id": a.id,
+                "name": a.name,
+                "status": a.status,
+                "platform": a.platform,
+                "version": a.version,
+                "tenant_id": a.tenant_id,
+                "tenant_name": t.name if t else None,
+            }
+            for a, t in rows
+        ]
+    }
+
+
+@router.patch("/resources/assign")
+async def assign_resources(
+    payload: AssignResourcesPayload,
+    _: SuperAdminOnly,
+    db: AsyncSession = Depends(get_db),
+):
+    tenant = (await db.execute(select(Tenant).where(Tenant.id == payload.tenant_id))).scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(404, "Hedef organizasyon bulunamadı")
+
+    if not payload.resource_ids:
+        raise HTTPException(400, "En az bir kaynak seçilmeli")
+
+    if payload.resource_type == "device":
+        await db.execute(
+            update(Device)
+            .where(Device.id.in_(payload.resource_ids))
+            .values(tenant_id=payload.tenant_id)
+        )
+    elif payload.resource_type == "agent":
+        await db.execute(
+            update(Agent)
+            .where(Agent.id.in_(payload.resource_ids))
+            .values(tenant_id=payload.tenant_id)
+        )
+    else:
+        raise HTTPException(400, "resource_type 'device' veya 'agent' olmalı")
+
+    await db.commit()
+    return {"ok": True, "assigned": len(payload.resource_ids), "tenant_id": payload.tenant_id, "tenant_name": tenant.name}

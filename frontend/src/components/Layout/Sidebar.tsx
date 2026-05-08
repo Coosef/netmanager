@@ -102,14 +102,11 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
   const canSee = (minRole?: UserRole, key?: string) => {
     if (!minRole && !key) return true
-    // System-role bypass
     if (isSA || isOA) return true
-    // Permission-based check for mapped routes
     if (key && MODULE_MAP[key]) {
       const [mod, action] = MODULE_MAP[key]
       return can(mod, action)
     }
-    // Legacy role fallback
     if (!minRole) return true
     return userRoleIdx >= roleIndex(minRole)
   }

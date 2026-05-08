@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter
+from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
 from app.models.audit_log import AuditLog
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
@@ -156,9 +156,13 @@ async def device_risk_score(
     device_id: int,
     _: CurrentUser,
     db: AsyncSession = Depends(get_db),
+    tenant_filter: TenantFilter = None,
 ):
     """0-100 risk puanı ve breakdown — tek cihaz."""
-    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    q = select(Device).where(Device.id == device_id)
+    if tenant_filter is not None:
+        q = q.where(Device.tenant_id == tenant_filter)
+    device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
     return await _calc_risk(db, device, datetime.now(timezone.utc))
@@ -170,9 +174,12 @@ async def fleet_risk(
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     location_filter: LocationNameFilter = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Tüm aktif cihazların risk skorları — en riskli N cihaz ve özet."""
     dev_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
     if location_filter is not None:
         if not location_filter:
             return {"summary": {"total_devices": 0, "avg_risk_score": 0, "critical": 0, "high": 0, "medium": 0, "low": 0}, "top_devices": []}
@@ -205,12 +212,16 @@ async def device_mttr_mtbf(
     _: CurrentUser,
     window_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
+    tenant_filter: TenantFilter = None,
 ):
     """
     MTTR (Ort. Kurtarma Süresi): her offline→online çiftinin süresi ortalaması.
     MTBF (Ort. Arıza Arası Süre): ardışık offline başlangıçları arasındaki süre ortalaması.
     """
-    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    q = select(Device).where(Device.id == device_id)
+    if tenant_filter is not None:
+        q = q.where(Device.tenant_id == tenant_filter)
+    device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
 
@@ -279,12 +290,16 @@ async def device_timeline(
     _: CurrentUser,
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
+    tenant_filter: TenantFilter = None,
 ):
     """
     Network event + config backup + audit log kayıtlarını tek zaman çizelgesinde birleştirir.
     Config değişikliği → ardından gelen olay ilişkisi burada görülür.
     """
-    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    q = select(Device).where(Device.id == device_id)
+    if tenant_filter is not None:
+        q = q.where(Device.tenant_id == tenant_filter)
+    device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
 
@@ -379,6 +394,7 @@ async def root_cause_incidents(
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    tenant_filter: TenantFilter = None,
 ):
     """
     Son N saatteki correlation_incident olaylarını döndürür.
@@ -386,13 +402,17 @@ async def root_cause_incidents(
     """
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    rows = (await db.execute(
+    q = (
         select(NetworkEvent)
         .where(NetworkEvent.event_type == "correlation_incident")
         .where(NetworkEvent.created_at >= since)
         .order_by(NetworkEvent.created_at.desc())
         .limit(limit)
-    )).scalars().all()
+    )
+    if tenant_filter is not None:
+        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        q = q.where(NetworkEvent.device_id.in_(tenant_dev_ids))
+    rows = (await db.execute(q)).scalars().all()
 
     incidents = []
     for evt in rows:
@@ -442,6 +462,7 @@ async def get_anomalies(
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
+    tenant_filter: TenantFilter = None,
 ):
     """
     Son N saatteki davranış anomalisi olaylarını döndürür.
@@ -449,13 +470,17 @@ async def get_anomalies(
     """
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
-    rows = (await db.execute(
+    q = (
         select(NetworkEvent)
         .where(NetworkEvent.event_type.in_(_ANOMALY_TYPES))
         .where(NetworkEvent.created_at >= since)
         .order_by(NetworkEvent.created_at.desc())
         .limit(limit)
-    )).scalars().all()
+    )
+    if tenant_filter is not None:
+        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        q = q.where(NetworkEvent.device_id.in_(tenant_dev_ids))
+    rows = (await db.execute(q)).scalars().all()
 
     counts: dict[str, int] = {t: 0 for t in _ANOMALY_TYPES}
     events = []

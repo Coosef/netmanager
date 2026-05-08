@@ -115,12 +115,16 @@ async def get_topology_graph(
 async def get_topology_links(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
     device_id: int = Query(None),
     skip: int = 0,
     limit: int = 200,
 ):
     """Return raw topology links for a device or all devices."""
     query = select(TopologyLink)
+    if tenant_filter is not None:
+        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        query = query.where(TopologyLink.device_id.in_(tenant_dev_ids))
     if device_id:
         query = query.where(TopologyLink.device_id == device_id)
 
@@ -293,13 +297,14 @@ async def hop_discover(
 async def get_ghost_switches(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Return ghost nodes that look like switches — candidates for hop discovery."""
-    result = await db.execute(
-        select(TopologyLink)
-        .where(TopologyLink.neighbor_device_id.is_(None))
-        .where(TopologyLink.neighbor_type == "switch")
-    )
+    q = select(TopologyLink).where(TopologyLink.neighbor_device_id.is_(None)).where(TopologyLink.neighbor_type == "switch")
+    if tenant_filter is not None:
+        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        q = q.where(TopologyLink.device_id.in_(tenant_dev_ids))
+    result = await db.execute(q)
     links = result.scalars().all()
 
     seen: set[str] = set()
@@ -320,15 +325,26 @@ async def get_ghost_switches(
 
 
 @router.get("/stats", response_model=dict)
-async def get_topology_stats(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
-    total = (await db.execute(select(func.count()).select_from(TopologyLink))).scalar() or 0
-    matched = (await db.execute(
-        select(func.count()).select_from(TopologyLink)
-        .where(TopologyLink.neighbor_device_id.is_not(None))
-    )).scalar() or 0
-    with_neighbors = (await db.execute(
-        select(func.count(func.distinct(TopologyLink.device_id)))
-    )).scalar() or 0
+async def get_topology_stats(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+):
+    tenant_cond = None
+    if tenant_filter is not None:
+        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        tenant_cond = TopologyLink.device_id.in_(tenant_dev_ids)
+
+    total_q = select(func.count()).select_from(TopologyLink)
+    matched_q = select(func.count()).select_from(TopologyLink).where(TopologyLink.neighbor_device_id.is_not(None))
+    neighbors_q = select(func.count(func.distinct(TopologyLink.device_id)))
+    if tenant_cond is not None:
+        total_q = total_q.where(tenant_cond)
+        matched_q = matched_q.where(tenant_cond)
+        neighbors_q = neighbors_q.where(tenant_cond)
+    total = (await db.execute(total_q)).scalar() or 0
+    matched = (await db.execute(matched_q)).scalar() or 0
+    with_neighbors = (await db.execute(neighbors_q)).scalar() or 0
     return {
         "total_links": total,
         "matched_links": matched,
@@ -569,11 +585,15 @@ async def discover_ghost(
 async def get_lldp_inventory(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
     device_type: str = Query(None),
     site: str = Query(None),
 ):
     """Return all ghost nodes (non-inventory neighbors) grouped by hostname, optionally filtered by device_type."""
     query = select(TopologyLink).where(TopologyLink.neighbor_device_id.is_(None))
+    if tenant_filter is not None:
+        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        query = query.where(TopologyLink.device_id.in_(tenant_dev_ids))
     if device_type:
         query = query.where(TopologyLink.neighbor_type == device_type)
     if site:

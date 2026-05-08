@@ -59,5 +59,7 @@ class ConfigBackupResponse(BaseModel):
     notes: Optional[str]
     created_by: Optional[int]
     created_at: datetime
+    is_golden: bool = False
+    golden_set_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

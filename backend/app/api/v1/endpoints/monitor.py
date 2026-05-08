@@ -222,6 +222,7 @@ async def monitor_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
     location_filter: LocationNameFilter = None,
+    tenant_filter: TenantFilter = None,
     site: Optional[str] = Query(None),
 ):
     """Dashboard-level stats: health score, event counts, offline devices."""
@@ -239,6 +240,8 @@ async def monitor_stats(
 
     # Device counts
     dev_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
     if effective_sites is not None:
         if not effective_sites:
             return {
@@ -253,10 +256,15 @@ async def monitor_stats(
     offline = sum(1 for d in all_devices if d.status == "offline")
     unknown = total - online - offline
 
-    # Event counts last 24h
+    # Build device id subquery for event filtering (tenant + location scoped)
     site_ids_sq: Any = None
-    if effective_sites is not None:
-        site_ids_sq = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
+    if tenant_filter is not None or effective_sites is not None:
+        sq = select(Device.id).where(Device.is_active == True)
+        if tenant_filter is not None:
+            sq = sq.where(Device.tenant_id == tenant_filter)
+        if effective_sites is not None:
+            sq = sq.where(Device.site.in_(effective_sites))
+        site_ids_sq = sq
 
     ev_base_24h = select(NetworkEvent.severity, func.count()).where(NetworkEvent.created_at >= since_24h)
     if site_ids_sq is not None:
@@ -284,9 +292,18 @@ async def monitor_stats(
         if d.last_backup and d.last_backup < datetime.now(timezone.utc) - timedelta(days=7)
     )
 
-    # Topology
-    topo_nodes = (await db.execute(select(func.count()).select_from(Device).where(Device.is_active == True))).scalar()
-    topo_links = (await db.execute(select(func.count()).select_from(TopologyLink))).scalar()
+    # Topology — scoped to tenant/location
+    topo_q = select(func.count()).select_from(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        topo_q = topo_q.where(Device.tenant_id == tenant_filter)
+    if effective_sites is not None:
+        topo_q = topo_q.where(Device.site.in_(effective_sites))
+    topo_nodes = (await db.execute(topo_q)).scalar()
+
+    topo_link_q = select(func.count()).select_from(TopologyLink)
+    if site_ids_sq is not None:
+        topo_link_q = topo_link_q.where(TopologyLink.device_id.in_(site_ids_sq))
+    topo_links = (await db.execute(topo_link_q)).scalar()
 
     # Health score (0-100)
     score = 100

@@ -222,6 +222,8 @@ export interface ConfigBackup {
   notes?: string
   created_by?: number
   created_at: string
+  is_golden: boolean
+  golden_set_at?: string
 }
 
 export interface NetworkInterface {

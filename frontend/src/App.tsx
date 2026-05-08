@@ -133,6 +133,13 @@ function RoleRoute({ children, minRole }: { children: React.ReactNode; minRole: 
   return <>{children}</>
 }
 
+// Permission-based route guard — mirrors the sidebar MODULE_MAP check.
+// Allows access when can(module, action) is true (which already handles SA/OrgAdmin bypass).
+function PermRoute({ children, module, action }: { children: React.ReactNode; module: string; action: string }) {
+  const { can } = useAuthStore()
+  return can(module, action) ? <>{children}</> : <Navigate to="/" replace />
+}
+
 const GLOBAL_CSS_DARK = `
   :root { color-scheme: dark; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -204,33 +211,33 @@ function ThemedApp() {
               <Route path="topology" element={<TopologyPage />} />
               <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
-              <Route path="reports" element={<RoleRoute minRole="org_viewer"><ReportsPage /></RoleRoute>} />
-              <Route path="users" element={<RoleRoute minRole="admin"><UsersPage /></RoleRoute>} />
-              <Route path="audit" element={<RoleRoute minRole="org_viewer"><AuditLogPage /></RoleRoute>} />
-              <Route path="agents" element={<RoleRoute minRole="admin"><AgentsPage /></RoleRoute>} />
-              <Route path="settings" element={<RoleRoute minRole="admin"><SettingsPage /></RoleRoute>} />
-              <Route path="playbooks" element={<RoleRoute minRole="admin"><PlaybooksPage /></RoleRoute>} />
+              <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
+              <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
+              <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
+              <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
+              <Route path="settings" element={<PermRoute module="settings" action="view"><SettingsPage /></PermRoute>} />
+              <Route path="playbooks" element={<PermRoute module="playbooks" action="view"><PlaybooksPage /></PermRoute>} />
               <Route path="approvals" element={<RoleRoute minRole="location_manager"><ApprovalsPage /></RoleRoute>} />
-              <Route path="mac-arp" element={<RoleRoute minRole="org_viewer"><MacArpPage /></RoleRoute>} />
-              <Route path="ipam" element={<RoleRoute minRole="org_viewer"><IpamPage /></RoleRoute>} />
-              <Route path="security-audit" element={<RoleRoute minRole="org_viewer"><SecurityAuditPage /></RoleRoute>} />
-              <Route path="asset-lifecycle" element={<RoleRoute minRole="org_viewer"><AssetLifecyclePage /></RoleRoute>} />
+              <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
+              <Route path="ipam" element={<PermRoute module="ipam" action="view"><IpamPage /></PermRoute>} />
+              <Route path="security-audit" element={<PermRoute module="monitoring" action="view"><SecurityAuditPage /></PermRoute>} />
+              <Route path="asset-lifecycle" element={<PermRoute module="monitoring" action="view"><AssetLifecyclePage /></PermRoute>} />
               <Route path="diagnostics" element={<RoleRoute minRole="operator"><DiagnosticsPage /></RoleRoute>} />
-              <Route path="bandwidth" element={<RoleRoute minRole="org_viewer"><BandwidthMonitorPage /></RoleRoute>} />
-              <Route path="config-templates" element={<RoleRoute minRole="admin"><ConfigTemplatesPage /></RoleRoute>} />
+              <Route path="bandwidth" element={<PermRoute module="monitoring" action="view"><BandwidthMonitorPage /></PermRoute>} />
+              <Route path="config-templates" element={<PermRoute module="driver_templates" action="view"><ConfigTemplatesPage /></PermRoute>} />
               <Route path="change-management" element={<RoleRoute minRole="location_manager"><ChangeManagementPage /></RoleRoute>} />
               <Route path="sla" element={<RoleRoute minRole="org_viewer"><SlaReportPage /></RoleRoute>} />
               <Route path="vlan" element={<RoleRoute minRole="org_viewer"><VlanManagementPage /></RoleRoute>} />
-              <Route path="backups" element={<RoleRoute minRole="location_manager"><BackupCenterPage /></RoleRoute>} />
+              <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
               <Route path="config-drift" element={<RoleRoute minRole="org_viewer"><ConfigDriftPage /></RoleRoute>} />
               <Route path="intelligence" element={<RoleRoute minRole="org_viewer"><IntelligencePage /></RoleRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_manager"><ComplianceCheckPage /></RoleRoute>} />
               <Route path="racks" element={<RoleRoute minRole="admin"><RacksPage /></RoleRoute>} />
               <Route path="tenants" element={<RoleRoute minRole="super_admin"><TenantsPage /></RoleRoute>} />
-              <Route path="locations" element={<RoleRoute minRole="admin"><LocationsPage /></RoleRoute>} />
+              <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
               <Route path="floor-plan" element={<RoleRoute minRole="admin"><FloorPlanPage /></RoleRoute>} />
               <Route path="alert-rules" element={<RoleRoute minRole="admin"><AlertRulesPage /></RoleRoute>} />
-              <Route path="driver-templates" element={<RoleRoute minRole="admin"><DriverTemplatesPage /></RoleRoute>} />
+              <Route path="driver-templates" element={<PermRoute module="driver_templates" action="view"><DriverTemplatesPage /></PermRoute>} />
               <Route path="help" element={<HelpPage />} />
               <Route path="services" element={<RoleRoute minRole="org_viewer"><ServicesPage /></RoleRoute>} />
               <Route path="topology-twin" element={<RoleRoute minRole="location_manager"><TopologyTwinPage /></RoleRoute>} />
