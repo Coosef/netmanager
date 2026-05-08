@@ -67,24 +67,22 @@ async def list_locations(
     current_user: CurrentUser = None,
     search: str = Query(None),
     tenant_id: Optional[int] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=1000),
 ):
     query = select(Location)
 
     if current_user.role == UserRole.SUPER_ADMIN:
-        # Always unrestricted — optional tenant filter for SA
         if tenant_id:
             query = query.where(Location.tenant_id == tenant_id)
     elif current_user.role == UserRole.ADMIN:
         if current_user.tenant_id:
-            # Tenant-scoped admin — only their tenant's locations
             query = query.where(Location.tenant_id == current_user.tenant_id)
-        # else: platform admin (ADMIN with no tenant) — sees everything, no filter
     elif current_user.role == UserRole.ORG_VIEWER:
         if not current_user.tenant_id:
             return {"items": [], "total": 0}
         query = query.where(Location.tenant_id == current_user.tenant_id)
     else:
-        # location-scoped roles: only show assigned locations
         assigned = (await db.execute(
             select(UserLocation.location_id).where(UserLocation.user_id == current_user.id)
         )).scalars().all()
@@ -93,7 +91,8 @@ async def list_locations(
     if search:
         query = query.where(Location.name.ilike(f"%{search}%"))
 
-    locs = (await db.execute(query.order_by(Location.name))).scalars().all()
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
+    locs = (await db.execute(query.order_by(Location.name).offset(skip).limit(limit))).scalars().all()
 
     count_rows = (await db.execute(
         select(Device.site, func.count().label("cnt"))
@@ -110,7 +109,7 @@ async def list_locations(
 
     return {
         "items": [_serialize(loc, count_map.get(loc.name, 0), user_count_map.get(loc.id, 0)) for loc in locs],
-        "total": len(locs),
+        "total": total,
     }
 
 

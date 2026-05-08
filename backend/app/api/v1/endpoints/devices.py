@@ -2135,3 +2135,116 @@ async def get_device_activity(
             for lg in logs
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Device Health Scores
+# ---------------------------------------------------------------------------
+
+@router.get("/health-scores")
+async def get_health_scores(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+):
+    """
+    Compute a 0-100 health score for each active device.
+    Score factors:
+      - Offline / unreachable status: -40 / -20
+      - Critical events in last 24h: -10 per event (max -30)
+      - Config drift (hash != golden): -15
+      - No backup in last 7 days: -10
+    """
+    from datetime import timedelta, timezone
+    from app.models.network_event import NetworkEvent
+
+    now = __import__('datetime').datetime.now(timezone.utc)
+    since_24h = now - timedelta(hours=24)
+    since_7d  = now - timedelta(days=7)
+
+    # All active devices
+    q = select(Device).where(Device.is_active == True)
+    if tenant_filter:
+        q = q.where(Device.tenant_id == tenant_filter)
+    elif current_user.tenant_id:
+        q = q.where(Device.tenant_id == current_user.tenant_id)
+    devices_list = (await db.execute(q)).scalars().all()
+
+    if not devices_list:
+        return {"items": [], "avg_score": 0}
+
+    device_ids = [d.id for d in devices_list]
+
+    # Critical events per device last 24h
+    event_rows = (await db.execute(
+        select(NetworkEvent.device_id, func.count().label("cnt"))
+        .where(NetworkEvent.device_id.in_(device_ids),
+               NetworkEvent.severity == "critical",
+               NetworkEvent.created_at >= since_24h)
+        .group_by(NetworkEvent.device_id)
+    )).fetchall()
+    critical_map = {r[0]: r[1] for r in event_rows}
+
+    # Latest backup per device
+    backup_rows = (await db.execute(
+        select(ConfigBackup.device_id, func.max(ConfigBackup.created_at).label("latest"))
+        .where(ConfigBackup.device_id.in_(device_ids))
+        .group_by(ConfigBackup.device_id)
+    )).fetchall()
+    backup_map = {r[0]: r[1] for r in backup_rows}
+
+    # Golden config hashes
+    golden_rows = (await db.execute(
+        select(ConfigBackup.device_id, ConfigBackup.config_hash)
+        .where(ConfigBackup.device_id.in_(device_ids), ConfigBackup.is_golden == True)
+    )).fetchall()
+    golden_map = {r[0]: r[1] for r in golden_rows}
+
+    # Latest backup hash per device (for drift check)
+    latest_hash_rows = (await db.execute(
+        select(ConfigBackup.device_id, ConfigBackup.config_hash, ConfigBackup.created_at)
+        .where(ConfigBackup.device_id.in_(device_ids))
+        .order_by(ConfigBackup.device_id, ConfigBackup.created_at.desc())
+    )).fetchall()
+    latest_hash_map: dict[int, str] = {}
+    for r in latest_hash_rows:
+        if r[0] not in latest_hash_map:
+            latest_hash_map[r[0]] = r[1]
+
+    results = []
+    for dev in devices_list:
+        score = 100
+        issues = []
+
+        if dev.status == "offline":
+            score -= 40; issues.append("offline")
+        elif dev.status == "unreachable":
+            score -= 20; issues.append("unreachable")
+
+        crit = min(critical_map.get(dev.id, 0), 3)
+        if crit:
+            score -= crit * 10; issues.append(f"{crit} kritik olay (24h)")
+
+        if dev.id in golden_map:
+            latest_h = latest_hash_map.get(dev.id)
+            if not latest_h or latest_h != golden_map[dev.id]:
+                score -= 15; issues.append("config drift")
+
+        latest_bk = backup_map.get(dev.id)
+        if not latest_bk or (now - latest_bk.replace(tzinfo=timezone.utc)).total_seconds() > 7 * 86400:
+            score -= 10; issues.append("7+ gündür backup yok")
+
+        results.append({
+            "device_id": dev.id,
+            "hostname": dev.hostname,
+            "ip": dev.ip_address,
+            "vendor": dev.vendor,
+            "site": dev.site,
+            "status": dev.status,
+            "score": max(score, 0),
+            "issues": issues,
+        })
+
+    results.sort(key=lambda x: x["score"])
+    avg = round(sum(r["score"] for r in results) / len(results)) if results else 0
+    return {"items": results, "avg_score": avg}

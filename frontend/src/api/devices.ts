@@ -272,6 +272,16 @@ export const devicesApi = {
     client.post<{ success: boolean; commands_applied: string[] }>(
       `/devices/${deviceId}/configure-snmp`, payload
     ).then((r) => r.data),
+
+  getHealthScores: () =>
+    client.get<{
+      items: {
+        device_id: number; hostname: string; ip: string | null
+        vendor: string | null; site: string | null; status: string
+        score: number; issues: string[]
+      }[]
+      avg_score: number
+    }>('/devices/health-scores').then((r) => r.data),
 }
 
 export interface GroupSuggestion {

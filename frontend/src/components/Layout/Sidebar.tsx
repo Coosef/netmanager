@@ -9,7 +9,7 @@ import {
   SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
   HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
-  CloseOutlined, GlobalOutlined,
+  CloseOutlined, GlobalOutlined, DiffOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -166,6 +166,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         { key: '/ipam', icon: <ClusterOutlined />, label: t('nav.ipam'), minRole: 'org_viewer' },
         { key: '/vlan', icon: <BranchesOutlined />, label: t('nav.vlan'), minRole: 'org_viewer' },
         { key: '/backups', icon: <CloudOutlined />, label: t('nav.backups'), minRole: 'location_manager' },
+        { key: '/config-drift', icon: <DiffOutlined />, label: 'Config Drift', minRole: 'org_viewer' },
         { key: '/compliance', icon: <FileDoneOutlined />, label: t('nav.compliance'), minRole: 'location_manager' },
         { key: '/racks', icon: <HddOutlined />, label: t('nav.racks'), minRole: 'admin' },
         { key: '/floor-plan', icon: <BuildOutlined />, label: t('nav.floor_plan'), minRole: 'admin' },

@@ -1,13 +1,15 @@
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
 from app.models.backup_schedule import BackupSchedule
+from app.models.config_backup import ConfigBackup
+from app.models.device import Device
 from app.schemas.backup_schedule import (
     BackupScheduleCreate,
     BackupScheduleResponse,
@@ -162,3 +164,107 @@ async def run_schedule_now(
         await db.commit()
         return {"status": "started", "task_id": task_id}
     return {"status": "no_devices"}
+
+
+# ---------------------------------------------------------------------------
+# Config Drift Report
+# ---------------------------------------------------------------------------
+
+@router.get("/drift-report")
+async def config_drift_report(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+    tenant_id: Optional[int] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+):
+    """
+    Compare each device's latest backup hash against its golden config hash.
+    Returns devices with drift (hash mismatch) and summary stats.
+    """
+    tf = tenant_id or (current_user.tenant_id if hasattr(current_user, "tenant_id") else None)
+
+    # Golden baselines per device
+    golden_q = select(ConfigBackup.device_id, ConfigBackup.config_hash.label("golden_hash")).where(ConfigBackup.is_golden == True)
+    if tf:
+        golden_q = golden_q.where(ConfigBackup.tenant_id == tf)
+    golden_rows = (await db.execute(golden_q)).fetchall()
+    golden_map = {r[0]: r[1] for r in golden_rows}
+
+    if not golden_map:
+        return {
+            "total_with_golden": 0, "drift_count": 0, "clean_count": 0,
+            "no_backup_count": 0, "items": [], "total": 0,
+        }
+
+    # Latest backup per device (only for devices with golden)
+    latest_q = (
+        select(ConfigBackup.device_id, ConfigBackup.config_hash, ConfigBackup.created_at, ConfigBackup.id)
+        .where(ConfigBackup.device_id.in_(list(golden_map.keys())))
+        .order_by(ConfigBackup.device_id, ConfigBackup.created_at.desc())
+    )
+    if tf:
+        latest_q = latest_q.where(ConfigBackup.tenant_id == tf)
+    latest_rows = (await db.execute(latest_q)).fetchall()
+
+    # Pick only the most recent per device
+    latest_map: dict[int, tuple] = {}
+    for row in latest_rows:
+        did = row[0]
+        if did not in latest_map:
+            latest_map[did] = row
+
+    # Load device info
+    device_rows = (await db.execute(
+        select(Device.id, Device.hostname, Device.ip_address, Device.vendor, Device.site, Device.status)
+        .where(Device.id.in_(list(golden_map.keys())), Device.is_active == True)
+    )).fetchall()
+    dev_map = {r[0]: r for r in device_rows}
+
+    drift_items = []
+    clean_count = 0
+    no_backup_count = 0
+
+    for device_id, golden_hash in golden_map.items():
+        dev = dev_map.get(device_id)
+        hostname = dev[1] if dev else str(device_id)
+        ip = dev[2] if dev else None
+        vendor = dev[3] if dev else None
+        site = dev[4] if dev else None
+        status = dev[5] if dev else None
+
+        if device_id not in latest_map:
+            no_backup_count += 1
+            drift_items.append({
+                "device_id": device_id, "hostname": hostname, "ip": ip,
+                "vendor": vendor, "site": site, "device_status": status,
+                "drift": True, "reason": "no_backup",
+                "latest_backup_at": None, "backup_id": None,
+            })
+        else:
+            _, latest_hash, latest_at, backup_id = latest_map[device_id]
+            has_drift = latest_hash != golden_hash
+            if has_drift:
+                drift_items.append({
+                    "device_id": device_id, "hostname": hostname, "ip": ip,
+                    "vendor": vendor, "site": site, "device_status": status,
+                    "drift": True, "reason": "hash_mismatch",
+                    "latest_backup_at": latest_at.isoformat(), "backup_id": backup_id,
+                })
+            else:
+                clean_count += 1
+
+    total_with_golden = len(golden_map)
+    drift_count = len(drift_items)
+
+    # Pagination over drift items
+    paginated = drift_items[skip: skip + limit]
+
+    return {
+        "total_with_golden": total_with_golden,
+        "drift_count": drift_count,
+        "clean_count": clean_count,
+        "no_backup_count": no_backup_count,
+        "items": paginated,
+        "total": drift_count,
+    }

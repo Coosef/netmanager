@@ -2,6 +2,8 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +21,7 @@ from app.schemas.user import UserResponse
 from app.services.audit_service import log_action
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 async def _build_token_response(db: AsyncSession, user: User) -> TokenResponse:
@@ -38,6 +41,7 @@ async def _build_token_response(db: AsyncSession, user: User) -> TokenResponse:
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def login(
     payload: LoginRequest,
     request: Request,

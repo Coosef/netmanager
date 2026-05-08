@@ -636,6 +636,21 @@ export default function DevicesPage() {
     refetchInterval: 120000,
   })
 
+  const { data: healthData } = useQuery({
+    queryKey: ['device-health-scores'],
+    queryFn: devicesApi.getHealthScores,
+    staleTime: 120000,
+    refetchInterval: 300000,
+  })
+
+  const healthMap = React.useMemo(() => {
+    const map = new Map<number, { score: number; issues: string[] }>()
+    for (const item of healthData?.items ?? []) {
+      map.set(item.device_id, { score: item.score, issues: item.issues })
+    }
+    return map
+  }, [healthData])
+
   const utilizationMap = React.useMemo(() => {
     const map = new Map<number, { maxPct: number; inPct: number; outPct: number }>()
     for (const iface of snmpTopData?.items ?? []) {
@@ -745,6 +760,29 @@ export default function DevicesPage() {
             {cfg.icon}
             <span style={{ color: cfg.color, fontSize: 12, fontWeight: 500 }}>{v}</span>
           </Space>
+        )
+      },
+    },
+    {
+      title: 'Sağlık',
+      key: 'health',
+      width: 72,
+      render: (_: unknown, r: Device) => {
+        const h = healthMap.get(r.id)
+        if (!h) return null
+        const score = h.score
+        const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444'
+        return (
+          <Tooltip title={h.issues.length ? h.issues.join(', ') : 'Sorun yok'}>
+            <div style={{
+              width: 36, height: 36, borderRadius: '50%',
+              border: `2px solid ${color}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, fontWeight: 700, color,
+            }}>
+              {score}
+            </div>
+          </Tooltip>
         )
       },
     },

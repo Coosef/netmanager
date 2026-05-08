@@ -6,8 +6,8 @@ Sprint 13C — Service Impact Mapping
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -109,9 +109,16 @@ async def fleet_impact_summary(
 async def list_services(
     _: CurrentUser,
     db: AsyncSession = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    search: str = Query(None),
 ):
-    rows = (await db.execute(select(Service).order_by(Service.name))).scalars().all()
-    return {"total": len(rows), "items": [_svc_out(s) for s in rows]}
+    query = select(Service).order_by(Service.name)
+    if search:
+        query = query.where(Service.name.ilike(f"%{search}%"))
+    total = (await db.execute(select(func.count()).select_from(query.subquery()))).scalar() or 0
+    rows = (await db.execute(query.offset(skip).limit(limit))).scalars().all()
+    return {"total": total, "items": [_svc_out(s) for s in rows]}
 
 
 @router.post("")

@@ -12,13 +12,13 @@ export interface SystemStats {
 
 export const superadminApi = {
   getSystemStats: () =>
-    client.get<SystemStats>('/superadmin/system-stats').then((r) => r.data),
+    client.get<SystemStats>('/super-admin/system-stats').then((r) => r.data),
 
   updateTenantPlan: (tenantId: number, plan_tier: string, max_devices: number, max_users: number) =>
-    client.patch(`/superadmin/tenants/${tenantId}/plan`, null, {
+    client.patch(`/super-admin/tenants/${tenantId}/plan`, null, {
       params: { plan_tier, max_devices, max_users },
     }).then((r) => r.data),
 
   toggleTenantActive: (tenantId: number) =>
-    client.patch(`/superadmin/tenants/${tenantId}/toggle-active`).then((r) => r.data),
+    client.patch(`/super-admin/tenants/${tenantId}/toggle-active`).then((r) => r.data),
 }
