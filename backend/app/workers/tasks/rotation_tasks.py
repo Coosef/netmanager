@@ -227,7 +227,7 @@ async def _notify_rotation_failure(policy, device_results: list) -> None:
 
             for ch in channels:
                 notify_on = ch.notify_on or []
-                if "critical_event" not in notify_on and "warning_event" not in notify_on and "any_event" not in notify_on:
+                if not ({"critical_event", "warning_event", "rotation_failure", "any_event"} & set(notify_on)):
                     continue
                 ok, err = await send_channel(ch, f"[UYARI] {title}", message)
                 db.add(NotificationLog(

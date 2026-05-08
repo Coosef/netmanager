@@ -219,7 +219,7 @@ async def _notify_rollout_failure(db, rollout, rollout_id: int, final_status: st
 
         for ch in channels:
             notify_on = ch.notify_on or []
-            if "critical_event" not in notify_on and "warning_event" not in notify_on and "any_event" not in notify_on:
+            if not ({"critical_event", "warning_event", "rollout_failure", "any_event"} & set(notify_on)):
                 continue
             ok, err = await send_channel(ch, f"[ROLLOUT] {title}", message)
             db.add(NotificationLog(

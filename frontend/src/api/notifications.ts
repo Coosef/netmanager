@@ -12,6 +12,10 @@ export type NotifyOn =
   | 'threshold_alert'
   | 'lifecycle_alert'
   | 'sla_breach'
+  | 'config_drift'
+  | 'rollout_failure'
+  | 'rotation_failure'
+  | 'security_audit_critical'
   | 'any_event'
 
 export interface EmailConfig {
@@ -90,5 +94,9 @@ export const NOTIFY_ON_OPTIONS: { label: string; value: NotifyOn }[] = [
   { label: 'Eşik Uyarısı (SNMP)', value: 'threshold_alert' },
   { label: 'Lifecycle Uyarısı', value: 'lifecycle_alert' },
   { label: 'SLA İhlali', value: 'sla_breach' },
+  { label: 'Config Sapması', value: 'config_drift' },
+  { label: 'Config Rollout Hatası', value: 'rollout_failure' },
+  { label: 'Credential Rotasyon Hatası', value: 'rotation_failure' },
+  { label: 'Güvenlik Denetim Uyarısı', value: 'security_audit_critical' },
   { label: 'Tüm Olaylar', value: 'any_event' },
 ]

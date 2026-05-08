@@ -65,10 +65,18 @@ def process_notifications():
             for ev in events:
                 severity_cat = "critical_event" if ev.severity == "critical" else "warning_event"
                 offline_cat = "device_offline" if ev.event_type == "device_offline" else None
+                # Specific event-type subscriptions (channels can subscribe to individual types)
+                specific_cats = {ev.event_type}  # e.g. "config_drift", "rollout_failure", etc.
 
                 for ch in channels:
                     cats = set(ch.notify_on or [])
-                    if "any_event" not in cats and severity_cat not in cats and (not offline_cat or offline_cat not in cats):
+                    matched = (
+                        "any_event" in cats
+                        or severity_cat in cats
+                        or (offline_cat and offline_cat in cats)
+                        or bool(specific_cats & cats)
+                    )
+                    if not matched:
                         continue
                     if await already_sent(ch.id, "network_event", ev.id):
                         continue

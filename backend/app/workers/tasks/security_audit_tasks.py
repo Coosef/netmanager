@@ -154,7 +154,7 @@ def scheduled_compliance_scan():
 
             for ch in channels:
                 notify_on = ch.notify_on or []
-                if "critical_event" not in notify_on and "warning_event" not in notify_on and "any_event" not in notify_on:
+                if not ({"critical_event", "warning_event", "security_audit_critical", "any_event"} & set(notify_on)):
                     continue
                 ok, err = await send_channel(ch, f"[GÜVENLİK] {title}", message)
                 db.add(NotificationLog(
