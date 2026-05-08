@@ -414,6 +414,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs(created_at)"
         ))
+        # Composite indexes for config_backups — speeds up latest-per-device subquery in config_search
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_config_backups_device_created ON config_backups(device_id, created_at DESC)"
+        ))
+        # Composite index for per-device event queries in DeviceDetail syslog tab
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_network_events_device_created ON network_events(device_id, created_at DESC)"
+        ))
+        # Index for notification_logs dedup lookups (channel + source)
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notification_logs_channel_source ON notification_logs(channel_id, source_type, source_id)"
+        ))
+        # Partial index: unacknowledged events only — used in acknowledge-all and unacked_only filter
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_network_events_unacked ON network_events(created_at DESC) WHERE acknowledged = FALSE"
+        ))
         # Expand snmp_community columns to hold Fernet-encrypted values (~200 chars)
         await conn.execute(text(
             "ALTER TABLE devices ALTER COLUMN snmp_community TYPE VARCHAR(512)"

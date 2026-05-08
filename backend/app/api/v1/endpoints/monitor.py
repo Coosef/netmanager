@@ -1,3 +1,5 @@
+import csv
+import io
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -5,6 +7,7 @@ _ISTANBUL = ZoneInfo("Europe/Istanbul")
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -86,6 +89,70 @@ async def list_events(
             for e in events
         ],
     }
+
+
+@router.get("/events/export.csv")
+async def export_events_csv(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
+    severity: Optional[str] = Query(None),
+    event_type: Optional[str] = Query(None),
+    device_id: Optional[int] = Query(None),
+    hours: int = Query(24, description="Events from last N hours"),
+    unacked_only: bool = Query(False),
+    site: Optional[str] = Query(None),
+):
+    """Export filtered network events as CSV download."""
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
+
+    effective_sites: Optional[list[str]] = location_filter
+    if effective_sites is not None:
+        if site:
+            effective_sites = [s for s in effective_sites if s == site]
+            site = None
+        if not effective_sites:
+            q = q.where(NetworkEvent.id == -1)
+        else:
+            site_ids_sq = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
+            q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
+    elif site:
+        site_ids_sq = select(Device.id).where(Device.site == site, Device.is_active == True)
+        q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
+
+    if severity:
+        q = q.where(NetworkEvent.severity == severity)
+    if event_type:
+        q = q.where(NetworkEvent.event_type == event_type)
+    if device_id:
+        q = q.where(NetworkEvent.device_id == device_id)
+    if unacked_only:
+        q = q.where(NetworkEvent.acknowledged == False)
+
+    result = await db.execute(q.order_by(NetworkEvent.created_at.desc()).limit(10000))
+    events = result.scalars().all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["id", "created_at", "severity", "event_type", "device_hostname", "device_id", "title", "message", "acknowledged"])
+    tz = ZoneInfo("Europe/Istanbul")
+    for e in events:
+        ts = e.created_at.astimezone(tz).strftime("%Y-%m-%d %H:%M:%S") if e.created_at else ""
+        writer.writerow([
+            e.id, ts, e.severity, e.event_type,
+            e.device_hostname or "", e.device_id or "",
+            e.title or "", (e.message or "").replace("\n", " "),
+            "evet" if e.acknowledged else "hayır",
+        ])
+
+    filename = f"events_{datetime.now(tz).strftime('%Y%m%d_%H%M')}.csv"
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/events/{event_id}/acknowledge")

@@ -54,4 +54,23 @@ export const monitorApi = {
     client.post<{ deleted: number; event_types: string[] }>(
       '/monitor/events/purge-noise', null, { params: { older_than_hours: olderThanHours } }
     ).then((r) => r.data),
+
+  exportEvents: async (params?: {
+    severity?: string; event_type?: string; device_id?: number
+    hours?: number; unacked_only?: boolean; site?: string
+  }) => {
+    const res = await client.get('/monitor/events/export.csv', {
+      params,
+      responseType: 'blob',
+    })
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+    const a = document.createElement('a')
+    a.href = url
+    const now = new Date()
+    a.download = `events_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
 }

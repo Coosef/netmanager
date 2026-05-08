@@ -13,7 +13,7 @@ import {
   ApiOutlined, ApartmentOutlined, BranchesOutlined,
   DisconnectOutlined, LineChartOutlined, RobotOutlined,
   TableOutlined, ExclamationCircleOutlined,
-  CodeOutlined, DatabaseOutlined,
+  CodeOutlined, DatabaseOutlined, DownloadOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
@@ -782,6 +782,25 @@ export default function MonitorPage() {
     message.success(t('monitor.scan_queued'))
   }
 
+  const [exporting, setExporting] = useState(false)
+  const handleExport = async () => {
+    setExporting(true)
+    try {
+      await monitorApi.exportEvents({
+        severity: severityFilter !== 'all' ? severityFilter : undefined,
+        event_type: typeFilter || undefined,
+        device_id: deviceFilter,
+        hours,
+        unacked_only: unackedOnly || undefined,
+        site: activeSite || undefined,
+      })
+    } catch {
+      message.error('CSV dışa aktarma başarısız')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   const handlePurgeNoise = async () => {
     const res = await monitorApi.purgeNoise(1)
     message.success(`${res.deleted} gürültü olayı silindi (flapping, correlation, agent_outage)`)
@@ -950,6 +969,13 @@ export default function MonitorPage() {
             onClick={() => { setTypeFilter('threshold_alert'); setHours(168); setPage(1) }}
           >
             Alarm Geçmişi
+          </Button>
+          <Button
+            icon={<DownloadOutlined />}
+            loading={exporting}
+            onClick={handleExport}
+          >
+            CSV İndir
           </Button>
           <Button
             icon={<ThunderboltOutlined />}
