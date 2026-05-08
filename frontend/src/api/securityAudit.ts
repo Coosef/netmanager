@@ -69,4 +69,15 @@ export const securityAuditApi = {
         { params: { days, ...(site ? { site } : {}) } },
       )
       .then((r) => r.data),
+
+  downloadCsv: (site?: string) =>
+    client.get('/security-audit/export.csv', { params: site ? { site } : {}, responseType: 'blob' })
+      .then((res) => {
+        const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `security_audit_${new Date().toISOString().slice(0, 10)}.csv`
+        document.body.appendChild(a); a.click(); document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+      }),
 }

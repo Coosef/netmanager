@@ -1,8 +1,11 @@
 """Security Audit & Hardening Score endpoints."""
+import csv
+import io
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import cast, Date, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -73,6 +76,68 @@ async def get_audit_stats(
         "grades": grade_dist,
         "critical_count": critical_count,
     }
+
+
+# ── CSV Export ───────────────────────────────────────────────────────────────
+
+@router.get("/export.csv")
+async def export_audits_csv(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    site: Optional[str] = Query(None),
+    location_filter: LocationNameFilter = None,
+):
+    """Stream latest security audit results as CSV."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/Istanbul")
+    except Exception:
+        tz = timezone.utc
+
+    subq = (
+        select(SecurityAudit.device_id, func.max(SecurityAudit.created_at).label("latest"))
+        .group_by(SecurityAudit.device_id)
+        .subquery()
+    )
+    q = select(SecurityAudit).join(
+        subq,
+        (SecurityAudit.device_id == subq.c.device_id)
+        & (SecurityAudit.created_at == subq.c.latest),
+    )
+    if location_filter is not None:
+        eff = [s for s in location_filter if not site or s == site] if site else location_filter
+        if eff:
+            site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
+            q = q.where(SecurityAudit.device_id.in_(site_ids))
+    elif site:
+        site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
+        q = q.where(SecurityAudit.device_id.in_(site_ids))
+
+    audits = (await db.execute(q.order_by(desc(SecurityAudit.score)))).scalars().all()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["device_hostname", "device_id", "score", "grade", "status",
+                     "findings_total", "failed", "warnings", "passed", "audited_at", "error"])
+    for a in audits:
+        findings = a.findings or []
+        ts = a.created_at.astimezone(tz).strftime("%Y-%m-%d %H:%M") if a.created_at else ""
+        writer.writerow([
+            a.device_hostname, a.device_id, a.score, a.grade, a.status,
+            len(findings),
+            sum(1 for f in findings if f.get("status") == "fail"),
+            sum(1 for f in findings if f.get("status") == "warning"),
+            sum(1 for f in findings if f.get("status") == "pass"),
+            ts,
+            a.error or "",
+        ])
+
+    now_str = datetime.now().strftime("%Y%m%d_%H%M")
+    return StreamingResponse(
+        iter([buf.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=security_audit_{now_str}.csv"},
+    )
 
 
 # ── List (latest per device) ──────────────────────────────────────────────────

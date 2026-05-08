@@ -28,6 +28,7 @@ import {
 import {
   CheckCircleOutlined,
   CloseCircleOutlined,
+  DownloadOutlined,
   ExclamationCircleOutlined,
   MinusCircleOutlined,
   ReloadOutlined,
@@ -454,6 +455,7 @@ export default function SecurityAuditPage() {
   const [gradeFilter, setGradeFilter] = useState<string | undefined>()
   const [page, setPage] = useState(1)
   const [selectedAuditId, setSelectedAuditId] = useState<number | null>(null)
+  const [exporting, setExporting] = useState(false)
 
   const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['audit-stats', activeSite],
@@ -713,6 +715,16 @@ export default function SecurityAuditPage() {
         />
         <Button icon={<ReloadOutlined />} onClick={() => { refetch(); refetchStats() }}>
           Yenile
+        </Button>
+        <Button
+          icon={<DownloadOutlined />}
+          loading={exporting}
+          onClick={() => {
+            setExporting(true)
+            securityAuditApi.downloadCsv(activeSite || undefined).finally(() => setExporting(false))
+          }}
+        >
+          CSV İndir
         </Button>
       </Space>
 
