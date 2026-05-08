@@ -87,7 +87,7 @@ async def _run():
                 try:
                     ifaces = await snmp_service.get_interfaces(
                         device.ip_address,
-                        src.snmp_community or device.snmp_community or "",
+                        decrypt_credential_safe(src.snmp_community) or decrypt_credential_safe(device.snmp_community) or "",
                         src.snmp_version or device.snmp_version,
                         src.snmp_port or device.snmp_port,
                         v3_username=getattr(src, "snmp_v3_username", None) or device.snmp_v3_username,

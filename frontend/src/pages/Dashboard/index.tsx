@@ -17,6 +17,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { monitorApi } from '@/api/monitor'
+import { maintenanceWindowsApi } from '@/api/maintenanceWindows'
 import { assetLifecycleApi } from '@/api/assetLifecycle'
 import { tasksApi } from '@/api/tasks'
 import { agentsApi } from '@/api/agents'
@@ -492,6 +493,7 @@ export default function DashboardPage() {
   const { data: rootCauseData }= useQuery({ queryKey: ['root-cause-incidents'],  queryFn: () => intelligenceApi.getRootCauseIncidents(24, 10), refetchInterval: 120000 })
   const { data: fleetImpact }  = useQuery({ queryKey: ['fleet-impact-summary'],  queryFn: servicesApi.getFleetImpact,  refetchInterval: 120000 })
   const { data: anomalyData }  = useQuery({ queryKey: ['behavior-anomalies'],     queryFn: () => intelligenceApi.getAnomalies(24, 30), refetchInterval: 120000 })
+  const { data: maintWindows } = useQuery({ queryKey: ['maintenance-windows-all'], queryFn: maintenanceWindowsApi.list, refetchInterval: 300000 })
 
   // ── WebSocket ─────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1644,6 +1646,69 @@ export default function DashboardPage() {
             </div>
           </div>
         )}
+
+        {/* ── Maintenance Windows ─────────────────────────────────────────── */}
+        {(() => {
+          const now = new Date()
+          const in24h = new Date(now.getTime() + 24 * 3600 * 1000)
+          const active = (maintWindows || []).filter(w => new Date(w.start_time) <= now && new Date(w.end_time) >= now)
+          const upcoming = (maintWindows || []).filter(w => new Date(w.start_time) > now && new Date(w.start_time) <= in24h)
+          if (active.length === 0 && upcoming.length === 0) return null
+          return (
+            <div className="tv-card" style={{ borderColor: active.length > 0 ? `${N.blue}30` : `${N.teal}20` }}>
+              <div style={{ padding: '12px 18px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <CalendarOutlined style={{ color: active.length > 0 ? N.blue : N.teal }} />
+                  <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>Bakım Pencereleri</span>
+                  {active.length > 0 && (
+                    <span style={{ background: `${N.blue}18`, color: N.blue, border: `1px solid ${N.blue}30`, borderRadius: 10, fontSize: 10, padding: '2px 8px' }}>
+                      {active.length} aktif
+                    </span>
+                  )}
+                  {upcoming.length > 0 && (
+                    <span style={{ background: `${N.teal}18`, color: N.teal, border: `1px solid ${N.teal}30`, borderRadius: 10, fontSize: 10, padding: '2px 8px' }}>
+                      {upcoming.length} yaklaşan
+                    </span>
+                  )}
+                </div>
+                <span onClick={() => navigate('/settings')} style={{ color: N.cyan, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}>
+                  Yönet <RightOutlined />
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 0 }}>
+                {[...active.map(w => ({ ...w, _state: 'active' })), ...upcoming.map(w => ({ ...w, _state: 'upcoming' }))].slice(0, 6).map((w) => (
+                  <div key={w.id} style={{
+                    padding: '9px 18px', borderBottom: `1px solid ${C.border}`,
+                    width: '50%', boxSizing: 'border-box',
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                        <span style={{
+                          width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
+                          background: (w as any)._state === 'active' ? N.blue : N.teal,
+                          boxShadow: `0 0 6px ${ (w as any)._state === 'active' ? N.blue : N.teal}`,
+                        }} />
+                        <span style={{ color: C.text, fontSize: 12, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.name}</span>
+                      </div>
+                      <span style={{ color: C.dim, fontSize: 10 }}>
+                        {dayjs(w.start_time).format('DD/MM HH:mm')} → {dayjs(w.end_time).format('DD/MM HH:mm')}
+                      </span>
+                    </div>
+                    <span style={{
+                      fontSize: 10, padding: '2px 7px', borderRadius: 4, flexShrink: 0, marginLeft: 8,
+                      background: (w as any)._state === 'active' ? `${N.blue}15` : `${N.teal}15`,
+                      color: (w as any)._state === 'active' ? N.blue : N.teal,
+                      border: `1px solid ${ (w as any)._state === 'active' ? N.blue : N.teal}30`,
+                    }}>
+                      {(w as any)._state === 'active' ? 'Aktif' : dayjs(w.start_time).fromNow()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* Bottom padding for TV display */}
         <div style={{ height: 16 }} />
