@@ -667,32 +667,17 @@ async def _seed_driver_templates():
 
 
 async def _ensure_default_org():
-    """Create a default organization and assign all org-less users to it."""
+    """Create one Organization per Tenant and assign users to matching org."""
     import copy
     from sqlalchemy import select, func as _func, update as _upd
     from app.core.database import AsyncSessionLocal
     from app.models.shared.organization import Organization
     from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
     from app.models.user import User
+    from app.models.tenant import Tenant
 
     async with AsyncSessionLocal() as db:
-        org = (await db.execute(
-            select(Organization).where(Organization.slug == "default")
-        )).scalar_one_or_none()
-
-        if not org:
-            org = Organization(
-                name="Varsayılan Organizasyon",
-                slug="default",
-                description="Sistem tarafından otomatik oluşturuldu",
-            )
-            db.add(org)
-            await db.flush()
-            print(f"[Org] Default organization created (id={org.id})")
-
-        org_id = org.id
-
-        # Migrate legacy role → system_role for existing users stuck with default 'member'
+        # Migrate legacy role → system_role
         from app.models.user import UserRole
         await db.execute(
             _upd(User)
@@ -705,12 +690,60 @@ async def _ensure_default_org():
             .values(system_role='org_admin')
         )
 
-        # Assign all org-less users to this org
-        result = await db.execute(
-            _upd(User).where(User.org_id.is_(None)).values(org_id=org_id)
-        )
-        if result.rowcount:
-            print(f"[Org] {result.rowcount} user(s) assigned to default org")
+        # Create one Organization per Tenant (idempotent by slug)
+        tenants = (await db.execute(select(Tenant))).scalars().all()
+        tenant_to_org_id: dict[int, int] = {}
+
+        for tenant in tenants:
+            org = (await db.execute(
+                select(Organization).where(Organization.slug == tenant.slug)
+            )).scalar_one_or_none()
+
+            if not org:
+                org = Organization(
+                    name=tenant.name,
+                    slug=tenant.slug,
+                    description=getattr(tenant, 'description', None),
+                    contact_email=getattr(tenant, 'contact_email', None),
+                    is_active=tenant.is_active,
+                )
+                db.add(org)
+                await db.flush()
+                print(f"[Org] Created org '{org.name}' for tenant {tenant.id}")
+
+            tenant_to_org_id[tenant.id] = org.id
+
+        # Fallback default org if no tenants exist
+        if not tenant_to_org_id:
+            fallback = (await db.execute(
+                select(Organization).where(Organization.slug == "default")
+            )).scalar_one_or_none()
+            if not fallback:
+                fallback = Organization(
+                    name="Varsayılan Organizasyon", slug="default",
+                    description="Sistem tarafından otomatik oluşturuldu",
+                )
+                db.add(fallback)
+                await db.flush()
+            tenant_to_org_id[0] = fallback.id  # sentinel
+
+        # Assign users to the org matching their tenant_id (re-runs are safe)
+        for t_id, o_id in tenant_to_org_id.items():
+            if t_id == 0:
+                # fallback: assign users with no tenant and no org
+                r = await db.execute(
+                    _upd(User).where(User.tenant_id.is_(None), User.org_id.is_(None)).values(org_id=o_id)
+                )
+            else:
+                r = await db.execute(
+                    _upd(User).where(User.tenant_id == t_id).values(org_id=o_id)
+                )
+            if r.rowcount:
+                print(f"[Org] {r.rowcount} user(s) → org_id={o_id} (tenant={t_id})")
+
+        # Use first org for permission set seeding
+        first_org_id = next(iter(tenant_to_org_id.values()))
+        org_id = first_org_id
 
         # Create default permission sets if none exist for this org
         existing_count = (await db.execute(
