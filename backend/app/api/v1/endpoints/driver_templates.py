@@ -442,6 +442,55 @@ async def _http_identify_device(ip: str) -> str:
     return ""
 
 
+def _robust_json_parse(raw: str) -> dict:
+    """Parse AI JSON response tolerantly: strips noise, falls back to regex extraction."""
+    # Strip markdown fences anywhere
+    text = re.sub(r"```[a-z]*", "", raw).replace("```", "")
+    # Strip ANSI and control chars
+    text = re.sub(r"\x1b\[[0-9;]*[mGKHFJA-Z]", "", text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = text.strip()
+
+    # Try 1: direct parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Try 2: extract outermost {...} block
+    m = re.search(r"\{[\s\S]*\}", text)
+    if m:
+        candidate = m.group(0)
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+        # Try 3: truncated JSON — find last complete field and close the object
+        # Remove the last incomplete value (unterminated string)
+        fixed = re.sub(r',?\s*"[^"]*"\s*:\s*"[^"]*$', "", candidate)  # drop last broken field
+        fixed = re.sub(r',?\s*"[^"]*"\s*:\s*$', "", fixed)
+        fixed = fixed.rstrip(", \t\n") + "\n}"
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
+    # Try 4: field-by-field regex extraction (last resort)
+    result: dict = {}
+    for key, val in re.findall(r'"([^"]+)"\s*:\s*"([^"]*)"', text):
+        result[key] = val
+    for key, val in re.findall(r'"([^"]+)"\s*:\s*(\{[^}]*\}|\[[^\]]*\]|true|false|null|-?\d+(?:\.\d+)?)', text):
+        if key not in result:
+            try:
+                result[key] = json.loads(val)
+            except Exception:
+                result[key] = val
+    if result:
+        return result
+
+    raise HTTPException(500, f"AI geçersiz yanıt döndürdü ve ayrıştırılamadı: {raw[:200]}")
+
+
 async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: int = 1024) -> dict:
     """Call the configured AI provider (from Settings → AI) and return parsed JSON."""
     from app.models.ai_settings import AISettings
@@ -527,24 +576,7 @@ async def _call_driver_ai(db: AsyncSession, system: str, user: str, max_tokens: 
     else:
         raise HTTPException(400, f"Bilinmeyen AI sağlayıcısı: {provider}")
 
-    # Strip markdown fences
-    if "```" in raw_response:
-        raw_response = re.sub(r"```[a-z]*\n?", "", raw_response)
-        raw_response = raw_response.replace("```", "")
-
-    # Extract the first {...} block — handles extra text before/after JSON
-    m = re.search(r"\{.*\}", raw_response, re.DOTALL)
-    if m:
-        raw_response = m.group(0)
-
-    # Strip ASCII control chars that break JSON (ANSI codes, \x00-\x1f except \t\n\r)
-    raw_response = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", raw_response)
-    raw_response = re.sub(r"\x1b\[[0-9;]*[mGKHF]", "", raw_response)
-
-    try:
-        return json.loads(raw_response)
-    except json.JSONDecodeError as e:
-        raise HTTPException(500, f"AI geçersiz JSON döndürdü: {e}") from e
+    return _robust_json_parse(raw_response)
 
 
 @router.post("/probe-device/{device_id}")
