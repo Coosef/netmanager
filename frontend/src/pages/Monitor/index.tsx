@@ -253,6 +253,7 @@ const TYPE_LABELS: Record<string, string> = {
   playbook_failure:      'Playbook Hatası',
   lifecycle_alert:       'Lifecycle Uyarısı',
   rollout_failure:       'Config Rollout Hatası',
+  sla_breach:            'SLA İhlali',
 }
 
 // ── Event detail modal helpers ────────────────────────────────────────────────
@@ -621,6 +622,32 @@ function buildEventDetail(ev: NetworkEvent): EventDetail {
         ],
         links: [
           { label: 'Asset Lifecycle', path: '/lifecycle', icon: <DatabaseOutlined /> },
+        ],
+      }
+    }
+
+    case 'sla_breach': {
+      const breaches: any[] = Array.isArray(d.breaches) ? d.breaches : []
+      return {
+        icon: <WarningOutlined style={{ color: '#f59e0b' }} />,
+        what: `${d.breach_count ?? breaches.length} cihaz SLA hedefinin altında uptime'a sahip.`,
+        rows: [
+          { label: 'İhlal Sayısı', value: <Tag color="orange">{d.breach_count ?? '—'}</Tag> },
+          ...(breaches.length > 0 ? [{
+            label: 'Detaylar',
+            value: (
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                {breaches.slice(0, 6).map((b: any, i: number) => (
+                  <li key={i}>
+                    <strong>{b.hostname}</strong>: {b.uptime_pct?.toFixed(2)}% (hedef: {b.target_pct}%, {b.window_days}g)
+                  </li>
+                ))}
+              </ul>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'SLA Raporu', path: '/sla', icon: <LineChartOutlined /> },
         ],
       }
     }

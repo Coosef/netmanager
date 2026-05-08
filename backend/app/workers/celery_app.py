@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.workers.tasks.rollout_tasks",
         "app.workers.tasks.behavior_analytics_tasks",
         "app.workers.tasks.retention_tasks",
+        "app.workers.tasks.sla_tasks",
     ],
 )
 
@@ -122,6 +123,10 @@ celery_app.conf.update(
         },
         "data-retention-cleanup-daily": {
             "task": "app.workers.tasks.retention_tasks.cleanup_old_data",
+            "schedule": 86400.0,  # once per day
+        },
+        "check-sla-breaches-daily": {
+            "task": "app.workers.tasks.sla_tasks.check_sla_breaches",
             "schedule": 86400.0,  # once per day
         },
     },
