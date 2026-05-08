@@ -1211,8 +1211,7 @@ export default function DevicesPage() {
             <div style={{ marginBottom: 12 }}>
               <Button
                 icon={<DownloadOutlined />} size="small" type="dashed"
-                href={devicesApi.getImportTemplate()}
-                download="device_import_template.csv"
+                onClick={() => devicesApi.downloadImportTemplate()}
               >
                 Şablon CSV İndir
               </Button>

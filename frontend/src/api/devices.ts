@@ -223,8 +223,12 @@ export const devicesApi = {
       }[]
     }>(`/devices/${id}/activity`, { params }).then((r) => r.data),
 
-  getImportTemplate: () =>
-    `/api/v1/devices/import-template`,
+  downloadImportTemplate: () =>
+    client.get('/devices/import-template', { responseType: 'blob' }).then((res) => {
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }))
+      const a = document.createElement('a'); a.href = url; a.download = 'device_import_template.csv'
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+    }),
 
   importCsv: (file: File) => {
     const form = new FormData()
