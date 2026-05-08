@@ -3,7 +3,12 @@ import asyncio
 import fnmatch
 from datetime import timezone
 
+import redis as _redis_lib
+
+from app.core.config import settings
 from app.workers.celery_app import celery_app
+
+_redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 @celery_app.task(name="app.workers.tasks.snmp_tasks.poll_snmp_all")
@@ -209,14 +214,9 @@ def _write_rows(db, device, ifaces: list, device_prev: dict, now) -> list[dict]:
 
 async def _check_alert_rules(device, new_rows: list[dict], rules: list):
     """Check thresholds for each new poll row; fire notifications when breached."""
-    import json
     from datetime import datetime
 
-    try:
-        import redis as _redis
-        r = _redis.Redis(host="redis", port=6379, decode_responses=True)
-    except Exception:
-        return
+    r = _redis
 
     now_ts = datetime.now(timezone.utc).timestamp()
 
@@ -299,6 +299,8 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
             f"Ardışık İhlal: {count} poll\n"
         )
 
+        import json
+        title = f"{rule.name}: {device.hostname}/{if_name} {metric_label}={value:.1f}{unit}"
         async with make_worker_session()() as db:
             # Persist alert fire as a NetworkEvent for history tracking
             db.add(NetworkEvent(
@@ -306,7 +308,7 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
                 device_hostname=device.hostname,
                 event_type="threshold_alert",
                 severity=rule.severity,
-                title=f"{rule.name}: {device.hostname}/{if_name} {metric_label}={value:.1f}{unit}",
+                title=title,
                 message=body,
                 details={
                     "rule_id": rule.id,
@@ -320,6 +322,19 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
                 },
             ))
             await db.commit()
+            from datetime import datetime
+            payload = json.dumps({
+                "device_id": device.id,
+                "device_hostname": device.hostname,
+                "event_type": "threshold_alert",
+                "severity": rule.severity,
+                "title": title,
+                "message": body,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            _redis.publish("network:events", payload)
+            _redis.lpush("network:events:recent", payload)
+            _redis.ltrim("network:events:recent", 0, 499)
 
             channels = (
                 await db.execute(
