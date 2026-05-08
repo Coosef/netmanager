@@ -439,6 +439,19 @@ async def lifespan(app: FastAPI):
         ))
         # Encrypt any existing plaintext SNMP community strings
         await _encrypt_existing_snmp_communities(conn)
+        # change_rollouts execution result columns
+        await conn.execute(text(
+            "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS total_devices INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS success_devices INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS failed_devices INTEGER NOT NULL DEFAULT 0"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS rolled_back_devices INTEGER NOT NULL DEFAULT 0"
+        ))
 
     await _create_default_tenant()
     await _create_default_admin()
