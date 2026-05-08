@@ -5,6 +5,7 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from sqlalchemy import select
 
 from app.core.config import settings
 from app.core.security import decode_access_token
@@ -18,6 +19,42 @@ async def _authenticate_ws(websocket: WebSocket, token: Optional[str]) -> bool:
         await websocket.close(code=4001)
         return False
     return True
+
+
+async def _get_tenant_device_ids(token: str) -> Optional[set]:
+    """Return set of device_ids the token owner can see, or None for super_admin (sees all)."""
+    from app.core.database import AsyncSessionLocal
+    from app.models.device import Device
+    from app.models.user import User, UserRole, SystemRole
+
+    payload = decode_access_token(token)
+    if not payload:
+        return set()
+    user_id = payload.get("sub")
+    if not user_id:
+        return set()
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(User).where(User.id == int(user_id), User.is_active == True)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            return set()
+
+        if user.system_role == SystemRole.SUPER_ADMIN or user.role == UserRole.SUPER_ADMIN:
+            return None  # sees everything
+
+        if not user.tenant_id:
+            return set()
+
+        rows = (await db.execute(
+            select(Device.id).where(
+                Device.tenant_id == user.tenant_id,
+                Device.is_active == True,
+            )
+        )).scalars().all()
+        return set(rows)
 
 
 @router.websocket("/tasks/{task_id}")
@@ -80,6 +117,19 @@ async def events_ws(
     """Live network events stream (persisted events: device_offline, stp, loop, port, etc.)"""
     if not await _authenticate_ws(websocket, token):
         return
+
+    accessible_ids = await _get_tenant_device_ids(token or "")
+
+    def _allowed(raw: str) -> bool:
+        if accessible_ids is None:
+            return True
+        try:
+            data = json.loads(raw)
+            dev_id = data.get("device_id")
+            return dev_id is not None and dev_id in accessible_ids
+        except Exception:
+            return False
+
     await websocket.accept()
     r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     pubsub = r.pubsub()
@@ -88,11 +138,12 @@ async def events_ws(
     # Replay last 30 events on connect
     recent = await r.lrange("network:events:recent", 0, 29)
     for item in reversed(recent):
-        await websocket.send_text(item)
+        if _allowed(item):
+            await websocket.send_text(item)
 
     try:
         async for message in pubsub.listen():
-            if message["type"] == "message":
+            if message["type"] == "message" and _allowed(message["data"]):
                 await websocket.send_text(message["data"])
     except WebSocketDisconnect:
         pass

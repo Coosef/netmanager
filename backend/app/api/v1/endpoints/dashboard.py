@@ -42,8 +42,17 @@ async def dashboard_analytics(
     devices = (await db.execute(dev_q)).scalars().all()
     total = len(devices)
     device_ids = [d.id for d in devices]
-    site_filter = NetworkEvent.device_id.in_(device_ids) if site and device_ids else None
-    site_filter_empty = site and not device_ids
+
+    # When the query is scoped to a tenant/location, filter events by the accessible device ids.
+    # Using device_ids directly avoids a correlated subquery and handles the empty-tenant case.
+    scoped = tenant_filter is not None or location_filter is not None or site
+    if scoped:
+        if device_ids:
+            ev_device_filter = NetworkEvent.device_id.in_(device_ids)
+        else:
+            ev_device_filter = text("false")
+    else:
+        ev_device_filter = None
 
     # ── Top N Problematic Devices (most events last 7d) ──────────────────────
     top_q = (
@@ -59,12 +68,9 @@ async def dashboard_analytics(
         .order_by(desc("event_count"))
         .limit(8)
     )
-    if site_filter_empty:
-        top_rows = []
-    else:
-        if site_filter is not None:
-            top_q = top_q.where(site_filter)
-        top_rows = (await db.execute(top_q)).fetchall()
+    if ev_device_filter is not None:
+        top_q = top_q.where(ev_device_filter)
+    top_rows = (await db.execute(top_q)).fetchall() if (not scoped or device_ids) else []
 
     top_problematic = [
         {
@@ -90,12 +96,9 @@ async def dashboard_analytics(
         .having(func.count() >= 4)
         .order_by(desc("flap_count"))
     )
-    if site_filter_empty:
-        flap_rows = []
-    else:
-        if site_filter is not None:
-            flap_q = flap_q.where(site_filter)
-        flap_rows = (await db.execute(flap_q)).fetchall()
+    if ev_device_filter is not None:
+        flap_q = flap_q.where(ev_device_filter)
+    flap_rows = (await db.execute(flap_q)).fetchall() if (not scoped or device_ids) else []
 
     flapping = [
         {"device_id": r[0], "hostname": r[1], "flap_count": r[2]}
@@ -139,9 +142,10 @@ async def dashboard_analytics(
     firmware_posture = sorted(fw_map.values(), key=lambda x: -x["count"])
 
     # ── Agent Health ─────────────────────────────────────────────────────────
-    agents = (await db.execute(
-        select(Agent).where(Agent.is_active == True)
-    )).scalars().all()
+    agent_q = select(Agent).where(Agent.is_active == True)
+    if tenant_filter is not None:
+        agent_q = agent_q.where(Agent.tenant_id == tenant_filter)
+    agents = (await db.execute(agent_q)).scalars().all()
 
     agent_health = []
     for a in agents:
@@ -163,9 +167,17 @@ async def dashboard_analytics(
         })
 
     # ── Change Summary (last 24h audit log) ──────────────────────────────────
+    audit_wheres = [AuditLog.created_at >= since_24h]
+    if tenant_filter is not None:
+        from app.models.user import User as _User
+        tenant_user_ids = (await db.execute(
+            select(_User.id).where(_User.tenant_id == tenant_filter)
+        )).scalars().all()
+        audit_wheres.append(AuditLog.user_id.in_(tenant_user_ids))
+
     change_rows = (await db.execute(
         select(AuditLog.action, AuditLog.username, AuditLog.resource_name, AuditLog.created_at)
-        .where(AuditLog.created_at >= since_24h)
+        .where(*audit_wheres)
         .order_by(AuditLog.created_at.desc())
         .limit(15)
     )).fetchall()
@@ -182,7 +194,7 @@ async def dashboard_analytics(
 
     action_counts_rows = (await db.execute(
         select(AuditLog.action, func.count().label("cnt"))
-        .where(AuditLog.created_at >= since_24h)
+        .where(*audit_wheres)
         .group_by(AuditLog.action)
         .order_by(desc("cnt"))
     )).fetchall()
@@ -306,18 +318,39 @@ async def snmp_summary(
         dev_base = dev_base.where(Device.tenant_id == tenant_filter)
     accessible_ids = (await db.execute(dev_base)).scalars().all()
 
-    snmp_row = (await db.execute(
-        select(
-            func.count(Device.id).label("total"),
-            func.sum(case((Device.snmp_enabled == True, 1), else_=0)).label("enabled"),
-        ).where(Device.is_active == True, Device.id.in_(accessible_ids) if accessible_ids is not None else text("true"))
-    )).one()
+    snmp_count_q = select(
+        func.count(Device.id).label("total"),
+        func.sum(case((Device.snmp_enabled == True, 1), else_=0)).label("enabled"),
+    ).where(Device.is_active == True)
+    if tenant_filter is not None:
+        snmp_count_q = snmp_count_q.where(Device.tenant_id == tenant_filter)
+    snmp_row = (await db.execute(snmp_count_q)).one()
+
+    # Build device_id IN clause for raw SQL when tenant is scoped
+    if tenant_filter is not None and not accessible_ids:
+        # Tenant has no devices — return empty SNMP data
+        return {
+            "snmp_enabled": 0,
+            "total_devices": 0,
+            "last_poll_at": None,
+            "critical_interfaces": 0,
+            "warning_interfaces": 0,
+            "total_interfaces": 0,
+            "total_in_bytes_24h": 0.0,
+            "total_out_bytes_24h": 0.0,
+            "top_interfaces": [],
+        }
+
+    snmp_id_clause = (
+        f"AND device_id IN ({','.join(str(i) for i in accessible_ids)})"
+        if tenant_filter is not None and accessible_ids else ""
+    )
 
     last_poll_row = (await db.execute(
-        text("SELECT MAX(polled_at) AS last_poll FROM snmp_poll_results")
+        text(f"SELECT MAX(polled_at) AS last_poll FROM snmp_poll_results WHERE 1=1 {snmp_id_clause}")
     )).one()
 
-    counts_row = (await db.execute(text("""
+    counts_row = (await db.execute(text(f"""
         SELECT
             COUNT(*) FILTER (WHERE max_pct >= 80) AS critical_count,
             COUNT(*) FILTER (WHERE max_pct >= 50 AND max_pct < 80) AS warning_count,
@@ -327,11 +360,12 @@ async def snmp_summary(
                 GREATEST(COALESCE(in_utilization_pct,0), COALESCE(out_utilization_pct,0)) AS max_pct
             FROM snmp_poll_results
             WHERE polled_at >= NOW() - INTERVAL '10 minutes'
+            {snmp_id_clause}
             ORDER BY device_id, if_index, polled_at DESC
         ) sub
     """))).one()
 
-    top_rows = (await db.execute(text("""
+    top_rows = (await db.execute(text(f"""
         SELECT s.device_id, d.hostname, s.if_index, s.if_name,
                s.in_utilization_pct, s.out_utilization_pct,
                GREATEST(COALESCE(s.in_utilization_pct,0), COALESCE(s.out_utilization_pct,0)) AS max_pct
@@ -341,6 +375,7 @@ async def snmp_summary(
             FROM snmp_poll_results
             WHERE polled_at >= NOW() - INTERVAL '10 minutes'
               AND (in_utilization_pct IS NOT NULL OR out_utilization_pct IS NOT NULL)
+            {snmp_id_clause}
             ORDER BY device_id, if_index, polled_at DESC
         ) s
         JOIN devices d ON d.id = s.device_id
@@ -348,11 +383,12 @@ async def snmp_summary(
         LIMIT 8
     """))).mappings().all()
 
-    total_traffic = (await db.execute(text("""
+    total_traffic = (await db.execute(text(f"""
         WITH latest AS (
             SELECT DISTINCT ON (device_id, if_index)
                 device_id, if_index, in_octets, out_octets
             FROM snmp_poll_results
+            WHERE 1=1 {snmp_id_clause}
             ORDER BY device_id, if_index, polled_at DESC
         ),
         oldest AS (
@@ -360,6 +396,7 @@ async def snmp_summary(
                 device_id, if_index, in_octets, out_octets
             FROM snmp_poll_results
             WHERE polled_at >= NOW() - INTERVAL '24 hours'
+            {snmp_id_clause}
             ORDER BY device_id, if_index, polled_at ASC
         )
         SELECT
@@ -434,9 +471,19 @@ async def dashboard_sparklines(
 async def snmp_chart(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Hourly average in/out utilization across all interfaces for the last 24 hours."""
-    rows = (await db.execute(text("""
+    id_clause = ""
+    if tenant_filter is not None:
+        dev_ids = (await db.execute(
+            select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
+        )).scalars().all()
+        if not dev_ids:
+            return {"points": []}
+        id_clause = f"AND device_id IN ({','.join(str(i) for i in dev_ids)})"
+
+    rows = (await db.execute(text(f"""
         SELECT
             date_trunc('hour', polled_at AT TIME ZONE 'UTC') AS hour,
             ROUND(AVG(in_utilization_pct)::numeric, 2)  AS avg_in,
@@ -445,6 +492,7 @@ async def snmp_chart(
         FROM snmp_poll_results
         WHERE polled_at >= NOW() - INTERVAL '24 hours'
           AND (in_utilization_pct IS NOT NULL OR out_utilization_pct IS NOT NULL)
+          {id_clause}
         GROUP BY hour
         ORDER BY hour
     """))).mappings().all()
