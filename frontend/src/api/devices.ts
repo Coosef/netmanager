@@ -129,6 +129,11 @@ export const devicesApi = {
 
   bulkFetchInfoStream: '/api/v1/devices/bulk-fetch-info-stream',
 
+  bulkTag: (device_ids: number[], tag: string, action: 'add' | 'remove') =>
+    client.patch<{ updated: number; total: number; tag: string; action: string }>(
+      '/devices/bulk-tag', { device_ids, tag, action }
+    ).then((r) => r.data),
+
   bulkUpdateAgent: (device_ids: number[], agent_id: string | null) =>
     client.post<{ updated: number; agent_id: string | null }>(
       '/devices/bulk-update-agent', { device_ids, agent_id }

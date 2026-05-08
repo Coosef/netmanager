@@ -601,6 +601,9 @@ export default function DevicesPage() {
   const [autoGroupOpen, setAutoGroupOpen] = useState(false)
   const [groupProfileOpen, setGroupProfileOpen] = useState(false)
   const [viewMode, setViewMode] = useState<'table' | 'grid'>('table')
+  const [bulkTagOpen, setBulkTagOpen] = useState(false)
+  const [bulkTagValue, setBulkTagValue] = useState('')
+  const [bulkTagAction, setBulkTagAction] = useState<'add' | 'remove'>('add')
   const pageSize = 50
 
   useTaskProgress(backupTaskId, {
@@ -693,6 +696,19 @@ export default function DevicesPage() {
       queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
     },
     onError: (err: any) => message.error(err?.response?.data?.detail || t('devices.bulk_delete_error')),
+  })
+
+  const bulkTagMutation = useMutation({
+    mutationFn: ({ tag, action }: { tag: string; action: 'add' | 'remove' }) =>
+      devicesApi.bulkTag(selectedRowKeys as number[], tag, action),
+    onSuccess: (res) => {
+      message.success(`${res.updated} cihaz güncellendi — etiket "${res.tag}" ${res.action === 'add' ? 'eklendi' : 'kaldırıldı'}`)
+      setBulkTagOpen(false)
+      setBulkTagValue('')
+      setSelectedRowKeys([])
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+    },
+    onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
   })
 
   const bulkBackupMutation = useMutation({
@@ -939,6 +955,9 @@ export default function DevicesPage() {
           {hasSelection && (
             <>
               <Tag color="blue" style={{ padding: '4px 10px', fontSize: 13 }}>{t('devices.selected', { count: selectedRowKeys.length })}</Tag>
+              <Button icon={<TagOutlined />} onClick={() => setBulkTagOpen(true)} style={{ borderColor: '#13c2c2', color: '#008080' }}>
+                Etiket İşlemi
+              </Button>
               <Button icon={<RobotOutlined />} onClick={() => setBulkAgentOpen(true)} style={{ borderColor: '#722ed1', color: '#531dab' }}>
                 {t('devices.bulk_agent')}
               </Button>
@@ -1293,6 +1312,45 @@ export default function DevicesPage() {
             <SshTerminal deviceId={termDevice.id} isDark={isDark} onClose={() => setTermDevice(null)} />
           </Suspense>
         )}
+      </Modal>
+
+      {/* Bulk Tag Modal */}
+      <Modal
+        title={`Toplu Etiket İşlemi — ${selectedRowKeys.length} cihaz`}
+        open={bulkTagOpen}
+        onCancel={() => { setBulkTagOpen(false); setBulkTagValue('') }}
+        onOk={() => bulkTagValue.trim() && bulkTagMutation.mutate({ tag: bulkTagValue.trim(), action: bulkTagAction })}
+        okText={bulkTagAction === 'add' ? 'Ekle' : 'Kaldır'}
+        confirmLoading={bulkTagMutation.isPending}
+        okButtonProps={{ disabled: !bulkTagValue.trim() }}
+        destroyOnClose
+      >
+        <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
+          <Radio.Group
+            value={bulkTagAction}
+            onChange={(e) => setBulkTagAction(e.target.value)}
+            optionType="button"
+            buttonStyle="solid"
+          >
+            <Radio.Button value="add">Etiket Ekle</Radio.Button>
+            <Radio.Button value="remove">Etiket Kaldır</Radio.Button>
+          </Radio.Group>
+          <Select
+            mode="tags"
+            style={{ width: '100%' }}
+            placeholder="Etiket girin veya mevcut etiketlerden seçin"
+            options={allTags}
+            value={bulkTagValue ? [bulkTagValue] : []}
+            onChange={(vals) => setBulkTagValue(vals[vals.length - 1] || '')}
+            maxCount={1}
+            tokenSeparators={[',']}
+          />
+          <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+            {bulkTagAction === 'add'
+              ? `Seçili ${selectedRowKeys.length} cihaza bu etiket eklenecek`
+              : `Seçili ${selectedRowKeys.length} cihazdan bu etiket kaldırılacak`}
+          </div>
+        </Space>
       </Modal>
     </div>
   )

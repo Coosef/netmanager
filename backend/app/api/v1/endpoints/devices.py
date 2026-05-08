@@ -896,6 +896,63 @@ async def bulk_delete_devices(
     return {"deleted": len(devices)}
 
 
+@router.patch("/bulk-tag", response_model=dict)
+async def bulk_tag_devices(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Add or remove a tag on multiple devices at once.
+
+    Body: {"device_ids": [int], "tag": str, "action": "add" | "remove"}
+    """
+    if not current_user.has_permission("device:edit"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    body = await request.json()
+    device_ids: list[int] = body.get("device_ids", [])
+    tag_value: str = (body.get("tag") or "").strip()
+    action: str = body.get("action", "add")
+
+    if not device_ids:
+        raise HTTPException(400, "device_ids required")
+    if not tag_value:
+        raise HTTPException(400, "tag required")
+    if action not in ("add", "remove"):
+        raise HTTPException(400, "action must be 'add' or 'remove'")
+
+    from app.models.user import UserRole
+    tenant_clause = (
+        [Device.id.in_(device_ids)]
+        if current_user.role == UserRole.SUPER_ADMIN
+        else [Device.id.in_(device_ids), Device.tenant_id == current_user.tenant_id]
+    )
+    devices = (await db.execute(select(Device).where(*tenant_clause))).scalars().all()
+    if not devices:
+        raise HTTPException(404, "No matching devices found")
+
+    updated = 0
+    for device in devices:
+        current_tags = [t.strip() for t in (device.tags or "").split(",") if t.strip()]
+        if action == "add":
+            if tag_value not in current_tags:
+                current_tags.append(tag_value)
+        else:
+            current_tags = [t for t in current_tags if t != tag_value]
+        new_tags = ",".join(current_tags)
+        if new_tags != (device.tags or ""):
+            device.tags = new_tags or None
+            updated += 1
+
+    await db.commit()
+    await log_action(
+        db, current_user, f"devices_bulk_tag_{action}", "device", None, None,
+        details={"device_ids": device_ids, "tag": tag_value, "updated": updated},
+        request=request,
+    )
+    return {"updated": updated, "total": len(devices), "tag": tag_value, "action": action}
+
+
 @router.post("/bulk-fetch-info", response_model=dict)
 async def bulk_fetch_info(
     request: Request,
