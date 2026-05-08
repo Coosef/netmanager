@@ -301,9 +301,12 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
 
         import json
         title = f"{rule.name}: {device.hostname}/{if_name} {metric_label}={value:.1f}{unit}"
+        from datetime import datetime
+        from app.models.notification import NotificationLog
+
         async with make_worker_session()() as db:
             # Persist alert fire as a NetworkEvent for history tracking
-            db.add(NetworkEvent(
+            evt = NetworkEvent(
                 device_id=device.id,
                 device_hostname=device.hostname,
                 event_type="threshold_alert",
@@ -320,21 +323,9 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
                     "unit": unit,
                     "consecutive_count": count,
                 },
-            ))
-            await db.commit()
-            from datetime import datetime
-            payload = json.dumps({
-                "device_id": device.id,
-                "device_hostname": device.hostname,
-                "event_type": "threshold_alert",
-                "severity": rule.severity,
-                "title": title,
-                "message": body,
-                "ts": datetime.now(timezone.utc).isoformat(),
-            })
-            _redis.publish("network:events", payload)
-            _redis.lpush("network:events:recent", payload)
-            _redis.ltrim("network:events:recent", 0, 499)
+            )
+            db.add(evt)
+            await db.flush()  # get evt.id
 
             channels = (
                 await db.execute(
@@ -348,7 +339,30 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
                 ) or (
                     rule.severity == "warning" and "warning_event" in notify_on
                 ):
-                    await send_channel(ch, subject, body)
+                    ok, err = await send_channel(ch, subject, body)
+                    # Log the send so process_notifications doesn't resend
+                    db.add(NotificationLog(
+                        channel_id=ch.id,
+                        source_type="network_event",
+                        source_id=evt.id,
+                        success=ok,
+                        error=err,
+                    ))
+
+            await db.commit()
+
+            payload = json.dumps({
+                "device_id": device.id,
+                "device_hostname": device.hostname,
+                "event_type": "threshold_alert",
+                "severity": rule.severity,
+                "title": title,
+                "message": body,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            _redis.publish("network:events", payload)
+            _redis.lpush("network:events:recent", payload)
+            _redis.ltrim("network:events:recent", 0, 499)
     except Exception:
         pass
 
