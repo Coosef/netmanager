@@ -115,7 +115,6 @@ async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
 
 # ── REST ─────────────────────────────────────────────────────────────────────
 
-@router.get("/", response_model=list[dict])
 async def _get_agent_scoped(agent_id: str, db: AsyncSession, tenant_filter) -> Agent:
     """Fetch agent and validate it belongs to the current user's tenant."""
     q = select(Agent).where(Agent.id == agent_id, Agent.is_active == True)
@@ -127,6 +126,7 @@ async def _get_agent_scoped(agent_id: str, db: AsyncSession, tenant_filter) -> A
     return agent
 
 
+@router.get("/", response_model=list[dict])
 async def list_agents(db: AsyncSession = Depends(get_db), _: CurrentUser = None, tenant_filter: TenantFilter = None):
     q = select(Agent).where(Agent.is_active == True)
     if tenant_filter is not None:
