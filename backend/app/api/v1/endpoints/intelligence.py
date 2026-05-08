@@ -9,13 +9,16 @@ Sprint 14A — Behavior Analytics
   GET /intelligence/anomalies — mac_anomaly / traffic_spike / vlan_anomaly / mac_loop_suspicion
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import redis
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser, LocationNameFilter
 from app.models.audit_log import AuditLog
@@ -25,6 +28,9 @@ from app.models.network_event import NetworkEvent
 from app.models.security_audit import SecurityAudit
 
 router = APIRouter()
+
+_redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+_RISK_CACHE_TTL = 300  # 5 minutes
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -39,7 +45,7 @@ def _risk_level(score: float) -> str:
     return "critical"
 
 
-async def _calc_risk(db: AsyncSession, device: Device, now: datetime) -> dict:
+async def _calc_risk_uncached(db: AsyncSession, device: Device, now: datetime) -> dict:
     since_7d = now - timedelta(days=7)
 
     # 1. Compliance — 25 puan ağırlık
@@ -131,6 +137,16 @@ async def _calc_risk(db: AsyncSession, device: Device, now: datetime) -> dict:
             },
         },
     }
+
+
+async def _calc_risk(db: AsyncSession, device: Device, now: datetime) -> dict:
+    cache_key = f"risk:device:{device.id}"
+    cached = _redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    result = await _calc_risk_uncached(db, device, now)
+    _redis.setex(cache_key, _RISK_CACHE_TTL, json.dumps(result))
+    return result
 
 
 # ── 12A: Risk Score ───────────────────────────────────────────────────────────

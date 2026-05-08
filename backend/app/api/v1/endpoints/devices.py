@@ -2231,7 +2231,11 @@ async def get_health_scores(
                 score -= 15; issues.append("config drift")
 
         latest_bk = backup_map.get(dev.id)
-        if not latest_bk or (now - latest_bk.replace(tzinfo=timezone.utc)).total_seconds() > 7 * 86400:
+        if latest_bk:
+            lb = latest_bk if latest_bk.tzinfo else latest_bk.replace(tzinfo=timezone.utc)
+            if (now - lb).total_seconds() > 7 * 86400:
+                score -= 10; issues.append("7+ gündür backup yok")
+        else:
             score -= 10; issues.append("7+ gündür backup yok")
 
         results.append({
