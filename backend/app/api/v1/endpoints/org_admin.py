@@ -114,17 +114,22 @@ async def list_users(
     page: int = 1,
     per_page: int = 50,
 ):
-    org_id = current_user.org_id
-    if not org_id:
-        raise HTTPException(400, "Organizasyona bağlı değilsiniz")
-
     offset = (page - 1) * per_page
+    if _is_super(current_user):
+        # Super admin sees all users across all organizations
+        where_clause = []
+    else:
+        org_id = current_user.org_id
+        if not org_id:
+            raise HTTPException(400, "Organizasyona bağlı değilsiniz")
+        where_clause = [User.org_id == org_id]
+
     total = (await db.execute(
-        select(func.count()).select_from(User).where(User.org_id == org_id)
+        select(func.count()).select_from(User).where(*where_clause)
     )).scalar()
     rows = (await db.execute(
         select(User)
-        .where(User.org_id == org_id)
+        .where(*where_clause)
         .order_by(User.id)
         .offset(offset).limit(per_page)
     )).scalars().all()
@@ -137,7 +142,8 @@ async def get_user(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    user = await _get_org_user(db, user_id, current_user.org_id)
+    scope_org = None if _is_super(current_user) else current_user.org_id
+    user = await _get_org_user(db, user_id, scope_org)
     perms = await _get_user_perm_assignments(db, user.id)
     d = _user_dict(user)
     d["perm_assignments"] = perms
@@ -151,7 +157,8 @@ async def update_user(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    user = await _get_org_user(db, user_id, current_user.org_id)
+    scope_org = None if _is_super(current_user) else current_user.org_id
+    user = await _get_org_user(db, user_id, scope_org)
 
     # Org admin cannot promote to super_admin
     if payload.system_role == SystemRole.SUPER_ADMIN and not current_user.is_super_admin:
@@ -170,7 +177,8 @@ async def remove_user(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    user = await _get_org_user(db, user_id, current_user.org_id)
+    scope_org = None if _is_super(current_user) else current_user.org_id
+    user = await _get_org_user(db, user_id, scope_org)
     if user.id == current_user.id:
         raise HTTPException(400, "Kendinizi silemezsiniz")
     # Soft-delete: deactivate instead of hard delete
@@ -349,7 +357,8 @@ async def get_user_permissions(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_org_user(db, user_id, current_user.org_id)
+    scope_org = None if _is_super(current_user) else current_user.org_id
+    await _get_org_user(db, user_id, scope_org)
     assignments = await _get_user_perm_assignments(db, user_id)
     return {"user_id": user_id, "assignments": assignments}
 
@@ -362,7 +371,8 @@ async def assign_user_permission(
     db: AsyncSession = Depends(get_db),
 ):
     """Create or replace a permission assignment for (user, location)."""
-    await _get_org_user(db, user_id, current_user.org_id)
+    scope_org = None if _is_super(current_user) else current_user.org_id
+    await _get_org_user(db, user_id, scope_org)
 
     # Validate permission set
     ps = await db.get(PermissionSet, payload.permission_set_id)
@@ -403,7 +413,8 @@ async def remove_user_permission(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_org_user(db, user_id, current_user.org_id)
+    scope_org = None if _is_super(current_user) else current_user.org_id
+    await _get_org_user(db, user_id, scope_org)
     ulp = await db.get(UserLocationPerm, ulp_id)
     if not ulp or ulp.user_id != user_id:
         raise HTTPException(404, "Atama bulunamadı")
@@ -415,9 +426,19 @@ async def remove_user_permission(
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _is_super(user: User) -> bool:
+    return (
+        user.system_role == SystemRole.SUPER_ADMIN
+        or getattr(user, "role", None) == "super_admin"
+    )
+
+
 async def _get_org_user(db: AsyncSession, user_id: int, org_id: Optional[int]) -> User:
+    """org_id=None means caller is super_admin — skip org ownership check."""
     user = await db.get(User, user_id)
-    if not user or user.org_id != org_id:
+    if not user:
+        raise HTTPException(404, "Kullanıcı bulunamadı")
+    if org_id is not None and user.org_id != org_id:
         raise HTTPException(404, "Kullanıcı bulunamadı")
     return user
 
