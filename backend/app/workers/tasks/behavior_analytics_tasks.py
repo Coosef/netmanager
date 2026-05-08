@@ -116,7 +116,7 @@ async def _fire(db, device, event_type: str, severity: str, title: str,
             )).scalar_one_or_none()
             if existing:
                 existing.details = details
-        return
+        return None
     evt = NetworkEvent(
         device_id=device.id,
         device_hostname=device.hostname,
@@ -127,6 +127,15 @@ async def _fire(db, device, event_type: str, severity: str, title: str,
         details=details or {},
     )
     db.add(evt)
+    return {
+        "device_id": device.id,
+        "device_hostname": device.hostname,
+        "event_type": event_type,
+        "severity": severity,
+        "title": title,
+        "message": message,
+        "ts": datetime.now(timezone.utc).isoformat(),
+    }
 
 
 async def _upsert_baseline(db, device_id: int, metric_type: str,
@@ -276,6 +285,8 @@ async def _do_detect_anomalies():
                 ).scalar_one_or_none()
             return device_cache[device_id]
 
+        notify_queue: list[dict] = []
+
         # ── 1. MAC count anomaly ───────────────────────────────────────────────
         mac_counts = (await db.execute(
             select(MacAddressEntry.device_id,
@@ -290,12 +301,14 @@ async def _do_detect_anomalies():
                 if r.cnt > 2 * b.baseline_value:
                     dev = await _dev(r.device_id)
                     if dev:
-                        await _fire(db, dev, "mac_anomaly", "warning",
+                        payload = await _fire(db, dev, "mac_anomaly", "warning",
                             f"MAC Sayısı Anomalisi: {dev.hostname}",
                             f"Aktif MAC {r.cnt} (baseline: {b.baseline_value:.0f})",
                             details={"current": r.cnt, "baseline": round(b.baseline_value, 1)},
                             dedup_key=f"mac_{dev.id}_{r.cnt}")
-                        fired += 1
+                        if payload:
+                            notify_queue.append(payload)
+                            fired += 1
 
         # ── 2. Traffic spike ───────────────────────────────────────────────────
         traffic_rows = (await db.execute(
@@ -320,14 +333,16 @@ async def _do_detect_anomalies():
                         dev = await _dev(r.device_id)
                         if dev:
                             direction = "Gelen" if "in" in metric else "Giden"
-                            await _fire(db, dev, "traffic_spike", "warning",
+                            payload = await _fire(db, dev, "traffic_spike", "warning",
                                 f"Trafik Spike: {dev.hostname}",
                                 f"{direction} trafik %{current:.1f} (baseline: %{b.baseline_value:.1f})",
                                 details={"direction": direction.lower(),
                                          "current_pct": round(current, 1),
                                          "baseline_pct": round(b.baseline_value, 1)},
                                 dedup_key=f"traffic_{dev.id}_{metric}_{int(current)}")
-                            fired += 1
+                            if payload:
+                                notify_queue.append(payload)
+                                fired += 1
 
         # ── 3. VLAN anomaly ────────────────────────────────────────────────────
         vlan_rows = (await db.execute(
@@ -348,13 +363,15 @@ async def _do_detect_anomalies():
                 if new_vlans:
                     dev = await _dev(device_id)
                     if dev:
-                        await _fire(db, dev, "vlan_anomaly", "warning",
+                        payload = await _fire(db, dev, "vlan_anomaly", "warning",
                             f"Beklenmeyen VLAN: {dev.hostname}",
                             f"Yeni VLAN'lar: {sorted(new_vlans)}",
                             details={"new_vlans": sorted(new_vlans),
                                      "known_vlans": sorted(b.known_vlans)},
                             dedup_key=f"vlan_{device_id}_{'_'.join(str(v) for v in sorted(new_vlans))}")
-                        fired += 1
+                        if payload:
+                            notify_queue.append(payload)
+                            fired += 1
 
         # ── 4. MAC loop suspicion ──────────────────────────────────────────────
         loop_rows = (await db.execute(
@@ -381,7 +398,7 @@ async def _do_detect_anomalies():
                     .distinct()
                 )
                 ports = [row[0] for row in port_q.all()]
-                await _fire(db, dev, "mac_loop_suspicion", "warning",
+                payload = await _fire(db, dev, "mac_loop_suspicion", "warning",
                     f"Döngü Şüphesi: {dev.hostname}",
                     f"MAC {r.mac_address} → {r.port_cnt} farklı portta",
                     details={
@@ -391,9 +408,15 @@ async def _do_detect_anomalies():
                         "device": dev.hostname,
                     },
                     dedup_key=f"loop_{dev.id}_{r.mac_address}")
-                fired += 1
+                if payload:
+                    notify_queue.append(payload)
+                    fired += 1
 
         if fired:
             await db.commit()
+            for p in notify_queue:
+                _redis.publish("network:events", json.dumps(p))
+                _redis.lpush("network:events:recent", json.dumps(p))
+            _redis.ltrim("network:events:recent", 0, 499)
 
         print(f"[behavior] Anomaly scan done — {fired} events fired")
