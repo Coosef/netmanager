@@ -19,6 +19,11 @@ from app.core.config import settings
 
 log = logging.getLogger("agent_manager")
 
+
+def _decrypt_community(value) -> str:
+    from app.core.security import decrypt_credential_safe
+    return decrypt_credential_safe(value) or "public"
+
 _COMMAND_TIMEOUT = 60  # seconds to wait for SSH result from agent
 _AGENT_ONLINE_TTL = 60  # seconds; refreshed on every heartbeat (agent sends every 15s)
 
@@ -814,7 +819,7 @@ class AgentManager:
             "device_ip": device.ip_address,
             "snmp_port": getattr(device, "snmp_port", 161) or 161,
             "snmp_version": getattr(device, "snmp_version", "v2c") or "v2c",
-            "snmp_community": getattr(device, "snmp_community", "public") or "public",
+            "snmp_community": _decrypt_community(getattr(device, "snmp_community", None)),
             "oids": oids,
         }
         return await self._send_request(agent_id, payload, timeout=15)
@@ -827,7 +832,7 @@ class AgentManager:
             "device_ip": device.ip_address,
             "snmp_port": getattr(device, "snmp_port", 161) or 161,
             "snmp_version": getattr(device, "snmp_version", "v2c") or "v2c",
-            "snmp_community": getattr(device, "snmp_community", "public") or "public",
+            "snmp_community": _decrypt_community(getattr(device, "snmp_community", None)),
             "oid_prefix": oid_prefix,
         }
         return await self._send_request(agent_id, payload, timeout=30)

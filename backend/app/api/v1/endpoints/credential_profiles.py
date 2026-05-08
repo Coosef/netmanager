@@ -59,7 +59,8 @@ def _apply_fields(p: CredentialProfile, payload: dict):
     if "snmp_enabled" in payload:
         p.snmp_enabled = bool(payload["snmp_enabled"])
     if "snmp_community" in payload:
-        p.snmp_community = payload["snmp_community"] or None
+        community = payload["snmp_community"] or None
+        p.snmp_community = encrypt_credential(community) if community else None
     if "snmp_version" in payload:
         p.snmp_version = payload.get("snmp_version", "v2c")
     if "snmp_port" in payload:

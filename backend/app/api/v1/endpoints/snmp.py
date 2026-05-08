@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser, LocationNameFilter
-from app.core.security import decrypt_credential_safe
+from app.core.security import decrypt_credential_safe, encrypt_credential
 from app.models.device import Device
 from app.models.snmp_metric import SnmpPollResult
 from app.services import snmp_service
@@ -54,7 +54,7 @@ async def bulk_configure_snmp(
     result = await db.execute(
         q.values(
             snmp_enabled=True,
-            snmp_community=payload.community,
+            snmp_community=encrypt_credential(payload.community) if payload.community else None,
             snmp_version=payload.version,
             snmp_port=payload.port,
         )
@@ -118,7 +118,7 @@ async def bulk_ssh_configure(
         await db.execute(
             update(Device).where(Device.id.in_(succeeded_ids)).values(
                 snmp_enabled=True,
-                snmp_community=payload.community,
+                snmp_community=encrypt_credential(payload.community) if payload.community else None,
                 snmp_version=payload.version,
                 snmp_port=payload.port,
             )
@@ -297,7 +297,7 @@ async def snmp_health(
     try:
         info = await snmp_service.get_system_info(
             host=device.ip_address,
-            community=device.snmp_community or "",
+            community=decrypt_credential_safe(device.snmp_community) or "",
             version=device.snmp_version,
             port=device.snmp_port,
             **_v3_kwargs(device),
@@ -319,7 +319,7 @@ async def snmp_interfaces(
     try:
         ifaces = await snmp_service.get_interfaces(
             host=device.ip_address,
-            community=device.snmp_community or "",
+            community=decrypt_credential_safe(device.snmp_community) or "",
             version=device.snmp_version,
             port=device.snmp_port,
             **_v3_kwargs(device),
@@ -376,7 +376,7 @@ async def snmp_cpu_ram(
     try:
         data = await snmp_service.get_cpu_ram(
             host=device.ip_address,
-            community=device.snmp_community or "",
+            community=decrypt_credential_safe(device.snmp_community) or "",
             version=device.snmp_version,
             port=device.snmp_port,
             vendor=device.vendor,

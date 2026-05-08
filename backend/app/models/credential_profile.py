@@ -24,7 +24,7 @@ class CredentialProfile(Base):
 
     # SNMP v1/v2c
     snmp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
-    snmp_community: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    snmp_community: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     snmp_version: Mapped[str] = mapped_column(String(8), default="v2c")
     snmp_port: Mapped[int] = mapped_column(Integer, default=161)
 

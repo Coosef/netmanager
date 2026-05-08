@@ -1006,7 +1006,8 @@ async def refresh_credential_vault(
     for d in devices:
         pwd = decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else ""
         enable = decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else ""
-        community = d.snmp_community or ""
+        from app.core.security import decrypt_credential_safe as _dec_safe
+        community = _dec_safe(d.snmp_community) or ""
         if has_crypto:
             credentials.append({
                 "credential_id": d.id,

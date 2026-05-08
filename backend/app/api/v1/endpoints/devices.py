@@ -442,7 +442,7 @@ async def create_device(
         agent_id=payload.agent_id or None,
         is_readonly=payload.is_readonly,
         snmp_enabled=payload.snmp_enabled,
-        snmp_community=payload.snmp_community,
+        snmp_community=encrypt_credential(payload.snmp_community) if payload.snmp_community else None,
         snmp_version=payload.snmp_version,
         snmp_port=payload.snmp_port,
         snmp_v3_username=payload.snmp_v3_username,
@@ -739,6 +739,9 @@ async def update_device(
     if "enable_secret" in data:
         secret = data.pop("enable_secret")
         device.enable_secret_enc = encrypt_credential(secret) if secret else None
+    if "snmp_community" in data:
+        community = data.pop("snmp_community")
+        device.snmp_community = encrypt_credential(community) if community else None
 
     for field, value in data.items():
         setattr(device, field, value)
@@ -1558,7 +1561,7 @@ async def configure_snmp(
     device.snmp_version = version
     device.snmp_port = snmp_port
     if version == "v2c":
-        device.snmp_community = community
+        device.snmp_community = encrypt_credential(community) if community else None
     else:
         device.snmp_v3_username = v3_user
         device.snmp_v3_auth_protocol = v3_auth_proto

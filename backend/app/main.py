@@ -414,6 +414,15 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs(created_at)"
         ))
+        # Expand snmp_community columns to hold Fernet-encrypted values (~200 chars)
+        await conn.execute(text(
+            "ALTER TABLE devices ALTER COLUMN snmp_community TYPE VARCHAR(512)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE credential_profiles ALTER COLUMN snmp_community TYPE VARCHAR(512)"
+        ))
+        # Encrypt any existing plaintext SNMP community strings
+        await _encrypt_existing_snmp_communities(conn)
 
     await _create_default_tenant()
     await _create_default_admin()
@@ -545,6 +554,33 @@ async def _backfill_mac_oui():
             await db.commit()
 
         print(f"[OUI backfill] {len(rows)} MAC entries enriched.")
+
+
+async def _encrypt_existing_snmp_communities(conn) -> None:
+    """One-time migration: encrypt any plaintext SNMP community strings in devices and credential_profiles."""
+    from app.core.security import encrypt_credential, decrypt_credential_safe
+    from cryptography.fernet import InvalidToken
+
+    def _needs_encryption(val: str) -> bool:
+        try:
+            from cryptography.fernet import Fernet
+            from app.core.config import settings
+            Fernet(settings.CREDENTIAL_ENCRYPTION_KEY.encode()).decrypt(val.encode())
+            return False  # already encrypted
+        except Exception:
+            return True  # plaintext
+
+    for table in ("devices", "credential_profiles"):
+        rows = (await conn.execute(
+            text(f"SELECT id, snmp_community FROM {table} WHERE snmp_community IS NOT NULL AND snmp_community != ''")
+        )).fetchall()
+        for row_id, community in rows:
+            if _needs_encryption(community):
+                encrypted = encrypt_credential(community)
+                await conn.execute(
+                    text(f"UPDATE {table} SET snmp_community = :enc WHERE id = :id"),
+                    {"enc": encrypted, "id": row_id},
+                )
 
 
 async def _seed_builtin_templates():
