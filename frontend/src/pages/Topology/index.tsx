@@ -1014,8 +1014,10 @@ function TopologyFlow() {
         {viewMode === '3d' && (
           <div style={{
             position: 'absolute', top: 12, right: 12, zIndex: 10, width: 238,
-            background: 'rgba(3,12,30,0.92)', borderRadius: 12, padding: '10px 12px',
-            border: '1px solid rgba(0,195,255,0.22)', backdropFilter: 'blur(12px)',
+            background: isDark ? 'rgba(3,12,30,0.92)' : 'rgba(255,255,255,0.96)',
+            borderRadius: 12, padding: '10px 12px',
+            border: `1px solid ${isDark ? 'rgba(0,195,255,0.22)' : '#e2e8f0'}`,
+            backdropFilter: 'blur(12px)',
             display: 'flex', flexDirection: 'column', gap: 8,
           }}>
             {/* Search */}
@@ -1034,11 +1036,11 @@ function TopologyFlow() {
             )}
 
             {/* Divider */}
-            <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)' }} />
+            <div style={{ borderTop: `1px solid ${isDark ? 'rgba(0,195,255,0.10)' : '#e2e8f0'}` }} />
 
             {/* Tour */}
             <div>
-              <div style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 9, color: isDark ? '#00d4ff' : '#3b82f6', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
                 Otomatik Tur
               </div>
               <Button
@@ -1061,7 +1063,7 @@ function TopologyFlow() {
 
             {/* Path tracing */}
             <div>
-              <div style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
+              <div style={{ fontSize: 9, color: isDark ? '#00d4ff' : '#3b82f6', fontWeight: 700, letterSpacing: 1.5, marginBottom: 5, textTransform: 'uppercase' }}>
                 Yol Bul
               </div>
               <Button
@@ -1084,7 +1086,7 @@ function TopologyFlow() {
             </div>
 
             {/* Isolate hint */}
-            <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)', paddingTop: 6 }}>
+            <div style={{ borderTop: `1px solid ${isDark ? 'rgba(0,195,255,0.10)' : '#e2e8f0'}`, paddingTop: 6 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 9, color: '#94a3b8', letterSpacing: 0.5 }}>
                   🖱 Sağ tık → cihazı izole et
@@ -1100,25 +1102,25 @@ function TopologyFlow() {
             </div>
 
             {/* Layer toggles */}
-            <div style={{ borderTop: '1px solid rgba(0,195,255,0.10)', paddingTop: 6 }}>
+            <div style={{ borderTop: `1px solid ${isDark ? 'rgba(0,195,255,0.10)' : '#e2e8f0'}`, paddingTop: 6 }}>
               {/* Mode toggle */}
               <div
                 onClick={() => setLayerMode((v) => !v)}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                   cursor: 'pointer', marginBottom: 6, padding: '4px 8px', borderRadius: 5,
-                  background: layerMode ? 'rgba(0,195,255,0.07)' : 'rgba(99,102,241,0.10)',
-                  border: `1px solid ${layerMode ? 'rgba(0,195,255,0.25)' : 'rgba(99,102,241,0.35)'}`,
+                  background: layerMode ? (isDark ? 'rgba(0,195,255,0.07)' : 'rgba(59,130,246,0.07)') : 'rgba(99,102,241,0.10)',
+                  border: `1px solid ${layerMode ? (isDark ? 'rgba(0,195,255,0.25)' : 'rgba(59,130,246,0.35)') : 'rgba(99,102,241,0.35)'}`,
                   userSelect: 'none', transition: 'all 0.15s',
                 }}
               >
                 <span style={{ fontSize: 13 }}>{layerMode ? '⬛' : '🌐'}</span>
-                <span style={{ fontSize: 10, fontWeight: 600, color: layerMode ? '#00d4ff' : '#818cf8' }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: layerMode ? (isDark ? '#00d4ff' : '#3b82f6') : '#818cf8' }}>
                   {layerMode ? 'Katman Modu' : 'Klasik Mod'}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
-                <span style={{ fontSize: 9, color: '#00d4ff', fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
+                <span style={{ fontSize: 9, color: isDark ? '#00d4ff' : '#3b82f6', fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>
                   Katmanlar
                 </span>
                 <div
@@ -1129,9 +1131,9 @@ function TopologyFlow() {
                   )}
                   style={{
                     fontSize: 9, cursor: 'pointer', padding: '2px 6px',
-                    borderRadius: 3, border: '1px solid rgba(0,195,255,0.25)',
-                    color: hiddenLayers.size === 0 ? '#94a3b8' : '#00d4ff',
-                    background: hiddenLayers.size === 0 ? 'transparent' : 'rgba(0,195,255,0.08)',
+                    borderRadius: 3, border: `1px solid ${isDark ? 'rgba(0,195,255,0.25)' : '#bfdbfe'}`,
+                    color: hiddenLayers.size === 0 ? '#94a3b8' : (isDark ? '#00d4ff' : '#3b82f6'),
+                    background: hiddenLayers.size === 0 ? 'transparent' : (isDark ? 'rgba(0,195,255,0.08)' : 'rgba(59,130,246,0.08)'),
                     userSelect: 'none', transition: 'all 0.15s',
                   }}
                 >
@@ -1160,7 +1162,7 @@ function TopologyFlow() {
                         display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
                         padding: '3px 6px', borderRadius: 4, userSelect: 'none',
                         background: visible ? `${color}18` : 'transparent',
-                        border: `1px solid ${visible ? color + '44' : 'rgba(255,255,255,0.06)'}`,
+                        border: `1px solid ${visible ? color + '44' : (isDark ? 'rgba(255,255,255,0.06)' : '#e2e8f0')}`,
                         opacity: visible ? 1 : 0.4,
                         transition: 'all 0.15s',
                       }}

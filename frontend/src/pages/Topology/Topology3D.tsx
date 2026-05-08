@@ -88,7 +88,7 @@ export interface Topology3DHandle {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
-  { graph, width, height, onNodeClick, searchQuery, pathMode = false, blastDeviceIds = [], hiddenLayers, layerMode = true },
+  { graph, isDark = true, width, height, onNodeClick, searchQuery, pathMode = false, blastDeviceIds = [], hiddenLayers, layerMode = true },
   ref,
 ) {
   const fgRef = useRef<any>(null)
@@ -537,7 +537,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
   if (!hasEverHadData.current) {
     return (
       <div style={{
-        width, height, background: '#030c1e',
+        width, height, background: isDark ? '#030c1e' : '#f0f4f8',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
       }}>
         <div style={{ color: '#00d4ff', fontSize: 13, letterSpacing: 1, opacity: 0.7 }}>
@@ -553,7 +553,7 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
       graphData={graphData}
       width={width}
       height={height}
-      backgroundColor="#030c1e"
+      backgroundColor={isDark ? '#030c1e' : '#f0f4f8'}
       nodeThreeObject={nodeThreeObject}
       nodeThreeObjectExtend={false}
       linkColor={linkColorFn}
