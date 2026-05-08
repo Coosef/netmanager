@@ -332,22 +332,20 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
                     select(NotificationChannel).where(NotificationChannel.is_active == True)
                 )
             ).scalars().all()
+            severity_cat = "critical_event" if rule.severity == "critical" else "warning_event"
             for ch in channels:
-                notify_on = ch.notify_on or []
-                if "threshold_alert" in notify_on or (
-                    rule.severity == "critical" and "critical_event" in notify_on
-                ) or (
-                    rule.severity == "warning" and "warning_event" in notify_on
-                ):
-                    ok, err = await send_channel(ch, subject, body)
-                    # Log the send so process_notifications doesn't resend
-                    db.add(NotificationLog(
-                        channel_id=ch.id,
-                        source_type="network_event",
-                        source_id=evt.id,
-                        success=ok,
-                        error=err,
-                    ))
+                notify_on = set(ch.notify_on or [])
+                if not ({"threshold_alert", severity_cat, "any_event"} & notify_on):
+                    continue
+                ok, err = await send_channel(ch, subject, body)
+                # Log the send so process_notifications doesn't resend
+                db.add(NotificationLog(
+                    channel_id=ch.id,
+                    source_type="network_event",
+                    source_id=evt.id,
+                    success=ok,
+                    error=err,
+                ))
 
             await db.commit()
 
