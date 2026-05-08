@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -10,7 +10,6 @@ from app.core.database import Base
 class MacAddressEntry(Base):
     __tablename__ = "mac_address_entries"
     __table_args__ = (
-        UniqueConstraint("device_id", "mac_address", name="uq_mac_device_mac"),
         Index("ix_mac_entries_device_active", "device_id", "is_active"),
     )
 
@@ -37,7 +36,6 @@ class MacAddressEntry(Base):
 class ArpEntry(Base):
     __tablename__ = "arp_entries"
     __table_args__ = (
-        UniqueConstraint("device_id", "ip_address", name="uq_arp_device_ip"),
         Index("ix_arp_entries_device_active", "device_id", "is_active"),
     )
 
