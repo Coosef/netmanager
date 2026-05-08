@@ -183,6 +183,10 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
         )
         db.commit()
 
+        # Notify on backup failures
+        if failed > 0:
+            _notify_backup_failures(db, failed, completed, results)
+
     except Exception as e:
         db.execute(
             update(Task).where(Task.id == task_id).values(
@@ -193,6 +197,66 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
     finally:
         _run_async(ssh.close_all())
         db.close()
+
+
+def _notify_backup_failures(db: Session, failed: int, completed: int, results: dict) -> None:
+    """Send backup_failure notifications and publish to real-time event stream."""
+    try:
+        from app.models.network_event import NetworkEvent
+        from app.models.notification import NotificationChannel, NotificationLog
+        from app.services.notification_service import send_channel as _send
+
+        failed_hostnames = [
+            v["hostname"] for v in results.values() if not v.get("success")
+        ][:10]
+        title = f"Yedekleme Hatası: {failed} cihaz başarısız"
+        message = f"Başarısız: {', '.join(failed_hostnames)}{'...' if failed > 10 else ''}"
+
+        evt = NetworkEvent(
+            device_id=None,
+            device_hostname=None,
+            event_type="backup_failure",
+            severity="warning",
+            title=title,
+            message=message,
+            details={"failed": failed, "completed": completed, "failed_devices": failed_hostnames},
+        )
+        db.add(evt)
+        db.flush()
+
+        channels = db.execute(
+            select(NotificationChannel).where(NotificationChannel.is_active == True)
+        ).scalars().all()
+
+        for ch in channels:
+            notify_on = ch.notify_on or []
+            if "backup_failure" not in notify_on and "any_event" not in notify_on:
+                continue
+            ok, err = _run_async(_send(ch, f"[UYARI] {title}", message))
+            db.add(NotificationLog(
+                channel_id=ch.id,
+                source_type="network_event",
+                source_id=evt.id,
+                success=ok,
+                error=err,
+            ))
+
+        db.commit()
+
+        payload = json.dumps({
+            "device_id": None,
+            "device_hostname": None,
+            "event_type": "backup_failure",
+            "severity": "warning",
+            "title": title,
+            "message": message,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+        _redis.publish("network:events", payload)
+        _redis.lpush("network:events:recent", payload)
+        _redis.ltrim("network:events:recent", 0, 499)
+    except Exception:
+        pass
 
 
 @celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.bulk_password_change")
