@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { orgAdminApi, type OrgUser } from '@/api/orgAdmin'
+import { locationsApi } from '@/api/locations'
 import type { PermissionSet, Permissions } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -185,6 +186,11 @@ export default function PermissionsPage() {
   const [assignPsId, setAssignPsId] = useState<number | null>(null)
   const [assignLocId, setAssignLocId] = useState<number | null>(null)
 
+  const { data: locationsData } = useQuery({
+    queryKey: ['perm-page-locations'],
+    queryFn: () => locationsApi.list(),
+  })
+
   const { data: usersData, isLoading: usersLoading, isError: usersError } = useQuery({
     queryKey: ['perm-page-users'],
     queryFn: () => orgAdminApi.listUsers(1, 200),
@@ -251,6 +257,7 @@ export default function PermissionsPage() {
   const permSets = permSetsData?.permission_sets ?? []
   const orgPermSets = permSets.filter(p => p.org_id !== null)
   const globalPermSets = permSets.filter(p => p.org_id === null)
+  const locations = locationsData?.items ?? []
   const assignments = userPermsData?.assignments ?? []
 
   // Find effective permission set for selected user (org-wide default)
@@ -414,7 +421,9 @@ export default function PermissionsPage() {
                               style={{ fontSize: 12 }}
                             >
                               {ps?.name ?? `Set #${a.permission_set_id}`}
-                              {a.location_id ? ` (Lok. ${a.location_id})` : ' — Tüm Org'}
+                              {a.location_id
+                                ? ` — ${locations.find(l => l.id === a.location_id)?.name ?? `Lok. ${a.location_id}`}`
+                                : ' — Tüm Org'}
                             </Tag>
                           )
                         })}
@@ -640,17 +649,16 @@ export default function PermissionsPage() {
             />
           </div>
           <div>
-            <Text style={{ color: t.textSec, fontSize: 12 }}>Lokasyon ID (boş = tüm org için geçerli)</Text>
-            <input
-              type="number"
-              placeholder="Boş bırak = tüm organizasyon"
-              value={assignLocId ?? ''}
-              onChange={e => setAssignLocId(e.target.value ? Number(e.target.value) : null)}
-              style={{
-                width: '100%', marginTop: 4, padding: '8px 10px',
-                background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 6,
-                color: t.textPrimary, fontSize: 14,
-              }}
+            <Text style={{ color: t.textSec, fontSize: 12 }}>Lokasyon (boş = tüm organizasyon için geçerli)</Text>
+            <Select
+              allowClear
+              placeholder="Tüm organizasyon"
+              style={{ width: '100%', marginTop: 4 }}
+              value={assignLocId}
+              onChange={v => setAssignLocId(v ?? null)}
+              options={[
+                ...locations.map(l => ({ label: l.name, value: l.id })),
+              ]}
             />
           </div>
           {/* Preview selected permission set */}
