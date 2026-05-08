@@ -8,7 +8,7 @@
   "nav": {
     "dashboard": "Dashboard",
     "topology": "Topoloji",
-    "devices": "Cihazlar",
+    "devices": "Switch",
     "discovery": "Keşif Envanteri",
     "monitor": "Uyarılar",
     "tasks": "Görevler",

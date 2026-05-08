@@ -51,10 +51,45 @@ class PermissionEngine:
             return self._all_true()
 
         perm_set = await self._find_permission_set(db, user.id, location_id)
-        if perm_set is None:
-            return copy.deepcopy(DEFAULT_PERMISSIONS)
+        if perm_set is not None:
+            return perm_set.permissions or copy.deepcopy(DEFAULT_PERMISSIONS)
 
-        return perm_set.permissions or copy.deepcopy(DEFAULT_PERMISSIONS)
+        # No org-wide assignment — merge all location-specific assignments so the
+        # sidebar can show the right menu items (OR-merge: grant if any location grants it).
+        if location_id is None:
+            merged = await self._merge_all_location_permissions(db, user.id)
+            if merged is not None:
+                return merged
+
+        return copy.deepcopy(DEFAULT_PERMISSIONS)
+
+    async def _merge_all_location_permissions(
+        self,
+        db: AsyncSession,
+        user_id: int,
+    ) -> Optional[dict]:
+        """OR-merge permissions from every location-specific assignment."""
+        rows = await db.execute(
+            select(UserLocationPerm).where(UserLocationPerm.user_id == user_id)
+        )
+        ulps = rows.scalars().all()
+        if not ulps:
+            return None
+
+        merged = copy.deepcopy(DEFAULT_PERMISSIONS)
+        found_any = False
+        for ulp in ulps:
+            ps = await db.get(PermissionSet, ulp.permission_set_id)
+            if ps and ps.permissions:
+                found_any = True
+                for mod, actions in ps.permissions.get("modules", {}).items():
+                    if mod not in merged["modules"]:
+                        merged["modules"][mod] = {}
+                    for action, val in actions.items():
+                        if val:
+                            merged["modules"][mod][action] = True
+
+        return merged if found_any else None
 
     async def _find_permission_set(
         self,
