@@ -548,6 +548,7 @@ function TopologyFlow() {
   const { data: graph, isLoading: graphLoading } = useQuery({
     queryKey: ['topology-graph', filterGroup, activeSite],
     queryFn: () => topologyApi.getGraph({ group_id: filterGroup, site: activeSite || undefined }),
+    refetchInterval: 60000,
   })
 
   const { data: stats } = useQuery({
@@ -783,11 +784,27 @@ function TopologyFlow() {
             const newStatus = evt.event_type === 'device_online' ? 'online' : 'offline'
             const deviceId = evt.device_id as number | undefined
             if (deviceId) {
+              // Update 2D React Flow nodes
               ;(setNodes as any)((nds: any[]) => nds.map((n: any) =>
                 n.data?.device_id === deviceId
                   ? { ...n, data: { ...n.data, status: newStatus } }
                   : n
               ))
+              // Update 3D graph cache so Topology3D also reflects the change immediately
+              queryClient.setQueriesData(
+                { queryKey: ['topology-graph'] },
+                (old: any) => {
+                  if (!old?.nodes) return old
+                  return {
+                    ...old,
+                    nodes: old.nodes.map((n: any) =>
+                      n.data?.device_id === deviceId
+                        ? { ...n, data: { ...n.data, status: newStatus } }
+                        : n
+                    ),
+                  }
+                }
+              )
               setWsEventLog((prev) => [
                 { type: evt.event_type, hostname: evt.device_hostname || String(deviceId), time: Date.now() },
                 ...prev.slice(0, 4),

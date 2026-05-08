@@ -92,6 +92,22 @@ async def get_topology_graph(
 
     if tenant_filter is None and effective_sites is None:
         await set_json(cache_key, graph, ttl=300)
+
+    # Always patch node statuses with live DB values so cached graph never shows stale online/offline
+    device_ids_in_graph = [
+        n["data"]["device_id"] for n in graph.get("nodes", [])
+        if not n["data"].get("ghost") and n["data"].get("device_id")
+    ]
+    if device_ids_in_graph:
+        rows = await db.execute(
+            select(Device.id, Device.status).where(Device.id.in_(device_ids_in_graph))
+        )
+        live_status = {row.id: row.status for row in rows}
+        for node in graph.get("nodes", []):
+            did = node["data"].get("device_id")
+            if did and did in live_status:
+                node["data"]["status"] = live_status[did]
+
     return graph
 
 

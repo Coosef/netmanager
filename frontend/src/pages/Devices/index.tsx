@@ -615,6 +615,7 @@ export default function DevicesPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['devices', search, vendor, status, deviceTypeFilter, tag, page, activeSite],
     queryFn: () => devicesApi.list({ search: search || undefined, vendor, status, device_type: deviceTypeFilter, tag, skip: (page - 1) * pageSize, limit: pageSize, site: activeSite || undefined }),
+    refetchInterval: 30000,
   })
 
   // Stats — fetch all for counters
