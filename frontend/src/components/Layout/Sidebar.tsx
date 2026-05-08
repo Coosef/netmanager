@@ -9,7 +9,7 @@ import {
   SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
   HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
-  CloseOutlined, GlobalOutlined, DiffOutlined,
+  CloseOutlined, GlobalOutlined, DiffOutlined, BugOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -176,6 +176,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       label: t('nav_group.monitoring'),
       items: [
         { key: '/monitor', icon: <AlertOutlined />, label: t('nav.monitor'), badge: true },
+        { key: '/intelligence', icon: <BugOutlined />, label: 'Ağ Analitik', minRole: 'org_viewer' },
         { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules'), minRole: 'admin' },
         { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth'), minRole: 'org_viewer' },
         { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence'), minRole: 'org_viewer' },

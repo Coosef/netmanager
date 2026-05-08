@@ -41,6 +41,7 @@ import SlaReportPage from '@/pages/SlaReport'
 import VlanManagementPage from '@/pages/VlanManagement'
 import BackupCenterPage from '@/pages/BackupCenter'
 import ConfigDriftPage from '@/pages/ConfigDrift'
+import IntelligencePage from '@/pages/Intelligence'
 import ComplianceCheckPage from '@/pages/ComplianceCheck'
 import RacksPage from '@/pages/Racks'
 import TenantsPage from '@/pages/Tenants'
@@ -221,6 +222,7 @@ function ThemedApp() {
               <Route path="vlan" element={<RoleRoute minRole="org_viewer"><VlanManagementPage /></RoleRoute>} />
               <Route path="backups" element={<RoleRoute minRole="location_manager"><BackupCenterPage /></RoleRoute>} />
               <Route path="config-drift" element={<RoleRoute minRole="org_viewer"><ConfigDriftPage /></RoleRoute>} />
+              <Route path="intelligence" element={<RoleRoute minRole="org_viewer"><IntelligencePage /></RoleRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_manager"><ComplianceCheckPage /></RoleRoute>} />
               <Route path="racks" element={<RoleRoute minRole="admin"><RacksPage /></RoleRoute>} />
               <Route path="tenants" element={<RoleRoute minRole="super_admin"><TenantsPage /></RoleRoute>} />
