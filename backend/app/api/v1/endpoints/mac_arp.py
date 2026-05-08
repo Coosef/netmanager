@@ -142,6 +142,7 @@ def _parse_arp_table(output: str) -> list[dict]:
 
 async def _collect_device(device: Device, db: AsyncSession) -> dict:
     """SSH to device, collect MAC + ARP, upsert DB. Returns stats dict."""
+    from sqlalchemy import update as _upd
     now = datetime.now(timezone.utc)
     mac_count = arp_count = mac_errors = arp_errors = 0
 
@@ -159,27 +160,48 @@ async def _collect_device(device: Device, db: AsyncSession) -> dict:
     mac_result = await ssh_manager.execute_command(device, mac_cmd)
     if mac_result.success:
         parsed_macs = _parse_mac_table(mac_result.output, device.vendor)
+        current_macs = {e["mac_address"] for e in parsed_macs}
 
-        # Mark existing entries for this device as inactive before upsert
-        await db.execute(
-            _del(MacAddressEntry).where(MacAddressEntry.device_id == device.id)
-        )
+        # Load existing entries for this device
+        existing_rows = (await db.execute(
+            select(MacAddressEntry).where(MacAddressEntry.device_id == device.id)
+        )).scalars().all()
+        existing_map = {e.mac_address: e for e in existing_rows}
 
         for entry in parsed_macs:
-            vendor = oui_service.lookup(entry["mac_address"])
+            mac = entry["mac_address"]
+            vendor = oui_service.lookup(mac)
             dtype = oui_service._classify_vendor(vendor) if vendor else "other"
-            db.add(MacAddressEntry(
-                device_id=device.id,
-                device_hostname=device.hostname,
-                mac_address=entry["mac_address"],
-                vlan_id=entry.get("vlan_id"),
-                port=entry.get("port"),
-                entry_type=entry.get("entry_type", "dynamic"),
-                oui_vendor=vendor,
-                device_type=dtype,
-                first_seen=now,
-                last_seen=now,
-            ))
+            if mac in existing_map:
+                row = existing_map[mac]
+                row.last_seen = now
+                row.is_active = True
+                row.vlan_id = entry.get("vlan_id")
+                row.port = entry.get("port")
+                row.entry_type = entry.get("entry_type", "dynamic")
+                row.oui_vendor = vendor
+                row.device_type = dtype
+            else:
+                db.add(MacAddressEntry(
+                    device_id=device.id,
+                    device_hostname=device.hostname,
+                    mac_address=mac,
+                    vlan_id=entry.get("vlan_id"),
+                    port=entry.get("port"),
+                    entry_type=entry.get("entry_type", "dynamic"),
+                    oui_vendor=vendor,
+                    device_type=dtype,
+                    first_seen=now,
+                    last_seen=now,
+                    is_active=True,
+                ))
+
+        # Mark entries not seen in this poll as inactive
+        for mac, row in existing_map.items():
+            if mac not in current_macs:
+                row.is_active = False
+                row.last_seen = now
+
         mac_count = len(parsed_macs)
     else:
         mac_errors = 1
@@ -193,21 +215,38 @@ async def _collect_device(device: Device, db: AsyncSession) -> dict:
     arp_result = await ssh_manager.execute_command(device, arp_cmd)
     if arp_result.success:
         parsed_arps = _parse_arp_table(arp_result.output)
+        current_ips = {e["ip_address"] for e in parsed_arps}
 
-        await db.execute(
-            _del(ArpEntry).where(ArpEntry.device_id == device.id)
-        )
+        existing_arp = (await db.execute(
+            select(ArpEntry).where(ArpEntry.device_id == device.id)
+        )).scalars().all()
+        arp_map = {e.ip_address: e for e in existing_arp}
 
         for entry in parsed_arps:
-            db.add(ArpEntry(
-                device_id=device.id,
-                device_hostname=device.hostname,
-                ip_address=entry["ip_address"],
-                mac_address=entry["mac_address"],
-                interface=entry.get("interface"),
-                first_seen=now,
-                last_seen=now,
-            ))
+            ip = entry["ip_address"]
+            if ip in arp_map:
+                row = arp_map[ip]
+                row.mac_address = entry["mac_address"]
+                row.interface = entry.get("interface")
+                row.last_seen = now
+                row.is_active = True
+            else:
+                db.add(ArpEntry(
+                    device_id=device.id,
+                    device_hostname=device.hostname,
+                    ip_address=ip,
+                    mac_address=entry["mac_address"],
+                    interface=entry.get("interface"),
+                    first_seen=now,
+                    last_seen=now,
+                    is_active=True,
+                ))
+
+        for ip, row in arp_map.items():
+            if ip not in current_ips:
+                row.is_active = False
+                row.last_seen = now
+
         arp_count = len(parsed_arps)
     else:
         arp_errors = 1
