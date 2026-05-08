@@ -11,6 +11,7 @@ export type NotifyOn =
   | 'backup_failure'
   | 'threshold_alert'
   | 'lifecycle_alert'
+  | 'sla_breach'
   | 'any_event'
 
 export interface EmailConfig {
@@ -88,5 +89,6 @@ export const NOTIFY_ON_OPTIONS: { label: string; value: NotifyOn }[] = [
   { label: 'Yedek Hatası', value: 'backup_failure' },
   { label: 'Eşik Uyarısı (SNMP)', value: 'threshold_alert' },
   { label: 'Lifecycle Uyarısı', value: 'lifecycle_alert' },
+  { label: 'SLA İhlali', value: 'sla_breach' },
   { label: 'Tüm Olaylar', value: 'any_event' },
 ]

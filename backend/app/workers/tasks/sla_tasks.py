@@ -98,7 +98,7 @@ async def _run():
 
         for ch in channels:
             notify_on = ch.notify_on or []
-            if "critical_event" not in notify_on and "any_event" not in notify_on:
+            if "sla_breach" not in notify_on and "critical_event" not in notify_on and "any_event" not in notify_on:
                 continue
             ok, err = await send_channel(ch, f"[SLA] {title}", message)
             db.add(NotificationLog(
