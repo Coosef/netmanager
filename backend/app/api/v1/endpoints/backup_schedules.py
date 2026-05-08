@@ -268,3 +268,53 @@ async def config_drift_report(
         "items": paginated,
         "total": drift_count,
     }
+
+
+# ---------------------------------------------------------------------------
+# Golden vs Latest diff for a single device
+# ---------------------------------------------------------------------------
+
+@router.get("/drift-diff/{device_id}")
+async def config_drift_diff(
+    device_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Return golden config text and latest backup text for client-side diff rendering."""
+    tf = getattr(current_user, "tenant_id", None)
+
+    golden_q = (
+        select(ConfigBackup)
+        .where(ConfigBackup.device_id == device_id, ConfigBackup.is_golden == True)
+        .order_by(ConfigBackup.created_at.desc())
+        .limit(1)
+    )
+    if tf:
+        golden_q = golden_q.where(ConfigBackup.tenant_id == tf)
+    golden = (await db.execute(golden_q)).scalar_one_or_none()
+    if not golden:
+        raise HTTPException(status_code=404, detail="Golden config bulunamadı")
+
+    latest_q = (
+        select(ConfigBackup)
+        .where(
+            ConfigBackup.device_id == device_id,
+            ConfigBackup.is_golden == False,
+        )
+        .order_by(ConfigBackup.created_at.desc())
+        .limit(1)
+    )
+    if tf:
+        latest_q = latest_q.where(ConfigBackup.tenant_id == tf)
+    latest = (await db.execute(latest_q)).scalar_one_or_none()
+    if not latest:
+        raise HTTPException(status_code=404, detail="Son backup bulunamadı")
+
+    return {
+        "golden_id": golden.id,
+        "golden_at": golden.created_at.isoformat(),
+        "golden_text": golden.config_text or "",
+        "latest_id": latest.id,
+        "latest_at": latest.created_at.isoformat(),
+        "latest_text": latest.config_text or "",
+    }

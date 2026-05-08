@@ -3,7 +3,7 @@ import asyncio
 
 from app.workers.celery_app import celery_app
 
-# Retention windows (days)
+# Retention windows (days) for time-series tables
 _RETENTION = {
     "snmp_poll_results":  30,   # high-volume, polled every 5 min
     "syslog_events":      30,   # high-volume syslog stream
@@ -12,6 +12,11 @@ _RETENTION = {
     "network_events":     90,   # event history
     "audit_logs":         180,  # compliance / security audit
 }
+
+# How many days of inactive MAC/ARP entries to keep
+_MAC_ARP_INACTIVE_DAYS = 30
+# Keep non-golden config backups for this many days; golden backups are never deleted
+_CONFIG_BACKUP_DAYS = 90
 
 
 @celery_app.task(name="app.workers.tasks.retention_tasks.cleanup_old_data")
@@ -28,6 +33,7 @@ async def _run():
     summary: dict[str, int] = {}
 
     async with make_worker_session()() as db:
+        # ── Standard time-series tables ───────────────────────────────────────
         for table, days in _RETENTION.items():
             cutoff = now - timedelta(days=days)
             ts_col = "polled_at" if table == "snmp_poll_results" else (
@@ -41,6 +47,47 @@ async def _run():
             )
             if result.rowcount:
                 summary[table] = result.rowcount
+
+        # ── Stale MAC/ARP entries not seen recently ────────────────────────────
+        mac_cutoff = now - timedelta(days=_MAC_ARP_INACTIVE_DAYS)
+        r = await db.execute(
+            text("DELETE FROM mac_address_entries WHERE is_active = FALSE AND last_seen < :cutoff"),
+            {"cutoff": mac_cutoff},
+        )
+        if r.rowcount:
+            summary["mac_address_entries"] = r.rowcount
+
+        r = await db.execute(
+            text("DELETE FROM arp_entries WHERE is_active = FALSE AND last_seen < :cutoff"),
+            {"cutoff": mac_cutoff},
+        )
+        if r.rowcount:
+            summary["arp_entries"] = r.rowcount
+
+        # ── Old non-golden config backups ─────────────────────────────────────
+        # Keep: (1) golden backups always, (2) latest 5 per device, (3) last 90 days
+        backup_cutoff = now - timedelta(days=_CONFIG_BACKUP_DAYS)
+        r = await db.execute(
+            text("""
+                DELETE FROM config_backups
+                WHERE is_golden = FALSE
+                  AND created_at < :cutoff
+                  AND id NOT IN (
+                    SELECT id FROM (
+                        SELECT id,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY device_id ORDER BY created_at DESC
+                               ) AS rn
+                        FROM config_backups
+                        WHERE is_golden = FALSE
+                    ) ranked
+                    WHERE rn <= 5
+                  )
+            """),
+            {"cutoff": backup_cutoff},
+        )
+        if r.rowcount:
+            summary["config_backups"] = r.rowcount
 
         await db.commit()
 

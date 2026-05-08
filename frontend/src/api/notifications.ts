@@ -16,6 +16,8 @@ export type NotifyOn =
   | 'rollout_failure'
   | 'rotation_failure'
   | 'security_audit_critical'
+  | 'topology_drift'
+  | 'behavior_anomaly'
   | 'any_event'
 
 export interface EmailConfig {
@@ -98,5 +100,7 @@ export const NOTIFY_ON_OPTIONS: { label: string; value: NotifyOn }[] = [
   { label: 'Config Rollout Hatası', value: 'rollout_failure' },
   { label: 'Credential Rotasyon Hatası', value: 'rotation_failure' },
   { label: 'Güvenlik Denetim Uyarısı', value: 'security_audit_critical' },
+  { label: 'Topoloji Drift', value: 'topology_drift' },
+  { label: 'Davranış Anomalisi (MAC/Trafik/VLAN)', value: 'behavior_anomaly' },
   { label: 'Tüm Olaylar', value: 'any_event' },
 ]

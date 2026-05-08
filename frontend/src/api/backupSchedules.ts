@@ -45,6 +45,15 @@ export interface DriftItem {
   backup_id: number | null
 }
 
+export interface DriftDiff {
+  golden_id: number
+  golden_at: string
+  golden_text: string
+  latest_id: number
+  latest_at: string
+  latest_text: string
+}
+
 export interface DriftReport {
   total_with_golden: number
   drift_count: number
@@ -72,4 +81,7 @@ export const backupSchedulesApi = {
 
   driftReport: (params?: { skip?: number; limit?: number }) =>
     client.get<DriftReport>('/backup-schedules/drift-report', { params }).then((r) => r.data),
+
+  driftDiff: (deviceId: number) =>
+    client.get<DriftDiff>(`/backup-schedules/drift-diff/${deviceId}`).then((r) => r.data),
 }

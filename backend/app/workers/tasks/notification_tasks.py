@@ -62,11 +62,17 @@ def process_notifications():
             )
             events = ev_result.scalars().all()
 
+            _BEHAVIOR_TYPES = {"mac_anomaly", "traffic_spike", "vlan_anomaly",
+                               "mac_loop_suspicion", "loop_detected", "stp_anomaly", "port_flap"}
+
             for ev in events:
                 severity_cat = "critical_event" if ev.severity == "critical" else "warning_event"
                 offline_cat = "device_offline" if ev.event_type == "device_offline" else None
                 # Specific event-type subscriptions (channels can subscribe to individual types)
                 specific_cats = {ev.event_type}  # e.g. "config_drift", "rollout_failure", etc.
+                # Alias behavior analytics types → "behavior_anomaly" subscription category
+                if ev.event_type in _BEHAVIOR_TYPES:
+                    specific_cats.add("behavior_anomaly")
 
                 for ch in channels:
                     cats = set(ch.notify_on or [])
