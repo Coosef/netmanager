@@ -692,6 +692,19 @@ async def _ensure_default_org():
 
         org_id = org.id
 
+        # Migrate legacy role → system_role for existing users stuck with default 'member'
+        from app.models.user import UserRole
+        await db.execute(
+            _upd(User)
+            .where(User.role == UserRole.SUPER_ADMIN, User.system_role == 'member')
+            .values(system_role='super_admin')
+        )
+        await db.execute(
+            _upd(User)
+            .where(User.role == UserRole.ADMIN, User.system_role == 'member')
+            .values(system_role='org_admin')
+        )
+
         # Assign all org-less users to this org
         result = await db.execute(
             _upd(User).where(User.org_id.is_(None)).values(org_id=org_id)

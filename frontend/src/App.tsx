@@ -147,6 +147,15 @@ const GLOBAL_CSS_DARK = `
   .ant-table-placeholder td { border-bottom: none !important; }
   .perm-user-row td { border-bottom: 1px solid #112240 !important; }
   .perm-user-row:last-child td { border-bottom: none !important; }
+  .ant-modal-content { background: #0e1e38 !important; border: 1px solid #1a3458 !important; }
+  .ant-modal-header { background: #0e1e38 !important; border-bottom: 1px solid #1a3458 !important; }
+  .ant-modal-footer { border-top: 1px solid #1a3458 !important; }
+  .ant-modal-title { color: #f1f5f9 !important; }
+  .ant-select-dropdown { background: #0e1e38 !important; border: 1px solid #1a3458 !important; }
+  .ant-select-item { color: #94a3b8 !important; }
+  .ant-select-item-option-active { background: #122040 !important; }
+  .ant-select-item-option-selected { background: #1d4ed820 !important; color: #3b82f6 !important; }
+  .ant-select-dropdown .ant-empty-description { color: #475569 !important; }
 `
 
 const GLOBAL_CSS_LIGHT = `

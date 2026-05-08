@@ -162,14 +162,23 @@ def require_permission(module: str, action: str):
 
 
 def require_system_role(*roles: SystemRole):
-    """Require one of the given system-level roles (super_admin, org_admin, member)."""
+    """Require one of the given system-level roles (super_admin, org_admin, member).
+
+    Falls back to legacy `role` field so existing users whose system_role
+    defaulted to 'member' before the RBAC migration are not locked out.
+    """
     async def _checker(user: Annotated[User, Depends(get_current_active_user)]) -> User:
-        if user.system_role not in roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient system role",
-            )
-        return user
+        if user.system_role in roles:
+            return user
+        # Legacy fallback: map old `role` values to new system roles
+        if user.role == UserRole.SUPER_ADMIN and SystemRole.SUPER_ADMIN in roles:
+            return user
+        if user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN) and SystemRole.ORG_ADMIN in roles:
+            return user
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient system role",
+        )
     return _checker
 
 
