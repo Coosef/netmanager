@@ -88,6 +88,19 @@ async def anomalies_ws(
 ):
     if not await _authenticate_ws(websocket, token):
         return
+
+    accessible_ids = await _get_tenant_device_ids(token or "")
+
+    def _anomaly_allowed(raw: str) -> bool:
+        if accessible_ids is None:
+            return True
+        try:
+            data = json.loads(raw)
+            dev_id = data.get("device_id")
+            return dev_id is not None and dev_id in accessible_ids
+        except Exception:
+            return False
+
     await websocket.accept()
     r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     pubsub = r.pubsub()
@@ -96,11 +109,12 @@ async def anomalies_ws(
     recent_stp = await r.lrange("anomalies:stp", 0, 19)
     recent_loop = await r.lrange("anomalies:loop", 0, 19)
     for item in recent_stp + recent_loop:
-        await websocket.send_text(item)
+        if _anomaly_allowed(item):
+            await websocket.send_text(item)
 
     try:
         async for message in pubsub.listen():
-            if message["type"] == "message":
+            if message["type"] == "message" and _anomaly_allowed(message["data"]):
                 await websocket.send_text(message["data"])
     except WebSocketDisconnect:
         pass
@@ -169,18 +183,27 @@ async def ssh_terminal_ws(
     if not await _authenticate_ws(websocket, token):
         return
 
-    # Resolve device + credentials
+    # Resolve device + credentials — validate tenant ownership first
     import paramiko
     from sqlalchemy import select
     from app.core.database import AsyncSessionLocal
     from app.core.security import decrypt_credential_safe, decrypt_credential
     from app.models.device import Device
+    from app.models.user import User, UserRole, SystemRole
+
+    accessible_ids = await _get_tenant_device_ids(token or "")
 
     async with AsyncSessionLocal() as db:
-        device = (await db.execute(select(Device).where(Device.id == device_id, Device.is_active == True))).scalar_one_or_none()
+        dev_q = select(Device).where(Device.id == device_id, Device.is_active == True)
+        device = (await db.execute(dev_q)).scalar_one_or_none()
 
     if not device:
         await websocket.close(code=4004)
+        return
+
+    # Check tenant ownership (accessible_ids is None only for super_admin)
+    if accessible_ids is not None and device_id not in accessible_ids:
+        await websocket.close(code=4003)
         return
 
     username = device.ssh_username or ""

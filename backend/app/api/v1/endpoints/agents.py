@@ -116,6 +116,17 @@ async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
 # ── REST ─────────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=list[dict])
+async def _get_agent_scoped(agent_id: str, db: AsyncSession, tenant_filter) -> Agent:
+    """Fetch agent and validate it belongs to the current user's tenant."""
+    q = select(Agent).where(Agent.id == agent_id, Agent.is_active == True)
+    if tenant_filter is not None:
+        q = q.where(Agent.tenant_id == tenant_filter)
+    agent = (await db.execute(q)).scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+
 async def list_agents(db: AsyncSession = Depends(get_db), _: CurrentUser = None, tenant_filter: TenantFilter = None):
     q = select(Agent).where(Agent.is_active == True)
     if tenant_filter is not None:
@@ -131,11 +142,9 @@ async def get_agent_live_metrics(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
 
     live = agent_manager.get_live_metrics(agent_id)
     if not live:
@@ -154,12 +163,10 @@ async def trigger_agent_update(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Manually push an update_available message to a connected agent."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent çevrimdışı — güncelleme gönderilemez")
 
@@ -198,12 +205,10 @@ async def ping_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Real-time WebSocket connection check. Returns online status + heartbeat age."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
 
     online = agent_manager.is_online(agent_id)
     live = agent_manager.get_live_metrics(agent_id) if online else None
@@ -236,14 +241,12 @@ async def restart_agent(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:update"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
 
     sent = await agent_manager.send_restart(agent_id)
     if not sent:
@@ -302,13 +305,11 @@ async def delete_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:delete"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
-    result = await db.execute(select(Agent).where(Agent.id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
     agent.is_active = False
     await db.commit()
 
@@ -322,15 +323,13 @@ async def update_agent_security(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Update command mode, allowed commands and allowed source IPs for an agent."""
     if not current_user.has_permission("device:update"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
 
     command_mode = body.get("command_mode", agent.command_mode)
     if command_mode not in ("all", "whitelist", "blacklist"):
@@ -364,15 +363,13 @@ async def rotate_agent_key(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Rotate agent key. New key returned once; agent will apply it if online."""
     if not current_user.has_permission("device:update"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
 
     new_key = _gen_key()
     agent.agent_key_hash = hash_password(new_key)
@@ -399,15 +396,13 @@ async def unlock_agent(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Clear failed_auth_count to unlock a brute-force locked agent."""
     if not current_user.has_permission("device:update"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
 
     agent.failed_auth_count = 0
     await db.commit()
@@ -424,11 +419,10 @@ async def get_agent_commands(
     blocked_only: bool = Query(False),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Return paginated command audit log for an agent."""
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Agent not found")
+    await _get_agent_scoped(agent_id, db, tenant_filter)
 
     q = select(AgentCommandLog).where(AgentCommandLog.agent_id == agent_id)
     if blocked_only:
@@ -559,13 +553,12 @@ async def probe_agent_devices(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:read"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result_agent = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    if not result_agent.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Agent not found")
+    await _get_agent_scoped(agent_id, db, tenant_filter)
 
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
@@ -717,14 +710,13 @@ async def push_device_sync(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Push device list to connected agent so it can run health checks."""
     if not current_user.has_permission("device:read"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Agent not found")
+    await _get_agent_scoped(agent_id, db, tenant_filter)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
 
@@ -814,14 +806,13 @@ async def trigger_discovery(
     body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Trigger network discovery on the agent's local subnet."""
     if not current_user.has_permission("device:read"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Agent not found")
+    await _get_agent_scoped(agent_id, db, tenant_filter)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
 
@@ -885,14 +876,13 @@ async def configure_syslog(
     body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Enable or disable syslog collection on the agent."""
     if not current_user.has_permission("device:update"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Agent not found")
+    await _get_agent_scoped(agent_id, db, tenant_filter)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
 
@@ -972,14 +962,13 @@ async def refresh_credential_vault(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Regenerate agent AES key and push fresh credential bundle to agent."""
     if not current_user.has_permission("device:update"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
-    if not result.scalar_one_or_none():
-        raise HTTPException(status_code=404, detail="Agent not found")
+    await _get_agent_scoped(agent_id, db, tenant_filter)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
 

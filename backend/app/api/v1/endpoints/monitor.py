@@ -26,6 +26,7 @@ router = APIRouter()
 async def list_events(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
     location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = 100,
@@ -39,16 +40,23 @@ async def list_events(
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
 
-    # Location RBAC enforcement
+    # Tenant + location RBAC enforcement
     effective_sites: Optional[list[str]] = location_filter  # None = unrestricted
-    if effective_sites is not None:
-        if site:
-            effective_sites = [s for s in effective_sites if s == site]
+    if tenant_filter is not None or effective_sites is not None:
+        dev_q = select(Device.id).where(Device.is_active == True)
+        if tenant_filter is not None:
+            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+        if effective_sites is not None:
+            if site:
+                effective_sites = [s for s in effective_sites if s == site]
+                site = None
+            if not effective_sites:
+                return {"total": 0, "items": []}
+            dev_q = dev_q.where(Device.site.in_(effective_sites))
+        elif site:
+            dev_q = dev_q.where(Device.site == site)
             site = None
-        if not effective_sites:
-            return {"total": 0, "items": []}
-        site_ids_sq = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
-        q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
+        q = q.where(NetworkEvent.device_id.in_(dev_q))
     elif site:
         site_ids_sq = select(Device.id).where(Device.site == site, Device.is_active == True)
         q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
@@ -160,10 +168,15 @@ async def acknowledge_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
-    await db.execute(
-        update(NetworkEvent).where(NetworkEvent.id == event_id).values(acknowledged=True)
-    )
+    q = update(NetworkEvent).where(NetworkEvent.id == event_id)
+    if tenant_filter is not None:
+        accessible_dev_ids = select(Device.id).where(
+            Device.tenant_id == tenant_filter, Device.is_active == True
+        )
+        q = q.where(NetworkEvent.device_id.in_(accessible_dev_ids))
+    await db.execute(q.values(acknowledged=True))
     await db.commit()
     return {"ok": True}
 

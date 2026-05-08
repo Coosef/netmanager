@@ -99,8 +99,19 @@ def _command_risk(cmd: str) -> str:
 # ── Groups ──────────────────────────────────────────────────────────────────
 
 @router.get("/groups", response_model=list[DeviceGroupResponse])
-async def list_groups(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
-    result = await db.execute(select(DeviceGroup))
+async def list_groups(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+):
+    if tenant_filter is not None:
+        # Only return groups that contain at least one device in this tenant
+        group_ids_q = select(Device.group_id).where(
+            Device.tenant_id == tenant_filter, Device.group_id.isnot(None), Device.is_active == True
+        ).distinct()
+        result = await db.execute(select(DeviceGroup).where(DeviceGroup.id.in_(group_ids_q)))
+    else:
+        result = await db.execute(select(DeviceGroup))
     return result.scalars().all()
 
 
@@ -171,8 +182,15 @@ _LAYER_LABELS = {
 
 
 @router.get("/group-suggestions", response_model=dict)
-async def group_suggestions(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
-    devices = (await db.execute(select(Device).where(Device.is_active == True))).scalars().all()
+async def group_suggestions(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+):
+    dev_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+    devices = (await db.execute(dev_q)).scalars().all()
     device_map = {d.id: d for d in devices}
     suggestions = []
 
@@ -466,6 +484,7 @@ async def bulk_update_credentials(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Copy SSH/enable credentials from a source device (or manual input) to multiple devices."""
     if not current_user.has_permission("device:edit"):
@@ -475,8 +494,10 @@ async def bulk_update_credentials(
         raise HTTPException(status_code=400, detail="No device IDs provided")
 
     if payload.source_device_id:
-        source_q = await db.execute(select(Device).where(Device.id == payload.source_device_id))
-        source = source_q.scalar_one_or_none()
+        source_q = select(Device).where(Device.id == payload.source_device_id)
+        if tenant_filter is not None:
+            source_q = source_q.where(Device.tenant_id == tenant_filter)
+        source = (await db.execute(source_q)).scalar_one_or_none()
         if not source:
             raise HTTPException(status_code=404, detail="Source device not found")
         new_username = source.ssh_username
@@ -489,7 +510,10 @@ async def bulk_update_credentials(
         new_password_enc = encrypt_credential(payload.ssh_password)
         new_secret_enc = encrypt_credential(payload.enable_secret) if payload.enable_secret else None
 
-    result = await db.execute(select(Device).where(Device.id.in_(payload.device_ids)))
+    target_q = select(Device).where(Device.id.in_(payload.device_ids))
+    if tenant_filter is not None:
+        target_q = target_q.where(Device.tenant_id == tenant_filter)
+    result = await db.execute(target_q)
     devices = result.scalars().all()
     if not devices:
         raise HTTPException(status_code=404, detail="No matching devices found")
@@ -509,19 +533,27 @@ async def bulk_update_credentials(
 
 
 @router.get("/location-options", response_model=dict)
-async def get_location_options(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
+async def get_location_options(
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
+):
     """Return distinct site/building/floor values for cascading topology filters."""
+    base = [Device.is_active == True]
+    if tenant_filter is not None:
+        base.append(Device.tenant_id == tenant_filter)
+
     sites_r = await db.execute(
-        select(Device.site).where(Device.site.isnot(None), Device.site != "", Device.is_active == True).distinct()
+        select(Device.site).where(*base, Device.site.isnot(None), Device.site != "").distinct()
     )
     buildings_r = await db.execute(
         select(Device.site, Device.building).where(
-            Device.building.isnot(None), Device.building != "", Device.is_active == True
+            *base, Device.building.isnot(None), Device.building != ""
         ).distinct()
     )
     floors_r = await db.execute(
         select(Device.site, Device.building, Device.floor).where(
-            Device.floor.isnot(None), Device.floor != "", Device.is_active == True
+            *base, Device.floor.isnot(None), Device.floor != ""
         ).distinct()
     )
     sites = [r[0] for r in sites_r.all() if r[0]]
@@ -1854,6 +1886,8 @@ async def get_backup_content(
 ):
     if not current_user.has_permission("config:view"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    await _get_device_scoped(db, device_id, current_user)
 
     result = await db.execute(
         select(ConfigBackup).where(

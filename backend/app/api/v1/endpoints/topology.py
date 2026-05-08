@@ -22,6 +22,7 @@ async def trigger_discovery(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
     device_ids: list[int] | None = Body(default=None),
 ):
     """Trigger LLDP/CDP topology discovery. If device_ids is empty, discovers all active devices."""
@@ -29,7 +30,10 @@ async def trigger_discovery(
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     if not device_ids:
-        result = await db.execute(select(Device.id).where(Device.is_active == True))
+        dev_q = select(Device.id).where(Device.is_active == True)
+        if tenant_filter is not None:
+            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+        result = await db.execute(dev_q)
         device_ids = result.scalars().all()
 
     if not device_ids:
@@ -158,16 +162,23 @@ async def discover_single(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Run LLDP/CDP on one device synchronously and return neighbors with type detection."""
     if not current_user.has_permission("task:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
+    dev_q = select(Device).where(Device.id == device_id)
+    if tenant_filter is not None:
+        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
+    device = (await db.execute(dev_q)).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    all_devices = (await db.execute(select(Device).where(Device.is_active == True))).scalars().all()
+    all_devs_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        all_devs_q = all_devs_q.where(Device.tenant_id == tenant_filter)
+    all_devices = (await db.execute(all_devs_q)).scalars().all()
     hostname_map = {d.hostname.lower(): d.id for d in all_devices}
     ip_map = {d.ip_address: d.id for d in all_devices}
 
@@ -231,6 +242,7 @@ async def hop_discover(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """
     Cascade LLDP discovery: SSH into ghost-switch neighbors using inherited credentials,
@@ -248,7 +260,10 @@ async def hop_discover(
     if not source_device_id or not raw_ips:
         raise HTTPException(status_code=400, detail="source_device_id and target_ips required")
 
-    source_device = (await db.execute(select(Device).where(Device.id == source_device_id))).scalar_one_or_none()
+    src_q = select(Device).where(Device.id == source_device_id)
+    if tenant_filter is not None:
+        src_q = src_q.where(Device.tenant_id == tenant_filter)
+    source_device = (await db.execute(src_q)).scalar_one_or_none()
     if not source_device:
         raise HTTPException(status_code=404, detail="Source device not found")
 
@@ -358,6 +373,7 @@ async def discover_ghost(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """
     Attempt to SSH into a ghost switch node.
@@ -383,7 +399,10 @@ async def discover_ghost(
     # Resolve source device for vendor/group hints
     source: Device | None = None
     if source_device_id:
-        source = (await db.execute(select(Device).where(Device.id == source_device_id))).scalar_one_or_none()
+        src_q = select(Device).where(Device.id == source_device_id)
+        if tenant_filter is not None:
+            src_q = src_q.where(Device.tenant_id == tenant_filter)
+        source = (await db.execute(src_q)).scalar_one_or_none()
 
     target_vendor = source.vendor if source else "other"
 
@@ -401,9 +420,10 @@ async def discover_ghost(
         })
     else:
         # Collect unique (username, password_enc, os_type) from same-vendor inventory devices
-        same_vendor = (await db.execute(
-            select(Device).where(Device.vendor == target_vendor, Device.is_active == True)
-        )).scalars().all()
+        vendor_q = select(Device).where(Device.vendor == target_vendor, Device.is_active == True)
+        if tenant_filter is not None:
+            vendor_q = vendor_q.where(Device.tenant_id == tenant_filter)
+        same_vendor = (await db.execute(vendor_q)).scalars().all()
 
         seen: set[tuple] = set()
         for d in same_vendor:
@@ -466,10 +486,11 @@ async def discover_ghost(
     if successful_creds is None:
         return {"success": False, "needs_credentials": True, "tried_count": len(creds_to_try)}
 
-    # SSH succeeded — add to inventory if not already there
-    existing = (await db.execute(
-        select(Device).where(Device.ip_address == ghost_ip)
-    )).scalar_one_or_none()
+    # SSH succeeded — add to inventory if not already there (scoped to this tenant)
+    exist_q = select(Device).where(Device.ip_address == ghost_ip)
+    if tenant_filter is not None:
+        exist_q = exist_q.where(Device.tenant_id == tenant_filter)
+    existing = (await db.execute(exist_q)).scalar_one_or_none()
 
     real_hostname = fetched_info.get("hostname") or ghost_hostname or ghost_ip
 
@@ -505,6 +526,7 @@ async def discover_ghost(
             is_active=True,
             location=source.location if source else None,
             group_id=source.group_id if source else None,
+            tenant_id=current_user.tenant_id,
         )
         db.add(new_device)
         await db.commit()
@@ -512,7 +534,10 @@ async def discover_ghost(
         is_new = True
 
     # Save LLDP links with the real device ID
-    all_devices = (await db.execute(select(Device).where(Device.is_active == True))).scalars().all()
+    all_devs_q = select(Device).where(Device.is_active == True)
+    if tenant_filter is not None:
+        all_devs_q = all_devs_q.where(Device.tenant_id == tenant_filter)
+    all_devices = (await db.execute(all_devs_q)).scalars().all()
     hostname_map = {d.hostname.lower(): d.id for d in all_devices}
     ip_map = {d.ip_address: d.id for d in all_devices}
 
