@@ -15,6 +15,7 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
+import { authApi } from '@/api/auth'
 import AppLayout from '@/components/Layout/AppLayout'
 import LoginPage from '@/pages/Login'
 import DashboardPage from '@/pages/Dashboard'
@@ -181,6 +182,15 @@ const GLOBAL_CSS_LIGHT = `
 function ThemedApp() {
   const { isDark } = useTheme()
   const [antdLocale, setAntdLocale] = useState(ANTD_LOCALES[i18n.language] || trTR)
+  const { token, setAuth, user } = useAuthStore()
+
+  // Re-fetch permissions on every app load so stale/null localStorage entries get refreshed
+  useEffect(() => {
+    if (!token || !user) return
+    authApi.myPermissions().then((res) => {
+      setAuth(token, user, res.permissions)
+    }).catch(() => {/* silently ignore — server unreachable */})
+  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handler = (lng: string) => {

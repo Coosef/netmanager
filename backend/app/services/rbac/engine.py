@@ -4,7 +4,7 @@ Permission resolution engine.
 Resolution order for a (user, location_id) pair:
   1. Location-specific row in user_location_perms (user_id=X, location_id=Y)
   2. Org-wide default row                         (user_id=X, location_id IS NULL)
-  3. Deny all (no matching row)
+  3. Role-based defaults (so users work without manual PermissionSet assignment)
 
 Super admins and org admins bypass this and are always granted all permissions.
 """
@@ -17,6 +17,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import User, SystemRole
 from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
 from app.models.shared.user_location_perm import UserLocationPerm
+
+# Role-based fallback permissions — applied when no PermissionSet is assigned.
+# Each entry only lists modules/actions that should be True; anything missing stays False.
+_ROLE_GRANTS: dict[str, dict[str, list[str]]] = {
+    "location_viewer": {
+        "devices": ["view"], "topology": ["view"], "monitoring": ["view"],
+    },
+    "viewer": {
+        "devices": ["view"], "topology": ["view"], "monitoring": ["view"],
+    },
+    "location_operator": {
+        "devices": ["view", "ssh"], "topology": ["view"], "monitoring": ["view"],
+        "tasks": ["view", "create"], "config_backups": ["view"],
+    },
+    "operator": {
+        "devices": ["view", "edit", "ssh"], "topology": ["view"], "monitoring": ["view"],
+        "tasks": ["view", "create"], "config_backups": ["view"],
+        "driver_templates": ["view"],
+    },
+    "location_manager": {
+        "devices": ["view", "edit", "ssh"], "topology": ["view"], "monitoring": ["view"],
+        "tasks": ["view", "create", "cancel"], "config_backups": ["view", "edit"],
+        "playbooks": ["view", "run"], "ipam": ["view"], "reports": ["view"],
+        "agents": ["view"], "driver_templates": ["view"], "locations": ["view"],
+    },
+    "org_viewer": {
+        "devices": ["view"], "topology": ["view"], "monitoring": ["view"],
+        "config_backups": ["view"], "ipam": ["view", "edit"],
+        "reports": ["view"], "audit_logs": ["view"],
+    },
+}
+
+
+def _role_default_permissions(role: str) -> dict:
+    """Build a full permissions dict from the role-grant table."""
+    result = copy.deepcopy(DEFAULT_PERMISSIONS)
+    grants = _ROLE_GRANTS.get(role, {})
+    for module, actions in grants.items():
+        if module in result["modules"]:
+            for action in actions:
+                if action in result["modules"][module]:
+                    result["modules"][module][action] = True
+    return result
 
 
 class PermissionEngine:
@@ -61,7 +104,8 @@ class PermissionEngine:
             if merged is not None:
                 return merged
 
-        return copy.deepcopy(DEFAULT_PERMISSIONS)
+        # Final fallback: role-based defaults so users work without manual assignment
+        return _role_default_permissions(user.role)
 
     async def _merge_all_location_permissions(
         self,

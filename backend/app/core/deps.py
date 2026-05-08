@@ -68,8 +68,7 @@ async def get_tenant_context(
 ) -> Optional[int]:
     if current_user.role == UserRole.SUPER_ADMIN:
         return None
-    if current_user.role == UserRole.ADMIN:
-        return current_user.tenant_id
+    # admin with no tenant_id must not see all orgs — treat as no-match
     return current_user.tenant_id if current_user.tenant_id is not None else -1
 
 

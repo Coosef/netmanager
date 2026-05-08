@@ -53,11 +53,18 @@ export const useAuthStore = create<AuthState>()(
       can: (module: string, action: string) => {
         const user = get().user
         if (!user) return false
-        // Super admin and org admin bypass permission checks
+        // System-role bypass
         if (user.system_role === 'super_admin' || user.system_role === 'org_admin') return true
-        // Also check legacy super_admin role
-        if (user.role === 'super_admin' || user.role === 'admin') return true
-
+        // Legacy role bypass for super_admin
+        if (user.role === 'super_admin') return true
+        // admin: use permissions object if present, otherwise allow all
+        if (user.role === 'admin') {
+          const perms = get().permissions
+          if (!perms) return true  // no perms yet → allow (will refresh on mount)
+          const val = (perms.modules?.[module] as Record<string, boolean> | undefined)?.[action]
+          return val !== false  // allow if not explicitly denied
+        }
+        // All other roles: check permissions object
         const perms = get().permissions
         if (!perms) return false
         return !!(perms.modules?.[module] as Record<string, boolean> | undefined)?.[action]
