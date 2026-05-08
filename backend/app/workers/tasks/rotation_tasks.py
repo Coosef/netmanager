@@ -180,6 +180,77 @@ async def _rotate(policy_id: int):
         }
         await db.commit()
 
+        if not all_success:
+            await _notify_rotation_failure(policy, device_results)
+
         # Flush SSH pool so next connection uses new creds
         if all_success:
             await ssh_manager.close_all()
+
+
+async def _notify_rotation_failure(policy, device_results: list) -> None:
+    try:
+        import json
+        from datetime import datetime, timezone
+        import redis as _redis_lib
+        from app.core.config import settings
+        from sqlalchemy import select
+        from app.core.database import make_worker_session
+        from app.models.network_event import NetworkEvent
+        from app.models.notification import NotificationChannel, NotificationLog
+        from app.services.notification_service import send_channel
+
+        failed = [r for r in device_results if not r.get("success")]
+        if not failed:
+            return
+
+        _redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+        title = f"Credential Rotasyon Hatası: {policy.id} — {len(failed)} cihaz başarısız"
+        message = "; ".join(f"{r['hostname']}: {r['message'][:80]}" for r in failed[:5])
+
+        async with make_worker_session()() as db:
+            evt = NetworkEvent(
+                device_id=None,
+                device_hostname=None,
+                event_type="rotation_failure",
+                severity="warning",
+                title=title,
+                message=message,
+                details={"policy_id": policy.id, "failed_count": len(failed), "failed_devices": failed[:10]},
+            )
+            db.add(evt)
+            await db.flush()
+
+            channels = (await db.execute(
+                select(NotificationChannel).where(NotificationChannel.is_active == True)
+            )).scalars().all()
+
+            for ch in channels:
+                notify_on = ch.notify_on or []
+                if "critical_event" not in notify_on and "any_event" not in notify_on:
+                    continue
+                ok, err = await send_channel(ch, f"[UYARI] {title}", message)
+                db.add(NotificationLog(
+                    channel_id=ch.id,
+                    source_type="network_event",
+                    source_id=evt.id,
+                    success=ok,
+                    error=err,
+                ))
+
+            await db.commit()
+
+            payload = json.dumps({
+                "device_id": None,
+                "device_hostname": None,
+                "event_type": "rotation_failure",
+                "severity": "warning",
+                "title": title,
+                "message": message,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            _redis.publish("network:events", payload)
+            _redis.lpush("network:events:recent", payload)
+            _redis.ltrim("network:events:recent", 0, 499)
+    except Exception:
+        pass
