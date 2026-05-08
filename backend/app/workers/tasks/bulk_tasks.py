@@ -230,7 +230,7 @@ def _notify_backup_failures(db: Session, failed: int, completed: int, results: d
 
         for ch in channels:
             notify_on = ch.notify_on or []
-            if "backup_failure" not in notify_on and "any_event" not in notify_on:
+            if not ({"backup_failure", "warning_event", "any_event"} & set(notify_on)):
                 continue
             ok, err = _run_async(_send(ch, f"[UYARI] {title}", message))
             db.add(NotificationLog(

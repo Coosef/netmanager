@@ -84,7 +84,7 @@ async def _run():
         channels = channels_result.scalars().all()
         for ch in channels:
             notify_on = ch.notify_on or []
-            if "lifecycle_alert" not in notify_on and "any_event" not in notify_on:
+            if not ({"lifecycle_alert", "warning_event", "any_event"} & set(notify_on)):
                 continue
             try:
                 ok, err = await send_channel(ch, f"[LİFECYCLE] {subject}", body)
