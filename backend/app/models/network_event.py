@@ -24,7 +24,7 @@ class NetworkEvent(Base):
     message: Mapped[Optional[str]] = mapped_column(Text)
     details: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
 
-    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False)
+    acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True

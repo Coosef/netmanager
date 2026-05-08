@@ -177,7 +177,75 @@ def execute_rollout_task(self, rollout_id: int):
             )
             await db.commit()
 
+            if final_status in ("failed", "partial"):
+                await _notify_rollout_failure(db, rollout, rollout_id, final_status, failed_count, success_count, device_results)
+
     _run_async(_run())
+
+
+async def _notify_rollout_failure(db, rollout, rollout_id: int, final_status: str, failed_count: int, success_count: int, device_results: dict) -> None:
+    try:
+        import json
+        import redis as _redis_lib
+        from sqlalchemy import select
+        from app.core.config import settings
+        from app.models.network_event import NetworkEvent
+        from app.models.notification import NotificationChannel, NotificationLog
+        from app.services.notification_service import send_channel
+
+        _redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+
+        label = "Başarısız" if success_count == 0 else "Kısmen Başarılı"
+        name = getattr(rollout, "name", None) or f"Rollout #{rollout_id}"
+        title = f"Config Rollout {label}: '{name}' — {failed_count} cihaz başarısız"
+        failed_hosts = [v["hostname"] for v in device_results.values() if v.get("status") != "success"]
+        message = "Başarısız cihazlar: " + ", ".join(failed_hosts[:10]) if failed_hosts else title
+
+        evt = NetworkEvent(
+            device_id=None,
+            device_hostname=None,
+            event_type="rollout_failure",
+            severity="warning",
+            title=title,
+            message=message,
+            details={"rollout_id": rollout_id, "rollout_name": name, "failed_count": failed_count, "failed_hosts": failed_hosts[:20]},
+        )
+        db.add(evt)
+        await db.flush()
+
+        channels = (await db.execute(
+            select(NotificationChannel).where(NotificationChannel.is_active == True)
+        )).scalars().all()
+
+        for ch in channels:
+            notify_on = ch.notify_on or []
+            if "critical_event" not in notify_on and "any_event" not in notify_on:
+                continue
+            ok, err = await send_channel(ch, f"[ROLLOUT] {title}", message)
+            db.add(NotificationLog(
+                channel_id=ch.id,
+                source_type="network_event",
+                source_id=evt.id,
+                success=ok,
+                error=err,
+            ))
+
+        await db.commit()
+
+        payload = json.dumps({
+            "device_id": None,
+            "device_hostname": None,
+            "event_type": "rollout_failure",
+            "severity": "warning",
+            "title": title,
+            "message": message,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        })
+        _redis.publish("network:events", payload)
+        _redis.lpush("network:events:recent", payload)
+        _redis.ltrim("network:events:recent", 0, 499)
+    except Exception:
+        pass
 
 
 @celery_app.task(bind=True, name="app.workers.tasks.rollout_tasks.execute_rollback_task")

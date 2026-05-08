@@ -252,6 +252,7 @@ const TYPE_LABELS: Record<string, string> = {
   security_audit_critical: 'Güvenlik Uyumu Kritik',
   playbook_failure:      'Playbook Hatası',
   lifecycle_alert:       'Lifecycle Uyarısı',
+  rollout_failure:       'Config Rollout Hatası',
 }
 
 // ── Event detail modal helpers ────────────────────────────────────────────────
@@ -620,6 +621,32 @@ function buildEventDetail(ev: NetworkEvent): EventDetail {
         ],
         links: [
           { label: 'Asset Lifecycle', path: '/lifecycle', icon: <DatabaseOutlined /> },
+        ],
+      }
+    }
+
+    case 'rollout_failure': {
+      const failedHosts: string[] = Array.isArray(d.failed_hosts) ? d.failed_hosts : []
+      return {
+        icon: <CodeOutlined style={{ color: '#ef4444' }} />,
+        what: `"${d.rollout_name ?? 'Config Rollout'}" sırasında ${d.failed_count ?? '?'} cihaza uygulama başarısız oldu.`,
+        rows: [
+          { label: 'Rollout',        value: d.rollout_name ?? '—' },
+          { label: 'Rollout ID',     value: d.rollout_id ?? '—' },
+          { label: 'Başarısız',      value: <Tag color="red">{d.failed_count ?? '—'}</Tag> },
+          ...(failedHosts.length > 0 ? [{
+            label: 'Başarısız Cihazlar',
+            value: (
+              <Space wrap size={4}>
+                {failedHosts.slice(0, 8).map((h: string) => (
+                  <Tag key={h} color="red">{h}</Tag>
+                ))}
+              </Space>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'Config Rollout', path: '/change-management', icon: <CodeOutlined /> },
         ],
       }
     }

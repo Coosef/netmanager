@@ -395,6 +395,25 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)"
         ))
+        # Composite indexes for Monitor page queries (created_at + acknowledged is the hottest path)
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_network_events_acked ON network_events(acknowledged)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_network_events_created_sev ON network_events(created_at, severity)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_snmp_poll_results_device_polled ON snmp_poll_results(device_id, polled_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_syslog_events_received ON syslog_events(received_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_notification_logs_sent ON notification_logs(sent_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs(created_at)"
+        ))
 
     await _create_default_tenant()
     await _create_default_admin()

@@ -20,6 +20,7 @@ celery_app = Celery(
         "app.workers.tasks.rotation_tasks",
         "app.workers.tasks.rollout_tasks",
         "app.workers.tasks.behavior_analytics_tasks",
+        "app.workers.tasks.retention_tasks",
     ],
 )
 
@@ -118,6 +119,10 @@ celery_app.conf.update(
         "check-topology-drift-every-6h": {
             "task": "app.workers.tasks.behavior_analytics_tasks.check_topology_drift",
             "schedule": 21600.0,  # every 6 hours
+        },
+        "data-retention-cleanup-daily": {
+            "task": "app.workers.tasks.retention_tasks.cleanup_old_data",
+            "schedule": 86400.0,  # once per day
         },
     },
 )
