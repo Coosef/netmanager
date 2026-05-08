@@ -203,7 +203,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },
         { key: '/users', icon: <TeamOutlined />, label: t('nav.users'), minRole: 'admin' },
         { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations'), minRole: 'admin' },
-        ...(isSA ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: t('nav.tenants'), minRole: 'super_admin' as UserRole }] : []),
         { key: '/audit', icon: <AuditOutlined />, label: t('nav.audit'), minRole: 'org_viewer' },
         { key: '/driver-templates', icon: <CodeOutlined />, label: t('nav.driver_templates'), minRole: 'admin' },
         { key: '/help', icon: <QuestionCircleOutlined />, label: t('nav.help') },
