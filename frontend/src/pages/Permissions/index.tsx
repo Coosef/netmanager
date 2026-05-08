@@ -11,8 +11,31 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { orgAdminApi, type OrgUser } from '@/api/orgAdmin'
 import type { PermissionSet, Permissions } from '@/types'
 import { useAuthStore } from '@/store/auth'
+import { useTheme } from '@/contexts/ThemeContext'
 
 const { Title, Text } = Typography
+
+function usePageTheme() {
+  const { isDark } = useTheme()
+  return {
+    isDark,
+    pageBg:      isDark ? '#030c1e' : '#f1f5f9',
+    cardBg:      isDark ? '#0e1e38' : '#ffffff',
+    cardBg2:     isDark ? '#071a2e' : '#f8fafc',
+    border:      isDark ? '#1a3458' : '#e2e8f0',
+    borderLight: isDark ? '#112240' : '#f1f5f9',
+    textPrimary: isDark ? '#f1f5f9' : '#1e293b',
+    textSec:     isDark ? '#94a3b8' : '#64748b',
+    textMuted:   isDark ? '#64748b' : '#94a3b8',
+    rowHover:    isDark ? '#ffffff08' : '#f8fafc',
+    rowSelected: isDark ? '#1d4ed815' : '#eff6ff',
+    avatarBg:    isDark ? '#1a3458' : '#e2e8f0',
+    inputBg:     isDark ? '#071a2e' : '#f8fafc',
+    tableHead:   isDark ? '#071a2e' : '#f1f5f9',
+    tableRow:    isDark ? 'transparent' : 'transparent',
+    tableStripe: isDark ? 'rgba(255,255,255,0.02)' : 'rgba(0,0,0,0.02)',
+  }
+}
 
 // ─── Definitions ──────────────────────────────────────────────────────────────
 
@@ -57,6 +80,8 @@ function PermMatrix({
   onChange?: (p: Permissions) => void
   readOnly?: boolean
 }) {
+  const t = usePageTheme()
+
   const toggle = (mod: string, action: string) => {
     if (readOnly || !onChange) return
     onChange(setPermValue(permissions, mod, action, !getPermValue(permissions, mod, action)))
@@ -76,17 +101,17 @@ function PermMatrix({
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
-          <tr>
-            <th style={{ textAlign: 'left', padding: '8px 12px', color: '#94a3b8', fontWeight: 600, borderBottom: '1px solid #1a3458', width: 180 }}>Modül</th>
+          <tr style={{ background: t.tableHead }}>
+            <th style={{ textAlign: 'left', padding: '8px 12px', color: t.textSec, fontWeight: 600, borderBottom: `1px solid ${t.border}`, width: 180 }}>Modül</th>
             {ALL_ACTIONS.map(a => (
-              <th key={a} style={{ textAlign: 'center', padding: '8px 8px', color: '#64748b', fontWeight: 500, borderBottom: '1px solid #1a3458', minWidth: 72, fontSize: 11 }}>
+              <th key={a} style={{ textAlign: 'center', padding: '8px 8px', color: t.textMuted, fontWeight: 500, borderBottom: `1px solid ${t.border}`, minWidth: 72, fontSize: 11 }}>
                 {a === 'view' ? 'Görüntüle' : a === 'edit' ? 'Düzenle' : a === 'delete' ? 'Sil' :
                   a === 'create' ? 'Oluştur' : a === 'ssh' ? 'SSH' : a === 'run' ? 'Çalıştır' :
                   a === 'cancel' ? 'İptal' : a === 'invite' ? 'Davet' : a}
               </th>
             ))}
             {!readOnly && (
-              <th style={{ textAlign: 'center', padding: '8px 8px', color: '#64748b', fontSize: 11, borderBottom: '1px solid #1a3458' }}>Tümü</th>
+              <th style={{ textAlign: 'center', padding: '8px 8px', color: t.textMuted, fontSize: 11, borderBottom: `1px solid ${t.border}` }}>Tümü</th>
             )}
           </tr>
         </thead>
@@ -96,20 +121,20 @@ function PermMatrix({
             return (
               <tr
                 key={mod.key}
-                style={{ background: idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)' }}
+                style={{ background: idx % 2 === 0 ? 'transparent' : t.tableStripe }}
               >
-                <td style={{ padding: '7px 12px', color: '#e2e8f0', fontWeight: 500 }}>{mod.label}</td>
+                <td style={{ padding: '7px 12px', color: t.textPrimary, fontWeight: 500 }}>{mod.label}</td>
                 {ALL_ACTIONS.map(action => {
                   const hasDef = mod.actions.some(a => a.key === action)
                   const val = hasDef ? getPermValue(permissions, mod.key, action) : null
                   return (
                     <td key={action} style={{ textAlign: 'center', padding: '7px 0' }}>
                       {val === null ? (
-                        <span style={{ color: '#1a3458', fontSize: 16 }}>—</span>
+                        <span style={{ color: t.border, fontSize: 16 }}>—</span>
                       ) : readOnly ? (
                         val
                           ? <CheckCircleFilled style={{ color: '#22c55e', fontSize: 16 }} />
-                          : <CloseCircleFilled style={{ color: '#374151', fontSize: 16 }} />
+                          : <CloseCircleFilled style={{ color: t.isDark ? '#374151' : '#cbd5e1', fontSize: 16 }} />
                       ) : (
                         <Checkbox
                           checked={val}
@@ -147,6 +172,7 @@ export default function PermissionsPage() {
   const qc = useQueryClient()
   const { isOrgAdmin } = useAuthStore()
   const canEdit = isOrgAdmin()
+  const t = usePageTheme()
 
   const [selectedUser, setSelectedUser] = useState<OrgUser | null>(null)
   const [editingPermSet, setEditingPermSet] = useState<PermissionSet | null>(null)
@@ -239,13 +265,10 @@ export default function PermissionsPage() {
     setEditName(ps.name)
   }
 
-  const cardBg = '#0e1e38'
-  const border = '#1a3458'
-
   const ROLE_COLOR: Record<string, string> = {
     super_admin: '#ef4444',
     org_admin: '#3b82f6',
-    member: '#475569',
+    member: t.isDark ? '#475569' : '#64748b',
   }
   const ROLE_LABEL: Record<string, string> = {
     super_admin: 'Süper Admin',
@@ -254,24 +277,25 @@ export default function PermissionsPage() {
   }
 
   return (
-    <div style={{ padding: 24, background: '#030c1e', minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Title level={4} style={{ color: '#f1f5f9', marginBottom: 4 }}>Yetki Yönetimi</Title>
-      <Text style={{ color: '#64748b', marginBottom: 16, display: 'block' }}>
+    <div style={{ padding: 24, background: t.pageBg, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <Title level={4} style={{ color: t.textPrimary, marginBottom: 4 }}>Yetki Yönetimi</Title>
+      <Text style={{ color: t.textMuted, marginBottom: 16, display: 'block' }}>
         Yetki setlerini düzenle, kullanıcılara ata
       </Text>
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, flex: 1, alignItems: 'start' }}>
 
-        {/* ── Left: User list (custom, no Ant Table) ── */}
+        {/* ── Left: User list ── */}
         <div style={{
-          background: cardBg, border: `1px solid ${border}`, borderRadius: 10,
+          background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10,
           overflow: 'hidden', display: 'flex', flexDirection: 'column',
           position: 'sticky', top: 24,
           maxHeight: 'calc(100vh - 120px)',
+          boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
         }}>
-          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, background: t.cardBg }}>
             <UserOutlined style={{ color: '#3b82f6' }} />
-            <Text style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 13 }}>Kullanıcılar</Text>
+            <Text style={{ color: t.textPrimary, fontWeight: 600, fontSize: 13 }}>Kullanıcılar</Text>
             {users.length > 0 && (
               <span style={{
                 marginLeft: 'auto', background: '#1d4ed8', color: '#fff',
@@ -279,16 +303,16 @@ export default function PermissionsPage() {
               }}>{users.length}</span>
             )}
           </div>
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div style={{ flex: 1, overflowY: 'auto', background: t.cardBg }}>
             {usersLoading ? (
               <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div>
             ) : usersError ? (
               <div style={{ padding: '32px 16px', textAlign: 'center', color: '#ef4444', fontSize: 13 }}>
                 Kullanıcılar yüklenemedi.<br />
-                <span style={{ color: '#64748b', fontSize: 11 }}>Backend bağlantısını kontrol edin.</span>
+                <span style={{ color: t.textMuted, fontSize: 11 }}>Backend bağlantısını kontrol edin.</span>
               </div>
             ) : users.length === 0 ? (
-              <div style={{ padding: '32px 16px', textAlign: 'center', color: '#475569', fontSize: 13 }}>
+              <div style={{ padding: '32px 16px', textAlign: 'center', color: t.textMuted, fontSize: 13 }}>
                 Henüz kullanıcı yok
               </div>
             ) : users.map((u, idx) => {
@@ -300,37 +324,35 @@ export default function PermissionsPage() {
                   style={{
                     cursor: 'pointer',
                     padding: '10px 16px',
-                    borderBottom: idx < users.length - 1 ? `1px solid ${border}` : 'none',
+                    borderBottom: idx < users.length - 1 ? `1px solid ${t.borderLight}` : 'none',
                     borderLeft: `3px solid ${isSelected ? '#3b82f6' : 'transparent'}`,
-                    background: isSelected ? '#1d4ed815' : 'transparent',
+                    background: isSelected ? t.rowSelected : t.cardBg,
                     display: 'flex', alignItems: 'center', gap: 10,
                     transition: 'background 0.12s',
                   }}
-                  onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = '#ffffff08' }}
-                  onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                  onMouseEnter={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = t.rowHover }}
+                  onMouseLeave={e => { if (!isSelected) (e.currentTarget as HTMLElement).style.background = t.cardBg }}
                 >
                   <div style={{
                     width: 32, height: 32, borderRadius: '50%', flexShrink: 0,
-                    background: isSelected ? '#1d4ed840' : '#1a3458',
+                    background: isSelected ? '#1d4ed840' : t.avatarBg,
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 13, fontWeight: 700, color: isSelected ? '#60a5fa' : '#64748b',
+                    fontSize: 13, fontWeight: 700, color: isSelected ? '#3b82f6' : t.textMuted,
                   }}>
                     {u.username[0].toUpperCase()}
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{
-                      color: isSelected ? '#f1f5f9' : '#cbd5e1',
-                      fontWeight: isSelected ? 600 : 400,
-                      fontSize: 13,
+                      color: isSelected ? t.textPrimary : t.textSec,
+                      fontWeight: isSelected ? 600 : 400, fontSize: 13,
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>{u.username}</div>
-                    <div style={{ color: '#64748b', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
+                    <div style={{ color: t.textMuted, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
                   </div>
                   <div style={{
-                    flexShrink: 0,
-                    fontSize: 10, fontWeight: 600,
-                    color: ROLE_COLOR[u.system_role] ?? '#475569',
-                    background: `${ROLE_COLOR[u.system_role] ?? '#475569'}18`,
+                    flexShrink: 0, fontSize: 10, fontWeight: 600,
+                    color: ROLE_COLOR[u.system_role] ?? t.textMuted,
+                    background: `${ROLE_COLOR[u.system_role] ?? t.textMuted}18`,
                     padding: '2px 6px', borderRadius: 4, whiteSpace: 'nowrap',
                   }}>
                     {ROLE_LABEL[u.system_role] ?? u.system_role}
@@ -346,11 +368,11 @@ export default function PermissionsPage() {
 
           {/* User permissions panel */}
           {selectedUser && (
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 20 }}>
+            <div style={{ background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10, padding: 20, boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)' }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div>
-                  <Text style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 16 }}>{selectedUser.username}</Text>
-                  <Text style={{ color: '#64748b', fontSize: 12, marginLeft: 8 }}>{selectedUser.email}</Text>
+                  <Text style={{ color: t.textPrimary, fontWeight: 700, fontSize: 16 }}>{selectedUser.username}</Text>
+                  <Text style={{ color: t.textMuted, fontSize: 12, marginLeft: 8 }}>{selectedUser.email}</Text>
                 </div>
                 {canEdit && selectedUser.system_role === 'member' && (
                   <Button
@@ -365,7 +387,7 @@ export default function PermissionsPage() {
               </div>
 
               {selectedUser.system_role !== 'member' ? (
-                <div style={{ background: '#071a2e', borderRadius: 8, padding: '12px 16px', border: '1px solid #1a3458' }}>
+                <div style={{ background: t.cardBg2, borderRadius: 8, padding: '12px 16px', border: `1px solid ${t.border}` }}>
                   <CheckCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
                   <Text style={{ color: '#f59e0b' }}>
                     {selectedUser.system_role === 'super_admin' ? 'Süper Admin — tüm yetkiler otomatik' : 'Org Yöneticisi — tüm yetkiler otomatik'}
@@ -403,8 +425,8 @@ export default function PermissionsPage() {
                   {/* Effective permissions matrix */}
                   {effectivePs && (
                     <>
-                      <Divider style={{ borderColor: '#1a3458', margin: '12px 0' }} />
-                      <Text style={{ color: '#94a3b8', fontSize: 12, display: 'block', marginBottom: 8 }}>
+                      <Divider style={{ borderColor: t.border, margin: '12px 0' }} />
+                      <Text style={{ color: t.textSec, fontSize: 12, display: 'block', marginBottom: 8 }}>
                         Aktif yetki seti: <strong style={{ color: '#3b82f6' }}>{effectivePs.name}</strong>
                       </Text>
                       <PermMatrix permissions={effectivePs.permissions} readOnly />
@@ -416,24 +438,24 @@ export default function PermissionsPage() {
           )}
 
           {!selectedUser && (
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: '48px 40px', textAlign: 'center' }}>
+            <div style={{ background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10, padding: '48px 40px', textAlign: 'center', boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)' }}>
               <div style={{
                 width: 56, height: 56, borderRadius: '50%',
-                background: '#1a3458', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: t.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 margin: '0 auto 16px',
               }}>
                 <UserOutlined style={{ fontSize: 24, color: '#3b82f6' }} />
               </div>
-              <Text style={{ color: '#94a3b8', fontSize: 14, display: 'block' }}>Soldaki listeden bir kullanıcı seçin</Text>
-              <Text style={{ color: '#475569', fontSize: 12, marginTop: 4, display: 'block' }}>Kullanıcının mevcut yetkilerini görüntüleyin ve düzenleyin</Text>
+              <Text style={{ color: t.textSec, fontSize: 14, display: 'block' }}>Soldaki listeden bir kullanıcı seçin</Text>
+              <Text style={{ color: t.textMuted, fontSize: 12, marginTop: 4, display: 'block' }}>Kullanıcının mevcut yetkilerini görüntüleyin ve düzenleyin</Text>
             </div>
           )}
 
           {/* ── Permission sets manager ── */}
-          <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10, overflow: 'hidden', boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
               <SafetyOutlined style={{ color: '#8b5cf6' }} />
-              <Text style={{ color: '#f1f5f9', fontWeight: 600 }}>Yetki Setleri</Text>
+              <Text style={{ color: t.textPrimary, fontWeight: 600 }}>Yetki Setleri</Text>
               {canEdit && (
                 <Button
                   size="small"
@@ -449,14 +471,14 @@ export default function PermissionsPage() {
 
             <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {globalPermSets.length > 0 && (
-                <Text style={{ color: '#64748b', fontSize: 11, marginBottom: 4 }}>GLOBAL ŞABLONLAR (salt okunur)</Text>
+                <Text style={{ color: t.textMuted, fontSize: 11, marginBottom: 4, letterSpacing: '0.05em' }}>GLOBAL ŞABLONLAR (salt okunur)</Text>
               )}
               {globalPermSets.map(ps => (
                 <PermSetCard key={ps.id} ps={ps} onView={() => openEdit(ps)} readOnly />
               ))}
 
               {orgPermSets.length > 0 && (
-                <Text style={{ color: '#64748b', fontSize: 11, marginTop: 8, marginBottom: 4 }}>ORGANİZASYON YETKİ SETLERİ</Text>
+                <Text style={{ color: t.textMuted, fontSize: 11, marginTop: 8, marginBottom: 4, letterSpacing: '0.05em' }}>ORGANİZASYON YETKİ SETLERİ</Text>
               )}
               {orgPermSets.map(ps => (
                 <PermSetCard
@@ -475,8 +497,8 @@ export default function PermissionsPage() {
               )}
               {!permSetsError && permSets.length === 0 && (
                 <div style={{ padding: '32px 0', textAlign: 'center' }}>
-                  <SafetyOutlined style={{ fontSize: 32, color: '#1a3458', display: 'block', marginBottom: 12 }} />
-                  <Text style={{ color: '#475569', fontSize: 13, display: 'block' }}>Henüz yetki seti yok</Text>
+                  <SafetyOutlined style={{ fontSize: 32, color: t.border, display: 'block', marginBottom: 12 }} />
+                  <Text style={{ color: t.textMuted, fontSize: 13, display: 'block' }}>Henüz yetki seti yok</Text>
                   {canEdit && (
                     <Text style={{ color: '#3b82f6', fontSize: 12, marginTop: 4, display: 'block', cursor: 'pointer' }}
                       onClick={() => { setNewSetName(''); setCloneFromId(null); setNewSetModal(true) }}>
@@ -531,12 +553,12 @@ export default function PermissionsPage() {
                 onChange={e => setEditName(e.target.value)}
                 style={{
                   width: '100%', marginBottom: 16, padding: '6px 10px',
-                  background: '#071224', border: '1px solid #1a3458', borderRadius: 6,
-                  color: '#f1f5f9', fontSize: 14,
+                  background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 6,
+                  color: t.textPrimary, fontSize: 14,
                 }}
               />
             ) : (
-              <Text style={{ color: '#f1f5f9', fontWeight: 700, fontSize: 16, display: 'block', marginBottom: 12 }}>
+              <Text style={{ color: t.textPrimary, fontWeight: 700, fontSize: 16, display: 'block', marginBottom: 12 }}>
                 {editingPermSet.name}
               </Text>
             )}
@@ -562,20 +584,20 @@ export default function PermissionsPage() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
-            <Text style={{ color: '#94a3b8', fontSize: 12 }}>Yetki Seti Adı</Text>
+            <Text style={{ color: t.textSec, fontSize: 12 }}>Yetki Seti Adı</Text>
             <input
               value={newSetName}
               onChange={e => setNewSetName(e.target.value)}
               placeholder="örn: Okuma Yetkisi"
               style={{
                 width: '100%', marginTop: 4, padding: '8px 10px',
-                background: '#071224', border: '1px solid #1a3458', borderRadius: 6,
-                color: '#f1f5f9', fontSize: 14,
+                background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 6,
+                color: t.textPrimary, fontSize: 14,
               }}
             />
           </div>
           <div>
-            <Text style={{ color: '#94a3b8', fontSize: 12 }}>Global Şablondan Kopyala (isteğe bağlı)</Text>
+            <Text style={{ color: t.textSec, fontSize: 12 }}>Global Şablondan Kopyala (isteğe bağlı)</Text>
             <Select
               allowClear
               placeholder="Şablon seç"
@@ -604,7 +626,7 @@ export default function PermissionsPage() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div>
-            <Text style={{ color: '#94a3b8', fontSize: 12 }}>Yetki Seti</Text>
+            <Text style={{ color: t.textSec, fontSize: 12 }}>Yetki Seti</Text>
             <Select
               style={{ width: '100%', marginTop: 4 }}
               placeholder="Seçin"
@@ -617,7 +639,7 @@ export default function PermissionsPage() {
             />
           </div>
           <div>
-            <Text style={{ color: '#94a3b8', fontSize: 12 }}>Lokasyon ID (boş = tüm org için geçerli)</Text>
+            <Text style={{ color: t.textSec, fontSize: 12 }}>Lokasyon ID (boş = tüm org için geçerli)</Text>
             <input
               type="number"
               placeholder="Boş bırak = tüm organizasyon"
@@ -625,8 +647,8 @@ export default function PermissionsPage() {
               onChange={e => setAssignLocId(e.target.value ? Number(e.target.value) : null)}
               style={{
                 width: '100%', marginTop: 4, padding: '8px 10px',
-                background: '#071224', border: '1px solid #1a3458', borderRadius: 6,
-                color: '#f1f5f9', fontSize: 14,
+                background: t.inputBg, border: `1px solid ${t.border}`, borderRadius: 6,
+                color: t.textPrimary, fontSize: 14,
               }}
             />
           </div>
@@ -635,8 +657,8 @@ export default function PermissionsPage() {
             const ps = permSets.find(p => p.id === assignPsId)
             return ps ? (
               <>
-                <Divider style={{ margin: '4px 0', borderColor: '#1a3458' }} />
-                <Text style={{ color: '#64748b', fontSize: 12 }}>Önizleme:</Text>
+                <Divider style={{ margin: '4px 0', borderColor: t.border }} />
+                <Text style={{ color: t.textMuted, fontSize: 12 }}>Önizleme:</Text>
                 <PermMatrix permissions={ps.permissions} readOnly />
               </>
             ) : null
@@ -660,6 +682,8 @@ function PermSetCard({
   onDelete?: () => void
   readOnly?: boolean
 }) {
+  const t = usePageTheme()
+
   const grantedCount = Object.values(ps.permissions?.modules ?? {}).reduce((sum, mod) => {
     return sum + Object.values(mod as Record<string, boolean>).filter(Boolean).length
   }, 0)
@@ -668,22 +692,22 @@ function PermSetCard({
 
   return (
     <div style={{
-      background: '#071a2e', border: '1px solid #1a3458', borderRadius: 8,
+      background: t.cardBg2, border: `1px solid ${t.border}`, borderRadius: 8,
       padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
       transition: 'border-color 0.15s',
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Text style={{ color: '#f1f5f9', fontWeight: 600, fontSize: 13 }}>{ps.name}</Text>
+          <Text style={{ color: t.textPrimary, fontWeight: 600, fontSize: 13 }}>{ps.name}</Text>
           {ps.org_id === null && <Tag color="purple" style={{ fontSize: 10 }}>Global</Tag>}
           {ps.is_default && <Tag color="blue" style={{ fontSize: 10 }}>Varsayılan</Tag>}
         </div>
-        {ps.description && <Text style={{ color: '#64748b', fontSize: 11 }}>{ps.description}</Text>}
+        {ps.description && <Text style={{ color: t.textMuted, fontSize: 11 }}>{ps.description}</Text>}
       </div>
       <Tooltip title={`${grantedCount}/${totalCount} izin verilmiş`}>
         <div style={{
-          background: grantedCount === 0 ? '#1a3458' : grantedCount >= totalCount * 0.7 ? '#22c55e20' : '#3b82f620',
-          color: grantedCount === 0 ? '#475569' : grantedCount >= totalCount * 0.7 ? '#22c55e' : '#3b82f6',
+          background: grantedCount === 0 ? t.border : grantedCount >= totalCount * 0.7 ? '#22c55e20' : '#3b82f620',
+          color: grantedCount === 0 ? t.textMuted : grantedCount >= totalCount * 0.7 ? '#22c55e' : '#3b82f6',
           padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, flexShrink: 0,
         }}>
           {grantedCount}/{totalCount}
