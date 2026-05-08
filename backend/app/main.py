@@ -393,6 +393,7 @@ async def lifespan(app: FastAPI):
 
     await _create_default_tenant()
     await _create_default_admin()
+    await _ensure_default_org()
     await _seed_builtin_templates()
     await _seed_default_backup_schedule()
     await _seed_driver_templates()
@@ -663,6 +664,83 @@ async def _seed_driver_templates():
     async with AsyncSessionLocal() as db:
         await seed_driver_templates(db)
         print("[DriverTemplates] Built-in templates seeded")
+
+
+async def _ensure_default_org():
+    """Create a default organization and assign all org-less users to it."""
+    import copy
+    from sqlalchemy import select, func as _func, update as _upd
+    from app.core.database import AsyncSessionLocal
+    from app.models.shared.organization import Organization
+    from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
+    from app.models.user import User
+
+    async with AsyncSessionLocal() as db:
+        org = (await db.execute(
+            select(Organization).where(Organization.slug == "default")
+        )).scalar_one_or_none()
+
+        if not org:
+            org = Organization(
+                name="Varsayılan Organizasyon",
+                slug="default",
+                description="Sistem tarafından otomatik oluşturuldu",
+            )
+            db.add(org)
+            await db.flush()
+            print(f"[Org] Default organization created (id={org.id})")
+
+        org_id = org.id
+
+        # Assign all org-less users to this org
+        result = await db.execute(
+            _upd(User).where(User.org_id.is_(None)).values(org_id=org_id)
+        )
+        if result.rowcount:
+            print(f"[Org] {result.rowcount} user(s) assigned to default org")
+
+        # Create default permission sets if none exist for this org
+        existing_count = (await db.execute(
+            select(_func.count()).select_from(PermissionSet).where(PermissionSet.org_id == org_id)
+        )).scalar()
+
+        if not existing_count:
+            viewer_perms = copy.deepcopy(DEFAULT_PERMISSIONS)
+            for mod in viewer_perms["modules"].values():
+                if "view" in mod:
+                    mod["view"] = True
+
+            operator_perms = copy.deepcopy(viewer_perms)
+            for mod_key, mod in operator_perms["modules"].items():
+                if mod_key in ("tasks",):
+                    mod["view"] = True
+                    mod["create"] = True
+                if mod_key == "devices":
+                    mod["ssh"] = True
+                if mod_key == "playbooks":
+                    mod["view"] = True
+                    mod["run"] = True
+
+            full_perms = copy.deepcopy(DEFAULT_PERMISSIONS)
+            for mod in full_perms["modules"].values():
+                for k in mod:
+                    mod[k] = True
+
+            db.add(PermissionSet(
+                name="Görüntüleyici", description="Salt okunur erişim",
+                org_id=org_id, permissions=viewer_perms, is_default=True,
+            ))
+            db.add(PermissionSet(
+                name="Operatör", description="Görüntüle ve temel operasyonlar",
+                org_id=org_id, permissions=operator_perms,
+            ))
+            db.add(PermissionSet(
+                name="Tam Yetki", description="Tüm modüllere tam erişim",
+                org_id=org_id, permissions=full_perms,
+            ))
+            print("[Org] Default permission sets created")
+
+        await db.commit()
 
 
 async def _create_default_admin():
