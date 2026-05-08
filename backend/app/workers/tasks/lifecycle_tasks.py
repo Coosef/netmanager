@@ -59,15 +59,25 @@ async def _run():
         subject = f"⚠️ Lifecycle Uyarısı: {len(alerts)} cihazda yaklaşan tarih"
         body = "Aşağıdaki cihazlarda kritik tarihler yaklaşıyor:\n\n" + "\n".join(alerts)
 
-        # Send to all active channels subscribed to device_offline or any_event
+        from app.models.notification import NotificationLog
+
         channels_result = await db.execute(
             select(NotificationChannel).where(NotificationChannel.is_active == True)
         )
         channels = channels_result.scalars().all()
         for ch in channels:
             notify_on = ch.notify_on or []
-            if "any_event" in notify_on or "device_offline" in notify_on:
-                try:
-                    await send_channel(ch, subject, body)
-                except Exception:
-                    pass
+            if "lifecycle_alert" not in notify_on and "any_event" not in notify_on:
+                continue
+            try:
+                ok, err = await send_channel(ch, subject, body)
+                db.add(NotificationLog(
+                    channel_id=ch.id,
+                    source_type="lifecycle_alert",
+                    source_id=0,
+                    success=ok,
+                    error=err,
+                ))
+            except Exception:
+                pass
+        await db.commit()
