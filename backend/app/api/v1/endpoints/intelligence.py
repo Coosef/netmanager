@@ -403,13 +403,20 @@ async def root_cause_incidents(
 
 # ── 14A: Behavior Analytics — Anomaly Feed ───────────────────────────────────
 
-_ANOMALY_TYPES = ("mac_anomaly", "traffic_spike", "vlan_anomaly", "mac_loop_suspicion")
+_ANOMALY_TYPES = (
+    "mac_anomaly", "traffic_spike", "vlan_anomaly", "mac_loop_suspicion",
+    "topology_drift", "stp_anomaly", "loop_detected", "device_flapping",
+)
 
 _ANOMALY_LABEL = {
     "mac_anomaly":         "MAC Anomalisi",
     "traffic_spike":       "Trafik Spike",
     "vlan_anomaly":        "VLAN Anomalisi",
     "mac_loop_suspicion":  "Döngü Şüphesi",
+    "topology_drift":      "Topoloji Drift",
+    "stp_anomaly":         "STP Anomalisi",
+    "loop_detected":       "Döngü Tespiti",
+    "device_flapping":     "Cihaz Flapping",
 }
 
 

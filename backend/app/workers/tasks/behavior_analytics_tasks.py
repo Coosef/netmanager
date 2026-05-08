@@ -85,6 +85,18 @@ async def _do_check_topology_drift():
         )
         db.add(evt)
         await db.commit()
+        payload = {
+            "device_id": None,
+            "device_hostname": None,
+            "event_type": "topology_drift",
+            "severity": "warning",
+            "title": "Topoloji Drift Tespiti",
+            "message": evt.message,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        _redis.publish("network:events", json.dumps(payload))
+        _redis.lpush("network:events:recent", json.dumps(payload))
+        _redis.ltrim("network:events:recent", 0, 499)
         print(f"[topology_twin] Drift event fired: +{added_count} / -{removed_count}")
 
 
