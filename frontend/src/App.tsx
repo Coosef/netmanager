@@ -141,6 +141,12 @@ const GLOBAL_CSS_DARK = `
   .ant-card:hover { box-shadow: 0 4px 20px rgba(59,130,246,0.08) !important; }
   .ant-table-row { transition: background 0.1s; }
   .ant-btn-primary { box-shadow: 0 0 12px rgba(59,130,246,0.25) !important; }
+  .ant-table-placeholder { background: transparent !important; }
+  .ant-table-placeholder .ant-empty-description { color: #475569 !important; }
+  .ant-table-placeholder .ant-empty-image svg { opacity: 0.25; }
+  .ant-table-placeholder td { border-bottom: none !important; }
+  .perm-user-row td { border-bottom: 1px solid #112240 !important; }
+  .perm-user-row:last-child td { border-bottom: none !important; }
 `
 
 const GLOBAL_CSS_LIGHT = `

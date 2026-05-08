@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import {
   Table, Select, Tag, Button, Modal, Checkbox, Space, Tooltip,
   message, Spin, Typography, Divider, Popconfirm, Badge,
@@ -159,14 +159,16 @@ export default function PermissionsPage() {
   const [assignPsId, setAssignPsId] = useState<number | null>(null)
   const [assignLocId, setAssignLocId] = useState<number | null>(null)
 
-  const { data: usersData, isLoading: usersLoading } = useQuery({
+  const { data: usersData, isLoading: usersLoading, isError: usersError } = useQuery({
     queryKey: ['perm-page-users'],
     queryFn: () => orgAdminApi.listUsers(1, 200),
+    retry: false,
   })
 
-  const { data: permSetsData } = useQuery({
+  const { data: permSetsData, isError: permSetsError } = useQuery({
     queryKey: ['perm-page-sets'],
     queryFn: orgAdminApi.listPermSets,
+    retry: false,
   })
 
   const { data: userPermsData } = useQuery({
@@ -278,7 +280,7 @@ export default function PermissionsPage() {
     },
   ]
 
-  const cardBg = '#0a111f'
+  const cardBg = '#0e1e38'
   const border = '#1a3458'
 
   return (
@@ -288,18 +290,27 @@ export default function PermissionsPage() {
         Yetki setlerini düzenle, kullanıcılara ata
       </Text>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, flex: 1 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: 16, flex: 1, alignItems: 'start' }}>
 
         {/* ── Left: User list ── */}
-        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 160px)' }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             <UserOutlined style={{ color: '#3b82f6' }} />
             <Text style={{ color: '#f1f5f9', fontWeight: 600 }}>Kullanıcılar</Text>
-            <Badge count={users.length} style={{ backgroundColor: '#1d4ed8', marginLeft: 'auto' }} />
+            <Badge count={users.length} style={{ backgroundColor: '#1d4ed8', marginLeft: 'auto' }} showZero={false} />
           </div>
           <div style={{ flex: 1, overflowY: 'auto' }}>
             {usersLoading ? (
               <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div>
+            ) : usersError ? (
+              <div style={{ padding: '32px 16px', textAlign: 'center', color: '#ef4444', fontSize: 13 }}>
+                Kullanıcılar yüklenemedi.<br />
+                <span style={{ color: '#64748b', fontSize: 11 }}>Backend bağlantısını kontrol edin.</span>
+              </div>
+            ) : users.length === 0 ? (
+              <div style={{ padding: '32px 16px', textAlign: 'center', color: '#475569', fontSize: 13 }}>
+                Henüz kullanıcı yok
+              </div>
             ) : (
               <Table
                 dataSource={users}
@@ -309,6 +320,7 @@ export default function PermissionsPage() {
                 pagination={false}
                 showHeader={false}
                 style={{ background: 'transparent' }}
+                rowClassName={() => 'perm-user-row'}
               />
             )}
           </div>
@@ -338,7 +350,7 @@ export default function PermissionsPage() {
               </div>
 
               {selectedUser.system_role !== 'member' ? (
-                <div style={{ background: '#071224', borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ background: '#071a2e', borderRadius: 8, padding: '12px 16px', border: '1px solid #1a3458' }}>
                   <CheckCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
                   <Text style={{ color: '#f59e0b' }}>
                     {selectedUser.system_role === 'super_admin' ? 'Süper Admin — tüm yetkiler otomatik' : 'Org Yöneticisi — tüm yetkiler otomatik'}
@@ -389,9 +401,16 @@ export default function PermissionsPage() {
           )}
 
           {!selectedUser && (
-            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 40, textAlign: 'center' }}>
-              <UserOutlined style={{ fontSize: 40, color: '#1a3458', display: 'block', marginBottom: 12 }} />
-              <Text style={{ color: '#475569' }}>Soldaki listeden bir kullanıcı seçin</Text>
+            <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: '48px 40px', textAlign: 'center' }}>
+              <div style={{
+                width: 56, height: 56, borderRadius: '50%',
+                background: '#1a3458', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 16px',
+              }}>
+                <UserOutlined style={{ fontSize: 24, color: '#3b82f6' }} />
+              </div>
+              <Text style={{ color: '#94a3b8', fontSize: 14, display: 'block' }}>Soldaki listeden bir kullanıcı seçin</Text>
+              <Text style={{ color: '#475569', fontSize: 12, marginTop: 4, display: 'block' }}>Kullanıcının mevcut yetkilerini görüntüleyin ve düzenleyin</Text>
             </div>
           )}
 
@@ -434,10 +453,22 @@ export default function PermissionsPage() {
                 />
               ))}
 
-              {permSets.length === 0 && (
-                <Text style={{ color: '#475569', padding: '16px 0', textAlign: 'center', display: 'block' }}>
-                  Henüz yetki seti yok
-                </Text>
+              {permSetsError && (
+                <div style={{ padding: '24px 0', textAlign: 'center', color: '#ef4444', fontSize: 13 }}>
+                  Yetki setleri yüklenemedi
+                </div>
+              )}
+              {!permSetsError && permSets.length === 0 && (
+                <div style={{ padding: '32px 0', textAlign: 'center' }}>
+                  <SafetyOutlined style={{ fontSize: 32, color: '#1a3458', display: 'block', marginBottom: 12 }} />
+                  <Text style={{ color: '#475569', fontSize: 13, display: 'block' }}>Henüz yetki seti yok</Text>
+                  {canEdit && (
+                    <Text style={{ color: '#3b82f6', fontSize: 12, marginTop: 4, display: 'block', cursor: 'pointer' }}
+                      onClick={() => { setNewSetName(''); setCloneFromId(null); setNewSetModal(true) }}>
+                      + İlk yetki setini oluştur
+                    </Text>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -622,8 +653,9 @@ function PermSetCard({
 
   return (
     <div style={{
-      background: '#071224', border: '1px solid #1a3458', borderRadius: 8,
+      background: '#071a2e', border: '1px solid #1a3458', borderRadius: 8,
       padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
+      transition: 'border-color 0.15s',
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
