@@ -54,6 +54,7 @@ import AIAssistantPage from '@/pages/AIAssistant'
 import SuperAdminPage from '@/pages/SuperAdmin'
 import OrgAdminPage from '@/pages/OrgAdmin'
 import PermissionsPage from '@/pages/Permissions'
+import AdminPage from '@/pages/Admin'
 import InviteAcceptPage from '@/pages/InviteAccept'
 
 dayjs.extend(relativeTime)
@@ -233,6 +234,7 @@ function ThemedApp() {
               <Route path="superadmin" element={<RoleRoute minRole="super_admin"><SuperAdminPage /></RoleRoute>} />
               <Route path="org-admin" element={<RoleRoute minRole="admin"><OrgAdminPage /></RoleRoute>} />
               <Route path="permissions" element={<RoleRoute minRole="admin"><PermissionsPage /></RoleRoute>} />
+              <Route path="admin" element={<RoleRoute minRole="admin"><AdminPage /></RoleRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

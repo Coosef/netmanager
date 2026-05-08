@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -11,11 +12,27 @@ from app.models.location import Location
 from app.models.network_event import NetworkEvent
 from app.models.task import Task
 from app.models.tenant import Tenant
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, SystemRole
 
 router = APIRouter()
 
 SuperAdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN))
+
+
+def _user_dict(u: User) -> dict:
+    return {
+        "id": u.id,
+        "username": u.username,
+        "email": u.email,
+        "full_name": u.full_name,
+        "is_active": u.is_active,
+        "system_role": u.system_role,
+        "role": u.role,
+        "org_id": u.org_id,
+        "tenant_id": u.tenant_id,
+        "last_login": u.last_login.isoformat() if u.last_login else None,
+        "created_at": u.created_at.isoformat() if u.created_at else None,
+    }
 
 
 @router.get("/system-stats")
@@ -96,6 +113,49 @@ async def update_tenant_plan(
     tenant.max_users = max_users
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/tenants/{tenant_id}/users")
+async def list_tenant_users(
+    tenant_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=SuperAdminRequired,
+):
+    """List all users belonging to a tenant (for super_admin panel)."""
+    users = (await db.execute(
+        select(User).where(User.tenant_id == tenant_id).order_by(User.username)
+    )).scalars().all()
+    return [_user_dict(u) for u in users]
+
+
+@router.patch("/users/{user_id}")
+async def update_user_sa(
+    user_id: int,
+    db: AsyncSession = Depends(get_db),
+    _=SuperAdminRequired,
+    system_role: Optional[str] = Body(None),
+    is_active: Optional[bool] = Body(None),
+    full_name: Optional[str] = Body(None),
+    tenant_id: Optional[int] = Body(None),
+    org_id: Optional[int] = Body(None),
+):
+    """Super-admin level user edit (system_role, active, org assignment)."""
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if system_role is not None:
+        user.system_role = system_role
+    if is_active is not None:
+        user.is_active = is_active
+    if full_name is not None:
+        user.full_name = full_name
+    if tenant_id is not None:
+        user.tenant_id = tenant_id
+    if org_id is not None:
+        user.org_id = org_id
+    await db.commit()
+    await db.refresh(user)
+    return _user_dict(user)
 
 
 @router.patch("/tenants/{tenant_id}/toggle-active")
