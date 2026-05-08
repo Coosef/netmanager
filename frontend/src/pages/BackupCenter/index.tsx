@@ -954,8 +954,8 @@ export default function BackupCenterPage() {
         <Space wrap>
           <Button icon={<SyncOutlined />} onClick={() => refetch()}>Yenile</Button>
           <Button icon={<DiffOutlined />} onClick={() => setDiffOpen(true)}>Config Karşılaştır</Button>
-          <Button icon={<DownloadOutlined />} href={reportsApi.getBackupsCsvUrl()} target="_blank">CSV İndir</Button>
-          <Button icon={<DownloadOutlined />} href={reportsApi.getBackupsZipUrl()} target="_blank">ZIP İndir</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => reportsApi.downloadBackupsCsv()}>CSV İndir</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => reportsApi.downloadBackupsZip()}>ZIP İndir</Button>
           <Button
             type="primary"
             icon={<ThunderboltOutlined />}

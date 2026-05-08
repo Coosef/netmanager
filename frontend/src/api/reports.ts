@@ -12,15 +12,37 @@ export interface ReportSummary {
   topology: { links: number; nodes: number }
 }
 
+function _blobDownload(url: string, params: Record<string, unknown>, filename: string) {
+  return client.get(url, { params, responseType: 'blob' }).then((res) => {
+    const href = URL.createObjectURL(new Blob([res.data]))
+    const a = document.createElement('a')
+    a.href = href
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(href)
+  })
+}
+
 export const reportsApi = {
   getSummary: (params?: { site?: string }) =>
     client.get<ReportSummary>('/reports/summary', { params }).then((r) => r.data),
 
-  getDevicesCsvUrl: () => '/api/v1/reports/devices?format=csv',
-  getEventsCsvUrl: (hours = 24) => `/api/v1/reports/events?format=csv&hours=${hours}`,
-  getBackupsCsvUrl: () => '/api/v1/reports/backups?format=csv',
-  getFirmwareCsvUrl: () => '/api/v1/reports/firmware?format=csv',
-  getBackupsZipUrl: () => '/api/v1/reports/backups/download-zip',
+  downloadDevicesCsv: (site?: string) =>
+    _blobDownload('/reports/devices', { format: 'csv', ...(site ? { site } : {}) }, 'devices.csv'),
+
+  downloadEventsCsv: (hours = 24) =>
+    _blobDownload('/reports/events', { format: 'csv', hours }, `events_${hours}h.csv`),
+
+  downloadBackupsCsv: (site?: string) =>
+    _blobDownload('/reports/backups', { format: 'csv', ...(site ? { site } : {}) }, 'backups.csv'),
+
+  downloadFirmwareCsv: (site?: string) =>
+    _blobDownload('/reports/firmware', { format: 'csv', ...(site ? { site } : {}) }, 'firmware.csv'),
+
+  downloadBackupsZip: () =>
+    _blobDownload('/reports/backups/download-zip', {}, 'configs_backup.zip'),
 
   getDevices: (params?: { site?: string }) =>
     client.get<{ total: number; items: Record<string, string>[] }>('/reports/devices', { params }).then((r) => r.data),

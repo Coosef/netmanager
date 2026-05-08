@@ -103,17 +103,19 @@ function SummaryCard({ icon, color, label, value, sub, C }: {
   )
 }
 
-function DownloadBtn({ href, label, C }: { href: string; label: string; C: Colors }) {
+function DownloadBtn({ onClick, label, C, loading }: { onClick: () => void; label: string; C: Colors; loading?: boolean }) {
   return (
-    <a href={href} download style={{ textDecoration: 'none' }}>
-      <div style={{
+    <div
+      onClick={loading ? undefined : onClick}
+      style={{
         display: 'inline-flex', alignItems: 'center', gap: 6,
-        background: C.primary, color: '#fff', borderRadius: 7,
-        padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-      }}>
-        <DownloadOutlined /> {label}
-      </div>
-    </a>
+        background: loading ? C.dim : C.primary, color: '#fff', borderRadius: 7,
+        padding: '6px 14px', fontSize: 13, fontWeight: 600,
+        cursor: loading ? 'not-allowed' : 'pointer', userSelect: 'none',
+      }}
+    >
+      <DownloadOutlined /> {loading ? 'İndiriliyor…' : label}
+    </div>
   )
 }
 
@@ -317,7 +319,14 @@ export default function ReportsPage() {
   const [uptimeDays, setUptimeDays] = useState(7)
   const [problemDays, setProblemDays] = useState(7)
   const [activeTab, setActiveTab] = useState('devices')
+  const [dlLoading, setDlLoading] = useState<string | null>(null)
   const { t } = useTranslation()
+
+  const download = (key: string, fn: () => Promise<void>) => {
+    if (dlLoading) return
+    setDlLoading(key)
+    fn().finally(() => setDlLoading(null))
+  }
   const { isDark } = useTheme()
   const { activeSite } = useSite()
   const C = mkColors(isDark)
@@ -462,7 +471,7 @@ export default function ReportsPage() {
                   )}
                   disabled={!devicesData?.items?.length}
                 >Excel</Button>
-                <DownloadBtn href={reportsApi.getDevicesCsvUrl()} label={t('reports.download_csv')} C={C} />
+                <DownloadBtn onClick={() => download('dev-csv', reportsApi.downloadDevicesCsv)} label={t('reports.download_csv')} C={C} loading={dlLoading === 'dev-csv'} />
               </Space>
             ) :
             activeTab === 'events' ? (
@@ -481,7 +490,7 @@ export default function ReportsPage() {
                   )}
                   disabled={!eventsData?.items?.length}
                 >Excel</Button>
-                <DownloadBtn href={reportsApi.getEventsCsvUrl(eventHours)} label={t('reports.download_csv')} C={C} />
+                <DownloadBtn onClick={() => download('ev-csv', () => reportsApi.downloadEventsCsv(eventHours))} label={t('reports.download_csv')} C={C} loading={dlLoading === 'ev-csv'} />
               </div>
             ) :
             activeTab === 'backups' ? (
@@ -494,11 +503,11 @@ export default function ReportsPage() {
                   )}
                   disabled={!backupsData?.items?.length}
                 >Excel</Button>
-                <DownloadBtn href={reportsApi.getBackupsZipUrl()} label="Tümünü ZIP İndir" C={C} />
-                <DownloadBtn href={reportsApi.getBackupsCsvUrl()} label={t('reports.download_csv')} C={C} />
+                <DownloadBtn onClick={() => download('bk-zip', reportsApi.downloadBackupsZip)} label="Tümünü ZIP İndir" C={C} loading={dlLoading === 'bk-zip'} />
+                <DownloadBtn onClick={() => download('bk-csv', reportsApi.downloadBackupsCsv)} label={t('reports.download_csv')} C={C} loading={dlLoading === 'bk-csv'} />
               </Space>
             ) :
-            activeTab === 'firmware' ? <DownloadBtn href={reportsApi.getFirmwareCsvUrl()} label={t('reports.download_csv')} C={C} /> :
+            activeTab === 'firmware' ? <DownloadBtn onClick={() => download('fw-csv', reportsApi.downloadFirmwareCsv)} label={t('reports.download_csv')} C={C} loading={dlLoading === 'fw-csv'} /> :
             activeTab === 'uptime' ? (
               <Select size="small" value={uptimeDays} onChange={setUptimeDays} style={{ width: 120 }}
                 options={[
