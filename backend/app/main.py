@@ -453,6 +453,20 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS rolled_back_devices INTEGER NOT NULL DEFAULT 0"
         ))
 
+        # MAC/ARP unique constraints + composite indexes
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_mac_device_mac ON mac_address_entries(device_id, mac_address)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_mac_entries_device_active ON mac_address_entries(device_id, is_active)"
+        ))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_arp_device_ip ON arp_entries(device_id, ip_address)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_arp_entries_device_active ON arp_entries(device_id, is_active)"
+        ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _ensure_default_org()

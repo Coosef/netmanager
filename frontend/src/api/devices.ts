@@ -139,8 +139,12 @@ export const devicesApi = {
       '/devices/bulk-update-agent', { device_ids, agent_id }
     ).then((r) => r.data),
 
-  downloadBackupUrl: (deviceId: number, backupId: number) =>
-    `/api/v1/devices/${deviceId}/backups/${backupId}/download`,
+  downloadBackup: (deviceId: number, backupId: number) =>
+    client.get(`/devices/${deviceId}/backups/${backupId}/download`, { responseType: 'blob' }).then((res) => {
+      const url = URL.createObjectURL(new Blob([res.data], { type: 'text/plain' }))
+      const a = document.createElement('a'); a.href = url; a.download = `backup_${deviceId}_${backupId}.txt`
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url)
+    }),
 
   setGoldenBackup: (deviceId: number, backupId: number) =>
     client.post<{ success: boolean; backup_id: number; message: string }>(

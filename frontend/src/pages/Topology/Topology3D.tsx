@@ -301,6 +301,13 @@ const Topology3D = forwardRef<Topology3DHandle, Props>(function Topology3D(
     return group
   }, [])
 
+  // Clear tour timer on unmount
+  useEffect(() => {
+    return () => {
+      if (tourTimer.current) { clearInterval(tourTimer.current); tourTimer.current = null }
+    }
+  }, [])
+
   // ── Sync hiddenLayers prop → ref, trigger refresh ─────────────────────────
   useEffect(() => {
     hiddenLayersRef.current = hiddenLayers ?? new Set()

@@ -115,6 +115,7 @@ def check_config_drift():
                         "lines_removed": removed,
                     },
                     dedup_key=f"drift:{device.id}:{latest.id}",
+                    dedup_ttl=86400,
                 )
             except Exception:
                 pass

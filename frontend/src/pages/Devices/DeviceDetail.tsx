@@ -1025,12 +1025,7 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
                 {backupContent?.config && (
                   <Button size="small" icon={<CopyOutlined />} onClick={() => copyToClipboard(backupContent.config)}>Kopyala</Button>
                 )}
-                <a
-                  href={devicesApi.downloadBackupUrl(currentDevice.id, selectedBackup.id)}
-                  download
-                >
-                  <Button size="small" icon={<DownloadOutlined />}>İndir</Button>
-                </a>
+                <Button size="small" icon={<DownloadOutlined />} onClick={() => devicesApi.downloadBackup(currentDevice.id, selectedBackup.id)}>İndir</Button>
               </Space>
               {backupContentLoading ? <Spin /> : (
                 <pre style={{ background: '#1e1e1e', color: '#d4d4d4', padding: 16, borderRadius: 6, overflow: 'auto', maxHeight: 300, fontSize: 12 }}>

@@ -327,6 +327,7 @@ def poll_device_status():
         # ── Pass 1: Ping devices, update DB/Redis ──────────────────────────
         # changes: (device, new_status, error_msg)
         changes: list[tuple] = []
+        now_ts = datetime.now(timezone.utc)
         for device in devices:
             try:
                 # Skip devices whose agent is recently offline — avoids false flap increments
@@ -339,12 +340,11 @@ def poll_device_status():
 
                 db.execute(update(Device).where(Device.id == device.id).values(
                     status=new_status,
-                    last_seen=datetime.now(timezone.utc) if reachable else device.last_seen,
+                    last_seen=now_ts if reachable else device.last_seen,
                 ))
-                db.commit()
                 _redis.setex(
                     f"device:{device.id}:status", 600,
-                    json.dumps({"status": new_status, "ts": datetime.now(timezone.utc).isoformat()}),
+                    json.dumps({"status": new_status, "ts": now_ts.isoformat()}),
                 )
 
                 if prev_status != new_status:
@@ -352,6 +352,13 @@ def poll_device_status():
                     changes.append((device, new_status, error_msg))
             except Exception as exc:
                 logger.warning("poll error for %s: %s", device.hostname, exc)
+
+        # Single commit for all status updates — reduces N DB roundtrips to 1
+        try:
+            db.commit()
+        except Exception as exc:
+            logger.error("Failed to commit device status batch: %s", exc)
+            db.rollback()
 
         if not changes:
             return

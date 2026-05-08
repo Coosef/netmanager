@@ -11,6 +11,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/tr'
 import i18n from './i18n'
 
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
@@ -247,12 +248,14 @@ function ThemedApp() {
 
 export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <SiteProvider>
-          <ThemedApp />
-        </SiteProvider>
-      </ThemeProvider>
-    </QueryClientProvider>
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider>
+          <SiteProvider>
+            <ThemedApp />
+          </SiteProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </ErrorBoundary>
   )
 }

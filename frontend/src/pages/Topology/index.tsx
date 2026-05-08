@@ -274,6 +274,7 @@ select option{background:#0f172a}
 </div>
 <div id="cy"><div id="layout-spinner">⟳ Düzenleniyor…</div></div>
 <script>
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 var VC={cisco:'#1d6fa4',aruba:'#ff8300',ruijie:'#e4002b',other:'#64748b'};
 var SC={online:'#22c55e',offline:'#ef4444',unreachable:'#f59e0b',unknown:'#64748b'};
 var LC={core:'#ef4444',distribution:'#f97316',access:'#3b82f6',edge:'#22c55e',wireless:'#a855f7'};
@@ -379,16 +380,16 @@ cy.on('tap','node',function(evt){
   document.getElementById('detail-title').textContent=d.label||(d.ghost?'Bilinmeyen Cihaz':'Cihaz');
   var sc=SC[d.status]||'#64748b',lc=LC[d.layer]||'#475569',vc=VC[d.vendor]||'#64748b';
   var h='';
-  if(d.ip) h+='<div class="dr"><span class="dl">IP Adresi</span><span class="dv">'+d.ip+'</span></div>';
-  if(d.vendor&&!d.ghost) h+='<div class="dr"><span class="dl">Vendor</span><span class="dv"><span class="chip" style="background:'+vc+'33;color:'+vc+'">'+d.vendor+'</span></span></div>';
-  if(d.layer) h+='<div class="dr"><span class="dl">Katman</span><span class="dv"><span class="chip" style="background:'+lc+'33;color:'+lc+'">'+d.layer+'</span></span></div>';
-  if(d.status&&!d.ghost) h+='<div class="dr"><span class="dl">Durum</span><span class="dv"><span class="badge" style="background:'+sc+'22;color:'+sc+'">⬤ '+d.status+'</span></span></div>';
-  if(d.platform) h+='<div class="dr"><span class="dl">Platform</span><span class="dv">'+d.platform+'</span></div>';
+  if(d.ip) h+='<div class="dr"><span class="dl">IP Adresi</span><span class="dv">'+esc(d.ip)+'</span></div>';
+  if(d.vendor&&!d.ghost) h+='<div class="dr"><span class="dl">Vendor</span><span class="dv"><span class="chip" style="background:'+vc+'33;color:'+vc+'">'+esc(d.vendor)+'</span></span></div>';
+  if(d.layer) h+='<div class="dr"><span class="dl">Katman</span><span class="dv"><span class="chip" style="background:'+lc+'33;color:'+lc+'">'+esc(d.layer)+'</span></span></div>';
+  if(d.status&&!d.ghost) h+='<div class="dr"><span class="dl">Durum</span><span class="dv"><span class="badge" style="background:'+sc+'22;color:'+sc+'">⬤ '+esc(d.status)+'</span></span></div>';
+  if(d.platform) h+='<div class="dr"><span class="dl">Platform</span><span class="dv">'+esc(d.platform)+'</span></div>';
   if(d.ghost) h+='<div style="font-size:10px;color:#fbbf24;margin-top:6px;padding:6px 8px;background:#92400e22;border-radius:6px;border:1px solid #fbbf2444">⚠ Envanterde bulunmuyor</div>';
   var nbrs=n.neighborhood('node');
   if(nbrs.length>0){
     h+='<div style="margin-top:8px;font-size:10px;color:#64748b;font-weight:700;letter-spacing:.06em;text-transform:uppercase">Komşular ('+nbrs.length+')</div>';
-    nbrs.each(function(nb){h+='<div style="font-size:11px;color:#cbd5e1;padding:2px 0;border-bottom:1px solid #334155">'+nb.data('label')+(nb.data('ip')?'<span style="color:#64748b;margin-left:6px">'+nb.data('ip')+'</span>':'')+'</div>';});
+    nbrs.each(function(nb){h+='<div style="font-size:11px;color:#cbd5e1;padding:2px 0;border-bottom:1px solid #334155">'+esc(nb.data('label'))+(nb.data('ip')?'<span style="color:#64748b;margin-left:6px">'+esc(nb.data('ip'))+'</span>':'')+'</div>';});
   }
   document.getElementById('detail-content').innerHTML=h;
   dp.style.display='block';
@@ -763,11 +764,17 @@ function TopologyFlow() {
 
   useEffect(() => {
     const url = buildWsUrl('/api/v1/ws/events')
+    let destroyed = false
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     const connect = () => {
+      if (destroyed) return
       const ws = new WebSocket(url)
       wsRef.current = ws
       ws.onopen = () => setWsConnected(true)
-      ws.onclose = () => { setWsConnected(false); setTimeout(connect, 5000) }
+      ws.onclose = () => {
+        setWsConnected(false)
+        if (!destroyed) reconnectTimer = setTimeout(connect, 5000)
+      }
       ws.onerror = () => ws.close()
       ws.onmessage = (e) => {
         try {
@@ -791,7 +798,11 @@ function TopologyFlow() {
       }
     }
     connect()
-    return () => wsRef.current?.close()
+    return () => {
+      destroyed = true
+      if (reconnectTimer) clearTimeout(reconnectTimer)
+      wsRef.current?.close()
+    }
   }, [])
 
   const openDeviceById = useCallback(async (deviceId: number) => {
