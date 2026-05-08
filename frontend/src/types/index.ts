@@ -19,10 +19,43 @@ export type UserRole =
   | 'operator'
   | 'viewer'
 
+export type SystemRole = 'super_admin' | 'org_admin' | 'member'
+
 export interface UserLocationItem {
   location_id: number
   location_name: string
   loc_role: string
+}
+
+export interface ModulePermissions {
+  view?: boolean
+  edit?: boolean
+  delete?: boolean
+  create?: boolean
+  ssh?: boolean
+  run?: boolean
+  cancel?: boolean
+  invite?: boolean
+}
+
+export interface Permissions {
+  modules: {
+    devices?: ModulePermissions
+    config_backups?: ModulePermissions
+    tasks?: ModulePermissions
+    playbooks?: ModulePermissions
+    topology?: ModulePermissions
+    monitoring?: ModulePermissions
+    ipam?: ModulePermissions
+    audit_logs?: ModulePermissions
+    reports?: ModulePermissions
+    users?: ModulePermissions
+    locations?: ModulePermissions
+    settings?: ModulePermissions
+    agents?: ModulePermissions
+    driver_templates?: ModulePermissions
+    [key: string]: ModulePermissions | undefined
+  }
 }
 
 export interface User {
@@ -30,14 +63,69 @@ export interface User {
   username: string
   email: string
   full_name?: string
-  role: UserRole
+  role: UserRole           // legacy
+  system_role: SystemRole  // new RBAC
   is_active: boolean
   notes?: string
-  tenant_id?: number | null
+  tenant_id?: number | null   // legacy
+  org_id?: number | null      // new RBAC
   tenant_name?: string | null
   last_login?: string
   created_at: string
   locations?: UserLocationItem[]
+}
+
+export interface TokenResponse {
+  access_token: string
+  token_type: string
+  user_id: number
+  username: string
+  role: UserRole
+  system_role: SystemRole
+  tenant_id?: number | null
+  org_id?: number | null
+  permissions?: Permissions
+}
+
+export interface Organization {
+  id: number
+  name: string
+  slug: string
+  description?: string
+  is_active: boolean
+  contact_email?: string
+  plan_id?: number | null
+  schema_name?: string
+  trial_ends_at?: string | null
+  subscription_ends_at?: string | null
+  created_at: string
+}
+
+export interface Plan {
+  id: number
+  name: string
+  slug: string
+  description?: string
+  is_active: boolean
+  max_devices: number
+  max_users: number
+  max_locations: number
+  max_agents: number
+  features?: Record<string, boolean>
+  price_monthly?: number | null
+  price_yearly?: number | null
+}
+
+export interface PermissionSet {
+  id: number
+  name: string
+  description?: string
+  org_id?: number | null
+  is_default: boolean
+  cloned_from_id?: number | null
+  permissions: Permissions
+  created_at: string
+  updated_at: string
 }
 
 export interface Device {
@@ -159,14 +247,6 @@ export interface PaginatedResponse<T> {
   limit?: number
 }
 
-export interface TokenResponse {
-  access_token: string
-  token_type: string
-  user_id: number
-  username: string
-  role: string
-  tenant_id?: number | null
-}
 
 export const DEVICE_TYPE_OPTIONS = [
   { label: 'Switch', value: 'switch' },

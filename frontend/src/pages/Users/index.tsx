@@ -221,7 +221,7 @@ export default function UsersPage() {
       // If the current user edited their own profile, refresh the auth store
       if (editUser && editUser.id === currentUser?.id && updatedUser) {
         const { setAuth, token } = useAuthStore.getState()
-        setAuth(token!, { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role, tenant_id: updatedUser.tenant_id })
+        setAuth(token!, { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role as any, system_role: (updatedUser as any).system_role ?? 'member', tenant_id: updatedUser.tenant_id })
       }
       message.success(editUser ? t('users.updated') : t('users.created'))
       setDrawerOpen(false)

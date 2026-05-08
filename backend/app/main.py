@@ -367,6 +367,30 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_invite_tokens_token ON invite_tokens(token)"
         ))
 
+        # RBAC v2: plans, organizations, permission_sets, user_location_perms
+        # (tables created via create_all above; just add idempotent columns/indexes below)
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_role VARCHAR(32) NOT NULL DEFAULT 'member'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_users_org_id ON users(org_id)"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS system_role VARCHAR(32) NOT NULL DEFAULT 'member'"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS permission_set_id INTEGER REFERENCES permission_sets(id) ON DELETE SET NULL"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)"
+        ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _seed_builtin_templates()
@@ -650,12 +674,14 @@ async def _create_default_admin():
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalar_one_or_none() is None:
+            from app.models.user import SystemRole
             admin = User(
                 username="admin",
                 email="admin@netmanager.local",
                 hashed_password=hash_password("Admin@1234!"),
                 full_name="System Administrator",
                 role=UserRole.SUPER_ADMIN,
+                system_role=SystemRole.SUPER_ADMIN,
             )
             db.add(admin)
             await db.commit()

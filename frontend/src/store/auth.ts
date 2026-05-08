@@ -1,21 +1,33 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { User, UserRole } from '@/types'
+import type { UserRole, SystemRole, Permissions } from '@/types'
 
-type AuthUser = Pick<User, 'id' | 'username' | 'role'> & { tenant_id?: number | null }
+type AuthUser = {
+  id: number
+  username: string
+  role: UserRole
+  system_role: SystemRole
+  tenant_id?: number | null
+  org_id?: number | null
+}
 
 interface AuthState {
   token: string | null
   user: AuthUser | null
-  setAuth: (token: string, user: AuthUser) => void
+  permissions: Permissions | null
+  setAuth: (token: string, user: AuthUser, permissions?: Permissions | null) => void
   logout: () => void
-  hasPermission: (minRole: UserRole) => boolean
+  // New permission-based checks
+  can: (module: string, action: string) => boolean
+  // System role checks
   isSuperAdmin: () => boolean
   isOrgAdmin: () => boolean
+  // Legacy role-order checks (kept for backward compat)
+  hasPermission: (minRole: UserRole) => boolean
   isLocationScoped: () => boolean
 }
 
-// Ordered from lowest to highest privilege
+// Legacy role hierarchy order (lowest → highest)
 const ROLE_ORDER: UserRole[] = [
   'location_viewer',
   'viewer',
@@ -32,21 +44,51 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       token: null,
       user: null,
-      setAuth: (token, user) => set({ token, user }),
-      logout: () => set({ token: null, user: null }),
+      permissions: null,
+
+      setAuth: (token, user, permissions = null) => set({ token, user, permissions }),
+
+      logout: () => set({ token: null, user: null, permissions: null }),
+
+      can: (module: string, action: string) => {
+        const user = get().user
+        if (!user) return false
+        // Super admin and org admin bypass permission checks
+        if (user.system_role === 'super_admin' || user.system_role === 'org_admin') return true
+        // Also check legacy super_admin role
+        if (user.role === 'super_admin' || user.role === 'admin') return true
+
+        const perms = get().permissions
+        if (!perms) return false
+        return !!(perms.modules?.[module] as Record<string, boolean> | undefined)?.[action]
+      },
+
+      isSuperAdmin: () => {
+        const user = get().user
+        return user?.system_role === 'super_admin' || user?.role === 'super_admin'
+      },
+
+      isOrgAdmin: () => {
+        const user = get().user
+        return (
+          user?.system_role === 'super_admin' ||
+          user?.system_role === 'org_admin' ||
+          user?.role === 'super_admin' ||
+          user?.role === 'admin'
+        )
+      },
+
       hasPermission: (minRole: UserRole) => {
         const user = get().user
         if (!user) return false
         return ROLE_ORDER.indexOf(user.role as UserRole) >= ROLE_ORDER.indexOf(minRole)
       },
-      isSuperAdmin: () => get().user?.role === 'super_admin',
-      isOrgAdmin: () => {
-        const role = get().user?.role
-        return role === 'super_admin' || role === 'admin'
-      },
+
       isLocationScoped: () => {
-        const role = get().user?.role
-        return ['location_manager', 'location_operator', 'location_viewer', 'operator', 'viewer'].includes(role ?? '')
+        const user = get().user
+        return ['location_manager', 'location_operator', 'location_viewer', 'operator', 'viewer'].includes(
+          user?.role ?? ''
+        )
       },
     }),
     { name: 'netmgr-auth' },

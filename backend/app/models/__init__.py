@@ -1,5 +1,9 @@
 from app.models.tenant import Tenant
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, SystemRole
+from app.models.shared.plan import Plan
+from app.models.shared.organization import Organization
+from app.models.shared.permission_set import PermissionSet
+from app.models.shared.user_location_perm import UserLocationPerm
 from app.models.device import Device, DeviceGroup, VendorType, OSType, DeviceStatus
 from app.models.task import Task, TaskType, TaskStatus
 from app.models.audit_log import AuditLog
@@ -42,7 +46,11 @@ from app.models.invite_token import InviteToken
 
 __all__ = [
     "Tenant",
-    "User", "UserRole",
+    "User", "UserRole", "SystemRole",
+    "Plan",
+    "Organization",
+    "PermissionSet",
+    "UserLocationPerm",
     "Device", "DeviceGroup", "VendorType", "OSType", "DeviceStatus",
     "Task", "TaskType", "TaskStatus",
     "AuditLog",

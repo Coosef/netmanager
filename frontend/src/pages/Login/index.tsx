@@ -66,7 +66,18 @@ export default function LoginPage() {
     setError('')
     try {
       const res = await authApi.login(values.username, values.password)
-      setAuth(res.access_token, { id: res.user_id, username: res.username, role: res.role as any, tenant_id: res.tenant_id })
+      setAuth(
+        res.access_token,
+        {
+          id: res.user_id,
+          username: res.username,
+          role: res.role as any,
+          system_role: (res.system_role as any) ?? 'member',
+          tenant_id: res.tenant_id,
+          org_id: res.org_id,
+        },
+        res.permissions,
+      )
       navigate('/')
     } catch {
       setError(t('login.error'))

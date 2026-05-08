@@ -7,10 +7,14 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.security import decode_access_token
-from app.models.user import User, UserRole
+from app.models.user import User, UserRole, SystemRole
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
+
+# ---------------------------------------------------------------------------
+# Core auth dependencies (unchanged)
+# ---------------------------------------------------------------------------
 
 async def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
@@ -44,6 +48,10 @@ async def get_current_active_user(
     return current_user
 
 
+# ---------------------------------------------------------------------------
+# Legacy role-based deps (kept for backward compat)
+# ---------------------------------------------------------------------------
+
 def require_roles(*roles: UserRole):
     async def _checker(user: Annotated[User, Depends(get_current_active_user)]) -> User:
         if user.role not in roles:
@@ -58,18 +66,10 @@ def require_roles(*roles: UserRole):
 async def get_tenant_context(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Optional[int]:
-    """Returns tenant_id for row-level filtering.
-    - SUPER_ADMIN → always None (fully unrestricted, regardless of their own tenant_id)
-    - ADMIN with no tenant → None (platform admin, unrestricted)
-    - ADMIN with a tenant → restricted to that tenant
-    - All other roles without a tenant → -1 (impossible PK, matches nothing)
-    - All other roles with a tenant → restricted to that tenant
-    """
     if current_user.role == UserRole.SUPER_ADMIN:
-        return None  # Always unrestricted — never filter SA by tenant
+        return None
     if current_user.role == UserRole.ADMIN:
-        return current_user.tenant_id  # None → unrestricted platform admin
-    # Scoped roles: null tenant must not fall through as "no filter"
+        return current_user.tenant_id
     return current_user.tenant_id if current_user.tenant_id is not None else -1
 
 
@@ -77,11 +77,6 @@ async def get_accessible_location_ids(
     current_user: Annotated[User, Depends(get_current_active_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Optional[list[int]]:
-    """
-    Returns None for unrestricted access (super_admin, admin).
-    Returns list[int] of allowed location IDs for scoped roles.
-    org_viewer gets all tenant locations; location_* roles get only assigned ones.
-    """
     from app.models.location import Location
     from app.models.user_location import UserLocation
 
@@ -96,7 +91,6 @@ async def get_accessible_location_ids(
         )).fetchall()
         return [r[0] for r in rows]
 
-    # location_* and legacy operator/viewer: only explicitly assigned locations
     rows = (await db.execute(
         select(UserLocation.location_id).where(UserLocation.user_id == current_user.id)
     )).fetchall()
@@ -107,10 +101,6 @@ async def get_accessible_location_names(
     current_user: Annotated[User, Depends(get_current_active_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Optional[list[str]]:
-    """
-    Like get_accessible_location_ids but returns location names (matching Device.site).
-    Returns None for unrestricted (super_admin / admin).
-    """
     from app.models.location import Location
     from app.models.user_location import UserLocation
 
@@ -137,3 +127,55 @@ CurrentUser = Annotated[User, Depends(get_current_active_user)]
 TenantFilter = Annotated[Optional[int], Depends(get_tenant_context)]
 LocationFilter = Annotated[Optional[list[int]], Depends(get_accessible_location_ids)]
 LocationNameFilter = Annotated[Optional[list[str]], Depends(get_accessible_location_names)]
+
+
+# ---------------------------------------------------------------------------
+# New RBAC dependencies
+# ---------------------------------------------------------------------------
+
+async def get_current_user_rbac(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Like get_current_user but loads org_id into context for new RBAC system."""
+    return await get_current_user(token, db)
+
+
+def require_permission(module: str, action: str):
+    """
+    Dependency factory that checks module.action permission via PermissionEngine.
+    Usage: Depends(require_permission("devices", "edit"))
+    """
+    async def _checker(
+        user: Annotated[User, Depends(get_current_active_user)],
+        db: Annotated[AsyncSession, Depends(get_db)],
+    ) -> User:
+        from app.services.rbac.engine import permission_engine
+        allowed = await permission_engine.resolve(db, user, module, action)
+        if not allowed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {module}.{action}",
+            )
+        return user
+    return _checker
+
+
+def require_system_role(*roles: SystemRole):
+    """Require one of the given system-level roles (super_admin, org_admin, member)."""
+    async def _checker(user: Annotated[User, Depends(get_current_active_user)]) -> User:
+        if user.system_role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient system role",
+            )
+        return user
+    return _checker
+
+
+RbacUser = Annotated[User, Depends(get_current_active_user)]
+SuperAdminOnly = Annotated[User, Depends(require_system_role(SystemRole.SUPER_ADMIN))]
+OrgAdminOrAbove = Annotated[
+    User,
+    Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
+]

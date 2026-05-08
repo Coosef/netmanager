@@ -70,13 +70,46 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const location = useLocation()
   const { isDark } = useTheme()
   const { t } = useTranslation()
-  const { user, isSuperAdmin } = useAuthStore()
+  const { user, isSuperAdmin, isOrgAdmin, can } = useAuthStore()
   const isSA = isSuperAdmin()
+  const isOA = isOrgAdmin()
   const isMobile = useIsMobile()
 
   const userRoleIdx = roleIndex(user?.role ?? 'viewer')
 
-  const canSee = (minRole?: UserRole) => {
+  // Map sidebar items to permission checks; fall back to legacy role order
+  const MODULE_MAP: Record<string, [string, string]> = {
+    '/devices':          ['devices', 'view'],
+    '/topology':         ['topology', 'view'],
+    '/ipam':             ['ipam', 'view'],
+    '/backups':          ['config_backups', 'view'],
+    '/monitor':          ['monitoring', 'view'],
+    '/bandwidth':        ['monitoring', 'view'],
+    '/mac-arp':          ['monitoring', 'view'],
+    '/security-audit':   ['monitoring', 'view'],
+    '/asset-lifecycle':  ['monitoring', 'view'],
+    '/tasks':            ['tasks', 'view'],
+    '/playbooks':        ['playbooks', 'view'],
+    '/config-templates': ['driver_templates', 'view'],
+    '/audit':            ['audit_logs', 'view'],
+    '/reports':          ['reports', 'view'],
+    '/users':            ['users', 'view'],
+    '/locations':        ['locations', 'view'],
+    '/agents':           ['agents', 'view'],
+    '/driver-templates': ['driver_templates', 'view'],
+    '/settings':         ['settings', 'view'],
+  }
+
+  const canSee = (minRole?: UserRole, key?: string) => {
+    if (!minRole && !key) return true
+    // System-role bypass
+    if (isSA || isOA) return true
+    // Permission-based check for mapped routes
+    if (key && MODULE_MAP[key]) {
+      const [mod, action] = MODULE_MAP[key]
+      return can(mod, action)
+    }
+    // Legacy role fallback
     if (!minRole) return true
     return userRoleIdx >= roleIndex(minRole)
   }
@@ -163,6 +196,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       label: t('nav_group.management'),
       items: [
         ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as UserRole }] : []),
+        ...(isOA && !isSA ? [{ key: '/org-admin', icon: <GlobalOutlined />, label: '⚙ Organizasyon Paneli', minRole: 'admin' as UserRole }] : []),
         { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },
         { key: '/users', icon: <TeamOutlined />, label: t('nav.users'), minRole: 'admin' },
@@ -212,7 +246,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       {/* Nav groups */}
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
         {NAV_GROUPS.map((group) => {
-          const visibleItems = group.items.filter((item) => canSee(item.minRole))
+          const visibleItems = group.items.filter((item) => canSee(item.minRole, item.key))
           if (visibleItems.length === 0) return null
           return (
             <div key={group.label}>

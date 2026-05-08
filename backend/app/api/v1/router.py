@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, playbooks, racks, reports, security_audit, services, sla, snmp, superadmin, tasks, tenants, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, superadmin, tasks, tenants, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
@@ -43,4 +43,6 @@ api_router.include_router(topology_twin.router, prefix="/topology-twin", tags=["
 api_router.include_router(ai_assistant.router, prefix="/ai", tags=["AI Assistant"])
 api_router.include_router(superadmin.router, prefix="/superadmin", tags=["SuperAdmin"])
 api_router.include_router(invites.router, prefix="/invites", tags=["Invites"])
+api_router.include_router(super_admin.router, prefix="", tags=["Super Admin"])
+api_router.include_router(org_admin.router, prefix="", tags=["Org Admin"])
 api_router.include_router(internal.router, prefix="/internal", tags=["Internal"])
