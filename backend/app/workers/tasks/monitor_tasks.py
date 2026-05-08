@@ -169,6 +169,12 @@ def _save_event(db, device, event_type: str, severity: str, title: str,
     _redis.lpush("network:events:recent", json.dumps(payload))
     _redis.ltrim("network:events:recent", 0, 499)
 
+    # Invalidate cached risk score when status-affecting events fire
+    if event_type in ("device_offline", "device_online", "device_flapping",
+                      "config_drift", "stp_anomaly", "correlation_incident"):
+        if device and device.id:
+            _redis.delete(f"risk:device:{device.id}")
+
     # Fire event-based playbook triggers asynchronously
     try:
         from app.workers.tasks.playbook_tasks import trigger_event_playbooks
