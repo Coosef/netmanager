@@ -13,6 +13,7 @@ import {
   ApiOutlined, ApartmentOutlined, BranchesOutlined,
   DisconnectOutlined, LineChartOutlined, RobotOutlined,
   TableOutlined, ExclamationCircleOutlined,
+  CodeOutlined, DatabaseOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
@@ -237,7 +238,10 @@ const TYPE_LABELS: Record<string, string> = {
   threshold_alert:       'Eşik Alarmı (SNMP)',
   high_cpu:              'Yüksek CPU',
   config_change:         'Config Değişimi',
-  backup_failed:         'Yedek Hatası',
+  config_drift:          'Config Drift',
+  backup_failure:        'Yedek Hatası',
+  rotation_failure:      'Credential Rotasyon Hatası',
+  topology_drift:        'Topoloji Drift',
   mac_loop_suspicion:    'MAC Döngü Şüphesi',
   mac_anomaly:           'MAC Anomalisi',
   traffic_spike:         'Trafik Artışı',
@@ -447,6 +451,99 @@ function buildEventDetail(ev: NetworkEvent): EventDetail {
         ],
         links: [
           { label: 'Cihaza Git', path: devSearch, icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'threshold_alert':
+      return {
+        icon: <WarningOutlined style={{ color: '#f59e0b' }} />,
+        what: `SNMP eşiği ihlali: ${d.rule_name ?? 'kural'} — ${d.if_name ?? 'interface'} üzerinde ${d.metric ?? 'metrik'} eşiği aşıldı.`,
+        rows: [
+          { label: 'Kural',       value: <Tag color="orange">{d.rule_name ?? '—'}</Tag> },
+          { label: 'Interface',   value: <Tag color="geekblue">{d.if_name ?? '—'}</Tag> },
+          { label: 'Metrik',      value: d.metric ?? '—' },
+          { label: 'Değer',       value: <Tag color="red">{d.value != null ? `${d.value}${d.unit ?? ''}` : '—'}</Tag> },
+          { label: 'Eşik',        value: d.threshold != null ? `${d.threshold}${d.unit ?? ''}` : '—' },
+          { label: 'Ardışık İhlal', value: d.consecutive_count ? `${d.consecutive_count} poll` : '—' },
+        ],
+        links: [
+          { label: 'Alert Kuralları', path: '/alert-rules', icon: <WarningOutlined /> },
+          { label: 'Bant Genişliği',  path: '/bandwidth',   icon: <LineChartOutlined /> },
+          { label: 'Cihaza Git',      path: devSearch,       icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'config_drift':
+      return {
+        icon: <CodeOutlined style={{ color: '#f59e0b' }} />,
+        what: 'Cihazın mevcut konfigürasyonu altın baseline\'dan saptı.',
+        rows: [
+          { label: 'Eklenen Satır',  value: d.lines_added   != null ? <Tag color="green">+{d.lines_added}</Tag>  : '—' },
+          { label: 'Silinen Satır',  value: d.lines_removed != null ? <Tag color="red">−{d.lines_removed}</Tag> : '—' },
+          { label: 'Öneri', value: 'Config Drift sayfasında farkı inceleyin ve gerekirse yapılandırmayı sıfırlayın.' },
+        ],
+        links: [
+          { label: 'Config Drift', path: '/config-drift', icon: <CodeOutlined /> },
+          { label: 'Cihaza Git',   path: devSearch,        icon: <ApiOutlined /> },
+        ],
+      }
+
+    case 'topology_drift':
+      return {
+        icon: <ApartmentOutlined style={{ color: '#06b6d4' }} />,
+        what: 'Ağ topolojisi altın baseline\'dan saptı — bağlantı eklendi veya kaldırıldı.',
+        rows: [
+          { label: 'Eklenen Bağlantı',  value: d.added_count   ? <Tag color="green">+{d.added_count}</Tag>  : '0' },
+          { label: 'Silinen Bağlantı',  value: d.removed_count ? <Tag color="red">−{d.removed_count}</Tag> : '0' },
+          { label: 'Baseline',          value: d.golden_name ?? '—' },
+        ],
+        links: [
+          { label: 'Topoloji Twin', path: '/topology-twin', icon: <ApartmentOutlined /> },
+          { label: 'Topoloji',      path: '/topology',      icon: <ApartmentOutlined /> },
+        ],
+      }
+
+    case 'backup_failure':
+      return {
+        icon: <DatabaseOutlined style={{ color: '#ef4444' }} />,
+        what: `${d.failed ?? '?'} cihazın yedeklemesi başarısız oldu.`,
+        rows: [
+          { label: 'Başarılı',   value: d.completed ?? '—' },
+          { label: 'Başarısız',  value: <Tag color="red">{d.failed ?? '—'}</Tag> },
+          ...(d.failed_devices?.length ? [{
+            label: 'Başarısız Cihazlar',
+            value: (
+              <Space wrap size={4}>
+                {(d.failed_devices as string[]).map((h: string) => <Tag key={h} color="red">{h}</Tag>)}
+              </Space>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'Yedekleme Merkezi', path: '/backups', icon: <DatabaseOutlined /> },
+        ],
+      }
+
+    case 'rotation_failure':
+      return {
+        icon: <WarningOutlined style={{ color: '#ef4444' }} />,
+        what: `Credential rotasyon hatası: ${d.failed_count ?? '?'} cihaz başarısız.`,
+        rows: [
+          { label: 'Politika ID',    value: d.policy_id ?? '—' },
+          { label: 'Başarısız',      value: <Tag color="red">{d.failed_count ?? '—'}</Tag> },
+          ...(d.failed_devices?.length ? [{
+            label: 'Başarısız Cihazlar',
+            value: (
+              <Space wrap size={4}>
+                {(d.failed_devices as any[]).slice(0, 5).map((r: any) => (
+                  <Tag key={r.hostname} color="red">{r.hostname}</Tag>
+                ))}
+              </Space>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'Ayarlar (Credentials)', path: '/settings', icon: <WarningOutlined /> },
         ],
       }
 
