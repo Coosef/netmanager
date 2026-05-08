@@ -1,13 +1,13 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import {
   Button, Card, Col, Form, Input, InputNumber, Radio, Row,
-  Select, Space, Tag, Typography, Alert, Divider, Spin,
+  Select, Space, Tag, Typography, Alert, Divider, Spin, Modal,
 } from 'antd'
 import {
   AimOutlined, ApiOutlined, CheckCircleOutlined, CloseCircleOutlined,
   ClockCircleOutlined, CodeOutlined, DeploymentUnitOutlined,
   GlobalOutlined, LaptopOutlined, ReloadOutlined, SearchOutlined,
-  WifiOutlined, DatabaseOutlined,
+  WifiOutlined, DatabaseOutlined, ConsoleSqlOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { diagnosticsApi, type DiagResult, type DiagType } from '@/api/diagnostics'
@@ -15,6 +15,8 @@ import { devicesApi } from '@/api/devices'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import dayjs from 'dayjs'
+
+const SshTerminal = lazy(() => import('@/components/SshTerminal'))
 
 const { Text } = Typography
 
@@ -222,6 +224,8 @@ export default function DiagnosticsPage() {
   const [diagType, setDiagType] = useState<DiagType>('ping')
   const [source, setSource] = useState<'server' | 'device'>('server')
   const [results, setResults] = useState<DiagResult[]>([])
+  const [termDeviceId, setTermDeviceId] = useState<number | null>(null)
+  const [termOpen, setTermOpen] = useState(false)
 
   const { data: devicesData } = useQuery({
     queryKey: ['devices-list-diag', activeSite],
@@ -564,6 +568,64 @@ export default function DiagnosticsPage() {
           )}
         </Col>
       </Row>
+
+      {/* SSH Terminal section */}
+      <Card
+        size="small"
+        style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12 }}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <ConsoleSqlOutlined style={{ color: '#22c55e' }} />
+            <span style={{ color: C.text }}>SSH Terminal</span>
+          </div>
+        }
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <Select
+            placeholder="Cihaz seçin..."
+            style={{ flex: 1, minWidth: 200, maxWidth: 400 }}
+            showSearch
+            filterOption={(input, opt) => (opt?.label as string ?? '').toLowerCase().includes(input.toLowerCase())}
+            options={devices.map((d) => ({ value: d.id, label: `${d.hostname} (${d.ip_address})` }))}
+            onChange={(val) => setTermDeviceId(val as number)}
+            value={termDeviceId}
+          />
+          <Button
+            type="primary"
+            icon={<ConsoleSqlOutlined />}
+            disabled={!termDeviceId}
+            onClick={() => setTermOpen(true)}
+            style={{ background: '#16a34a', borderColor: '#16a34a' }}
+          >
+            Terminali Aç
+          </Button>
+        </div>
+      </Card>
+
+      <Modal
+        open={termOpen}
+        onCancel={() => setTermOpen(false)}
+        footer={null}
+        width="85vw"
+        style={{ top: 40 }}
+        styles={{ body: { padding: 0, height: '70vh', background: isDark ? '#0d1117' : '#fff' } }}
+        title={
+          <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
+            SSH Terminal — {devices.find(d => d.id === termDeviceId)?.hostname ?? termDeviceId}
+          </span>
+        }
+        destroyOnClose
+      >
+        {termDeviceId && (
+          <Suspense fallback={<div style={{ padding: 24 }}><Spin /></div>}>
+            <SshTerminal
+              deviceId={termDeviceId}
+              isDark={isDark}
+              onClose={() => setTermOpen(false)}
+            />
+          </Suspense>
+        )}
+      </Modal>
     </div>
   )
 }
