@@ -56,10 +56,27 @@ async def _run():
         if not alerts:
             return
 
-        subject = f"⚠️ Lifecycle Uyarısı: {len(alerts)} cihazda yaklaşan tarih"
-        body = "Aşağıdaki cihazlarda kritik tarihler yaklaşıyor:\n\n" + "\n".join(alerts)
-
+        import json
+        import redis as _redis_lib
+        from app.core.config import settings
+        from app.models.network_event import NetworkEvent
         from app.models.notification import NotificationLog
+
+        subject = f"Lifecycle Uyarısı: {len(alerts)} cihazda yaklaşan tarih"
+        body = "Aşağıdaki cihazlarda kritik tarihler yaklaşıyor:\n\n" + "\n".join(alerts)
+        _redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
+
+        evt = NetworkEvent(
+            device_id=None,
+            device_hostname=None,
+            event_type="lifecycle_alert",
+            severity="warning",
+            title=subject,
+            message=body[:500],
+            details={"alert_count": len(alerts), "alerts": alerts[:20]},
+        )
+        db.add(evt)
+        await db.flush()
 
         channels_result = await db.execute(
             select(NotificationChannel).where(NotificationChannel.is_active == True)
@@ -70,14 +87,27 @@ async def _run():
             if "lifecycle_alert" not in notify_on and "any_event" not in notify_on:
                 continue
             try:
-                ok, err = await send_channel(ch, subject, body)
+                ok, err = await send_channel(ch, f"[LİFECYCLE] {subject}", body)
                 db.add(NotificationLog(
                     channel_id=ch.id,
-                    source_type="lifecycle_alert",
-                    source_id=0,
+                    source_type="network_event",
+                    source_id=evt.id,
                     success=ok,
                     error=err,
                 ))
             except Exception:
                 pass
         await db.commit()
+
+        payload = json.dumps({
+            "device_id": None,
+            "device_hostname": None,
+            "event_type": "lifecycle_alert",
+            "severity": "warning",
+            "title": subject,
+            "message": body[:200],
+            "ts": date.today().isoformat(),
+        })
+        _redis.publish("network:events", payload)
+        _redis.lpush("network:events:recent", payload)
+        _redis.ltrim("network:events:recent", 0, 499)

@@ -249,6 +249,9 @@ const TYPE_LABELS: Record<string, string> = {
   device_flapping:       'Cihaz Flapping',
   agent_outage:          'Agent Kesintisi',
   correlation_incident:  'Kök Neden Analizi',
+  security_audit_critical: 'Güvenlik Uyumu Kritik',
+  playbook_failure:      'Playbook Hatası',
+  lifecycle_alert:       'Lifecycle Uyarısı',
 }
 
 // ── Event detail modal helpers ────────────────────────────────────────────────
@@ -546,6 +549,80 @@ function buildEventDetail(ev: NetworkEvent): EventDetail {
           { label: 'Ayarlar (Credentials)', path: '/settings', icon: <WarningOutlined /> },
         ],
       }
+
+    case 'security_audit_critical': {
+      const devices: any[] = Array.isArray(d.devices) ? d.devices : []
+      return {
+        icon: <ExclamationCircleOutlined style={{ color: '#ef4444' }} />,
+        what: `Haftalık güvenlik taramasında ${d.critical_count ?? devices.length} cihazda kritik uyum skoru tespit edildi.`,
+        rows: [
+          { label: 'Kritik Cihaz Sayısı', value: <Tag color="red">{d.critical_count ?? '—'}</Tag> },
+          ...(devices.length > 0 ? [{
+            label: 'Cihazlar',
+            value: (
+              <Space wrap size={4}>
+                {devices.slice(0, 8).map((c: any) => (
+                  <Tooltip key={c.hostname} title={`Skor: ${c.score}/100 — Not: ${c.grade}`}>
+                    <Tag color={c.grade === 'F' ? 'red' : 'orange'}>{c.hostname}</Tag>
+                  </Tooltip>
+                ))}
+              </Space>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'Güvenlik Denetimi', path: '/security-audit', icon: <ExclamationCircleOutlined /> },
+        ],
+      }
+    }
+
+    case 'playbook_failure': {
+      const failedHosts: string[] = Array.isArray(d.failed_hosts) ? d.failed_hosts : []
+      return {
+        icon: <RobotOutlined style={{ color: '#ef4444' }} />,
+        what: `"${d.playbook_name ?? 'Playbook'}" çalıştırmasında ${d.failed_count ?? '?'} cihaz başarısız oldu.`,
+        rows: [
+          { label: 'Playbook',       value: d.playbook_name ?? '—' },
+          { label: 'Çalıştırma ID',  value: d.run_id ?? '—' },
+          { label: 'Başarısız',      value: <Tag color="red">{d.failed_count ?? '—'}</Tag> },
+          ...(failedHosts.length > 0 ? [{
+            label: 'Başarısız Cihazlar',
+            value: (
+              <Space wrap size={4}>
+                {failedHosts.slice(0, 8).map((h: string) => (
+                  <Tag key={h} color="red">{h}</Tag>
+                ))}
+              </Space>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'Playbook Çalıştırmaları', path: '/playbooks', icon: <RobotOutlined /> },
+        ],
+      }
+    }
+
+    case 'lifecycle_alert': {
+      const alertList: string[] = Array.isArray(d.alerts) ? d.alerts : []
+      return {
+        icon: <WarningOutlined style={{ color: '#f59e0b' }} />,
+        what: `${d.alert_count ?? alertList.length} cihazda garanti/EOL/EOS tarihleri yaklaşıyor.`,
+        rows: [
+          { label: 'Uyarı Sayısı', value: <Tag color="orange">{d.alert_count ?? '—'}</Tag> },
+          ...(alertList.length > 0 ? [{
+            label: 'Detaylar',
+            value: (
+              <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12 }}>
+                {alertList.slice(0, 8).map((a: string, i: number) => <li key={i}>{a}</li>)}
+              </ul>
+            ),
+          }] : []),
+        ],
+        links: [
+          { label: 'Asset Lifecycle', path: '/lifecycle', icon: <DatabaseOutlined /> },
+        ],
+      }
+    }
 
     default:
       return {
