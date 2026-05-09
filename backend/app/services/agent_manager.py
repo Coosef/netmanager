@@ -24,8 +24,8 @@ def _decrypt_community(value) -> str:
     from app.core.security import decrypt_credential_safe
     return decrypt_credential_safe(value) or "public"
 
-_COMMAND_TIMEOUT = 60  # seconds to wait for SSH result from agent
-_AGENT_ONLINE_TTL = 60  # seconds; refreshed on every heartbeat (agent sends every 15s)
+_COMMAND_TIMEOUT = 90   # seconds to wait for SSH result from agent
+_AGENT_ONLINE_TTL = 120  # seconds; refreshed on every heartbeat (agent sends every 10s)
 
 def _get_sync_redis():
     return _redis_sync.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=2)

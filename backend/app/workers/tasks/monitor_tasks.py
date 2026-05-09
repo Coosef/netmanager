@@ -536,28 +536,120 @@ def check_loop_detection(device_ids: list[int]):
 
 @celery_app.task(name="app.workers.tasks.monitor_tasks.check_port_status")
 def check_port_status(device_ids: list[int]):
+    """Detect port up/down via SNMP ifOperStatus state comparison.
+
+    Compares current ifOperStatus against the last known state stored in Redis.
+    Only fires an event when the state *actually changes*, so no log-buffer
+    flooding and no duplicate events on restart.  Falls back to the old
+    SSH-log approach for devices that have SNMP disabled.
+    """
+    from app.services import snmp_service
     db = _get_db()
     ssh = SSHManager()
     try:
         devices = db.execute(select(Device).where(Device.id.in_(device_ids))).scalars().all()
         for device in devices:
             try:
-                result = _run_async(ssh.execute_command(device, "show log | include changed state"))
-                if not result.success:
-                    continue
-                for line in result.output.splitlines()[-30:]:
-                    ll = line.lower()
-                    line_hash = hashlib.md5(line.strip().encode()).hexdigest()[:16]
-                    if any(p in ll for p in PORT_DOWN_PATTERNS):
-                        _save_event(db, device, "port_change", "warning",
-                                    f"{device.hostname} — Port çevrimdışı",
-                                    line.strip(), {"log_line": line.strip()},
-                                    dedup_key=line_hash)
-                    elif any(p in ll for p in PORT_UP_PATTERNS):
-                        _save_event(db, device, "port_change", "info",
-                                    f"{device.hostname} — Port çevrimiçi",
-                                    line.strip(), {"log_line": line.strip()},
-                                    dedup_key=line_hash)
+                if device.snmp_enabled and device.snmp_community:
+                    # ── SNMP path: compare current ifOperStatus to last known state ──
+                    try:
+                        ifaces = _run_async(snmp_service.get_interfaces(
+                            device.ip_address,
+                            device.snmp_community,
+                            getattr(device, "snmp_version", "v2c") or "v2c",
+                            port=getattr(device, "snmp_port", 161) or 161,
+                        ))
+                    except Exception:
+                        ifaces = []
+
+                    for iface in ifaces:
+                        name = iface.get("name", "")
+                        if not name:
+                            continue
+                        # Skip loopbacks and management ports (usually Vlan, Lo, Mgmt)
+                        nl = name.lower()
+                        if any(nl.startswith(p) for p in ("vlan", "loopback", "lo", "mgmt", "null", "tunnel")):
+                            continue
+                        # Skip admin-down ports — only track operationally monitored ports
+                        if not iface.get("admin_up", True):
+                            continue
+
+                        curr_state = "up" if iface.get("oper_up") else "down"
+                        state_key = f"port:state:{device.id}:{name}"
+                        prev_state = _redis.get(state_key)
+
+                        # Always persist current state (TTL 2 hours so it survives poll gaps)
+                        _redis.set(state_key, curr_state, ex=7200)
+
+                        if prev_state is None:
+                            # First observation — establish baseline, no event
+                            continue
+                        if prev_state == curr_state:
+                            continue
+
+                        # State changed — fire exactly one event with a 30-min cooldown
+                        if curr_state == "down":
+                            _save_event(
+                                db, device, "port_change", "warning",
+                                f"{device.hostname} — Port çevrimdışı: {name}",
+                                f"Port {name} down oldu (SNMP ifOperStatus)",
+                                {"port": name, "prev": prev_state, "curr": curr_state, "source": "snmp"},
+                                dedup_key=f"port:{device.id}:{name}:down",
+                                dedup_ttl=1800,
+                            )
+                        else:
+                            _save_event(
+                                db, device, "port_change", "info",
+                                f"{device.hostname} — Port çevrimiçi: {name}",
+                                f"Port {name} up oldu (SNMP ifOperStatus)",
+                                {"port": name, "prev": prev_state, "curr": curr_state, "source": "snmp"},
+                                dedup_key=f"port:{device.id}:{name}:up",
+                                dedup_ttl=1800,
+                            )
+                else:
+                    # ── SSH fallback: parse log, but only lines from last 10 minutes ──
+                    result = _run_async(ssh.execute_command(device, "show log | include changed state"))
+                    if not result.success:
+                        continue
+                    cutoff = datetime.now(timezone.utc) - timedelta(minutes=10)
+                    for line in result.output.splitlines()[-30:]:
+                        ll = line.lower()
+                        # Try to extract timestamp and skip stale lines
+                        # Cisco IOS format: "*May  2 11:07:16.xxx:" or "May  2 11:07:16:"
+                        ts_ok = True
+                        try:
+                            import re as _re
+                            m = _re.search(r'\b(\w{3})\s+(\d{1,2})\s+(\d{2}:\d{2}:\d{2})', line)
+                            if m:
+                                month_str, day_str, time_str = m.group(1), m.group(2), m.group(3)
+                                # Build a datetime for current year
+                                import calendar as _cal
+                                months = {v.lower(): k for k, v in enumerate(_cal.month_abbr) if v}
+                                mon = months.get(month_str.lower(), 0)
+                                if mon:
+                                    now = datetime.now(timezone.utc)
+                                    h, mi, s = map(int, time_str.split(":"))
+                                    candidate = datetime(now.year, mon, int(day_str), h, mi, s, tzinfo=timezone.utc)
+                                    # If candidate is in the future (year boundary), try previous year
+                                    if candidate > now + timedelta(minutes=1):
+                                        candidate = candidate.replace(year=now.year - 1)
+                                    ts_ok = candidate >= cutoff
+                        except Exception:
+                            pass  # Can't parse timestamp — allow the line through
+                        if not ts_ok:
+                            continue
+                        # Use a long-lived dedup key so the same log line won't re-fire for 24h
+                        line_hash = hashlib.md5(line.strip().encode()).hexdigest()[:16]
+                        if any(p in ll for p in PORT_DOWN_PATTERNS):
+                            _save_event(db, device, "port_change", "warning",
+                                        f"{device.hostname} — Port çevrimdışı",
+                                        line.strip(), {"log_line": line.strip(), "source": "ssh_log"},
+                                        dedup_key=line_hash, dedup_ttl=86400)
+                        elif any(p in ll for p in PORT_UP_PATTERNS):
+                            _save_event(db, device, "port_change", "info",
+                                        f"{device.hostname} — Port çevrimiçi",
+                                        line.strip(), {"log_line": line.strip(), "source": "ssh_log"},
+                                        dedup_key=line_hash, dedup_ttl=86400)
             except Exception:
                 pass
     finally:

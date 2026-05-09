@@ -72,7 +72,7 @@ VERSION = "1.3.16"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
-HEARTBEAT_INTERVAL = 10
+HEARTBEAT_INTERVAL = 15
 
 # Try to find the env file path for key rotation
 _ENV_FILE_CANDIDATES = [
@@ -1499,8 +1499,8 @@ async def run():
             log.info("Baglaniliyor: {}/api/v1/agents/ws/{}".format(ws_base, AGENT_ID))
             async with websockets.connect(
                 ws_url,
-                ping_interval=20,
-                ping_timeout=10,
+                ping_interval=30,
+                ping_timeout=20,
                 open_timeout=30,
                 close_timeout=10,
                 max_size=10 * 1024 * 1024,
