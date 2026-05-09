@@ -28,6 +28,7 @@ import DeviceForm from './DeviceForm'
 import DeviceDetail from './DeviceDetail'
 import OnboardingWizard from './OnboardingWizard'
 import AutoGroupingModal from './AutoGroupingModal'
+import { apiErr } from '@/utils/apiError'
 import GroupProfileModal from './GroupProfileModal'
 import dayjs from 'dayjs'
 
@@ -268,7 +269,7 @@ function BulkCredentialModal({
   const mutation = useMutation({
     mutationFn: devicesApi.bulkUpdateCredentials,
     onSuccess: (res) => { message.success(t('devices.cred_updated', { count: res.updated })); onSuccess() },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('devices.cred_update_error')),
+    onError: (err: any) => message.error(apiErr(err, t('devices.cred_update_error'))),
   })
 
   const onFinish = (values: any) => {
@@ -331,7 +332,7 @@ function BulkAgentModal({
       message.success(t('devices.agent_updated', { count: res.updated }))
       onSuccess()
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
+    onError: (err: any) => message.error(apiErr(err, t('common.error'))),
   })
 
   const agentOptions = [
@@ -685,7 +686,7 @@ export default function DevicesPage() {
   const deleteMutation = useMutation({
     mutationFn: devicesApi.delete,
     onSuccess: () => { message.success(t('devices.deleted')); queryClient.invalidateQueries({ queryKey: ['devices'] }); queryClient.invalidateQueries({ queryKey: ['devices-stats'] }) },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('devices.delete_error')),
+    onError: (err: any) => message.error(apiErr(err, t('devices.delete_error'))),
   })
 
   const bulkDeleteMutation = useMutation({
@@ -696,7 +697,7 @@ export default function DevicesPage() {
       queryClient.invalidateQueries({ queryKey: ['devices'] })
       queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('devices.bulk_delete_error')),
+    onError: (err: any) => message.error(apiErr(err, t('devices.bulk_delete_error'))),
   })
 
   const bulkTagMutation = useMutation({
@@ -709,7 +710,7 @@ export default function DevicesPage() {
       setSelectedRowKeys([])
       queryClient.invalidateQueries({ queryKey: ['devices'] })
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
+    onError: (err: any) => message.error(apiErr(err, t('common.error'))),
   })
 
   const bulkBackupMutation = useMutation({
@@ -718,7 +719,7 @@ export default function DevicesPage() {
       setBackupTaskId(res.task_id)
       setSelectedRowKeys([])
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
+    onError: (err: any) => message.error(apiErr(err, t('common.error'))),
   })
 
   const testMutation = useMutation({
@@ -735,7 +736,7 @@ export default function DevicesPage() {
       message.success(`${device.hostname} — bilgiler güncellendi`)
       queryClient.invalidateQueries({ queryKey: ['devices'] })
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || t('common.error')),
+    onError: (err: any) => message.error(apiErr(err, t('common.error'))),
   })
 
 
@@ -746,7 +747,7 @@ export default function DevicesPage() {
       queryClient.invalidateQueries({ queryKey: ['devices'] })
       queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || 'CSV import hatası'),
+    onError: (err: any) => message.error(apiErr(err, 'CSV import hatası')),
   })
 
   const exportCsv = () => {

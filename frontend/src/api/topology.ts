@@ -109,7 +109,7 @@ export const topologyApi = {
     ).then((r) => r.data),
 
   discoverSingle: (device_id: number) =>
-    client.post<DiscoverSingleResult>(`/topology/discover-single/${device_id}`).then((r) => r.data),
+    client.post<DiscoverSingleResult>(`/topology/discover-single/${device_id}`, undefined, { timeout: 120_000 }).then((r) => r.data),
 
   hopDiscover: (source_device_id: number, target_ips: string[], max_depth = 5) =>
     client.post<{ task_id: number; target_count: number; status: string }>(
