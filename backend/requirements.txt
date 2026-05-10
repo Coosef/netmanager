@@ -48,3 +48,5 @@ httpx==0.28.1
 python-dotenv>=1.2.2
 structlog==24.4.0
 tenacity==9.0.0
+anyio>=4.4.0 # not directly required, pinned by Snyk to avoid a vulnerability
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
