@@ -415,3 +415,43 @@ async def test_offline_duplicate_does_not_reopen_closed(db, fake_redis):
     assert r3 is None
     # Celery task dispatched exactly once despite three duplicate events
     assert mock_task.apply_async.call_count == 1
+
+
+# ── process_event: Celery down during recovery — RECOVERING state is safe ────
+
+@pytest.mark.asyncio
+async def test_celery_down_during_recovery_leaves_recovering(db, fake_redis):
+    """
+    If confirm_recovery.apply_async raises during a recovery event, the incident
+    must be left in RECOVERING (state committed to DB before the apply_async call)
+    and the exception must NOT propagate.
+
+    This tests the symmetrical Celery guard on the recovery path.
+    """
+    from datetime import timedelta
+
+    old_open = datetime.now(timezone.utc) - timedelta(seconds=BOUNCE_GUARD_SEC + 10)
+    fp = make_fingerprint(60, "device_unreachable", "device")
+
+    inc = Incident(
+        fingerprint=fp, device_id=60, event_type="device_unreachable",
+        component="device", severity="critical", state=IncidentState.OPEN,
+        opened_at=old_open, sources=[], timeline=[],
+    )
+    db.add(inc)
+    await db.commit()
+
+    with patch("app.workers.tasks.correlation_tasks.confirm_recovery") as mock_task:
+        mock_task.apply_async.side_effect = ConnectionError("broker unreachable")
+
+        try:
+            result = await process_event(
+                device_id=60, event_type="device_unreachable", component="device",
+                source="agent", is_problem=False, db=db, sync_redis=fake_redis,
+            )
+        except Exception as e:
+            pytest.fail(f"process_event raised unexpectedly on recovery: {e}")
+
+    assert result is not None
+    # State must be RECOVERING — committed before the failed apply_async
+    assert result.state == IncidentState.RECOVERING

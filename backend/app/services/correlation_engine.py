@@ -201,13 +201,19 @@ async def _handle_recovery(incident: Incident | None, source: str, db: AsyncSess
         )
         await db.commit()
 
-        from app.workers.tasks.correlation_tasks import confirm_recovery
-        confirm_recovery.apply_async(
-            kwargs={"incident_id": incident.id},
-            countdown=RECOVERY_CONFIRM_SEC,
-        )
-        log.info("corr: incident #%d RECOVERING (will confirm in %ds)",
-                 incident.id, RECOVERY_CONFIRM_SEC)
+        try:
+            from app.workers.tasks.correlation_tasks import confirm_recovery
+            confirm_recovery.apply_async(
+                kwargs={"incident_id": incident.id},
+                countdown=RECOVERY_CONFIRM_SEC,
+            )
+            log.info("corr: incident #%d RECOVERING (will confirm in %ds)",
+                     incident.id, RECOVERY_CONFIRM_SEC)
+        except Exception as task_err:
+            # Broker unreachable — incident stays RECOVERING; the periodic
+            # recovery sweeper (Faz 2) will close it. Log for observability.
+            log.warning("corr: failed to schedule confirm_recovery for #%d: %s",
+                        incident.id, task_err)
 
     return incident
 
