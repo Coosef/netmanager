@@ -218,44 +218,71 @@ async def _handle_recovery(incident: Incident | None, source: str, db: AsyncSess
     return incident
 
 
-# ── Upstream suppression ──────────────────────────────────────────────────────
+# ── Upstream suppression (multi-hop BFS) ─────────────────────────────────────
+
+# Maximum hops to traverse when looking for an upstream root-cause incident.
+# Covers access → distribution → core topologies (typically 2-3 hops).
+UPSTREAM_BFS_MAX_DEPTH = 5
+
 
 async def check_upstream_suppression(incident: Incident, db: AsyncSession) -> bool:
     """
-    Check whether the device's upstream switch also has an active incident.
-    If so, mark this incident SUPPRESSED (it's a cascade, not a root cause).
+    BFS upstream traversal — find whether any ancestor device has an active
+    incident, and if so suppress this one as a cascade.
 
-    Uses TopologyLink.neighbor_device_id to find the upstream device —
-    the same graph the existing BFS in monitor_tasks.py uses.
+    Uses TopologyLink: TopologyLink(device_id=X, neighbor_device_id=Y) means
+    "device X discovered Y as its LLDP/CDP upstream neighbor."
+    So upstreams of X = {Y for TopologyLink where device_id == X}.
 
-    Call this from the Celery task *after* GROUP_WAIT_SEC so the upstream
-    device has had time to be detected (Statseeker 35s settle pattern).
-    Returns True if suppressed.
+    Fetches all links in one query and does BFS in-memory — avoids N+1 queries
+    on large topologies.  Max depth = UPSTREAM_BFS_MAX_DEPTH (cycle guard via
+    visited set).
+
+    Call after GROUP_WAIT_SEC so upstream status has had time to settle
+    (Statseeker 35s pattern).  Returns True if incident was suppressed.
     """
     from sqlalchemy import select as sa_select
     from app.models.topology import TopologyLink
 
-    # Find upstream devices: neighbors reported by this device via LLDP/CDP.
-    # TopologyLink(device_id=X, neighbor_device_id=Y) means "device X discovered
-    # device Y as its upstream neighbor", so upstream = neighbor_device_id of X.
-    upstream_result = await db.execute(
-        sa_select(TopologyLink.neighbor_device_id)
-        .where(
-            TopologyLink.device_id == incident.device_id,
-            TopologyLink.neighbor_device_id.is_not(None),
-        )
-        .limit(5)
-    )
-    upstream_ids = [r[0] for r in upstream_result.fetchall()]
-    if not upstream_ids:
+    # Single query: all topology links (upstream_of map)
+    all_links = (await db.execute(
+        sa_select(TopologyLink.device_id, TopologyLink.neighbor_device_id)
+        .where(TopologyLink.neighbor_device_id.is_not(None))
+    )).fetchall()
+
+    if not all_links:
         return False
 
-    # Is any upstream device currently in an active incident?
+    # upstream_of[X] = set of direct upstream neighbors of X
+    upstream_of: dict[int, set[int]] = {}
+    for dev_id, nbr_id in all_links:
+        upstream_of.setdefault(dev_id, set()).add(nbr_id)
+
+    # BFS from incident.device_id upward
+    visited: set[int] = set()
+    frontier = list(upstream_of.get(incident.device_id, []))
+    depth = 0
+    while frontier and depth < UPSTREAM_BFS_MAX_DEPTH:
+        next_frontier: list[int] = []
+        for node in frontier:
+            if node in visited:
+                continue
+            visited.add(node)
+            next_frontier.extend(upstream_of.get(node, []))
+        frontier = next_frontier
+        depth += 1
+
+    # Remove the incident's own device — it can't be its own upstream suppressor
+    visited.discard(incident.device_id)
+    if not visited:
+        return False
+
+    # Does any reachable upstream device have an active incident?
     upstream_inc_result = await db.execute(
         sa_select(Incident)
         .where(
-            Incident.device_id.in_(upstream_ids),
-            Incident.event_type.in_(["device_unreachable", "port_down"]),
+            Incident.device_id.in_(visited),
+            Incident.event_type.in_(["device_unreachable", "port_down", "device_restart"]),
             Incident.state.in_([IncidentState.OPEN, IncidentState.DEGRADED]),
         )
         .limit(1)
@@ -264,13 +291,14 @@ async def check_upstream_suppression(incident: Incident, db: AsyncSession) -> bo
     if not upstream_inc:
         return False
 
-    incident.state = IncidentState.SUPPRESSED
+    incident.state        = IncidentState.SUPPRESSED
     incident.suppressed_by = upstream_inc.id
     incident.log_transition(
         IncidentState.SUPPRESSED,
-        f"Upstream device incident #{upstream_inc.id} (device_id={upstream_inc.device_id}) is active",
+        f"Upstream incident #{upstream_inc.id} active (device_id={upstream_inc.device_id}, "
+        f"BFS depth ≤ {UPSTREAM_BFS_MAX_DEPTH})",
     )
     await db.commit()
-    log.info("corr: incident #%d SUPPRESSED by upstream incident #%d",
-             incident.id, upstream_inc.id)
+    log.info("corr: incident #%d SUPPRESSED by upstream incident #%d (BFS, depth≤%d)",
+             incident.id, upstream_inc.id, UPSTREAM_BFS_MAX_DEPTH)
     return True

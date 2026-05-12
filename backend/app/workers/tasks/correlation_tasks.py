@@ -110,28 +110,47 @@ def open_incident_after_wait(
 
 def _check_upstream_suppression_sync(incident: Incident, db) -> bool:
     """
-    Sync version of correlation_engine.check_upstream_suppression.
-    Uses TopologyLink to find upstream devices and checks for active incidents.
+    Sync BFS upstream suppression — mirrors correlation_engine.check_upstream_suppression.
+    Fetches all topology links once, builds upstream_of map, traverses BFS up to
+    UPSTREAM_BFS_MAX_DEPTH hops with a visited-set cycle guard.
     """
     from app.models.topology import TopologyLink
+    from app.services.correlation_engine import UPSTREAM_BFS_MAX_DEPTH
 
-    upstream_rows = db.execute(
-        select(TopologyLink.neighbor_device_id)
-        .where(
-            TopologyLink.device_id == incident.device_id,
-            TopologyLink.neighbor_device_id.is_not(None),
-        )
-        .limit(5)
+    all_links = db.execute(
+        select(TopologyLink.device_id, TopologyLink.neighbor_device_id)
+        .where(TopologyLink.neighbor_device_id.is_not(None))
     ).fetchall()
-    upstream_ids = [r[0] for r in upstream_rows]
 
-    if not upstream_ids:
+    if not all_links:
+        return False
+
+    upstream_of: dict[int, set[int]] = {}
+    for dev_id, nbr_id in all_links:
+        upstream_of.setdefault(dev_id, set()).add(nbr_id)
+
+    visited: set[int] = set()
+    frontier = list(upstream_of.get(incident.device_id, []))
+    depth = 0
+    while frontier and depth < UPSTREAM_BFS_MAX_DEPTH:
+        next_frontier: list[int] = []
+        for node in frontier:
+            if node in visited:
+                continue
+            visited.add(node)
+            next_frontier.extend(upstream_of.get(node, []))
+        frontier = next_frontier
+        depth += 1
+
+    # Remove the incident's own device — it can't be its own upstream suppressor
+    visited.discard(incident.device_id)
+    if not visited:
         return False
 
     upstream_inc = db.execute(
         select(Incident).where(
-            Incident.device_id.in_(upstream_ids),
-            Incident.event_type.in_(["device_unreachable", "port_down"]),
+            Incident.device_id.in_(visited),
+            Incident.event_type.in_(["device_unreachable", "port_down", "device_restart"]),
             Incident.state.in_([IncidentState.OPEN, IncidentState.DEGRADED]),
         ).limit(1)
     ).scalar_one_or_none()
@@ -139,15 +158,16 @@ def _check_upstream_suppression_sync(incident: Incident, db) -> bool:
     if not upstream_inc:
         return False
 
-    incident.state = IncidentState.SUPPRESSED
+    incident.state        = IncidentState.SUPPRESSED
     incident.suppressed_by = upstream_inc.id
     incident.log_transition(
         IncidentState.SUPPRESSED,
-        f"Upstream incident #{upstream_inc.id} active on device_id={upstream_inc.device_id}",
+        f"Upstream incident #{upstream_inc.id} active (device_id={upstream_inc.device_id}, "
+        f"BFS depth ≤ {UPSTREAM_BFS_MAX_DEPTH})",
     )
     db.commit()
-    log.info("corr: incident #%d SUPPRESSED by upstream incident #%d",
-             incident.id, upstream_inc.id)
+    log.info("corr: incident #%d SUPPRESSED by upstream incident #%d (BFS, depth≤%d)",
+             incident.id, upstream_inc.id, UPSTREAM_BFS_MAX_DEPTH)
     return True
 
 
@@ -190,6 +210,61 @@ def confirm_recovery(*, incident_id: int):
     except Exception as exc:
         db.rollback()
         log.exception("corr: confirm_recovery failed for incident %d: %s", incident_id, exc)
+        raise
+    finally:
+        db.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Task 3 — confirm_stale_recovering  (KL-3 fix)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@celery_app.task(
+    name="app.workers.tasks.correlation_tasks.confirm_stale_recovering",
+    max_retries=1,
+    default_retry_delay=60,
+)
+def confirm_stale_recovering():
+    """
+    Periodic sweep — runs every 5 minutes via Celery beat.
+
+    Closes incidents that are stuck in RECOVERING because confirm_recovery
+    could not be scheduled (Celery broker was temporarily down, KL-3).
+
+    Threshold: incidents still RECOVERING after RECOVERY_CONFIRM_SEC * 2
+    seconds have clearly had no re-trigger — safe to close.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=RECOVERY_CONFIRM_SEC * 2)
+    db = _get_db()
+    try:
+        stale = db.execute(
+            select(Incident).where(
+                Incident.state == IncidentState.RECOVERING,
+                Incident.recovering_at < cutoff,
+            )
+        ).scalars().all()
+
+        closed = 0
+        for inc in stale:
+            now = datetime.now(timezone.utc)
+            inc.state     = IncidentState.CLOSED
+            inc.closed_at = now
+            inc.log_transition(
+                IncidentState.CLOSED,
+                f"Recovery sweep — stuck in RECOVERING >{RECOVERY_CONFIRM_SEC * 2}s, "
+                "no re-trigger detected",
+            )
+            closed += 1
+
+        if closed:
+            db.commit()
+            log.info("corr: recovery sweep closed %d stale RECOVERING incident(s)", closed)
+
+    except Exception as exc:
+        db.rollback()
+        log.exception("corr: confirm_stale_recovering failed: %s", exc)
         raise
     finally:
         db.close()
