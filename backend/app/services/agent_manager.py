@@ -437,17 +437,50 @@ class AgentManager:
             from app.core.database import make_worker_session
             from app.models.syslog_event import SyslogEvent
 
+            source_ip  = msg.get("source_ip", "")
+            facility   = msg.get("facility", 0)
+            severity_i = msg.get("severity", 7)
+            message    = msg.get("message", "")
+
             async with make_worker_session()() as db:
                 ev = SyslogEvent(
                     agent_id=agent_id,
-                    source_ip=msg.get("source_ip", ""),
-                    facility=msg.get("facility", 0),
-                    severity=msg.get("severity", 7),
-                    message=msg.get("message", ""),
+                    source_ip=source_ip,
+                    facility=facility,
+                    severity=severity_i,
+                    message=message,
                     received_at=datetime.now(timezone.utc),
                 )
                 db.add(ev)
                 await db.commit()
+
+                # ── Correlation engine — availability-impacting messages only ──
+                # Raw SyslogEvent is always written above, regardless of this path.
+                from app.services.syslog_normalizer import normalize, AVAILABILITY_EVENT_TYPES
+                normalized = normalize(facility, severity_i, message)
+                if normalized and normalized.event_type in AVAILABILITY_EVENT_TYPES:
+                    from sqlalchemy import select
+                    from app.models.device import Device
+                    row = await db.execute(
+                        select(Device.id).where(Device.ip_address == source_ip)
+                    )
+                    device_id = row.scalar_one_or_none()
+                    if device_id:
+                        try:
+                            from app.services.correlation_engine import process_event as _corr
+                            _redis = _get_sync_redis()
+                            await _corr(
+                                device_id  = device_id,
+                                event_type = normalized.event_type,
+                                component  = normalized.component,
+                                source     = "syslog",
+                                is_problem = normalized.is_problem,
+                                db         = db,
+                                sync_redis = _redis,
+                                severity   = normalized.severity,
+                            )
+                        except Exception as corr_err:
+                            log.warning(f"Syslog correlation error (non-fatal): {corr_err}")
         except Exception as e:
             log.debug(f"Syslog persist error: {e}")
 
