@@ -1,11 +1,14 @@
 """
-Correlation Engine Celery tasks — Faz 1 MVP
+Correlation Engine Celery tasks — Faz 2C
 
-Two tasks:
-  open_incident_after_wait  — creates an Incident after group_wait expires
-  confirm_recovery          — closes a RECOVERING Incident if no re-trigger arrived
+Tasks:
+  open_incident_after_wait    — creates an Incident after group_wait expires
+  confirm_recovery            — ping-verifies recovery before closing (Faz 2C)
+  confirm_stale_recovering    — periodic sweep: closes stuck RECOVERING incidents
 """
 import logging
+import subprocess
+import sys
 from datetime import datetime, timezone
 
 import redis as redis_sync
@@ -28,6 +31,36 @@ _redis = redis_sync.from_url(settings.REDIS_URL, decode_responses=True)
 def _get_db():
     from app.core.database import SyncSessionLocal
     return SyncSessionLocal()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sync ICMP ping helper — used by confirm_recovery (Celery task, sync context)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ping_sync(ip: str, timeout: int = 3) -> bool | None:
+    """
+    Synchronous ICMP ping for Celery task context.
+
+    Returns:
+      True  — host responded (reachable)
+      False — host did not respond (unreachable, ping completed cleanly)
+      None  — ping mechanism failed (subprocess error, timeout, binary missing)
+              Callers should treat None as "unknown" and fall back to CLOSED.
+    """
+    flag = "-n" if sys.platform == "win32" else "-c"
+    w_flag = ["-w", str(timeout * 1000)] if sys.platform == "win32" else ["-W", str(timeout)]
+    try:
+        result = subprocess.run(
+            ["ping", flag, "1", *w_flag, ip],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=timeout + 2,
+        )
+        return result.returncode == 0
+    except subprocess.TimeoutExpired:
+        return None   # mechanism timeout — caller fallback
+    except Exception:
+        return None   # binary missing, permission error, etc. — caller fallback
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,9 +217,15 @@ def confirm_recovery(*, incident_id: int):
     """
     Called RECOVERY_CONFIRM_SEC after a recovery event arrives.
 
-    If the Incident is still RECOVERING (no new problem event re-opened it),
-    transition to CLOSED. If a new problem arrived, the state will be OPEN or
-    DEGRADED again — in that case do nothing.
+    Faz 2C — ping-gated recovery:
+      1. If incident is no longer RECOVERING → noop (re-trigger already re-opened it).
+      2. Look up the device's IP address.
+         - Device not found → fallback CLOSED (device removed from inventory).
+      3. ICMP ping the device:
+         - reachable (True)  → CLOSED (confirmed recovery)
+         - unreachable (False) → re-open to OPEN (still down, false clear)
+         - mechanism error (None) → fallback CLOSED (ping infra unavailable)
+      4. All ping exceptions are non-fatal to the incident lifecycle.
     """
     db = _get_db()
     try:
@@ -194,19 +233,69 @@ def confirm_recovery(*, incident_id: int):
         if not inc:
             return
 
-        if inc.state == IncidentState.RECOVERING:
-            now = datetime.now(timezone.utc)
+        if inc.state != IncidentState.RECOVERING:
+            log.debug("corr: confirm_recovery for #%d — state is %s, skip", incident_id, inc.state)
+            return
+
+        # ── Device lookup ─────────────────────────────────────────────────────
+        from app.models.device import Device
+        ip_address = db.execute(
+            select(Device.ip_address).where(Device.id == inc.device_id)
+        ).scalar_one_or_none()
+
+        now = datetime.now(timezone.utc)
+
+        if ip_address is None:
+            # Device no longer in inventory — close safely without ping
             inc.state     = IncidentState.CLOSED
             inc.closed_at = now
             inc.log_transition(
                 IncidentState.CLOSED,
-                f"Recovery confirmed — no re-trigger within {RECOVERY_CONFIRM_SEC}s window",
+                "Recovery confirmed — device no longer in inventory (fallback close)",
             )
             db.commit()
-            log.info("corr: incident #%d CLOSED after recovery confirmation", incident_id)
+            log.info("corr: incident #%d CLOSED — device_id=%d not in inventory",
+                     incident_id, inc.device_id or -1)
+            return
+
+        # ── Ping verification ─────────────────────────────────────────────────
+        reachable = _ping_sync(ip_address)
+
+        if reachable is True:
+            inc.state     = IncidentState.CLOSED
+            inc.closed_at = now
+            inc.log_transition(
+                IncidentState.CLOSED,
+                f"Recovery confirmed by ping — {ip_address} reachable",
+            )
+            db.commit()
+            log.info("corr: incident #%d CLOSED — ping confirmed reachable (%s)",
+                     incident_id, ip_address)
+
+        elif reachable is False:
+            # Device still unreachable — the recovery signal was a false clear
+            inc.state         = IncidentState.OPEN
+            inc.recovering_at = None
+            inc.log_transition(
+                IncidentState.OPEN,
+                f"Ping verification failed — {ip_address} still unreachable; false recovery signal",
+            )
+            db.commit()
+            log.info("corr: incident #%d re-opened to OPEN — ping failed (%s)",
+                     incident_id, ip_address)
+
         else:
-            log.debug("corr: confirm_recovery for #%d — state is %s, skip close",
-                      incident_id, inc.state)
+            # Ping mechanism unavailable — fall back to safe CLOSED
+            inc.state     = IncidentState.CLOSED
+            inc.closed_at = now
+            inc.log_transition(
+                IncidentState.CLOSED,
+                f"Recovery confirmed — ping mechanism unavailable for {ip_address} (fallback close)",
+            )
+            db.commit()
+            log.warning("corr: incident #%d CLOSED — ping mechanism failed for %s (fallback)",
+                        incident_id, ip_address)
+
     except Exception as exc:
         db.rollback()
         log.exception("corr: confirm_recovery failed for incident %d: %s", incident_id, exc)
