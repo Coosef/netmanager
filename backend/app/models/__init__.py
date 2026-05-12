@@ -45,6 +45,7 @@ from app.models.ai_settings import AISettings
 from app.models.invite_token import InviteToken
 from app.models.incident import Incident, IncidentState
 from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
+from app.models.synthetic_probe import SyntheticProbe, SyntheticProbeResult
 
 __all__ = [
     "Tenant",
@@ -94,4 +95,5 @@ __all__ = [
     "InviteToken",
     "Incident", "IncidentState",
     "DeviceAvailabilitySnapshot",
+    "SyntheticProbe", "SyntheticProbeResult",
 ]

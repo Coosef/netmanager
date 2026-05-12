@@ -498,6 +498,45 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_das_device_ts "
             "ON device_availability_snapshots (device_id, ts)"
         ))
+        # Faz 3B — synthetic probe definitions + results
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS synthetic_probes (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(128) NOT NULL,
+                device_id INTEGER REFERENCES devices(id) ON DELETE SET NULL,
+                agent_id VARCHAR(32),
+                probe_type VARCHAR(16) NOT NULL,
+                target VARCHAR(255) NOT NULL,
+                port INTEGER,
+                http_method VARCHAR(8) NOT NULL DEFAULT 'GET',
+                expected_status INTEGER,
+                dns_record_type VARCHAR(8) NOT NULL DEFAULT 'A',
+                interval_secs INTEGER NOT NULL DEFAULT 300,
+                timeout_secs INTEGER NOT NULL DEFAULT 5,
+                enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_synthetic_probes_device ON synthetic_probes (device_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_synthetic_probes_agent ON synthetic_probes (agent_id)"
+        ))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS synthetic_probe_results (
+                id SERIAL PRIMARY KEY,
+                probe_id INTEGER NOT NULL REFERENCES synthetic_probes(id) ON DELETE CASCADE,
+                success BOOLEAN NOT NULL,
+                latency_ms FLOAT,
+                detail VARCHAR(512),
+                measured_at TIMESTAMPTZ NOT NULL
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_spr_probe_ts "
+            "ON synthetic_probe_results (probe_id, measured_at)"
+        ))
 
     await _create_default_tenant()
     await _create_default_admin()

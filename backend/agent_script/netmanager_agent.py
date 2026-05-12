@@ -1233,6 +1233,87 @@ async def handle_message(ws, msg, loop):
         asyncio.ensure_future(_do_ping())
         return
 
+    # Synthetic probe — icmp / tcp / dns / http (Faz 3B)
+    if t == "synthetic_probe":
+        req_id   = msg.get("req_id", rid)
+        ptype    = msg.get("probe_type", "icmp")
+        target   = msg.get("target", "")
+        timeout  = float(msg.get("timeout", 5))
+
+        async def _do_synthetic():
+            import time as _time
+            import socket as _sock
+            t0 = _time.time()
+            success = False
+            detail  = ""
+            try:
+                if ptype == "icmp":
+                    flag   = "-n" if sys.platform == "win32" else "-c"
+                    w_flag = (["-w", str(int(timeout * 1000))] if sys.platform == "win32"
+                              else ["-W", str(int(timeout))])
+                    proc = await asyncio.create_subprocess_exec(
+                        "ping", flag, "1", *w_flag, target,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
+                    success = proc.returncode == 0
+                    detail  = "reachable" if success else "unreachable"
+
+                elif ptype == "tcp":
+                    port   = int(msg.get("port", 80))
+                    loop_  = asyncio.get_event_loop()
+                    success = await loop_.run_in_executor(None, _tcp_probe, target, port, timeout)
+                    detail  = f"tcp:{port} {'open' if success else 'refused/timeout'}"
+
+                elif ptype == "dns":
+                    rec   = msg.get("dns_record_type", "A")
+                    loop_ = asyncio.get_event_loop()
+                    def _resolve():
+                        _sock.getaddrinfo(target, None)
+                        return True
+                    try:
+                        success = await loop_.run_in_executor(None, _resolve)
+                        detail  = f"dns:{rec} resolved"
+                    except Exception as exc:
+                        success = False
+                        detail  = f"dns:{rec} failed: {str(exc)[:80]}"
+
+                elif ptype == "http":
+                    import urllib.request as _ur
+                    url             = msg.get("url", f"http://{target}")
+                    method          = msg.get("http_method", "GET")
+                    expected_status = int(msg.get("expected_status", 200))
+                    loop_           = asyncio.get_event_loop()
+                    def _http():
+                        req = _ur.Request(url, method=method)
+                        try:
+                            with _ur.urlopen(req, timeout=timeout) as resp:
+                                ok = resp.status == expected_status
+                                return ok, f"HTTP {resp.status}"
+                        except Exception as exc:
+                            return False, str(exc)[:80]
+                    success, detail = await loop_.run_in_executor(None, _http)
+
+                else:
+                    detail = f"unknown probe_type: {ptype}"
+
+            except Exception as exc:
+                success = False
+                detail  = str(exc)[:80]
+
+            latency_ms = round((_time.time() - t0) * 1000, 2)
+            await _send({
+                "type":       "synthetic_probe_result",
+                "req_id":     req_id,
+                "success":    success,
+                "latency_ms": latency_ms,
+                "detail":     detail,
+            })
+
+        asyncio.ensure_future(_do_synthetic())
+        return
+
     # Feature 8: credential bundle
     if t == "credential_bundle":
         new_key_b64 = msg.get("vault_key", "")
