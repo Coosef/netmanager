@@ -22,6 +22,8 @@ celery_app = Celery(
         "app.workers.tasks.behavior_analytics_tasks",
         "app.workers.tasks.retention_tasks",
         "app.workers.tasks.sla_tasks",
+        "app.workers.tasks.availability_tasks",
+        "app.workers.tasks.correlation_tasks",
     ],
 )
 
@@ -131,6 +133,10 @@ celery_app.conf.update(
         },
         "check-sla-breaches-daily": {
             "task": "app.workers.tasks.sla_tasks.check_sla_breaches",
+            "schedule": 86400.0,  # once per day
+        },
+        "update-device-availability-scores-daily": {
+            "task": "app.workers.tasks.availability_tasks.compute_availability_scores",
             "schedule": 86400.0,  # once per day
         },
     },

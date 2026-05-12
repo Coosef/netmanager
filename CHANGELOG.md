@@ -1,5 +1,53 @@
 # Changelog
 
+## [Unreleased] — Faz 2D: Availability Scoring
+
+### Merge: `feature/faz2d-availability-scoring` → `main`
+
+---
+
+### Yeni Özellikler
+
+#### G7 — Availability Score Fields (`device.py` + `main.py`)
+- `Device` modeline 4 nullable Float alan eklendi:
+  - `availability_24h` — son 24 saatin incident-free fraksiyonu (0.0–1.0)
+  - `availability_7d` — son 7 günün incident-free fraksiyonu (0.0–1.0)
+  - `mtbf_hours` — son 7 gündeki MTBF (saat); veri yetersizse `None`
+  - `experience_score` — composite kalite skoru (0.0–1.0)
+- `main.py` lifespan bloğuna 4 idempotent `ALTER TABLE devices ADD COLUMN IF NOT EXISTS FLOAT` satırı eklendi.
+
+#### G8 — Experience Score + Daily Celery Task (`availability_tasks.py`)
+- Yeni `backend/app/workers/tasks/availability_tasks.py` dosyası.
+- **Pure helper fonksiyonlar** (test edilebilir, I/O bağımsız):
+  - `compute_downtime_secs(incidents, window_start, window_end)` — SUPPRESSED hariç tüm aktif/kapalı incident sürelerini pencereye clip ederek toplar.
+  - `compute_availability(downtime_secs, window_secs)` — `(window - downtime) / window`, `[0.0, 1.0]` clamp.
+  - `compute_mtbf_hours(incidents, window_start, window_end)` — `window_hours / closed_count`; veri yoksa `None`.
+  - `compute_experience_score(availability_24h, last_severity, last_source)`:
+    ```
+    = availability_24h * 0.50
+    + (1 - SEVERITY_PENALTY[last_severity]) * 0.30
+    + SOURCE_CONFIDENCE[last_source] * 0.20
+    ```
+- **`compute_availability_scores()` Celery task** — aktif tüm cihazları toplu hesaplar, `asyncio.run(_run())` pattern (lifecycle_tasks.py ile aynı).
+- Beat schedule: `update-device-availability-scores-daily` → 86400s.
+
+### Known Limitations
+
+#### KL-6: Overlapping Incident Downtime
+`compute_downtime_secs` aynı cihazda eş zamanlı açık birden fazla incident'ı bağımsız toplar. Aynı zaman diliminde `port_down` + `device_unreachable` varsa downtime çift sayılabilir ve `availability < 0` sonucu üretebilir (`compute_availability` bunu 0.0'a clip eder ama metrik hatalı kalır). Faz 3'te interval union/merge logic ile düzeltilebilir.
+
+### Testler
+
+- `backend/tests/test_availability_scoring.py` — 27 yeni test:
+  - `compute_downtime_secs`: boş liste, tam pencere, yarım pencere, OPEN/DEGRADED/RECOVERING/SUPPRESSED states, pencere başı/sonu clip, çakışan iki incident
+  - `compute_availability`: 1.0, 0.0, 0.5, clamp sınırları, sıfır pencere
+  - `compute_mtbf_hours`: None durumları, 1 kapalı, 3 kapalı, SUPPRESSED dahil edilmez
+  - `compute_experience_score`: perfect score, critical+full outage, formula bileşen doğrulama, clamp korumaları
+
+**Toplam: 121/121 test geçiyor** (9 + 16 + 11 + 42 + 16 + 27).
+
+---
+
 ## [Unreleased] — Faz 2B: Syslog Normalization Engine
 
 ### Merge: `feature/faz2b-syslog-normalization` → `main`
