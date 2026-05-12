@@ -220,6 +220,28 @@ class AgentManager:
                     if not fut.done():
                         fut.set_result(result)
 
+        elif msg_type == "queued_events":
+            events = msg.get("events", [])
+            log.info(f"Agent {agent_id} delivered {len(events)} queued monitoring events from offline period")
+            for ev in events:
+                ev_type = ev.get("type", "")
+                if ev_type == "device_status_report":
+                    asyncio.get_running_loop().create_task(
+                        self._handle_device_status_report(agent_id, ev)
+                    )
+                elif ev_type == "syslog_event":
+                    asyncio.get_running_loop().create_task(
+                        self._handle_syslog_event(agent_id, ev)
+                    )
+                elif ev_type == "snmp_trap":
+                    asyncio.get_running_loop().create_task(
+                        self._handle_snmp_trap(agent_id, ev)
+                    )
+                elif ev_type == "local_anomaly":
+                    asyncio.get_running_loop().create_task(
+                        self._handle_local_anomaly(agent_id, ev)
+                    )
+
         elif msg_type == "device_status_report":
             asyncio.get_running_loop().create_task(
                 self._handle_device_status_report(agent_id, msg)
@@ -375,6 +397,35 @@ class AgentManager:
                     db.add(ev)
 
                 await db.commit()
+
+                # ── Correlation engine — stateful Incident lifecycle ──────────
+                # Runs after commit so the NetworkEvent is persisted first.
+                # Flapping events are not fed into the correlation engine —
+                # they are transient by definition.
+                try:
+                    from app.services.correlation_engine import process_event as _corr_process
+                    for r in results:
+                        device_id_r = r.get("device_id")
+                        if not device_id_r:
+                            continue
+                        is_flapping_r = r.get("flapping", False)
+                        if is_flapping_r:
+                            continue  # flapping handled by existing NetworkEvent only
+                        reachable_r = r.get("reachable", False)
+                        await _corr_process(
+                            device_id  = device_id_r,
+                            event_type = "device_unreachable",
+                            component  = "device",
+                            source     = "agent",
+                            is_problem = not reachable_r,
+                            db         = db,
+                            sync_redis = _redis,
+                            severity   = "critical" if not reachable_r else "info",
+                        )
+                except Exception as corr_err:
+                    # Correlation engine errors must never break the main event flow
+                    log.warning(f"Correlation engine error (non-fatal): {corr_err}")
+
             log.debug(f"Agent {agent_id} status report: {len(results)} device(s) changed")
         except Exception as e:
             log.warning(f"Device status report handler error: {e}")

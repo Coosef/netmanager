@@ -128,6 +128,14 @@ _POOL_TTL = 300               # 5 minutes
 # ── Feature 3: Offline Command Queue ─────────────────────────────────────
 _result_queue: deque = deque(maxlen=100)
 
+# ── Monitoring Event Offline Queue (SQLite WAL) ───────────────────────────
+try:
+    from agent_queue import AgentEventQueue as _AgentEventQueue
+    _event_queue = _AgentEventQueue()
+except Exception as _eq_err:
+    log.warning("AgentEventQueue yuklenemedi: {} — monitoring events offline buffer'lanmayacak".format(_eq_err))
+    _event_queue = None
+
 # ── Feature 2: Proactive Device Health Monitoring ────────────────────────
 _device_list: list = []
 _health_check_interval = 60
@@ -836,6 +844,8 @@ class SyslogProtocol(asyncio.DatagramProtocol):
                 await self._ws.send(payload)
             except Exception as e:
                 log.debug("Syslog gonderilemedi: {}".format(e))
+                if _event_queue is not None:
+                    _event_queue.push(json.loads(payload))
 
         asyncio.ensure_future(_do_send(), loop=self._loop)
 
@@ -1017,6 +1027,8 @@ class SnmpTrapProtocol(asyncio.DatagramProtocol):
                 await self._ws.send(payload)
             except Exception as e:
                 log.debug("SNMP trap gonderilemedi: {}".format(e))
+                if _event_queue is not None:
+                    _event_queue.push(json.loads(payload))
 
         asyncio.ensure_future(_do_send(), loop=self._loop)
 
@@ -1119,15 +1131,20 @@ async def _health_check(ws, loop):
         if not changed:
             continue  # Delta reporting: nothing to send
 
+        status_payload = {
+            "type": "device_status_report",
+            "agent_id": AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": changed,
+        }
         try:
-            await ws.send(json.dumps({
-                "type": "device_status_report",
-                "agent_id": AGENT_ID,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "results": changed,
-            }))
+            await ws.send(json.dumps(status_payload))
         except Exception as e:
             log.debug("Health check raporu gonderilemedi: {}".format(e))
+            if _event_queue is not None:
+                _event_queue.push(status_payload)
+                log.debug("Health check raporu offline queue'ya eklendi ({} bekliyor)".format(
+                    _event_queue.pending_count()))
             break
 
 
@@ -1540,6 +1557,30 @@ async def run():
                         for item in queued:
                             _result_queue.append(item)
 
+                # Monitoring event offline queue flush
+                if _event_queue is not None:
+                    pending = _event_queue.pending_count()
+                    if pending > 0:
+                        log.info("Monitoring event queue flush: {} event bekliyor".format(pending))
+                        while True:
+                            batch = _event_queue.pop_batch()
+                            if not batch:
+                                break
+                            ids, payloads = zip(*batch)
+                            try:
+                                await ws.send(json.dumps({
+                                    "type":     "queued_events",
+                                    "agent_id": AGENT_ID,
+                                    "count":    len(payloads),
+                                    "events":   list(payloads),
+                                }))
+                                _event_queue.ack(list(ids))
+                                log.info("Monitoring queue: {} event gonderildi".format(len(ids)))
+                            except Exception as flush_err:
+                                log.warning("Monitoring queue flush hatasi: {}".format(flush_err))
+                                break
+                        _event_queue.prune()
+
                 async def _heartbeat():
                     # Send immediately on connect so backend refreshes Redis TTL right away
                     try:
@@ -1692,7 +1733,7 @@ async def run():
                         # The backend will detect offline agent via heartbeat timeout
                 jitter = random.uniform(0, min(delay, 5))
                 await asyncio.sleep(delay + jitter)
-                delay = min(delay * 2, 30)
+                delay = min(delay * 2, 300)
 
 
 if __name__ == "__main__":
