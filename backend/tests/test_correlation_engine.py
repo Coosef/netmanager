@@ -27,6 +27,7 @@ from sqlalchemy.orm import DeclarativeBase
 # Re-use the same Base so Incident metadata is registered
 from app.core.database import Base
 from app.models.incident import Incident, IncidentState
+from app.models.topology import TopologyLink
 
 
 @pytest_asyncio.fixture
@@ -34,9 +35,11 @@ async def db():
     """In-memory async SQLite session — fresh for every test."""
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
     async with engine.begin() as conn:
-        # Only create the Incident table — other registered models use JSONB/PostgreSQL types
+        # Create only tables that use standard SQLAlchemy types (no JSONB / PostgreSQL-only)
         await conn.run_sync(
-            lambda c: Base.metadata.create_all(c, tables=[Incident.__table__])
+            lambda c: Base.metadata.create_all(
+                c, tables=[Incident.__table__, TopologyLink.__table__]
+            )
         )
 
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
@@ -288,3 +291,127 @@ def test_incident_log_transition():
     assert len(inc.timeline) == 1
     assert inc.timeline[0]["state"] == IncidentState.DEGRADED
     assert "2 sources" in inc.timeline[0]["reason"]
+
+
+# ── process_event: upstream suppression ──────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_upstream_suppression(db, fake_redis):
+    """
+    Downstream incident is SUPPRESSED when an upstream device has an active incident.
+
+    Topology:  upstream_device (id=50) ← TopologyLink.neighbor_device_id ← downstream_device (id=51)
+    Meaning: device 51 has a link where its neighbor is device 50.
+    """
+    from datetime import timedelta
+    from app.services.correlation_engine import check_upstream_suppression
+
+    now = datetime.now(timezone.utc)
+    old_open = now - timedelta(seconds=120)
+
+    # Create upstream incident (device 50 is down)
+    upstream_fp = make_fingerprint(50, "device_unreachable", "device")
+    upstream_inc = Incident(
+        fingerprint=upstream_fp, device_id=50, event_type="device_unreachable",
+        component="device", severity="critical", state=IncidentState.OPEN,
+        opened_at=old_open, sources=[], timeline=[],
+    )
+    db.add(upstream_inc)
+
+    # Create downstream incident (device 51 is also down)
+    downstream_fp = make_fingerprint(51, "device_unreachable", "device")
+    downstream_inc = Incident(
+        fingerprint=downstream_fp, device_id=51, event_type="device_unreachable",
+        component="device", severity="critical", state=IncidentState.OPEN,
+        opened_at=old_open, sources=[], timeline=[],
+    )
+    db.add(downstream_inc)
+
+    # Topology: device 51's upstream neighbor is device 50
+    link = TopologyLink(
+        device_id=51,
+        local_port="GigabitEthernet0/1",
+        neighbor_hostname="upstream-sw",
+        neighbor_port="GigabitEthernet0/24",
+        neighbor_device_id=50,
+        protocol="lldp",
+    )
+    db.add(link)
+    await db.commit()
+    await db.refresh(downstream_inc)
+
+    suppressed = await check_upstream_suppression(downstream_inc, db)
+
+    assert suppressed is True
+    assert downstream_inc.state == IncidentState.SUPPRESSED
+    assert downstream_inc.suppressed_by == upstream_inc.id
+    assert len(downstream_inc.timeline) == 1
+    assert "upstream" in downstream_inc.timeline[0]["reason"].lower()
+
+
+# ── process_event: Celery worker down — system must not break ─────────────────
+
+@pytest.mark.asyncio
+async def test_celery_down_does_not_break_flow(db, fake_redis):
+    """
+    If apply_async raises (Celery broker unreachable), process_event must NOT
+    propagate the exception. The group_wait key should be cleared so the next
+    event can retry scheduling rather than being permanently absorbed.
+    """
+    fp = make_fingerprint(77, "device_unreachable", "device")
+
+    with patch(
+        "app.workers.tasks.correlation_tasks.open_incident_after_wait"
+    ) as mock_task:
+        mock_task.apply_async.side_effect = ConnectionError("broker unreachable")
+
+        try:
+            result = await process_event(
+                device_id=77, event_type="device_unreachable", component="device",
+                source="agent", is_problem=True, db=db, sync_redis=fake_redis,
+            )
+        except Exception as e:
+            pytest.fail(f"process_event raised unexpectedly: {e}")
+
+    assert result is None
+    # group_wait key must be cleared so next event can retry
+    gw_key = f"corr:gw:{fp}"
+    assert fake_redis._store.get(gw_key) is None, "group_wait key must be deleted after broker failure"
+
+
+# ── queued_events dedup: offline duplicate does not reopen a closed incident ──
+
+@pytest.mark.asyncio
+async def test_offline_duplicate_does_not_reopen_closed(db, fake_redis):
+    """
+    An offline-queued recovery event followed by a re-queued problem event
+    for the same fingerprint should start group_wait once — not create two incidents.
+
+    Simulates: problem → queued while offline → reconnect sends two identical events.
+    """
+    with patch(
+        "app.workers.tasks.correlation_tasks.open_incident_after_wait"
+    ) as mock_task:
+        mock_task.apply_async = MagicMock()
+
+        # First call: sets group_wait key, schedules task
+        r1 = await process_event(
+            device_id=88, event_type="device_unreachable", component="device",
+            source="agent", is_problem=True, db=db, sync_redis=fake_redis,
+        )
+        # Second call: same event (offline duplicate) — absorbed
+        r2 = await process_event(
+            device_id=88, event_type="device_unreachable", component="device",
+            source="agent", is_problem=True, db=db, sync_redis=fake_redis,
+        )
+        # Third call: another duplicate
+        r3 = await process_event(
+            device_id=88, event_type="device_unreachable", component="device",
+            source="agent", is_problem=True, db=db, sync_redis=fake_redis,
+        )
+
+    assert r1 is None
+    assert r2 is None
+    assert r3 is None
+    # Celery task dispatched exactly once despite three duplicate events
+    assert mock_task.apply_async.call_count == 1

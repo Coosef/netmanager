@@ -116,8 +116,11 @@ def _check_upstream_suppression_sync(incident: Incident, db) -> bool:
     from app.models.topology import TopologyLink
 
     upstream_rows = db.execute(
-        select(TopologyLink.device_id)
-        .where(TopologyLink.neighbor_device_id == incident.device_id)
+        select(TopologyLink.neighbor_device_id)
+        .where(
+            TopologyLink.device_id == incident.device_id,
+            TopologyLink.neighbor_device_id.is_not(None),
+        )
         .limit(5)
     ).fetchall()
     upstream_ids = [r[0] for r in upstream_rows]

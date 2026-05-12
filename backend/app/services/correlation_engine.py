@@ -135,19 +135,28 @@ async def _handle_problem(
             pass
 
         # Delegate actual creation to a Celery task after GROUP_WAIT_SEC
-        from app.workers.tasks.correlation_tasks import open_incident_after_wait
-        open_incident_after_wait.apply_async(
-            kwargs=dict(
-                device_id=device_id,
-                event_type=event_type,
-                component=component,
-                source=source,
-                severity=severity,
-                confidence=confidence,
-            ),
-            countdown=GROUP_WAIT_SEC,
-        )
-        log.debug("corr: group_wait started for %s (device=%d)", fp, device_id)
+        try:
+            from app.workers.tasks.correlation_tasks import open_incident_after_wait
+            open_incident_after_wait.apply_async(
+                kwargs=dict(
+                    device_id=device_id,
+                    event_type=event_type,
+                    component=component,
+                    source=source,
+                    severity=severity,
+                    confidence=confidence,
+                ),
+                countdown=GROUP_WAIT_SEC,
+            )
+            log.debug("corr: group_wait started for %s (device=%d)", fp, device_id)
+        except Exception as task_err:
+            # Celery broker unreachable — clear the group_wait key so the next
+            # event can retry scheduling rather than being permanently absorbed.
+            log.warning("corr: failed to schedule open_incident_after_wait for %s: %s", fp, task_err)
+            try:
+                sync_redis.delete(gw_key)
+            except Exception:
+                pass
         return None
 
     # Incident already open — add this source, maybe escalate to DEGRADED
@@ -220,10 +229,15 @@ async def check_upstream_suppression(incident: Incident, db: AsyncSession) -> bo
     from sqlalchemy import select as sa_select
     from app.models.topology import TopologyLink
 
-    # Find upstream devices (devices where this device is a neighbor)
+    # Find upstream devices: neighbors reported by this device via LLDP/CDP.
+    # TopologyLink(device_id=X, neighbor_device_id=Y) means "device X discovered
+    # device Y as its upstream neighbor", so upstream = neighbor_device_id of X.
     upstream_result = await db.execute(
-        sa_select(TopologyLink.device_id)
-        .where(TopologyLink.neighbor_device_id == incident.device_id)
+        sa_select(TopologyLink.neighbor_device_id)
+        .where(
+            TopologyLink.device_id == incident.device_id,
+            TopologyLink.neighbor_device_id.is_not(None),
+        )
         .limit(5)
     )
     upstream_ids = [r[0] for r in upstream_result.fetchall()]
