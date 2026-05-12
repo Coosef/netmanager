@@ -469,6 +469,20 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_arp_entries_device_active ON arp_entries(device_id, is_active)"
         ))
 
+        # Faz 2D — availability scoring fields (daily computed, all nullable)
+        await conn.execute(text(
+            "ALTER TABLE devices ADD COLUMN IF NOT EXISTS availability_24h FLOAT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE devices ADD COLUMN IF NOT EXISTS availability_7d FLOAT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE devices ADD COLUMN IF NOT EXISTS mtbf_hours FLOAT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE devices ADD COLUMN IF NOT EXISTS experience_score FLOAT"
+        ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _ensure_default_org()

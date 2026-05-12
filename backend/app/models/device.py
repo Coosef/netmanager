@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text  # noqa: F401
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text  # noqa: F401
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -129,6 +129,12 @@ class Device(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_readonly: Mapped[bool] = mapped_column(Boolean, default=True)  # blocks non-show CLI commands
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)  # config changes need admin approval
+
+    # Availability scoring — computed daily by availability_tasks.compute_availability_scores
+    availability_24h:  Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    availability_7d:   Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    mtbf_hours:        Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
+    experience_score:  Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)
 
     agent_id: Mapped[Optional[str]] = mapped_column(String(32), index=True)
     # Ordered list of fallback agent IDs — tried in sequence if primary is offline
