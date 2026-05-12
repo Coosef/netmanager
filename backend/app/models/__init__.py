@@ -43,6 +43,7 @@ from app.models.network_baseline import NetworkBaseline
 from app.models.topology_snapshot import TopologySnapshot
 from app.models.ai_settings import AISettings
 from app.models.invite_token import InviteToken
+from app.models.incident import Incident, IncidentState
 
 __all__ = [
     "Tenant",
@@ -90,4 +91,5 @@ __all__ = [
     "TopologySnapshot",
     "AISettings",
     "InviteToken",
+    "Incident", "IncidentState",
 ]
