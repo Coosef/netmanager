@@ -1,6 +1,66 @@
 # Changelog
 
-## [Unreleased] — Faz 1 MVP: Reliable Agent Core + Stateful Incident Correlation
+## [Unreleased] — Faz 2A: Multi-Source Correlation Stability
+
+### Merge: `feature/faz2a-multisource-stability` → `main`
+
+---
+
+### Yeni Özellikler
+
+#### G1 — SNMP Trap → Correlation Engine (agent_manager.py)
+- `linkDown`, `coldStart`, `warmStart` trap'ları correlation engine'e bağlandı → `OPEN` incident tetikler.
+- `linkUp` trap'ı recovery path'i tetikler → incident `RECOVERING`'e geçer.
+- `authFailure` correlation'a dahil edilmedi (security event, availability etkilemez).
+- Raw `NetworkEvent` log akışı değişmedi — correlation failure asla ingest'i kesmez (non-fatal try/except wrapper).
+- `SOURCE_CONFIDENCE["snmp_trap"] = 0.85` — agent health check'ten daha yüksek güven.
+
+#### G2 — RECOVERING Sweep Task (correlation_tasks.py + celery_app.py) — **KL-3 kapatıldı**
+- Yeni Celery task: `confirm_stale_recovering` — her **5 dakikada** beat ile çalışır.
+- Celery broker geçici olarak down olduğunda `confirm_recovery` zamanlanamazsa incident `RECOVERING` state'inde takılı kalırdı (KL-3). Bu sweep task `RECOVERY_CONFIRM_SEC * 2 = 240s` geçmiş tüm `RECOVERING` incidentları otomatik olarak `CLOSED` yapar.
+- Sweep noop olduğunda (stale incident yok) commit yapılmaz.
+
+#### G3 — Multi-Hop BFS Upstream Suppression (correlation_engine.py + correlation_tasks.py) — **KL-5 kapatıldı**
+- `check_upstream_suppression` tek-hop query yerine tam **BFS traversal** ile değiştirildi.
+- Tek sorguda tüm `TopologyLink` satırları çekiliyor; `upstream_of: dict[int, set[int]]` in-memory map oluşturuluyor.
+- BFS: `incident.device_id`'den başlayarak maksimum `UPSTREAM_BFS_MAX_DEPTH = 5` hop.
+- **Cycle guard:** `visited` set — ring topolojilerde sonsuz döngü önleniyor.
+- **Self-suppression fix:** `visited.discard(incident.device_id)` — döngüsel topolojide cihazın kendi incidenti kendini suppress edemez.
+- Sync Celery task versiyonu (`_check_upstream_suppression_sync`) da aynı BFS pattern'ına güncellendi.
+- Kapsam: access → distribution → core topolojileri (tipik 2–3 hop, maksimum 5).
+
+### Düzeltilen Hatalar
+
+- **BFS self-suppression (cycle topology):** Ring topolojide (A→B→A) BFS, A'yı `visited`'a ekleyip A'nın kendi incidentını upstream suppressor olarak buluyordu. `visited.discard(incident.device_id)` ile düzeltildi.
+- **DetachedInstanceError (test fixture):** SQLAlchemy session kapandıktan sonra `instance.id` erişimi `DetachedInstanceError` atıyordu. Session blokları içinde ID'ler capture edildi.
+
+### Testler
+
+- `backend/tests/test_faz2a.py` — 11 yeni test:
+  - **G1 (5 test):** linkDown açar, linkUp recovery, coldStart, ikinci kaynak DEGRADED, correlation failure ingest'i kesmez
+  - **G2 (2 test):** stale sweep CLOSED yapar / fresh'i dokunmaz, noop (stale yok)
+  - **G3 (4 test):** 3-hop BFS suppression, upstream incident yok → suppress edilmez, cycle guard, max depth aşılınca suppress edilmez
+
+**Toplam: 36/36 test geçiyor** (9 agent_queue + 16 correlation_engine + 11 faz2a).
+
+### Pre-Merge Kontrol Sonuçları
+
+| Kontrol | Durum | Detay |
+|---|---|---|
+| main ile conflict | ✅ Yok | `git merge --no-commit --no-ff` temiz |
+| Backend startup | ✅ | settings, Incident model, correlation_engine, correlation_tasks import zinciri sorunsuz |
+| Celery beat schedule | ✅ | `confirm-stale-recovering-every-5min` → 300.0s kayıtlı |
+| SNMP linkDown → OPEN | ✅ | `_TRAP_CORRELATION["linkDown"]` → `event_type=port_down, is_problem=True` |
+| SNMP linkUp → RECOVERING | ✅ | `_TRAP_CORRELATION["linkUp"]` → `event_type=port_down, is_problem=False` |
+| Multi-hop BFS 3-hop | ✅ | `test_multihop_bfs_3hop_suppression` PASSED |
+| BFS cycle guard | ✅ | `test_multihop_bfs_cycle_guard` PASSED |
+| BFS max depth sınırı | ✅ | `test_multihop_beyond_max_depth_not_suppressed` PASSED |
+
+---
+
+## Faz 1 MVP: Reliable Agent Core + Stateful Incident Correlation
+
+### Merge: `feature/faz1-reliable-agent-correlation` → `main`
 
 ### Merge: `feature/faz1-reliable-agent-correlation` → `main`
 
@@ -77,16 +137,16 @@ Mevcut projede Alembic kullanılmıyor; tüm tablolar `Base.metadata.create_all`
 #### KL-2: JSON vs JSONB (sources, timeline kolonları)
 `Incident.sources` ve `Incident.timeline` kolonları, cross-database uyumluluğu için `JSONB` yerine `JSON` tipiyle tanımlandı. Küçük array'ler (< 10 eleman) için performans farkı ihmal edilebilir. Ancak gelecekte `sources` üzerinde `jsonb @>` operatörüyle filtreleme yapılması gerekirse (örn. "source='gnmi' olan tüm incidentlar") `JSONB`'ye dönüş ve sütun migration'ı değerlendirilmeli.
 
-#### KL-3: Celery Worker Kapalıyken Incident Lifecycle Davranışı
+#### ~~KL-3: Celery Worker Kapalıyken Incident Lifecycle Davranışı~~ ✅ Faz 2A'da kapatıldı
 - **Problem path:** Celery down → `open_incident_after_wait` zamanlanamaz → `group_wait` key temizlenir → sonraki event yeniden dener. Incident açılmaz, kayıp yok.
-- **Recovery path:** Celery down → `confirm_recovery` zamanlanamaz → incident `RECOVERING` state'inde kalır, kapanmaz. **Faz 2'de periyodik bir sweep task** (`confirm_stale_recovering`) eklenerek bu durum kapatılacak: X dakikadan uzun süre `RECOVERING` kalan incidentlar otomatik `CLOSED` yapılacak.
-- Celery broker tamamen down olduğunda mevcut `DEGRADED` incidentlar state değiştirmez — bu kabul edilebilir; yeni eventler geldiğinde state machine devam eder.
+- **Recovery path:** Celery down → `confirm_recovery` zamanlanamaz → incident `RECOVERING` state'inde kalır, kapanmaz. **Faz 2A'da `confirm_stale_recovering` beat task eklendi** — 240s üzerinde `RECOVERING` kalan incidentlar otomatik `CLOSED` yapılıyor.
+- Celery broker tamamen down olduğunda mevcut `DEGRADED` incidentlar state değiştirmez — kabul edilebilir; yeni eventler geldiğinde state machine devam eder.
 
 #### KL-4: `queued_events` Flush Sırasında Tekrar Bağlantı Kesilmesi
 Reconnect sonrası flush sırasında bağlantı yeniden kopsa, `ack` yapılmamış batch bir sonraki reconnect'te tekrar gönderilir (idempotent). `process_event` içindeki `group_wait` key dedup sayesinde duplicate incident üretilmez. Ancak son batch'in kısmen işlenip kısmen işlenmeme durumu (server-side `create_task` çağrıldı, ack gelmedi) teorik olarak mümkün; bu durumda aynı event iki kez işlenebilir. `NetworkEvent` dedup Redis key'i (mevcut altyapı) bu tekrarları zaten filtreler.
 
-#### KL-5: Upstream Suppression Tek Hop
-`check_upstream_suppression` yalnızca **tek hop** upstream kontrol eder (doğrudan `TopologyLink` komşular). Çok katmanlı topolojilerde (access → distribution → core) bir distribution switch down olduğunda, core'a bağlı access switch'lerin incidentları suppress edilmeyebilir. Faz 2'de BFS tabanlı multi-hop upstream traversal eklenecek — mevcut `monitor_tasks.py`'deki BFS altyapısı yeniden kullanılabilir.
+#### ~~KL-5: Upstream Suppression Tek Hop~~ ✅ Faz 2A'da kapatıldı
+~~`check_upstream_suppression` yalnızca **tek hop** upstream kontrol eder.~~ **Faz 2A'da** tam BFS traversal ile değiştirildi: tek sorgu + in-memory map + max 5 hop + visited-set cycle guard. Access → distribution → core topolojileri artık doğru şekilde cascade suppress eder.
 
 ---
 
