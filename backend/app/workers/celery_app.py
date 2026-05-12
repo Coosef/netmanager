@@ -56,6 +56,10 @@ celery_app.conf.update(
             "task": "app.workers.tasks.monitor_tasks.poll_device_status",
             "schedule": 300.0,
         },
+        "confirm-stale-recovering-every-5min": {
+            "task": "app.workers.tasks.correlation_tasks.confirm_stale_recovering",
+            "schedule": 300.0,
+        },
         "backup-configs-daily": {
             "task": "app.workers.tasks.bulk_tasks.scheduled_backup",
             "schedule": 86400.0,

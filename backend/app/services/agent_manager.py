@@ -534,6 +534,34 @@ class AgentManager:
                 db.add(ev)
                 await db.commit()
 
+                # ── Correlation engine — availability-impacting traps only ────
+                # authFailure is a security event, not availability → excluded.
+                # NetworkEvent raw log is always written above, regardless.
+                _TRAP_CORRELATION = {
+                    "linkDown":  ("port_down",      "device", True),   # is_problem
+                    "linkUp":    ("port_down",      "device", False),  # recovery
+                    "coldStart": ("device_restart", "device", True),
+                    "warmStart": ("device_restart", "device", True),
+                }
+                corr = _TRAP_CORRELATION.get(trap_name)
+                if corr and device_id:
+                    event_type_c, component_c, is_problem_c = corr
+                    try:
+                        from app.services.correlation_engine import process_event as _corr
+                        await _corr(
+                            device_id  = device_id,
+                            event_type = event_type_c,
+                            component  = component_c,
+                            source     = "snmp_trap",
+                            is_problem = is_problem_c,
+                            db         = db,
+                            sync_redis = _redis,
+                            severity   = severity,
+                        )
+                    except Exception as corr_err:
+                        # Correlation errors must never break trap ingest flow
+                        log.warning(f"SNMP trap correlation error (non-fatal): {corr_err}")
+
             # Publish to Redis event stream for real-time UI updates
             try:
                 r = _get_sync_redis()
