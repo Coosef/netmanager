@@ -1,6 +1,69 @@
 # Changelog
 
-## [Unreleased] — Faz 2A: Multi-Source Correlation Stability
+## [Unreleased] — Faz 2B: Syslog Normalization Engine
+
+### Merge: `feature/faz2b-syslog-normalization` → `main`
+
+---
+
+### Yeni Özellikler
+
+#### G4 — Syslog Normalization Engine (syslog_normalizer.py)
+- Yeni `NormalizedEvent(event_type, component, is_problem, severity)` dataclass.
+- İlk-eşleşme kazanır (`_RULES` listesi, en özelden genele sıralı) regex motoru.
+- **Vendor kapsamı:**
+  - **Cisco IOS/IOS-XE:** `%LINK UPDOWN`, `%LINEPROTO UPDOWN`, `%OSPF ADJCHG/ADJCHANGE`, `%BGP ADJCHANGE`, `%STP TOPOLOGY_CHANGE`, `BPDUGUARD`, `%SYS RELOAD`, `CONFIG_I`
+  - **Aruba OS-CX:** `Port <name> is Down/Up`
+  - **Ruijie RG-OS:** `link status changed to down/up`, `is turned down`
+- **`AVAILABILITY_EVENT_TYPES`** = `{port_down, device_restart, routing_change, bgp_peer_down}` — yalnızca bu tipler correlation engine'e gönderilir.
+- `config_change` ve `stp_event` normalize edilir (gelecekteki audit/notification için) ancak availability incident **açmaz**.
+- Severity escalation: syslog `severity_int ≤ 2` (emergency/alert/critical) → `"critical"` override.
+- Component extraction: trailing virgül/nokta temizlenir, çoklu boşluk normalize edilir.
+- Bilinmeyen mesajlar → `None` (raw SyslogEvent buffer'ında kalır, correlation yok).
+
+#### G5 — Syslog → Correlation Engine Wiring (agent_manager.py)
+- `_handle_syslog_event()` güncellendi: raw `SyslogEvent` her zaman önce yazılıyor (ingest akışı değişmedi).
+- `db.commit()` sonrası: `normalize()` → `AVAILABILITY_EVENT_TYPES` filtresi → `source_ip` ile `Device` lookup → `process_event(source="syslog")`.
+- `device_id = None` (kayıt dışı IP) → correlation atlanır, ingest devam eder.
+- `process_event` exception → non-fatal `log.warning`, ingest asla kırılmaz.
+
+### Düzeltilen Hatalar (test sırasında yakalandı)
+
+- **BGP "is now down" phrase:** `bgp.{0,40}neighbor\s+\S+\s+down` paterni `"neighbor X is now down"` formatında başarısız oluyordu — `bgp.{0,60}neighbor.{0,40}\bdown\b` ile genişletildi.
+- **IS-IS ADJCHANGE vs ADJCHG:** `ADJCHG` paterni `ADJCHANGE` içeren IS-IS mesajlarını kaçırıyordu — `ADJ(?:CHG|CHANGE)` ile düzeltildi.
+
+### Testler
+
+- `backend/tests/test_syslog_normalizer.py` — 42 yeni test:
+  - Per-pattern: Cisco / Aruba / Ruijie her vendor için ayrı test
+  - Recovery (is_problem=False) path
+  - Component extraction ve normalizasyon
+  - config_change → AVAILABILITY_EVENT_TYPES dışı
+  - stp_event → AVAILABILITY_EVENT_TYPES dışı
+  - Unknown → None
+  - Severity escalation (0–2 → critical)
+  - Regression: STP mesajında "port" kelimesi port_down olarak eşleşmemeli
+
+**Toplam: 78/78 test geçiyor** (9 + 16 + 11 + 42).
+
+### Pre-Merge Kontrol Sonuçları
+
+| Kontrol | Durum | Detay |
+|---|---|---|
+| Unknown syslog → sadece raw log | ✅ | `normalize()` None döndürür, correlation çağrısı yapılmaz |
+| source_ip eşleşmez → ingest devam | ✅ | `db.commit()` device lookup'tan önce; `if device_id:` guard mevcut |
+| config_change → incident açmaz | ✅ | `config_change ∉ AVAILABILITY_EVENT_TYPES`; `is_problem=False` |
+| port_down → OPEN path | ✅ | `is_problem=True`, `port_down ∈ AVAILABILITY_EVENT_TYPES` |
+| port_up → RECOVERING path | ✅ | `is_problem=False`, aynı fingerprint (port_down) → recovery çalışır |
+| BGP/OSPF severity | ✅ | BGP severity=warning; syslog_int≤2 → critical escalation |
+| correlation exception → ingest sağlam | ✅ | Inner try/except + outer try/except, debug log only |
+| stp_event → no false-positive incident | ✅ | `stp_event ∉ AVAILABILITY_EVENT_TYPES` |
+| Aruba / Ruijie vendor coverage | ✅ | Aruba port / Ruijie link-status test geçiyor |
+| port_down/up fingerprint tutarlılığı | ✅ | İki event aynı fingerprint → lifecycle doğru çalışır |
+
+---
+
+## Faz 2A: Multi-Source Correlation Stability
 
 ### Merge: `feature/faz2a-multisource-stability` → `main`
 
