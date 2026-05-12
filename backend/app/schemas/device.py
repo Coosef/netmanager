@@ -135,6 +135,10 @@ class DeviceResponse(BaseModel):
     credential_profile_id: Optional[int]
     created_at: datetime
     updated_at: datetime
+    availability_24h:  Optional[float] = None
+    availability_7d:   Optional[float] = None
+    mtbf_hours:        Optional[float] = None
+    experience_score:  Optional[float] = None
 
     model_config = {"from_attributes": True}
 
@@ -155,6 +159,7 @@ class DeviceResponse(BaseModel):
             "approval_required", "snmp_enabled", "snmp_version", "snmp_port",
             "snmp_v3_username", "snmp_v3_auth_protocol", "snmp_v3_priv_protocol",
             "group_id", "credential_profile_id", "created_at", "updated_at",
+            "availability_24h", "availability_7d", "mtbf_hours", "experience_score",
         ]
         result = {f: getattr(data, f, None) for f in fields}
         result["snmp_community_set"] = bool(getattr(data, "snmp_community", None))

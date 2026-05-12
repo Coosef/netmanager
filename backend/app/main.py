@@ -482,6 +482,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE devices ADD COLUMN IF NOT EXISTS experience_score FLOAT"
         ))
+        # Faz 3A — availability snapshot history
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS device_availability_snapshots (
+                id SERIAL PRIMARY KEY,
+                device_id INTEGER NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+                ts TIMESTAMPTZ NOT NULL,
+                availability_24h FLOAT NOT NULL,
+                availability_7d FLOAT NOT NULL,
+                mtbf_hours FLOAT,
+                experience_score FLOAT NOT NULL
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_das_device_ts "
+            "ON device_availability_snapshots (device_id, ts)"
+        ))
 
     await _create_default_tenant()
     await _create_default_admin()

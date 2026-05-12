@@ -17,6 +17,8 @@ _RETENTION = {
 _MAC_ARP_INACTIVE_DAYS = 30
 # Keep non-golden config backups for this many days; golden backups are never deleted
 _CONFIG_BACKUP_DAYS = 90
+# Availability snapshots — daily granularity, 90 days is enough for trending
+_AVAILABILITY_SNAPSHOT_DAYS = 90
 
 
 @celery_app.task(name="app.workers.tasks.retention_tasks.cleanup_old_data")
@@ -88,6 +90,15 @@ async def _run():
         )
         if r.rowcount:
             summary["config_backups"] = r.rowcount
+
+        # ── Availability snapshots — keep last 90 days ────────────────────────
+        snap_cutoff = now - timedelta(days=_AVAILABILITY_SNAPSHOT_DAYS)
+        r = await db.execute(
+            text("DELETE FROM device_availability_snapshots WHERE ts < :cutoff"),
+            {"cutoff": snap_cutoff},
+        )
+        if r.rowcount:
+            summary["device_availability_snapshots"] = r.rowcount
 
         await db.commit()
 

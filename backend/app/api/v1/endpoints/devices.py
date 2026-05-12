@@ -2411,3 +2411,56 @@ async def get_health_scores(
     results.sort(key=lambda x: x["score"])
     avg = round(sum(r["score"] for r in results) / len(results)) if results else 0
     return {"items": results, "avg_score": avg}
+
+
+@router.get("/{device_id}/availability")
+async def get_device_availability(
+    device_id: int,
+    days: int = 30,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """
+    Current availability metrics + snapshot history for trend charts.
+
+    Response:
+      current  — latest Device scoring fields (may be None before first daily run)
+      history  — list of daily snapshots ordered ascending by ts (up to `days` entries)
+    """
+    from datetime import timezone
+    from sqlalchemy import desc
+    from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
+
+    dev = await db.get(Device, device_id)
+    if not dev:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (await db.execute(
+        select(DeviceAvailabilitySnapshot)
+        .where(
+            DeviceAvailabilitySnapshot.device_id == device_id,
+            DeviceAvailabilitySnapshot.ts >= since,
+        )
+        .order_by(DeviceAvailabilitySnapshot.ts)
+    )).scalars().all()
+
+    return {
+        "current": {
+            "availability_24h": dev.availability_24h,
+            "availability_7d":  dev.availability_7d,
+            "mtbf_hours":       dev.mtbf_hours,
+            "experience_score": dev.experience_score,
+        },
+        "history": [
+            {
+                "ts":               r.ts.isoformat(),
+                "availability_24h": r.availability_24h,
+                "availability_7d":  r.availability_7d,
+                "mtbf_hours":       r.mtbf_hours,
+                "experience_score": r.experience_score,
+            }
+            for r in rows
+        ],
+    }
