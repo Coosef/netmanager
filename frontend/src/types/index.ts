@@ -165,6 +165,11 @@ export interface Device {
   group_id?: number
   created_at: string
   updated_at: string
+  // Availability scoring (Faz 2D/3A — computed daily, may be null before first run)
+  availability_24h?: number | null
+  availability_7d?: number | null
+  mtbf_hours?: number | null
+  experience_score?: number | null
 }
 
 export interface DeviceGroup {

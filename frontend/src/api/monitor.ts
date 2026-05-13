@@ -24,6 +24,8 @@ export interface MonitorStats {
   }
   backups: { never: number; stale_7d: number }
   topology: { nodes: number; links: number }
+  fleet_experience_score: number | null
+  fleet_availability_24h: number | null
 }
 
 export const monitorApi = {

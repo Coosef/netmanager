@@ -261,6 +261,7 @@ async def monitor_stats(
                 "health_score": 100, "devices": {"total": 0, "online": 0, "offline": 0, "unknown": 0},
                 "events_24h": {"total": 0, "by_severity": {}, "by_type": {}, "unacknowledged": 0},
                 "backups": {"never": 0, "stale_7d": 0}, "topology": {"nodes": 0, "links": 0},
+                "fleet_experience_score": None, "fleet_availability_24h": None,
             }
         dev_q = dev_q.where(Device.site.in_(effective_sites))
     all_devices = (await db.execute(dev_q)).scalars().all()
@@ -329,6 +330,12 @@ async def monitor_stats(
     score -= min(never_backed_up, 5)                         # max -5 for no backups
     score = max(0, min(100, score))
 
+    # Fleet scoring averages — None when no devices have been scored yet
+    exp_vals   = [d.experience_score  for d in all_devices if d.experience_score  is not None]
+    avail_vals = [d.availability_24h  for d in all_devices if d.availability_24h  is not None]
+    fleet_experience   = round(sum(exp_vals)   / len(exp_vals),   4) if exp_vals   else None
+    fleet_availability = round(sum(avail_vals) / len(avail_vals), 4) if avail_vals else None
+
     return {
         "health_score": score,
         "devices": {"total": total, "online": online, "offline": offline, "unknown": unknown},
@@ -340,6 +347,8 @@ async def monitor_stats(
         },
         "backups": {"never": never_backed_up, "stale_7d": stale_backup},
         "topology": {"nodes": topo_nodes, "links": topo_links},
+        "fleet_experience_score": fleet_experience,
+        "fleet_availability_24h": fleet_availability,
     }
 
 

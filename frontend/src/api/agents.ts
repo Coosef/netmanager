@@ -191,6 +191,13 @@ export const agentsApi = {
 
   snmpWalk: (id: string, body: { device_id: number; oid_prefix: string }) =>
     client.post<SnmpWalkResult>(`/agents/${id}/snmp-walk`, body).then(r => r.data),
+
+  // Peer latency — Faz 3C/3D
+  getPeerLatencyMatrix: () =>
+    client.get<PeerLatencyMatrix>('/agents/peer-latency-matrix').then((r) => r.data),
+
+  getAgentPeerLatency: (agentId: string, limit = 50) =>
+    client.get<PeerLatencyRecord[]>(`/agents/${agentId}/peer-latency`, { params: { limit } }).then((r) => r.data),
 }
 
 export interface DiscoverResult {
@@ -248,3 +255,20 @@ export interface SnmpWalkResult {
   results: Array<{ oid: string; value: string | number | null }>
   error?: string
 }
+
+export interface PeerLatencyRecord {
+  id: number
+  agent_from: string
+  agent_to: string
+  target_ip: string
+  latency_ms: number | null
+  reachable: boolean
+  measured_at: string
+}
+
+export type PeerLatencyMatrix = Record<string, {
+  latency_ms: number | null
+  reachable: boolean
+  target_ip: string
+  measured_at: string
+}>

@@ -1,9 +1,12 @@
 import { useState, useMemo } from 'react'
 import {
-  App, Alert, AutoComplete, Button, Descriptions, Form, Input, Modal, Select,
+  App, Alert, AutoComplete, Button, Card, Descriptions, Form, Input, Modal, Select,
   Popconfirm, Progress, Space, Table, Tag, Tooltip, Typography,
-  Tabs, Badge, Switch, Divider,
+  Tabs, Badge, Switch, Divider, Spin,
 } from 'antd'
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer,
+} from 'recharts'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import {
@@ -20,6 +23,7 @@ import {
   agentsApi, type Agent, type AgentLatencyEntry,
   type AgentCommandLog, type AgentSecurityConfig,
   type SnmpGetResult, type SnmpWalkResult,
+  type PeerLatencyMatrix,
 } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import dayjs from 'dayjs'
@@ -1607,6 +1611,163 @@ function LatencyMap({ agents }: { agents: Agent[] }) {
   )
 }
 
+// ── Peer Latency History sub-table ────────────────────────────────────────────
+function PeerLatencyHistory({ agentId }: { agentId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['peer-latency-history', agentId],
+    queryFn: () => agentsApi.getAgentPeerLatency(agentId, 50),
+    staleTime: 60_000,
+  })
+  if (isLoading) return <Spin size="small" style={{ display: 'block', margin: '12px auto' }} />
+  if (!data?.length) return <div style={{ padding: '8px 0', color: '#888', fontSize: 12 }}>Geçmiş veri yok.</div>
+
+  const chartData = [...data].reverse().map((r, i) => ({
+    i,
+    latency: r.latency_ms,
+  }))
+
+  return (
+    <div style={{ marginLeft: 24, paddingTop: 8, paddingBottom: 4 }}>
+      <div style={{ marginBottom: 8 }}>
+        <ResponsiveContainer width="100%" height={80}>
+          <LineChart data={chartData}>
+            <XAxis dataKey="i" hide />
+            <YAxis hide domain={['auto', 'auto']} />
+            <RTooltip
+              formatter={(v) => {
+                const n = v as number | null
+                return n != null ? [`${n.toFixed(1)} ms`, 'Gecikme'] : ['—', 'Gecikme']
+              }}
+              contentStyle={{ fontSize: 11, background: '#0e1e38', border: '1px solid #1a3458' }}
+            />
+            <Line type="monotone" dataKey="latency" stroke="#3b82f6" dot={false} strokeWidth={1.5} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+      <Table
+        dataSource={data}
+        rowKey="id"
+        size="small"
+        pagination={false}
+        columns={[
+          {
+            title: 'Sonuç', dataIndex: 'reachable', width: 80,
+            render: (ok: boolean) => ok
+              ? <Badge status="success" text={<span style={{ color: '#22c55e', fontSize: 11 }}>✓ UP</span>} />
+              : <Badge status="error"   text={<span style={{ color: '#ef4444', fontSize: 11 }}>✗ DOWN</span>} />,
+          },
+          {
+            title: 'Gecikme', dataIndex: 'latency_ms', width: 90,
+            render: (v: number | null) => v != null
+              ? <span style={{ fontSize: 11, color: v < 10 ? '#22c55e' : v < 50 ? '#f59e0b' : '#ef4444' }}>{v.toFixed(1)} ms</span>
+              : <span style={{ color: '#888', fontSize: 11 }}>—</span>,
+          },
+          {
+            title: 'Hedef IP', dataIndex: 'target_ip', width: 120,
+            render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#94a3b8' }}>{v}</span>,
+          },
+          {
+            title: 'Zaman', dataIndex: 'measured_at', width: 130,
+            render: (v: string) => <span style={{ fontSize: 11, color: '#888' }}>{dayjs(v).format('DD.MM HH:mm:ss')}</span>,
+          },
+        ]}
+      />
+    </div>
+  )
+}
+
+type MatrixRow = { agentId: string; latency_ms: number | null; reachable: boolean; target_ip: string; measured_at: string }
+
+// ── Peer Latency Matrix Card ───────────────────────────────────────────────────
+function PeerLatencyMatrixCard() {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: ['peer-latency-matrix'],
+    queryFn: () => agentsApi.getPeerLatencyMatrix(),
+    refetchInterval: 300_000,
+    staleTime: 60_000,
+  })
+
+  const entries = data ? Object.entries(data as PeerLatencyMatrix) : []
+
+  const tableData: MatrixRow[] = entries.map(([agentId, rec]) => ({
+    agentId,
+    ...rec,
+  }))
+
+  const columns = [
+    {
+      title: 'Agent', dataIndex: 'agentId', key: 'agentId',
+      render: (id: string) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{id}</span>,
+    },
+    {
+      title: 'Hedef IP', dataIndex: 'target_ip', width: 130,
+      render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#94a3b8' }}>{v}</span>,
+    },
+    {
+      title: 'Gecikme', dataIndex: 'latency_ms', width: 100,
+      render: (v: number | null) => {
+        if (v == null) return <span style={{ color: '#888', fontSize: 12 }}>—</span>
+        const color = v < 10 ? '#22c55e' : v < 50 ? '#f59e0b' : '#ef4444'
+        return <span style={{ color, fontWeight: 600, fontSize: 12 }}>{v.toFixed(1)} ms</span>
+      },
+      sorter: (a: MatrixRow, b: MatrixRow) => {
+        if (a.latency_ms == null) return 1
+        if (b.latency_ms == null) return -1
+        return a.latency_ms - b.latency_ms
+      },
+    },
+    {
+      title: 'Durum', dataIndex: 'reachable', width: 100,
+      render: (ok: boolean) => ok
+        ? <Tag color="green" style={{ fontSize: 11 }}>Erişilebilir</Tag>
+        : <Tag color="red"   style={{ fontSize: 11 }}>Erişilemiyor</Tag>,
+    },
+    {
+      title: 'Ölçüm', dataIndex: 'measured_at', width: 130,
+      render: (v: string) => <span style={{ fontSize: 11, color: '#888' }}>{dayjs(v).format('DD.MM HH:mm')}</span>,
+    },
+  ]
+
+  return (
+    <Card
+      size="small"
+      title={
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span style={{ fontWeight: 600, fontSize: 14 }}>Erişilebilirlik Matrisi</span>
+          <Button
+            size="small"
+            icon={<ReloadOutlined />}
+            onClick={() => qc.invalidateQueries({ queryKey: ['peer-latency-matrix'] })}
+          >
+            Yenile
+          </Button>
+        </div>
+      }
+      style={{ marginTop: 8 }}
+    >
+      {isLoading ? (
+        <div style={{ textAlign: 'center', padding: 32 }}><Spin /></div>
+      ) : !tableData.length ? (
+        <div style={{ textAlign: 'center', padding: '24px 0', color: '#888', fontSize: 13 }}>
+          Henüz ölçüm yok — ilk ölçüm 15 dakika içinde yapılacak.
+        </div>
+      ) : (
+        <Table
+          dataSource={tableData}
+          rowKey="agentId"
+          columns={columns}
+          size="small"
+          pagination={false}
+          expandable={{
+            expandedRowRender: (row: MatrixRow) => <PeerLatencyHistory agentId={row.agentId} />,
+          }}
+        />
+      )}
+    </Card>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function AgentsPage() {
@@ -2033,6 +2194,7 @@ export default function AgentsPage() {
       </div>
 
       <LatencyMap agents={agents} />
+      <PeerLatencyMatrixCard />
 
       {/* Create modal */}
       <Modal
