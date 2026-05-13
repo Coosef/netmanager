@@ -11,5 +11,6 @@ export function buildWsUrl(path: string): string {
   const portSuffix = port ? `:${port}` : ''
   const token = useAuthStore.getState().token
   const base = `${proto}://${host}${portSuffix}${path}`
-  return token ? `${base}?token=${encodeURIComponent(token)}` : base
+  const sep = path.includes('?') ? '&' : '?'
+  return token ? `${base}${sep}token=${encodeURIComponent(token)}` : base
 }

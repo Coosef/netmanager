@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
@@ -32,7 +32,6 @@ import { apiErr } from '@/utils/apiError'
 import GroupProfileModal from './GroupProfileModal'
 import dayjs from 'dayjs'
 
-const SshTerminal = lazy(() => import('@/components/SshTerminal'))
 
 const { Search } = Input
 
@@ -589,7 +588,6 @@ export default function DevicesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<Device | null>(null)
   const [detailDevice, setDetailDevice] = useState<Device | null>(null)
-  const [termDevice, setTermDevice] = useState<Device | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkCredOpen, setBulkCredOpen] = useState(false)
   const [bulkAgentOpen, setBulkAgentOpen] = useState(false)
@@ -905,8 +903,12 @@ export default function DevicesPage() {
       render: (_: unknown, record: Device) => (
         <Space size={2}>
           <Tooltip title={t('common.detail')}><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setDetailDevice(record)} /></Tooltip>
-          <Tooltip title="SSH Terminal">
-            <Button size="small" type="text" icon={<ConsoleSqlOutlined style={{ color: '#22c55e' }} />} onClick={() => setTermDevice(record)} />
+          <Tooltip title="SSH Terminal (yeni sekme)">
+            <Button
+              size="small" type="text"
+              icon={<ConsoleSqlOutlined style={{ color: '#22c55e' }} />}
+              onClick={() => window.open(`/ssh/${record.id}?hostname=${encodeURIComponent(record.hostname)}&ip=${encodeURIComponent(record.ip_address)}`, '_blank')}
+            />
           </Tooltip>
           <Tooltip title={t('devices.test_connection')}>
             <Button size="small" type="text" icon={<ThunderboltOutlined style={{ color: '#faad14' }} />} loading={testMutation.isPending} onClick={() => testMutation.mutate(record.id)} />
@@ -1288,30 +1290,6 @@ export default function DevicesPage() {
               </div>
             )}
           </>
-        )}
-      </Modal>
-
-      <Modal
-        open={!!termDevice}
-        onCancel={() => setTermDevice(null)}
-        footer={null}
-        width="85vw"
-        style={{ top: 40 }}
-        styles={{ body: { padding: 0, height: '70vh', background: isDark ? '#0d1117' : '#fff' } }}
-        title={
-          <Space>
-            <ConsoleSqlOutlined style={{ color: '#22c55e' }} />
-            <span style={{ fontFamily: 'monospace', fontSize: 13 }}>
-              SSH — {termDevice?.hostname} ({termDevice?.ip_address})
-            </span>
-          </Space>
-        }
-        destroyOnClose
-      >
-        {termDevice && (
-          <Suspense fallback={null}>
-            <SshTerminal deviceId={termDevice.id} isDark={isDark} onClose={() => setTermDevice(null)} />
-          </Suspense>
         )}
       </Modal>
 

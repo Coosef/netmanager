@@ -61,6 +61,7 @@ import PermissionsPage from '@/pages/Permissions'
 import InviteAcceptPage from '@/pages/InviteAccept'
 import SyntheticProbesPage from '@/pages/SyntheticProbes'
 import IncidentsPage from '@/pages/Incidents'
+import SshTerminalPage from '@/pages/SshTerminalPage'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -210,6 +211,7 @@ function ThemedApp() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/invite" element={<InviteAcceptPage />} />
+            <Route path="/ssh/:deviceId" element={<ProtectedRoute><SshTerminalPage /></ProtectedRoute>} />
             <Route
               element={
                 <ProtectedRoute>
