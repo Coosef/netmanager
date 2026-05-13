@@ -26,6 +26,7 @@ celery_app = Celery(
         "app.workers.tasks.correlation_tasks",
         "app.workers.tasks.synthetic_tasks",
         "app.workers.tasks.agent_peer_tasks",
+        "app.workers.tasks.escalation_tasks",
     ],
 )
 
@@ -148,6 +149,10 @@ celery_app.conf.update(
         "measure-agent-peer-latency-every-15min": {
             "task": "app.workers.tasks.agent_peer_tasks.measure_agent_peer_latency",
             "schedule": 900.0,
+        },
+        "evaluate-escalation-rules-every-5min": {
+            "task": "app.workers.tasks.escalation_tasks.evaluate_escalation_rules",
+            "schedule": 300.0,
         },
     },
 )

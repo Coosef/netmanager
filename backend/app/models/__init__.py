@@ -47,6 +47,7 @@ from app.models.incident import Incident, IncidentState
 from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
 from app.models.synthetic_probe import SyntheticProbe, SyntheticProbeResult
 from app.models.agent_peer_latency import AgentPeerLatency
+from app.models.escalation_rule import EscalationRule, EscalationNotificationLog
 
 __all__ = [
     "Tenant",
@@ -98,4 +99,5 @@ __all__ = [
     "DeviceAvailabilitySnapshot",
     "SyntheticProbe", "SyntheticProbeResult",
     "AgentPeerLatency",
+    "EscalationRule", "EscalationNotificationLog",
 ]
