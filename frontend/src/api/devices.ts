@@ -311,6 +311,27 @@ export const devicesApi = {
         snippets: string[]
       }[]
     }>('/devices/config-search', { params: { q, limit } }).then((r) => r.data),
+
+  getAvailability: (id: number, days = 30) =>
+    client.get<DeviceAvailability>(`/devices/${id}/availability`, { params: { days } }).then((r) => r.data),
+}
+
+export interface AvailabilitySnapshot {
+  ts: string
+  availability_24h: number
+  availability_7d: number
+  mtbf_hours: number | null
+  experience_score: number
+}
+
+export interface DeviceAvailability {
+  current: {
+    availability_24h: number | null
+    availability_7d: number | null
+    mtbf_hours: number | null
+    experience_score: number | null
+  }
+  history: AvailabilitySnapshot[]
 }
 
 export interface GroupSuggestion {

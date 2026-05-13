@@ -11,7 +11,7 @@ import {
   FireOutlined, RobotOutlined, SwapOutlined, SyncOutlined,
   ExperimentOutlined, EyeInvisibleOutlined, SafetyOutlined, CalendarOutlined, RiseOutlined,
   DashboardOutlined, ArrowUpOutlined, ArrowDownOutlined, AlertOutlined,
-  EnvironmentOutlined,
+  EnvironmentOutlined, HeartOutlined, StarOutlined,
 } from '@ant-design/icons'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer, Legend,
@@ -521,6 +521,9 @@ export default function DashboardPage() {
   const snmpBwTrend     = snmpChart?.points.map(p => +(p.avg_in + p.avg_out).toFixed(1)) ?? []
   const eventsTrend     = sparklineData?.events_24h.map(p => p.count) ?? []
 
+  const fleetAvailPct = s?.fleet_availability_24h != null ? Math.round(s.fleet_availability_24h * 100) : null
+  const fleetExpPct   = s?.fleet_experience_score  != null ? Math.round(s.fleet_experience_score  * 100) : null
+
   const topStatCards = [
     { icon: <LaptopOutlined />,       label: t('dashboard.stat_total'),  value: s?.devices.total   ?? 0, color: N.blue,   sub: t('dashboard.sub_managed'),    onClick: () => navigate('/devices'),   trend: snmpDeviceTrend  },
     { icon: <ApartmentOutlined />,    label: t('dashboard.stat_switch'), value: s?.topology.nodes  ?? 0, color: N.purple, sub: t('dashboard.sub_topo_nodes'),  onClick: () => navigate('/topology')                          },
@@ -528,6 +531,8 @@ export default function DashboardPage() {
     { icon: <WarningOutlined />,      label: t('dashboard.stat_alerts'), value: s?.events_24h.unacknowledged ?? 0, color: N.amber, sub: t('dashboard.sub_alerts'), onClick: () => navigate('/monitor'), trend: eventsTrend    },
     { icon: <WifiOutlined />,         label: t('dashboard.stat_lldp'),   value: lldpTotal,           color: N.teal,   sub: t('dashboard.sub_lldp'),        onClick: () => navigate('/discovery')                         },
     { icon: <DatabaseOutlined />,     label: t('dashboard.stat_config'), value: (s?.devices.total ?? 0) - (s?.backups.never ?? 0), color: N.cyan, sub: t('dashboard.sub_config'), onClick: () => navigate('/reports'), trend: snmpBwTrend },
+    { icon: <HeartOutlined />,        label: 'Fleet Availability',        value: fleetAvailPct != null ? `${fleetAvailPct}%` : '—', color: N.green,  sub: '24h ort. uptime',  onClick: () => navigate('/sla') },
+    { icon: <StarOutlined />,         label: 'Experience Score',          value: fleetExpPct   != null ? `${fleetExpPct}%`  : '—', color: N.purple, sub: 'Deneyim skoru',     onClick: () => navigate('/sla') },
   ]
 
   // ── Page background wrapper ───────────────────────────────────────────────────
@@ -667,32 +672,48 @@ export default function DashboardPage() {
                       </span>
                     }
                   />
-                  <div style={{ maxHeight: 220, overflowY: 'auto' }}>
+                  <div style={{ maxHeight: 260, overflowY: 'hidden' }}>
                     {liveEvents.length === 0 ? (
                       <div style={{ padding: '28px 20px', textAlign: 'center', color: C.dim }}>
                         <CheckCircleOutlined style={{ fontSize: 24, color: N.green, display: 'block', marginBottom: 8 }} />
-                        <span style={{ fontSize: 13 }}>{t('dashboard.no_events')}</span>
+                        <span style={{ fontSize: 13 }}>Son 30 dakikada olay yok</span>
                       </div>
-                    ) : liveEvents.slice(0, 8).map((ev, i) => (
-                      <div key={i} style={{
-                        padding: '9px 18px',
-                        borderBottom: i < 7 ? `1px solid ${C.border}` : undefined,
-                        display: 'flex', alignItems: 'center', gap: 10,
-                        transition: 'background 0.15s',
-                      }}
-                        onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = C.hover}
-                        onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = 'transparent'}
-                      >
-                        <span style={{ flexShrink: 0 }}>{SEV_ICON[ev.severity] || SEV_ICON.info}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ color: C.text, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {ev.title}
+                    ) : liveEvents.slice(0, 8).map((ev, i) => {
+                      const sevColor = ev.severity === 'critical' ? N.red : ev.severity === 'warning' ? N.amber : N.blue
+                      return (
+                        <div key={i} style={{
+                          padding: '9px 18px 9px 15px',
+                          borderBottom: i < 7 ? `1px solid ${C.border}` : undefined,
+                          borderLeft: `3px solid ${sevColor}`,
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          transition: 'background 0.15s',
+                          animation: i === 0 ? 'tlSlideIn 0.32s cubic-bezier(0.2,0,0,1)' : undefined,
+                        }}
+                          onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = C.hover}
+                          onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = 'transparent'}
+                        >
+                          <span style={{ flexShrink: 0 }}>{SEV_ICON[ev.severity] || SEV_ICON.info}</span>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: C.text, fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {ev.title}
+                            </div>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 2 }}>
+                              {ev.device_hostname && (
+                                <span style={{ color: N.cyan, fontSize: 10, background: `${N.cyan}15`, borderRadius: 3, padding: '1px 5px' }}>
+                                  {ev.device_hostname}
+                                </span>
+                              )}
+                              <span style={{ color: C.dim, fontSize: 10, background: `${sevColor}12`, borderRadius: 3, padding: '1px 5px' }}>
+                                {ev.event_type}
+                              </span>
+                            </div>
                           </div>
-                          {ev.device_hostname && <div style={{ color: C.dim, fontSize: 11 }}>{ev.device_hostname}</div>}
+                          <span style={{ color: C.dim, fontSize: 11, flexShrink: 0, fontFamily: 'monospace' }}>
+                            {dayjs(ev.created_at).format('HH:mm')}
+                          </span>
                         </div>
-                        <span style={{ color: C.dim, fontSize: 11, flexShrink: 0 }}>{dayjs(ev.created_at).fromNow()}</span>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 </div>
               </Col>

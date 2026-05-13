@@ -186,6 +186,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management'), minRole: 'location_manager' },
         { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval', minRole: 'location_manager' },
         { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla'), minRole: 'org_viewer' },
+        { key: '/synthetic-probes', icon: <RadarChartOutlined />, label: 'Synthetic Probes', minRole: 'org_viewer' },
         { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası', minRole: 'org_viewer' },
         { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin', minRole: 'location_manager' },
         { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports'), minRole: 'org_viewer' },

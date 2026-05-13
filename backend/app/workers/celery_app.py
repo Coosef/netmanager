@@ -24,6 +24,8 @@ celery_app = Celery(
         "app.workers.tasks.sla_tasks",
         "app.workers.tasks.availability_tasks",
         "app.workers.tasks.correlation_tasks",
+        "app.workers.tasks.synthetic_tasks",
+        "app.workers.tasks.agent_peer_tasks",
     ],
 )
 
@@ -138,6 +140,14 @@ celery_app.conf.update(
         "update-device-availability-scores-daily": {
             "task": "app.workers.tasks.availability_tasks.compute_availability_scores",
             "schedule": 86400.0,  # once per day
+        },
+        "run-synthetic-probes-every-minute": {
+            "task": "app.workers.tasks.synthetic_tasks.run_synthetic_probes",
+            "schedule": 60.0,
+        },
+        "measure-agent-peer-latency-every-15min": {
+            "task": "app.workers.tasks.agent_peer_tasks.measure_agent_peer_latency",
+            "schedule": 900.0,
         },
     },
 )

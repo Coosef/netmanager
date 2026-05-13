@@ -10,6 +10,7 @@ import {
   SwapOutlined, SafetyCertificateOutlined, WarningOutlined,
   ApartmentOutlined, AlertOutlined, HistoryOutlined, ApiOutlined, ScanOutlined,
   ClockCircleOutlined, LineChartOutlined, FireOutlined, CalendarOutlined,
+  HeartOutlined, InfoCircleOutlined,
 } from '@ant-design/icons'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ReTooltip, ResponsiveContainer, Legend,
@@ -427,6 +428,13 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
     queryFn: () => intelligenceApi.getTimeline(currentDevice.id, 30),
     enabled: activeTab === 'timeline',
     staleTime: 60_000,
+  })
+  const { data: availabilityData, isLoading: availLoading } = useQuery({
+    queryKey: ['device-availability', currentDevice.id],
+    queryFn: () => devicesApi.getAvailability(currentDevice.id, 30),
+    enabled: activeTab === 'availability',
+    staleTime: 300_000,
+    refetchInterval: activeTab === 'availability' ? 300_000 : false,
   })
   const { data: allServices } = useQuery({
     queryKey: ['services'],
@@ -1401,6 +1409,89 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
         </Tabs.TabPane>
 
         {/* ── 12C: Zaman Çizelgesi ────────────────────────────────────────── */}
+        {/* ── Availability ──────────────────────────────────────────────────── */}
+        <Tabs.TabPane tab={<span><HeartOutlined /> Availability</span>} key="availability">
+          {availLoading ? (
+            <div style={{ padding: 40, textAlign: 'center' }}><Spin /></div>
+          ) : !availabilityData ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>
+              <InfoCircleOutlined style={{ fontSize: 28, marginBottom: 8, display: 'block' }} />
+              Henüz veri yok — availability skoru günlük hesaplanır.
+            </div>
+          ) : (() => {
+            const cur = availabilityData.current
+            const history = availabilityData.history ?? []
+            const chartData = history.map(p => ({
+              date: dayjs(p.ts).format('DD/MM'),
+              'Exp. Score': +(p.experience_score * 100).toFixed(1),
+              'Avail. 7d': +(p.availability_7d * 100).toFixed(1),
+            }))
+            const fmtPct = (v: number | null | undefined) =>
+              v != null ? `${(v * 100).toFixed(1)}%` : '—'
+            const fmtHours = (v: number | null | undefined) =>
+              v != null ? `${v.toFixed(1)} saat` : null
+
+            return (
+              <div style={{ padding: '8px 0' }}>
+                {/* 4 stat boxes */}
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
+                  {[
+                    { label: '24h Uptime',     value: fmtPct(cur.availability_24h),  color: '#22c55e' },
+                    { label: '7d Uptime',      value: fmtPct(cur.availability_7d),   color: '#3b82f6' },
+                    { label: 'MTBF',           value: fmtHours(cur.mtbf_hours) ?? 'Yeterli veri yok', color: cur.mtbf_hours ? '#f97316' : '#888' },
+                    { label: 'Exp. Score',     value: fmtPct(cur.experience_score),  color: '#a855f7' },
+                  ].map(card => (
+                    <div key={card.label} style={{
+                      flex: '1 1 140px', minWidth: 120,
+                      background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.08)',
+                      borderTop: `3px solid ${card.color}`,
+                      borderRadius: 8, padding: '14px 16px',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 6 }}>{card.label}</div>
+                      <div style={{ fontSize: 28, fontFamily: 'monospace', fontWeight: 800, color: card.color, lineHeight: 1 }}>{card.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* 30-day trend chart */}
+                {history.length === 0 ? (
+                  <div style={{ padding: '24px 0', textAlign: 'center', color: '#888', fontSize: 13 }}>
+                    Geçmiş veri yok — grafik ilk günlük hesaplamadan sonra görünür.
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#555' }}>30 Günlük Trend</div>
+                    <ResponsiveContainer width="100%" height={180}>
+                      <AreaChart data={chartData} margin={{ top: 4, right: 8, left: -24, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="availExpGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#a855f7" stopOpacity={0.25} />
+                            <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
+                          </linearGradient>
+                          <linearGradient id="availAvailGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="5%" stopColor="#22c55e" stopOpacity={0.20} />
+                            <stop offset="95%" stopColor="#22c55e" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="2 2" stroke="rgba(0,0,0,0.06)" />
+                        <XAxis dataKey="date" tick={{ fontSize: 9 }} interval={Math.max(0, Math.floor(chartData.length / 8))} />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 9 }} tickFormatter={v => `${v}%`} />
+                        <ReTooltip
+                          contentStyle={{ fontSize: 12 }}
+                          formatter={(v) => [`${(v as number).toFixed(1)}%`]}
+                        />
+                        <Legend iconSize={10} wrapperStyle={{ fontSize: 11 }} />
+                        <Area type="monotone" dataKey="Exp. Score" stroke="#a855f7" strokeWidth={1.5} fill="url(#availExpGrad)" dot={false} />
+                        <Area type="monotone" dataKey="Avail. 7d"  stroke="#22c55e" strokeWidth={1.5} fill="url(#availAvailGrad)" dot={false} />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </>
+                )}
+              </div>
+            )
+          })()}
+        </Tabs.TabPane>
+
         <Tabs.TabPane tab={<span><HistoryOutlined /> Zaman Çizelgesi</span>} key="timeline">
           {timelineLoading ? (
             <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>

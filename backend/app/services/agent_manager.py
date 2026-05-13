@@ -264,6 +264,17 @@ class AgentManager:
                 if not fut.done():
                     fut.set_result(msg.get("reachable", False))
 
+        elif msg_type == "synthetic_probe_result":
+            req_id = msg.get("req_id", "")
+            if req_id and req_id in self._pending:
+                fut = self._pending.pop(req_id)
+                if not fut.done():
+                    fut.set_result({
+                        "success":    msg.get("success", False),
+                        "latency_ms": msg.get("latency_ms"),
+                        "detail":     msg.get("detail", ""),
+                    })
+
         # Sprint 14C: Agent edge intelligence anomaly report
         elif msg_type == "local_anomaly":
             asyncio.get_running_loop().create_task(
@@ -903,6 +914,48 @@ class AgentManager:
             return await asyncio.wait_for(fut, timeout=timeout + 2)
         except Exception:
             return False
+        finally:
+            self._pending.pop(req_id, None)
+
+    async def execute_synthetic_probe(
+        self,
+        agent_id: str,
+        probe_type: str,
+        target: str,
+        timeout: int = 5,
+        **kwargs,
+    ) -> dict:
+        """
+        Ask an agent to run a synthetic probe (icmp/tcp/dns/http).
+
+        Returns {"success": bool, "latency_ms": float|None, "detail": str}.
+        Returns success=False, detail="agent offline" when agent not connected —
+        caller should NOT correlate this as a device fault.
+        """
+        ws = self._connections.get(agent_id)
+        if not ws:
+            return {"success": False, "latency_ms": None, "detail": "agent offline"}
+
+        req_id = uuid.uuid4().hex
+        loop   = asyncio.get_running_loop()
+        fut: asyncio.Future = loop.create_future()
+        self._pending[req_id] = fut
+
+        payload = {
+            "type":       "synthetic_probe",
+            "req_id":     req_id,
+            "probe_type": probe_type,
+            "target":     target,
+            "timeout":    timeout,
+            **kwargs,
+        }
+        try:
+            await ws.send_text(json.dumps(payload))
+            return await asyncio.wait_for(fut, timeout=timeout + 5)
+        except asyncio.TimeoutError:
+            return {"success": False, "latency_ms": None, "detail": "probe timeout"}
+        except Exception as exc:
+            return {"success": False, "latency_ms": None, "detail": str(exc)[:80]}
         finally:
             self._pending.pop(req_id, None)
 

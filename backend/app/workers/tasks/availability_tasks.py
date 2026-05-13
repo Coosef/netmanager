@@ -1,5 +1,5 @@
 """
-Availability Scoring Task — Faz 2D
+Availability Scoring Task — Faz 3A
 
 Computes per-device availability metrics daily from incident history.
 All functions are pure (no I/O) to make them directly unit-testable.
@@ -10,10 +10,11 @@ Metrics written to Device:
   mtbf_hours        — mean time between failures over last 7 days (hours)
   experience_score  — composite quality-of-service score (0.0–1.0)
 
-Known limitation (KL-6): overlapping incidents on the same device are summed
-independently, which can yield availability < 0 when multiple incident types
-fire simultaneously. Faz 3 will apply interval union/merge before summing.
-SUPPRESSED incidents are excluded (cascade, not local fault).
+Each run also appends a DeviceAvailabilitySnapshot row for trend history.
+
+KL-6 (resolved Faz 3A): overlapping incident intervals are now merged before
+summing downtime, so concurrent incidents on the same device no longer
+double-count downtime. SUPPRESSED incidents remain excluded.
 """
 
 import asyncio
@@ -41,6 +42,25 @@ _7D_HOURS  = 168.0
 # Pure helpers — no I/O, fully unit-testable
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _merge_intervals(
+    intervals: list[tuple[datetime, datetime]],
+) -> list[tuple[datetime, datetime]]:
+    """
+    Merge overlapping or adjacent datetime intervals.
+
+    Input must not be empty. Intervals are sorted by start before merging.
+    Example: [(t0,t2),(t1,t3)] → [(t0,t3)] when t1 < t2.
+    """
+    sorted_ivs = sorted(intervals, key=lambda x: x[0])
+    merged: list[list] = [list(sorted_ivs[0])]
+    for start, end in sorted_ivs[1:]:
+        if start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return [(s, e) for s, e in merged]
+
+
 def compute_downtime_secs(
     incidents: list,
     window_start: datetime,
@@ -54,14 +74,15 @@ def compute_downtime_secs(
     OPEN / DEGRADED / RECOVERING:    opened_at … window_end (still active)
     SUPPRESSED:                      0 s (cascade event, not a local fault)
 
-    Overlapping incidents are summed independently (see module-level KL-6 note).
+    Overlapping incident intervals are merged before summing (KL-6 resolved).
     """
     from app.models.incident import IncidentState
 
-    total = 0.0
     window_secs = (window_end - window_start).total_seconds()
     if window_secs <= 0:
         return 0.0
+
+    raw_intervals: list[tuple[datetime, datetime]] = []
 
     for inc in incidents:
         if inc.state == IncidentState.SUPPRESSED:
@@ -81,9 +102,13 @@ def compute_downtime_secs(
         effective_end   = min(inc_end,   window_end)
 
         if effective_end > effective_start:
-            total += (effective_end - effective_start).total_seconds()
+            raw_intervals.append((effective_start, effective_end))
 
-    return total
+    if not raw_intervals:
+        return 0.0
+
+    merged = _merge_intervals(raw_intervals)
+    return sum((e - s).total_seconds() for s, e in merged)
 
 
 def compute_availability(downtime_secs: float, window_secs: float) -> float:
@@ -156,6 +181,7 @@ async def _run():
     from app.core.database import make_worker_session
     from app.models.device import Device
     from app.models.incident import Incident
+    from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
 
     now   = datetime.now(timezone.utc)
     w24   = now - timedelta(hours=24)
@@ -196,6 +222,14 @@ async def _run():
                 dev.availability_7d  = avail_7d
                 dev.mtbf_hours       = mtbf
                 dev.experience_score = exp
+                db.add(DeviceAvailabilitySnapshot(
+                    device_id=device_id,
+                    ts=now,
+                    availability_24h=avail_24h,
+                    availability_7d=avail_7d,
+                    mtbf_hours=mtbf,
+                    experience_score=exp,
+                ))
                 updated += 1
 
         await db.commit()
