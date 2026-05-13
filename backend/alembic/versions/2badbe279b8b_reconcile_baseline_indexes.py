@@ -38,7 +38,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ── agent_credential_bundles ─────────────────────────────────────────────
-    op.drop_constraint('agent_credential_bundles_agent_id_key', 'agent_credential_bundles', type_='unique')
+    op.execute(sa.text(
+        "ALTER TABLE agent_credential_bundles "
+        "DROP CONSTRAINT IF EXISTS agent_credential_bundles_agent_id_key"
+    ))
     op.create_index(op.f('ix_agent_credential_bundles_agent_id'), 'agent_credential_bundles', ['agent_id'], unique=True)
     op.create_index(op.f('ix_agent_credential_bundles_id'), 'agent_credential_bundles', ['id'], unique=False)
 
@@ -46,8 +49,8 @@ def upgrade() -> None:
     op.create_index(op.f('ix_audit_logs_request_id'), 'audit_logs', ['request_id'], unique=False)
 
     # ── device_availability_snapshots ────────────────────────────────────────
-    op.drop_index('device_availability_snapshots_ts_idx', table_name='device_availability_snapshots')
-    op.drop_index('ix_das_device_ts', table_name='device_availability_snapshots')
+    op.drop_index('device_availability_snapshots_ts_idx', table_name='device_availability_snapshots', if_exists=True)
+    op.drop_index('ix_das_device_ts', table_name='device_availability_snapshots', if_exists=True)
     op.create_index(op.f('ix_device_availability_snapshots_device_id'), 'device_availability_snapshots', ['device_id'], unique=False)
     op.create_index(op.f('ix_device_availability_snapshots_ts'), 'device_availability_snapshots', ['ts'], unique=False)
 
@@ -56,15 +59,15 @@ def upgrade() -> None:
     op.create_index(op.f('ix_devices_credential_profile_id'), 'devices', ['credential_profile_id'], unique=False)
 
     # ── discovery_results ────────────────────────────────────────────────────
-    op.drop_index('ix_discovery_results_agent', table_name='discovery_results')
+    op.drop_index('ix_discovery_results_agent', table_name='discovery_results', if_exists=True)
     op.create_index(op.f('ix_discovery_results_agent_id'), 'discovery_results', ['agent_id'], unique=False)
     op.create_index(op.f('ix_discovery_results_id'), 'discovery_results', ['id'], unique=False)
 
     # ── escalation_notification_logs ─────────────────────────────────────────
     # New-named indexes already exist (created by create_all). Drop old names only.
-    op.drop_index('ix_esc_notif_log_incident_id', table_name='escalation_notification_logs')
-    op.drop_index('ix_esc_notif_log_rule_id', table_name='escalation_notification_logs')
-    op.drop_index('ix_esc_notif_log_sent_at', table_name='escalation_notification_logs')
+    op.drop_index('ix_esc_notif_log_incident_id', table_name='escalation_notification_logs', if_exists=True)
+    op.drop_index('ix_esc_notif_log_rule_id', table_name='escalation_notification_logs', if_exists=True)
+    op.drop_index('ix_esc_notif_log_sent_at', table_name='escalation_notification_logs', if_exists=True)
 
     # ── invite_tokens ────────────────────────────────────────────────────────
     op.create_index(op.f('ix_invite_tokens_org_id'), 'invite_tokens', ['org_id'], unique=False)
@@ -78,8 +81,8 @@ def upgrade() -> None:
     op.create_index(op.f('ix_syslog_events_agent_id'), 'syslog_events', ['agent_id'], unique=False)
     op.create_index(op.f('ix_syslog_events_id'), 'syslog_events', ['id'], unique=False)
     op.create_index(op.f('ix_syslog_events_received_at'), 'syslog_events', ['received_at'], unique=False)
-    op.drop_index('ix_syslog_agent_received', table_name='syslog_events')
-    op.drop_index('ix_syslog_events_received', table_name='syslog_events')
+    op.drop_index('ix_syslog_agent_received', table_name='syslog_events', if_exists=True)
+    op.drop_index('ix_syslog_events_received', table_name='syslog_events', if_exists=True)
 
 
 def downgrade() -> None:

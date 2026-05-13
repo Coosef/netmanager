@@ -37,17 +37,62 @@ docker compose build --no-cache
 
 ## 2 — Veritabanı Migration
 
-> **Uyarı:** Faz 5'te Alembic entegre edilene kadar, `main.py` lifespan `ALTER TABLE IF NOT EXISTS` bloklarını çalıştırır. İdempotent ama kontrol edin.
+**Faz 5A itibarıyla Alembic aktif** — `backend/alembic/` altında 3 revision zinciri kurulu.
+
+### 2A — Mevcut DB (Production Upgrade)
 
 ```bash
-# Mevcut şemayı kaydet (deploy öncesi anlık görüntü)
+# 1. Deploy öncesi schema snapshot al
 docker exec switch-postgres-1 pg_dump -U netmgr -d network_manager \
   --schema-only -f /tmp/schema_before_$(date +%Y%m%d).sql
 
-# Deploy sonrası yeni tabloları doğrula
-docker exec switch-postgres-1 psql -U netmgr -d network_manager \
-  -c "\dt" | grep -E "escalation|incident"
-# escalation_rules, escalation_notification_logs, incidents, incident_timelines görünmeli
+# 2. Alembic mevcut revision kontrolü (eğer DB zaten stamp edilmişse)
+docker exec -w /app switch-backend-1 alembic current
+# Beklenen: c3d4e5f6a7b8 (head) — zaten güncel
+# Eğer baseline (2b6c64e3a91e) ise:
+docker exec -w /app switch-backend-1 alembic upgrade head
+# 3 revision uygulanır: reconcile_baseline_indexes + cleanup_duplicate_indexes
+
+# 3. Hiç stamp edilmemişse (ilk Alembic kurulumu mevcut DB'de):
+docker exec -w /app switch-backend-1 alembic stamp 2b6c64e3a91e  # baseline
+docker exec -w /app switch-backend-1 alembic upgrade head          # 2 revision uygular
+```
+
+### 2B — Temiz / Yeni DB Kurulumu
+
+```bash
+# Yeni ortamda tablolar main.py lifespan create_all() ile oluşur.
+# Sonrasında DB'yi head'e işaretle:
+docker exec -w /app switch-backend-1 alembic stamp head
+# c3d4e5f6a7b8 (head) görünmeli — migration çalıştırmaya gerek yok
+```
+
+### 2C — Rollback (Migration Geri Alma)
+
+```bash
+# Bir adım geri: cleanup_duplicate_indexes öncesine
+docker exec -w /app switch-backend-1 alembic downgrade -1
+
+# Baseline'a tam geri dön (tüm index operasyonlarını sıfırla):
+docker exec -w /app switch-backend-1 alembic downgrade base
+
+# Tekrar upgrade:
+docker exec -w /app switch-backend-1 alembic upgrade head
+```
+
+### 2D — Bilinen Kabul Edilmiş Farklar (`alembic check`)
+
+`alembic check` şu anda 2 tip gürültü üretir — ikisi de kasıtlı ertelendi:
+
+| Diff türü | Tablo/kolon | Neden ertelendi |
+|-----------|-------------|-----------------|
+| `modify_default` | ~40 kolon | server_default cosmetic fark, functional etkisi yok |
+| `modify_type` JSONB→JSON | `audit_logs`, `devices`, `discovery_results` | table rewrite riski var |
+
+```bash
+# Doğrulama: sadece modify_default ve modify_type kalmalı, add/remove_index sıfır
+docker exec -w /app switch-backend-1 alembic check 2>&1 | grep -c "add_index\|remove_index"
+# Beklenen: 0
 
 # TimescaleDB hypertable kontrol
 docker exec switch-postgres-1 psql -U netmgr -d network_manager \

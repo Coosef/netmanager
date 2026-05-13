@@ -30,27 +30,27 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     # ── agent_peer_latencies ─────────────────────────────────────────────────
     # ix_agent_peer_latencies_agent_from already exists (create_all convention name).
-    op.drop_index('ix_apl_agent_from', table_name='agent_peer_latencies')
+    op.drop_index('ix_apl_agent_from', table_name='agent_peer_latencies', if_exists=True)
 
     # ── audit_logs ───────────────────────────────────────────────────────────
     # ix_audit_logs_created_at already exists (create_all convention name).
-    op.drop_index('ix_audit_logs_created', table_name='audit_logs')
+    op.drop_index('ix_audit_logs_created', table_name='audit_logs', if_exists=True)
 
     # ── network_events ───────────────────────────────────────────────────────
     # Rename: acknowledged column index to Alembic convention name.
-    op.drop_index('ix_network_events_acked', table_name='network_events')
+    op.drop_index('ix_network_events_acked', table_name='network_events', if_exists=True)
     op.create_index(
         op.f('ix_network_events_acknowledged'), 'network_events', ['acknowledged'], unique=False
     )
 
     # ── notification_logs ────────────────────────────────────────────────────
     # ix_notification_logs_sent_at already exists (create_all convention name).
-    op.drop_index('ix_notification_logs_sent', table_name='notification_logs')
+    op.drop_index('ix_notification_logs_sent', table_name='notification_logs', if_exists=True)
 
     # ── synthetic_probes ─────────────────────────────────────────────────────
     # ix_synthetic_probes_agent_id and ix_synthetic_probes_device_id already exist.
-    op.drop_index('ix_synthetic_probes_agent', table_name='synthetic_probes')
-    op.drop_index('ix_synthetic_probes_device', table_name='synthetic_probes')
+    op.drop_index('ix_synthetic_probes_agent', table_name='synthetic_probes', if_exists=True)
+    op.drop_index('ix_synthetic_probes_device', table_name='synthetic_probes', if_exists=True)
 
     # ── syslog_events ────────────────────────────────────────────────────────
     # Composite (agent_id, received_at) was accidentally dropped in reconcile revision.
