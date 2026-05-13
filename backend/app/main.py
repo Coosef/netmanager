@@ -20,6 +20,17 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["1000/minute"])
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     async with async_engine.begin() as conn:
+        # ── DEPRECATED: create_all + ALTER TABLE pattern ──────────────────────
+        # Faz 5A (2026-05-13): Alembic is now the authoritative schema manager.
+        # DO NOT add new ALTER TABLE, CREATE TABLE, or CREATE INDEX statements
+        # to this block. All future DDL changes must go through an Alembic
+        # revision in backend/alembic/versions/.
+        #
+        # create_all() is kept for fresh-install compatibility only (new dev
+        # envs that spin up without a pre-existing DB). On existing DBs, Alembic
+        # handles all incremental changes via `alembic upgrade head`.
+        # See: backend/alembic/versions/ and DEPLOY_CHECKLIST.md §2
+        # ─────────────────────────────────────────────────────────────────────
         await conn.run_sync(Base.metadata.create_all)
         # Safe column additions (idempotent)
         await conn.execute(text(

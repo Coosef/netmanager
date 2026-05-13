@@ -310,11 +310,116 @@ LOG_LEVEL=           # INFO (prod) / DEBUG (dev)
 
 ---
 
-## 10 — Faz 5 Öncesi Açık Maddeler (KL Tablosu)
+## 10 — Migration Review Checklist (Zorunlu)
+
+Her PR'da schema değişikliği varsa aşağıdaki liste tamamlanmadan merge edilmez.
+
+### PR Açmadan Önce
+
+```bash
+# 1. Revision üret (autogenerate veya manuel)
+cd backend && alembic revision --autogenerate -m "kısa_açıklama"
+# VEYA manuel:
+alembic revision -m "kısa_açıklama"
+
+# 2. Üretilen dosyayı incele — sadece beklenen değişiklikler olmalı
+#    server_default ve JSONB→JSON noise'u kaldır (bilinen kabul edilmiş farklar)
+cat alembic/versions/<yeni_revision>.py
+
+# 3. Offline SQL üret — DDL mantıklı görünmeli
+alembic upgrade head --sql 2>&1 | grep -E "^(CREATE|DROP|ALTER)"
+
+# 4. Temiz ortamda round-trip test
+alembic downgrade -1 && alembic upgrade head
+alembic check 2>&1 | grep -c "add_index\|remove_index"
+# Beklenen: 0
+
+# 5. Test suite geçmeli
+python -m pytest tests/ -q
+```
+
+### PR Checklist (Review Sırasında)
+
+- [ ] Revision dosyası `backend/alembic/versions/` altında commit edilmiş
+- [ ] `main.py` lifespan'a yeni ALTER TABLE / CREATE INDEX eklenmemiş
+- [ ] `downgrade()` doğru ve test edilmiş
+- [ ] `if_exists=True` (drop_index) / `IF EXISTS` SQL (drop_constraint) kullanılmış
+- [ ] İndex isimleri Alembic convention: `ix_{tablo}_{kolon}` formatında
+- [ ] Composite/partial index varsa modele `Index(...)` eklenmiş (autogenerate sessiz kalmalı)
+- [ ] `alembic check` → `add_index` / `remove_index` sayısı 0
+
+---
+
+## 11 — Staging → Production Migration Dry-Run Prosedürü
+
+### Adım 1 — Staging'de Uygula
+
+```bash
+# Staging ortamını production DB dump ile besle
+pg_restore -U netmgr -d network_manager_staging /backup/latest.dump
+
+# Alembic state'ini staging'e kopyala
+docker exec -w /app switch-staging-backend-1 alembic current
+# Beklenen: production ile aynı revision
+
+# Yeni revisionları staging'de çalıştır
+docker exec -w /app switch-staging-backend-1 alembic upgrade head
+```
+
+### Adım 2 — Staging Doğrulama
+
+```bash
+# index diff sıfır olmalı
+docker exec -w /app switch-staging-backend-1 alembic check 2>&1 \
+  | grep -c "add_index\|remove_index"
+
+# Backend sağlık
+curl -s http://staging:8000/health
+
+# Test suite staging DB'ye karşı
+docker exec -w /app switch-staging-backend-1 python -m pytest tests/ -q
+
+# Kritik sorgu planları (yeni index var mı, seq scan yok mu)
+docker exec switch-staging-postgres-1 psql -U netmgr -d network_manager_staging \
+  -c "EXPLAIN ANALYZE SELECT * FROM network_events WHERE acknowledged=FALSE ORDER BY created_at DESC LIMIT 50;"
+# Index Scan beklenir, Seq Scan değil
+```
+
+### Adım 3 — Production Uygulaması
+
+```bash
+# 1. Bakım moduna al (opsiyonel — zero-downtime için atlanabilir)
+# 2. Schema snapshot al
+docker exec switch-postgres-1 pg_dump -U netmgr -d network_manager \
+  --schema-only -f /backup/pre_migration_$(date +%Y%m%d_%H%M).sql
+
+# 3. Migration uygula
+docker exec -w /app switch-backend-1 alembic upgrade head
+
+# 4. Doğrula
+docker exec -w /app switch-backend-1 alembic current
+# c3d4e5f6a7b8 (head) — veya yeni head revision
+
+# 5. Rollback gerekirse
+docker exec -w /app switch-backend-1 alembic downgrade -1
+```
+
+### Rollback Kararı
+
+| Semptom | Aksiyon |
+|---------|---------|
+| `alembic upgrade` hata fırlattı | `alembic downgrade -1` → root cause araştır |
+| Backend /health başarısız | `alembic downgrade base` → schema snapshot'tan restore |
+| Sorgu planları kötüleşti | Yeni index DROP et, eski index RE-CREATE |
+| Test suite failure | Downgrade → fix → yeni revision → re-deploy |
+
+---
+
+## 12 — Açık Maddeler (KL Tablosu)
 
 | ID | Açıklama | Planlanan Çözüm |
 |----|----------|----------------|
-| KL-1 | `main.py` ALTER TABLE — Alembic yok | Faz 5A — Alembic entegrasyonu |
+| KL-1 | `main.py` ALTER TABLE — Alembic yok | ✅ Faz 5A — kapatıldı |
 | KL-8 | SyntheticProbe.runNow agent gerektiriyor | Faz 5 — local fallback |
 | KL-10 | `webhook_headers` plaintext JSON | Faz 5D — EncryptedJSON TypeDecorator |
 | KL-11 | Escalation evaluator min tepki 5 dk | Faz 5 — konfigüre edilebilir interval |
