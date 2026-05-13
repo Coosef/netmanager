@@ -46,6 +46,7 @@ from app.models.invite_token import InviteToken
 from app.models.incident import Incident, IncidentState
 from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
 from app.models.synthetic_probe import SyntheticProbe, SyntheticProbeResult
+from app.models.agent_peer_latency import AgentPeerLatency
 
 __all__ = [
     "Tenant",
@@ -96,4 +97,5 @@ __all__ = [
     "Incident", "IncidentState",
     "DeviceAvailabilitySnapshot",
     "SyntheticProbe", "SyntheticProbeResult",
+    "AgentPeerLatency",
 ]

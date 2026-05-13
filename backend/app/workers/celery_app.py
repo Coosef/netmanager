@@ -25,6 +25,7 @@ celery_app = Celery(
         "app.workers.tasks.availability_tasks",
         "app.workers.tasks.correlation_tasks",
         "app.workers.tasks.synthetic_tasks",
+        "app.workers.tasks.agent_peer_tasks",
     ],
 )
 
@@ -143,6 +144,10 @@ celery_app.conf.update(
         "run-synthetic-probes-every-minute": {
             "task": "app.workers.tasks.synthetic_tasks.run_synthetic_probes",
             "schedule": 60.0,
+        },
+        "measure-agent-peer-latency-every-15min": {
+            "task": "app.workers.tasks.agent_peer_tasks.measure_agent_peer_latency",
+            "schedule": 900.0,
         },
     },
 )

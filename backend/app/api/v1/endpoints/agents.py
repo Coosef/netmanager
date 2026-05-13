@@ -12,7 +12,8 @@ from typing import Optional
 import redis as _redis_lib
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
-from sqlalchemy import select, desc
+from pydantic import BaseModel
+from sqlalchemy import and_, func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -1456,3 +1457,83 @@ exec(open(r'$InstallDir\\netmanager_agent.py').read())
 
 def _embedded_agent_script() -> str:
     return "# NetManager Agent script not found on server.\n"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Peer-latency endpoints — Faz 3C
+# ══════════════════════════════════════════════════════════════════════════════
+
+class PeerLatencyResponse(BaseModel):
+    id: int
+    agent_from: str
+    agent_to: str
+    target_ip: str
+    latency_ms: Optional[float]
+    reachable: bool
+    measured_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+@router.get("/{agent_id}/peer-latency", response_model=list[PeerLatencyResponse])
+async def get_agent_peer_latency(
+    agent_id: str,
+    limit: int = Query(default=100, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Return the most recent latency measurements for the given agent (as target)."""
+    from app.models.agent_peer_latency import AgentPeerLatency
+
+    rows = (
+        await db.execute(
+            select(AgentPeerLatency)
+            .where(AgentPeerLatency.agent_to == agent_id)
+            .order_by(desc(AgentPeerLatency.measured_at))
+            .limit(limit)
+        )
+    ).scalars().all()
+    return rows
+
+
+@router.get("/peer-latency-matrix")
+async def get_peer_latency_matrix(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+) -> dict:
+    """
+    Return the most-recent latency measurement for every agent as a flat dict:
+    { agent_id: { latency_ms, reachable, target_ip, measured_at } }
+    """
+    from app.models.agent_peer_latency import AgentPeerLatency
+
+    # Subquery: latest measured_at per agent_to
+    subq = (
+        select(
+            AgentPeerLatency.agent_to,
+            func.max(AgentPeerLatency.measured_at).label("max_ts"),
+        )
+        .group_by(AgentPeerLatency.agent_to)
+        .subquery()
+    )
+    rows = (
+        await db.execute(
+            select(AgentPeerLatency).join(
+                subq,
+                and_(
+                    AgentPeerLatency.agent_to == subq.c.agent_to,
+                    AgentPeerLatency.measured_at == subq.c.max_ts,
+                ),
+            )
+        )
+    ).scalars().all()
+
+    return {
+        row.agent_to: {
+            "latency_ms": row.latency_ms,
+            "reachable": row.reachable,
+            "target_ip": row.target_ip,
+            "measured_at": row.measured_at.isoformat(),
+        }
+        for row in rows
+    }

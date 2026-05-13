@@ -537,6 +537,26 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_spr_probe_ts "
             "ON synthetic_probe_results (probe_id, measured_at)"
         ))
+        # Faz 3C — agent peer latency history
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS agent_peer_latencies (
+                id SERIAL PRIMARY KEY,
+                agent_from VARCHAR(32) NOT NULL,
+                agent_to VARCHAR(32) NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+                target_ip VARCHAR(64) NOT NULL,
+                latency_ms FLOAT,
+                reachable BOOLEAN NOT NULL,
+                measured_at TIMESTAMPTZ NOT NULL
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_apl_agent_to_ts "
+            "ON agent_peer_latencies (agent_to, measured_at)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_apl_agent_from "
+            "ON agent_peer_latencies (agent_from)"
+        ))
 
     await _create_default_tenant()
     await _create_default_admin()
