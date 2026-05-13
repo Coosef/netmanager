@@ -1,18 +1,18 @@
 """
-Unit tests for DeviceAvailabilitySnapshot retention logic — Faz 3A
+Unit tests for DeviceAvailabilitySnapshot retention — Faz 3A / updated Faz 4B
 
-Verifies the retention constant and that the cleanup query targets the
-correct table/column without requiring a live database.
-No Celery, no DB, no network I/O.
+After Faz 4B, device_availability_snapshots is a TimescaleDB hypertable.
+Retention is managed by add_retention_policy (90 days), not a manual DELETE.
 """
 
-from app.workers.tasks.retention_tasks import _AVAILABILITY_SNAPSHOT_DAYS
+from app.workers.tasks.retention_tasks import HYPERTABLE_MANAGED, _RETENTION
 
 
-def test_snapshot_retention_window():
-    assert _AVAILABILITY_SNAPSHOT_DAYS == 90
+def test_snapshot_managed_by_timescaledb():
+    """device_availability_snapshots retention is handled by TimescaleDB, not Celery."""
+    assert "device_availability_snapshots" in HYPERTABLE_MANAGED
 
 
-def test_snapshot_retention_constant_type():
-    assert isinstance(_AVAILABILITY_SNAPSHOT_DAYS, int)
-    assert _AVAILABILITY_SNAPSHOT_DAYS > 0
+def test_snapshot_not_in_manual_retention():
+    """No manual DELETE should target device_availability_snapshots."""
+    assert "device_availability_snapshots" not in _RETENTION

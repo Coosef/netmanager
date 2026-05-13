@@ -558,6 +558,68 @@ async def lifespan(app: FastAPI):
             "ON agent_peer_latencies (agent_from)"
         ))
 
+        # ── Faz 4B — TimescaleDB hypertables ─────────────────────────────────
+        # Each DO block is idempotent: converts only if not already a hypertable.
+        # PK is changed to (id, time_col) because TimescaleDB requires the
+        # partition column to be part of any UNIQUE / PRIMARY KEY constraint.
+        for _tbl, _time_col, _interval in [
+            ("snmp_poll_results",             "polled_at",   "1 week"),
+            ("device_availability_snapshots", "ts",          "1 month"),
+            ("agent_peer_latencies",          "measured_at", "1 week"),
+            ("synthetic_probe_results",       "measured_at", "1 week"),
+            ("syslog_events",                 "received_at", "1 week"),
+        ]:
+            await conn.execute(text(f"""
+                DO $do$
+                BEGIN
+                  IF NOT EXISTS (
+                    SELECT 1 FROM timescaledb_information.hypertables
+                    WHERE hypertable_name = '{_tbl}'
+                  ) THEN
+                    ALTER TABLE {_tbl} DROP CONSTRAINT {_tbl}_pkey;
+                    ALTER TABLE {_tbl} ADD CONSTRAINT {_tbl}_pkey
+                      PRIMARY KEY (id, {_time_col});
+                    PERFORM create_hypertable('{_tbl}', '{_time_col}',
+                      migrate_data => true,
+                      chunk_time_interval => INTERVAL '{_interval}'
+                    );
+                  END IF;
+                END $do$;
+            """))
+
+        # Compression for snmp_poll_results (highest volume table)
+        await conn.execute(text("""
+            DO $do$
+            BEGIN
+              IF NOT EXISTS (
+                SELECT 1 FROM timescaledb_information.compression_settings
+                WHERE hypertable_name = 'snmp_poll_results'
+              ) THEN
+                ALTER TABLE snmp_poll_results SET (
+                  timescaledb.compress,
+                  timescaledb.compress_segmentby = 'device_id',
+                  timescaledb.compress_orderby = 'polled_at DESC'
+                );
+                PERFORM add_compression_policy('snmp_poll_results',
+                  INTERVAL '7 days', if_not_exists => true);
+              END IF;
+            END $do$;
+        """))
+
+        # TimescaleDB retention policies — drop old chunks automatically.
+        # These replace the manual DELETE approach in retention_tasks.py.
+        for _tbl, _interval in [
+            ("snmp_poll_results",             "30 days"),
+            ("syslog_events",                 "30 days"),
+            ("device_availability_snapshots", "90 days"),
+            ("agent_peer_latencies",          "90 days"),
+            ("synthetic_probe_results",       "90 days"),
+        ]:
+            await conn.execute(text(
+                f"SELECT add_retention_policy('{_tbl}', INTERVAL '{_interval}',"
+                f" if_not_exists => true)"
+            ))
+
     await _create_default_tenant()
     await _create_default_admin()
     await _ensure_default_org()
