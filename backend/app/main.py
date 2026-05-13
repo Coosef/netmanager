@@ -580,6 +580,9 @@ async def lifespan(app: FastAPI):
     # Agent-aware device status poller — runs inside FastAPI so agent_manager connections are live
     _asyncio.ensure_future(_agent_device_status_loop())
 
+    # A→B agent peer latency loop — requires live WebSocket connections (FastAPI process only)
+    _asyncio.ensure_future(_ab_peer_latency_loop())
+
     yield
     await async_engine.dispose()
 
@@ -654,6 +657,25 @@ async def _agent_device_status_loop():
             _log.warning(f"Poll cycle error: {exc}")
 
         await _asyncio.sleep(300)  # 5 minutes
+
+
+async def _ab_peer_latency_loop():
+    """Measure A→B latency between all online agent pairs every 15 minutes."""
+    import asyncio as _asyncio
+    import logging
+    from app.core.database import AsyncSessionLocal
+    from app.services.agent_manager import agent_manager
+
+    _log = logging.getLogger("ab-peer-latency")
+    await _asyncio.sleep(120)  # wait for agents to connect on startup
+    while True:
+        try:
+            async with AsyncSessionLocal() as db:
+                count = await agent_manager.measure_ab_peer_latency(db)
+                _log.debug("A→B peer latency sweep: %d pairs", count)
+        except Exception:
+            _log.exception("A→B peer latency sweep failed")
+        await _asyncio.sleep(900)
 
 
 async def _backfill_mac_oui():

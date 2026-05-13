@@ -1482,13 +1482,22 @@ async def get_agent_peer_latency(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    """Return the most recent latency measurements for the given agent (as target)."""
+    """
+    Return recent latency measurements where this agent is the source OR target.
+    Includes both backend-originated (agent_from='backend') and A→B measurements.
+    """
+    from sqlalchemy import or_
     from app.models.agent_peer_latency import AgentPeerLatency
 
     rows = (
         await db.execute(
             select(AgentPeerLatency)
-            .where(AgentPeerLatency.agent_to == agent_id)
+            .where(
+                or_(
+                    AgentPeerLatency.agent_to   == agent_id,
+                    AgentPeerLatency.agent_from == agent_id,
+                )
+            )
             .order_by(desc(AgentPeerLatency.measured_at))
             .limit(limit)
         )
@@ -1502,18 +1511,22 @@ async def get_peer_latency_matrix(
     current_user: CurrentUser = None,
 ) -> dict:
     """
-    Return the most-recent latency measurement for every agent as a flat dict:
-    { agent_id: { latency_ms, reachable, target_ip, measured_at } }
+    Return the most-recent latency measurement for every (agent_from, agent_to) pair.
+
+    Key format: "{agent_from}→{agent_to}"
+    Includes both backend-originated (agent_from="backend") and
+    true A→B agent-to-agent measurements (Faz 4A).
     """
     from app.models.agent_peer_latency import AgentPeerLatency
 
-    # Subquery: latest measured_at per agent_to
+    # Latest measured_at per (agent_from, agent_to) pair
     subq = (
         select(
+            AgentPeerLatency.agent_from,
             AgentPeerLatency.agent_to,
             func.max(AgentPeerLatency.measured_at).label("max_ts"),
         )
-        .group_by(AgentPeerLatency.agent_to)
+        .group_by(AgentPeerLatency.agent_from, AgentPeerLatency.agent_to)
         .subquery()
     )
     rows = (
@@ -1521,7 +1534,8 @@ async def get_peer_latency_matrix(
             select(AgentPeerLatency).join(
                 subq,
                 and_(
-                    AgentPeerLatency.agent_to == subq.c.agent_to,
+                    AgentPeerLatency.agent_from == subq.c.agent_from,
+                    AgentPeerLatency.agent_to   == subq.c.agent_to,
                     AgentPeerLatency.measured_at == subq.c.max_ts,
                 ),
             )
@@ -1529,10 +1543,12 @@ async def get_peer_latency_matrix(
     ).scalars().all()
 
     return {
-        row.agent_to: {
-            "latency_ms": row.latency_ms,
-            "reachable": row.reachable,
-            "target_ip": row.target_ip,
+        f"{row.agent_from}→{row.agent_to}": {
+            "agent_from":  row.agent_from,
+            "agent_to":    row.agent_to,
+            "latency_ms":  row.latency_ms,
+            "reachable":   row.reachable,
+            "target_ip":   row.target_ip,
             "measured_at": row.measured_at.isoformat(),
         }
         for row in rows

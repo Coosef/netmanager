@@ -1676,7 +1676,15 @@ function PeerLatencyHistory({ agentId }: { agentId: string }) {
   )
 }
 
-type MatrixRow = { agentId: string; latency_ms: number | null; reachable: boolean; target_ip: string; measured_at: string }
+type MatrixRow = {
+  pairKey: string    // "agent_from→agent_to" — unique table key
+  agent_from: string
+  agent_to: string
+  latency_ms: number | null
+  reachable: boolean
+  target_ip: string
+  measured_at: string
+}
 
 // ── Peer Latency Matrix Card ───────────────────────────────────────────────────
 function PeerLatencyMatrixCard() {
@@ -1690,15 +1698,23 @@ function PeerLatencyMatrixCard() {
 
   const entries = data ? Object.entries(data as PeerLatencyMatrix) : []
 
-  const tableData: MatrixRow[] = entries.map(([agentId, rec]) => ({
-    agentId,
+  const tableData: MatrixRow[] = entries.map(([pairKey, rec]) => ({
+    pairKey,
     ...rec,
   }))
 
   const columns = [
     {
-      title: 'Agent', dataIndex: 'agentId', key: 'agentId',
-      render: (id: string) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{id}</span>,
+      title: 'Kaynak', dataIndex: 'agent_from', key: 'agent_from',
+      render: (v: string) => (
+        <Tag color={v === 'backend' ? 'default' : 'blue'} style={{ fontFamily: 'monospace', fontSize: 11 }}>
+          {v === 'backend' ? '🖥 backend' : v}
+        </Tag>
+      ),
+    },
+    {
+      title: 'Hedef', dataIndex: 'agent_to', key: 'agent_to',
+      render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v}</span>,
     },
     {
       title: 'Hedef IP', dataIndex: 'target_ip', width: 130,
@@ -1734,7 +1750,12 @@ function PeerLatencyMatrixCard() {
       size="small"
       title={
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 600, fontSize: 14 }}>Erişilebilirlik Matrisi</span>
+          <div>
+            <span style={{ fontWeight: 600, fontSize: 14 }}>Erişilebilirlik Matrisi</span>
+            <span style={{ color: '#888', fontSize: 11, marginLeft: 8 }}>
+              Backend→Agent + A→B ölçümleri
+            </span>
+          </div>
           <Button
             size="small"
             icon={<ReloadOutlined />}
@@ -1755,12 +1776,12 @@ function PeerLatencyMatrixCard() {
       ) : (
         <Table
           dataSource={tableData}
-          rowKey="agentId"
+          rowKey="pairKey"
           columns={columns}
           size="small"
-          pagination={false}
+          pagination={tableData.length > 20 ? { pageSize: 20, size: 'small' } : false}
           expandable={{
-            expandedRowRender: (row: MatrixRow) => <PeerLatencyHistory agentId={row.agentId} />,
+            expandedRowRender: (row: MatrixRow) => <PeerLatencyHistory agentId={row.agent_to} />,
           }}
         />
       )}
