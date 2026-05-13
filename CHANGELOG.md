@@ -1,5 +1,163 @@
 # Changelog
 
+## [Released] — Faz 3: Observability Foundation (3A → 3D)
+
+### Merge: `feature/faz3d-dashboard-wiring` → `main`
+
+> 34 dosya · +2311 satır · **174/174 test** · 0 TypeScript hatası · Vite build temiz  
+> Tamamlandı: 2026-05-13
+
+---
+
+### Faz 3A — Interval Union Logic + Snapshot History
+
+#### KL-6 Kapatıldı: `_merge_intervals` pure helper (`availability_tasks.py`)
+- `_merge_intervals(intervals)` — örtüşen/bitişik downtime aralıklarını birleştirir.
+- `compute_downtime_secs` güncellendi: tüm incident aralıkları `_merge_intervals` ile toplandıktan sonra hesaplanır; çakışan olaylar artık çift sayılmaz.
+- Önceki davranış: port_down + device_unreachable aynı pencerede → downtime iki kez sayılıyor, `availability` hatalı düşüyordu.
+
+#### `DeviceAvailabilitySnapshot` modeli (`device_availability_snapshot.py`)
+- Günlük snapshot: `device_id`, `ts`, `availability_24h`, `availability_7d`, `mtbf_hours`, `experience_score`.
+- İndeks: `(device_id, ts)` — 30 günlük sorgu için optimize.
+- `availability_tasks._run()` her hesaplama döngüsünde snapshot ekler.
+- Retention: 90 gün (`retention_tasks.py` mevcut cleanup pattern'ı genişletildi).
+
+#### API: `GET /devices/{id}/availability?days=30`
+```json
+{
+  "current": {"availability_24h": 0.985, "availability_7d": 0.991, "mtbf_hours": 72.3, "experience_score": 0.985},
+  "history": [{"ts": "...", "availability_24h": 0.99, "availability_7d": 0.995, "experience_score": 0.98}, ...]
+}
+```
+
+#### Yeni testler (`test_availability_scoring.py` genişletmesi)
+- `test_overlapping_not_double_counted` — 2 çakışan incident → birleşik süre
+- `test_fully_nested_incident` — nested incident → dış süre korunur
+- `test_adjacent_incidents_merged` — bitişik aralıklar → tek interval
+- `test_merge_intervals_unit` — pure helper doğrudan test
+
+---
+
+### Faz 3B — Synthetic Probe Modülü
+
+#### `SyntheticProbe` + `SyntheticProbeResult` modelleri (`synthetic_probe.py`)
+- Tip desteği: `icmp | tcp | http | dns`
+- Alanlar: `target`, `port`, `http_method`, `expected_status`, `dns_record_type`, `interval_secs`, `timeout_secs`, `enabled`
+- Sonuç: `success`, `latency_ms`, `detail`, `measured_at`
+
+#### Agent Protocol Uzantısı (`netmanager_agent.py`)
+- `synthetic_probe` mesaj tipi (backend→agent): probe parametrelerini iletir.
+- `synthetic_probe_result` mesaj tipi (agent→backend): sonucu döner.
+- Dispatcher:
+  - `icmp` → subprocess ping (mevcut ping mantığı)
+  - `tcp` → `_tcp_probe()` (mevcut)
+  - `dns` → `socket.getaddrinfo` executor
+  - `http` → `urllib.request.urlopen` executor (stdlib, sıfır bağımlılık)
+
+#### `AgentManager.execute_synthetic_probe()` (`agent_manager.py`)
+- WebSocket üzerinden agent'a probe gönderir, `synthetic_probe_result` yanıtını bekler.
+
+#### `run_synthetic_probes` Celery task (`synthetic_tasks.py`)
+- Her 60s çalışır (beat schedule).
+- `interval_secs` geçmiş probe'ları seçer → agent'a gönderir → `SyntheticProbeResult` insert.
+- Başarısız probe → `process_event(source="synthetic", is_problem=True, confidence=0.90)`.
+- Önceden fail, şimdi success → recovery event.
+
+#### API (`synthetic.py`)
+```
+GET/POST  /synthetic-probes
+GET/PUT/DELETE  /synthetic-probes/{id}
+GET  /synthetic-probes/{id}/results?limit=100
+POST /synthetic-probes/{id}/run
+```
+
+---
+
+### Faz 3C — Agent Peer Latency
+
+#### `AgentPeerLatency` modeli (`agent_peer_latency.py`)
+- `agent_from` (str, "backend" = backend sunucudan ölçüm), `agent_to` (FK → agents.id CASCADE)
+- `target_ip`, `latency_ms`, `reachable`, `measured_at`
+- İndeks: `(agent_to, measured_at)` + `agent_from`
+
+#### `_measure_latency(ip, timeout)` pure helper (`agent_peer_tasks.py`)
+- Subprocess ICMP ping; RTT regex: `time[<=](\d+\.?\d*)\s*ms`
+- Fallback: RTT parse edilemezse wall-clock elapsed (ms).
+- Tüm exception'lar (TimeoutExpired / FileNotFoundError / PermissionError) → `(False, None)`.
+
+#### `measure_agent_peer_latency` Celery task
+- Her 900s çalışır (beat schedule).
+- Online + `last_ip` olan agentları DB'den çeker; her birine `_measure_latency` uygular.
+- `agent_from="backend"` — gerçek A→B ölçümü FastAPI bg task olarak Faz 4'e ertelendi.
+
+#### API (`agents.py` uzantısı)
+```
+GET /agents/{agent_id}/peer-latency?limit=50
+GET /agents/peer-latency-matrix
+→ {"agent_id": {"latency_ms": 0.039, "reachable": true, "target_ip": "...", "measured_at": "..."}}
+```
+
+---
+
+### Faz 3D — Dashboard Wiring & Observability UI
+
+#### G1: Fleet Aggregates (`monitor.py` + `Dashboard`)
+- `/monitor/stats` yanıtına 2 yeni alan: `fleet_experience_score`, `fleet_availability_24h`
+- Dashboard'a 2 StatCard: "Fleet Availability (24h %)" + "Experience Score"
+- Early-return path'inde de `None` olarak eklendi.
+
+#### G2: DeviceDetail "Availability" Sekmesi (`DeviceDetail.tsx`)
+- 4 stat kutusu: 24h %, 7d %, MTBF (saat), Experience Score
+- 30 günlük Recharts `AreaChart` — dual gradient: `experience_score` (mor) + `availability_7d` (yeşil)
+- `enabled: activeTab === 'availability'` lazy loading, `refetchInterval: 300_000`
+- MTBF null → "Yeterli veri yok" placeholder; history boş → empty state.
+
+#### G3: Synthetic Probes Sayfası (`SyntheticProbes/index.tsx`)
+- Probe tablosu: tip tag, enable toggle, "Şimdi Çalıştır", Popconfirm sil.
+- Severity satır renklendirme: `icmp/tcp = critical (kırmızı)`, `http/dns = warning (sarı)` — `onRow` left-border + arka plan.
+- Expandable satır: son 20 sonuç (`ProbeResultsTable`).
+- `ProbeDrawer`: tip bazlı dinamik alanlar (port / http_method / expected_status / dns_record_type).
+- Route: `/synthetic-probes` + `PermRoute(module="monitoring", action="view")` + Sidebar kaydı.
+
+#### G4: Agents Peer Latency Matrix (`Agents/index.tsx`)
+- `PeerLatencyMatrixCard` bileşeni: `useQuery(getPeerLatencyMatrix, refetchInterval=300s)`.
+- Gecikme rengi: <10ms yeşil · <50ms amber · ≥50ms kırmızı.
+- Expandable satır: `PeerLatencyHistory` — Recharts `LineChart` (son 50 ölçüm) + mini tablo.
+- "Şimdi Yenile" butonu → `invalidateQueries(['peer-latency-matrix'])`.
+- Boş state: "Henüz ölçüm yok — ilk ölçüm 15 dakika içinde yapılacak".
+
+#### G5: Dashboard Incident Timeline (`Dashboard/index.tsx`)
+- "Recent Alerts" bölümü geliştirildi: sol `3px solid` severity rengi, hostname cyan tag, HH:mm monospace timestamp, `overflowY: hidden`, first-event slide animasyonu.
+- Veri kaynağı: mevcut `liveEvents` WebSocket state (yeni query yok).
+
+#### Düzeltilen Hatalar (smoke test sırasında)
+- `devices.py` `get_device_availability`: `from datetime import timezone` → `from datetime import datetime, timedelta, timezone` (500 Internal Server Error düzeltildi).
+
+### Known Limitations — Güncel Durum
+
+| ID | Durum | Açıklama |
+|----|-------|---------|
+| KL-1 | Açık | `create_all` tablo yönetimi — Alembic yok, yeni kolon için `main.py` ALTER TABLE gerekli |
+| KL-2 | Açık | `sources`/`timeline` JSON vs JSONB — şu an sorunsuz |
+| KL-3 | ✅ Faz 2A | RECOVERING sweep task eklendi |
+| KL-4 | Açık | `queued_events` flush sırasında yeniden bağlantı — teorik duplicate, dedup ile karşılanıyor |
+| KL-5 | ✅ Faz 2A | Multi-hop BFS suppression |
+| KL-6 | ✅ Faz 3A | `_merge_intervals` ile çakışan downtime çift sayımı düzeltildi |
+| KL-7 | Açık | `agent_from="backend"` — gerçek A→B agent-to-agent latency ölçümü henüz yok. Faz 4'te FastAPI bg task olarak planlandı |
+| KL-8 | Açık | `SyntheticProbe.runNow` `agent_id` gerektiriyor — agentsiz probe çalıştırılamaz; isteğe bağlı local fallback Faz 4'te değerlendirilebilir |
+| KL-9 | Açık | `DeviceAvailabilitySnapshot` düz PostgreSQL tablo — 1000+ cihaz × 365 gün sonrasında sorgu yavaşlayabilir. TimescaleDB hypertable Faz 4 kapsamında |
+
+### Test Durumu
+
+**174/174 test geçiyor** (Faz 3 kümülatif):
+- `test_availability_scoring.py` — 35 test (KL-6 fix + merge_intervals dahil)
+- `test_availability_snapshot.py` — 4 test (snapshot insert + retention)
+- `test_synthetic_probes.py` — 27 test (CRUD, agent dispatch, recovery event, result query)
+- `test_agent_peer_latency.py` — 12 test (RTT parse, fallback, subprocess exception handling)
+- Önceki testler: 96 test (Faz 1–2D)
+
+---
+
 ## [Unreleased] — Faz 2D: Availability Scoring
 
 ### Merge: `feature/faz2d-availability-scoring` → `main`

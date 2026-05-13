@@ -1,6 +1,6 @@
 # NetManager — Ürün Yol Haritası
 
-> Son güncelleme: 2026-05-03  
+> Son güncelleme: 2026-05-13  
 > Platform: FastAPI · React · Celery · Redis · PostgreSQL · Docker  
 > Hedef: Multi-vendor ağ görünürlüğü, yapılandırma kontrolü, topoloji zekâsı ve güvenli otomasyon platformu
 
@@ -369,6 +369,134 @@
 
 ### 10C. Syntax Fix ✅
 - ✅ `asset_lifecycle.py`, `interfaces.py`, `playbooks.py`, `monitor.py` — `CurrentUser` parametresine `= None` varsayılanı eklendi (Python syntax hatası; backend başlayamıyordu)
+
+---
+
+---
+
+## FAZ 3 — Observability Foundation ✅
+
+> Tamamlandı: 2026-05-13 | 174/174 test | 0 TypeScript hatası
+
+### 3A — Interval Union Logic + Snapshot History ✅
+- ✅ KL-6 kapatıldı: `_merge_intervals` pure helper — çakışan downtime çift sayımı giderildi
+- ✅ `DeviceAvailabilitySnapshot` modeli + daily snapshot insert + 90 gün retention
+- ✅ `GET /devices/{id}/availability?days=N` endpoint — current fields + history array
+
+### 3B — Synthetic Probe Modülü ✅
+- ✅ `SyntheticProbe` + `SyntheticProbeResult` modelleri (icmp/tcp/http/dns)
+- ✅ Agent protokol uzantısı: `synthetic_probe` / `synthetic_probe_result` mesaj tipleri
+- ✅ `AgentManager.execute_synthetic_probe()` WebSocket dispatch
+- ✅ `run_synthetic_probes` Celery task (60s beat) + correlation engine entegrasyonu
+- ✅ CRUD + runNow + results REST API
+
+### 3C — Agent Peer Latency ✅
+- ✅ `AgentPeerLatency` modeli + `_measure_latency` pure helper (subprocess ICMP, RTT regex)
+- ✅ `measure_agent_peer_latency` Celery task (900s beat, `agent_from="backend"`)
+- ✅ `GET /agents/peer-latency-matrix` + `GET /agents/{id}/peer-latency` API
+
+### 3D — Dashboard Wiring & Observability UI ✅
+- ✅ Fleet aggregates (`fleet_experience_score`, `fleet_availability_24h`) `/monitor/stats`'a eklendi
+- ✅ Dashboard 2 StatCard: Fleet Availability + Experience Score
+- ✅ Dashboard incident timeline: severity sol çizgi, hostname tag, animasyon
+- ✅ DeviceDetail "Availability" sekmesi: 4 stat + 30 günlük AreaChart
+- ✅ Synthetic Probes sayfası: CRUD, severity satır rengi, expandable sonuçlar
+- ✅ Agents peer latency matrix: gecikme renkleri, expandable LineChart, Yenile butonu
+
+---
+
+## FAZ 4 — Advanced Observability & Intelligence 🔵
+
+> Öncelik sırası onaylandı: 2026-05-13
+
+### 4A — Gerçek Agent-to-Agent Latency (Öncelik: Yüksek)
+
+**Hedef:** `agent_from="backend"` kısıtlamasını aşmak (KL-7). Backend Celery worker WebSocket
+bağlantısı olmadığından şu an yalnızca backend→agent ölçümü yapılıyor.
+
+**Yaklaşım:**
+- FastAPI background task (`asyncio.create_task`) üzerinden agent A'ya `ping_check` gönder,
+  hedef: agent B'nin `last_ip`'si.
+- `agent_from = agent_a_id` olarak kaydedilir.
+- N ajanın tüm pair kombinasyonları için tetikleme: `online_agents × (online_agents - 1)` ping.
+- Celery değil; FastAPI lifespan `asyncio.create_task` ile periyodik tetikleme (900s).
+
+**Etki:** Matrix'te `agent_from != "backend"` satırlar görünür; gerçek ağ arası gecikme ölçülür.
+
+### 4B — TimescaleDB Hypertable Hazırlığı (Öncelik: Orta-Yüksek)
+
+**Hedef:** KL-9'u kapatmak. `device_availability_snapshots` 1000+ cihaz × 365 gün = 365k satır;
+plain PostgreSQL range sorguları 30 gün penceresinde yavaşlamaya başlar.
+
+**Yaklaşım:**
+- Docker Compose'a `timescaledb/timescaledb:latest-pg16` servisi ekle (mevcut `postgres` servisi fork'u).
+- `main.py` lifespan'a: `SELECT create_hypertable('device_availability_snapshots', 'ts', if_not_exists => TRUE)`.
+- `synthetic_probe_results` ve `agent_peer_latencies` tabloları da hypertable adayı.
+- Chunk interval: `device_availability_snapshots` → 7 gün · `probe_results` → 1 gün.
+- Retention policy: `add_retention_policy(interval => INTERVAL '90 days')` — Celery task devre dışı.
+
+**Kapsam dışı:** Plain PostgreSQL → TimescaleDB geçişi zero-downtime değil; mevcut veri pg_dump + restore gerekebilir. Faz 4 başlangıcında tam plan çıkarılacak.
+
+### 4C — Advanced Synthetic SLA Thresholds (Öncelik: Orta)
+
+**Hedef:** Synthetic probe sonuçlarını SLA politikalarına bağlamak.
+
+**Özellikler:**
+- `SlaPolicy` modeline `probe_id: Optional[int]` FK ekle.
+- Probe başarı oranı (ör. son 24h %95) → SLA compliance hesabına dahil.
+- `run_synthetic_probes` task: ardışık N başarısız probe → `threshold_violated` event (opsiyonel).
+- Latency SLA: `latency_ms > threshold_ms` → warning event.
+- Frontend: SyntheticProbes sayfasında probe başına "SLA: %98.2 (son 7g)" rozeti.
+- `/sla/compliance` endpoint'inde probe SLA ihlallerini göster.
+
+### 4D — Incident RCA Ekranı (Öncelik: Orta)
+
+**Hedef:** Mevcut `correlation_incident` + `Incident` verisini kullanıcıya okunabilir RCA olarak sunmak.
+
+**Özellikler:**
+- `/monitor` sayfasına veya ayrı `/rca` sayfasına "RCA Zaman Çizelgesi" bölümü.
+- Seçili incident → kök neden cihaz + etkilenen downstream cihazlar grafiği.
+- Timeline: ilk event → OPEN → DEGRADED → RECOVERING → CLOSED; her state geçişinde kaynak ve tetikleyici göster.
+- Synthetic probe başarısızlıkları + syslog normalize eventleri → incident üzerinde "Kanıtlar" paneli.
+- Correlation skoru göstergesi (mevcut `confidence` alanı kullanılır).
+- Export: PDF özet (mevcut `SlaReport` PDF pattern'ı).
+
+### 4E — Notification & Escalation Rule Engine (Öncelik: Orta)
+
+**Hedef:** Mevcut notification channel altyapısını (Slack/Teams/Email/Jira) rule-based escalation ile güçlendirmek.
+
+**Özellikler:**
+- `EscalationRule` modeli: `trigger_conditions` (JSON), `delay_minutes`, `channels`, `repeat_interval`, `max_repeats`.
+- Tetikleyiciler: incident state değişimi · probe başarısızlık sayısı · fleet availability < eşik · belirli cihaz/grup.
+- Örnekler:
+  - "CRITICAL incident 5dk OPEN kalırsa → Slack #ops-critical"
+  - "Probe 3x ardışık fail → Jira ticket oluştur"
+  - "Fleet availability 24h < %95 → Email digest gönder"
+- Celery task: her dakika tetiklenen rule evaluator.
+- Frontend: Settings → Eskalasyon Kuralları sekmesi (mevcut AlertRule UI pattern'ı).
+- **Dedup guard:** aynı rule + incident kombinasyonu `max_repeats` aşınca susar.
+
+---
+
+### Faz 4 Uygulama Sırası
+
+```
+4A → tek backend değişikliği, bağımsız sprint (1-2 gün)
+4B → altyapı değişikliği, dikkatli migration planı gerekli (2-3 gün)
+4C → 4B'den bağımsız, SlaPolicy mevcut (2 gün)
+4D → 4A + mevcut Incident/correlation verisi yeterli (3-4 gün)
+4E → en uzun sprint, model + task + UI (4-5 gün)
+```
+
+### Faz 4 Kısıtları (Önceden Belirlenmiş)
+
+| Kısıt | Uygulama |
+|-------|----------|
+| Agresif polling yok | Periyodik task'lar: 4A=900s · 4E evaluator=60s |
+| Geriye dönük uyumluluk | `create_hypertable` idempotent (`if_not_exists`) |
+| Yeni global store yok | Tüm UI `useQuery` local state |
+| TypeScript sıfır hata | Her sprint sonunda `tsc --noEmit` |
+| 174 test baz çizgisi | Faz 4 tamamında en az 200+ test hedefi |
 
 ---
 
