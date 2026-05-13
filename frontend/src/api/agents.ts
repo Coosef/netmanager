@@ -267,6 +267,8 @@ export interface PeerLatencyRecord {
 }
 
 export type PeerLatencyMatrix = Record<string, {
+  agent_from: string
+  agent_to: string
   latency_ms: number | null
   reachable: boolean
   target_ip: string

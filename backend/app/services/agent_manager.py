@@ -959,6 +959,63 @@ class AgentManager:
         finally:
             self._pending.pop(req_id, None)
 
+    # ── Faz 4A: A→B peer latency ─────────────────────────────────────────────
+
+    async def measure_ab_peer_latency(self, db) -> int:
+        """
+        For every ordered pair (A, B) of currently connected agents that have
+        a known last_ip, ask agent A to ICMP-probe agent B's IP via the existing
+        execute_synthetic_probe("icmp") protocol.
+
+        Returns the number of (A→B) measurements inserted.
+        Silently skips agents with no last_ip or that go offline mid-sweep.
+        """
+        from datetime import datetime, timezone
+        from sqlalchemy import select as _select
+        from app.models.agent import Agent
+        from app.models.agent_peer_latency import AgentPeerLatency
+
+        online = set(self.online_agent_ids())
+        if len(online) < 2:
+            return 0
+
+        rows = (
+            await db.execute(
+                _select(Agent.id, Agent.last_ip).where(
+                    Agent.id.in_(online),
+                    Agent.last_ip.isnot(None),
+                    Agent.is_active == True,
+                )
+            )
+        ).all()
+
+        ip_map: dict[str, str] = {r.id: r.last_ip for r in rows}
+        if len(ip_map) < 2:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        count = 0
+        for a_from_id, _from_ip in ip_map.items():
+            for a_to_id, a_to_ip in ip_map.items():
+                if a_from_id == a_to_id:
+                    continue
+                result = await self.execute_synthetic_probe(
+                    a_from_id, probe_type="icmp", target=a_to_ip, timeout=3,
+                )
+                db.add(AgentPeerLatency(
+                    agent_from=a_from_id,
+                    agent_to=a_to_id,
+                    target_ip=a_to_ip,
+                    latency_ms=result.get("latency_ms"),
+                    reachable=result.get("success", False),
+                    measured_at=now,
+                ))
+                count += 1
+
+        await db.commit()
+        log.info("A→B peer latency sweep complete — %d pairs measured", count)
+        return count
+
     # ── Feature 2: Device sync ────────────────────────────────────────────────
 
     async def send_device_sync(self, agent_id: str, devices: list[dict]) -> bool:
