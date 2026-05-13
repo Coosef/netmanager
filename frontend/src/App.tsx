@@ -62,6 +62,7 @@ import InviteAcceptPage from '@/pages/InviteAccept'
 import SyntheticProbesPage from '@/pages/SyntheticProbes'
 import IncidentsPage from '@/pages/Incidents'
 import SshTerminalPage from '@/pages/SshTerminalPage'
+import EscalationRulesPage from '@/pages/EscalationRules'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -261,6 +262,7 @@ function ThemedApp() {
               <Route path="permissions" element={<RoleRoute minRole="admin"><PermissionsPage /></RoleRoute>} />
               <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
               <Route path="incidents" element={<PermRoute module="monitoring" action="view"><IncidentsPage /></PermRoute>} />
+              <Route path="escalation-rules" element={<RoleRoute minRole="admin"><EscalationRulesPage /></RoleRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

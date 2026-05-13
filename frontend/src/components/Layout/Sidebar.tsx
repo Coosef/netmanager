@@ -9,7 +9,7 @@ import {
   SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
   HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
-  CloseOutlined, GlobalOutlined, DiffOutlined, BugOutlined,
+  CloseOutlined, GlobalOutlined, DiffOutlined, BugOutlined, BellOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
@@ -84,7 +84,8 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     '/ipam':             ['ipam', 'view'],
     '/backups':          ['config_backups', 'view'],
     '/monitor':          ['monitoring', 'view'],
-    '/incidents':        ['monitoring', 'view'],
+    '/incidents':         ['monitoring', 'view'],
+    '/escalation-rules':  ['monitoring', 'view'],
     '/bandwidth':        ['monitoring', 'view'],
     '/mac-arp':          ['monitoring', 'view'],
     '/security-audit':   ['monitoring', 'view'],
@@ -189,6 +190,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla'), minRole: 'org_viewer' },
         { key: '/synthetic-probes', icon: <RadarChartOutlined />, label: 'Synthetic Probes', minRole: 'org_viewer' },
         { key: '/incidents', icon: <BugOutlined />, label: 'Incident RCA', minRole: 'org_viewer' },
+        { key: '/escalation-rules', icon: <BellOutlined />, label: 'Escalation Kuralları', minRole: 'admin' },
         { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası', minRole: 'org_viewer' },
         { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin', minRole: 'location_manager' },
         { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports'), minRole: 'org_viewer' },

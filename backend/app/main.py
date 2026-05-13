@@ -623,6 +623,51 @@ async def lifespan(app: FastAPI):
             END $do$;
         """))
 
+        # ── Faz 4E — Escalation Rule Engine ──────────────────────────────────
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS escalation_rules (
+                id               SERIAL PRIMARY KEY,
+                name             VARCHAR(200) NOT NULL,
+                enabled          BOOLEAN NOT NULL DEFAULT TRUE,
+                description      TEXT,
+                match_severity   TEXT,
+                match_event_types TEXT,
+                match_sources    TEXT,
+                min_duration_secs INTEGER,
+                match_states     TEXT,
+                webhook_type     VARCHAR(20) NOT NULL,
+                webhook_url      VARCHAR(500) NOT NULL,
+                webhook_headers  TEXT,
+                cooldown_secs    INTEGER NOT NULL DEFAULT 3600,
+                created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_by       INTEGER REFERENCES users(id) ON DELETE SET NULL
+            )
+        """))
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS escalation_notification_logs (
+                id           SERIAL PRIMARY KEY,
+                rule_id      INTEGER NOT NULL REFERENCES escalation_rules(id) ON DELETE CASCADE,
+                incident_id  INTEGER NOT NULL,
+                channel      VARCHAR(20) NOT NULL,
+                status       VARCHAR(20) NOT NULL,
+                response_code INTEGER,
+                error_msg    TEXT,
+                sent_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_esc_notif_log_rule_id "
+            "ON escalation_notification_logs (rule_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_esc_notif_log_incident_id "
+            "ON escalation_notification_logs (incident_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_esc_notif_log_sent_at "
+            "ON escalation_notification_logs (sent_at)"
+        ))
+
         # TimescaleDB retention policies — drop old chunks automatically.
         # These replace the manual DELETE approach in retention_tasks.py.
         for _tbl, _interval in [

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, tasks, tenants, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, tasks, tenants, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
@@ -47,3 +47,4 @@ api_router.include_router(invites.router, prefix="/invites", tags=["Invites"])
 api_router.include_router(super_admin.router, prefix="", tags=["Super Admin"])
 api_router.include_router(org_admin.router, prefix="", tags=["Org Admin"])
 api_router.include_router(internal.router, prefix="/internal", tags=["Internal"])
+api_router.include_router(escalation.router, prefix="/escalation-rules", tags=["Escalation"])
