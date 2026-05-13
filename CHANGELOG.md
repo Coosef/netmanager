@@ -1,5 +1,154 @@
 # Changelog
 
+## [Released] — Faz 4: Advanced Observability & Intelligence (4A → 4E)
+
+### Merge: `feature/faz4e-escalation-rule-engine` → `main`
+
+> 5 sprint · **236/236 test** · 0 TypeScript hatası · Vite build temiz  
+> Tamamlandı: 2026-05-13
+
+---
+
+### Faz 4A — Gerçek Agent-to-Agent Latency
+
+#### KL-7 Kapatıldı: FastAPI Background Loop (`agent_peer_tasks.py`)
+- `_ab_peer_latency_loop()` — FastAPI lifespan'da `asyncio.create_task` ile 900s aralıklı periyodik görev.
+- Her online agent çifti (A, B) için Agent A'ya `ping_check` gönderir; hedef = Agent B'nin `last_ip`.
+- `agent_from = agent_a_id` olarak kaydedilir — daha önce sabit `"backend"` idi.
+- `AgentPeerLatency` satırları artık gerçek ağ arası gecikmeyi yansıtır.
+- Önceki kısıt: Celery worker WebSocket bağlantısı olmadığından yalnızca backend→agent ölçümü yapılıyordu.
+
+#### Test eklemesi
+- `test_agent_peer_latency.py` — 9 test eklendi (toplam +9, baz 174 → 183)
+
+---
+
+### Faz 4B — TimescaleDB Hypertable
+
+#### KL-9 Kapatıldı: 5 Hypertable Oluşturuldu
+- `docker-compose.yml` → `timescaledb/timescaledb:latest-pg16` servisi (`postgres` yerini aldı).
+- `main.py` lifespan'a 5 idempotent `create_hypertable(..., if_not_exists => TRUE)` çağrısı:
+  - `device_availability_snapshots` (chunk: 7 gün)
+  - `snmp_poll_results` (chunk: 1 gün)
+  - `agent_peer_latencies` (chunk: 7 gün)
+  - `synthetic_probe_results` (chunk: 1 gün)
+  - `syslog_events` (chunk: 1 gün)
+- Retention policy: her tablo için `add_retention_policy` (90 gün) — Celery retention task devre dışı.
+- Önceki kısıt: 1000+ cihaz × 365 gün = 365k satır; plain PostgreSQL range sorguları yavaşlıyordu.
+
+#### Test eklemesi
+- `test_faz4b_timescale.py` — 8 test eklendi (toplam 191)
+
+---
+
+### Faz 4C — Advanced Synthetic SLA Thresholds
+
+#### `SlaPolicy` ↔ `SyntheticProbe` Entegrasyonu
+- `SlaPolicy` modeline `probe_id: Optional[int]` FK eklendi.
+- `run_synthetic_probes` task: ardışık N başarısız probe → `threshold_violated` event.
+- Latency SLA: `latency_ms > threshold_ms` → warning event.
+- `/sla/compliance` endpoint'inde probe SLA ihlalleri dahil edildi.
+- Frontend: SyntheticProbes sayfasında probe başına "SLA: %98.2 (son 7g)" rozeti.
+
+#### Test eklemesi
+- `test_faz4c_sla_probes.py` — 13 test eklendi (toplam 204)
+
+---
+
+### Faz 4D — Incident RCA Ekranı
+
+#### `Incident` Modeli + RCA UI
+- `Incident` + `IncidentTimeline` modelleri — OPEN/DEGRADED/RECOVERING/CLOSED state makinesi.
+- `opened_at`, `closed_at`, `recovering_at`, `severity`, `event_type`, `component`, `sources` (JSON).
+- `process_event()` servisi: yeni veya mevcut incident'a event ekler, state geçişlerini `IncidentTimeline`'a kaydeder.
+- CRUD API: `GET /incidents`, `GET /incidents/{id}`, `PATCH /incidents/{id}/state`.
+- `/incidents` sayfası — filtreli tablo (state/severity/device), timeline modal, RCA detayı.
+- `correlation_incident` olayları dashboard incident feed'inde gösterilir.
+
+#### Düzeltilen test sorunu
+- `test_list_incidents_empty`: FastAPI `Query()` nesneleri doğrudan fonksiyon çağrısında çözülmüyor; tüm parametreler açıkça geçildi.
+
+#### Test eklemesi
+- `test_faz4d_incidents.py` — 12 test eklendi (toplam 216)
+
+---
+
+### Faz 4E — Escalation Rule Engine
+
+#### `EscalationRule` + `EscalationNotificationLog` Modelleri (`escalation_rule.py`)
+- `EscalationRule`: `name`, `enabled`, `match_severity` (JSON), `match_event_types` (JSON), `match_sources` (JSON), `min_duration_secs`, `match_states` (JSON), `webhook_type` (slack/jira/generic), `webhook_url`, `webhook_headers` (JSON), `cooldown_secs` (varsayılan 3600).
+- `EscalationNotificationLog`: kural + incident başına gönderim kaydı — `status` (sent/failed/dry_run), `response_code`, `error_msg`, `sent_at`.
+
+#### `escalation_matcher.py` — Pure Matcher Fonksiyonları
+- `matches_rule(incident, rule)` — enabled, state, severity, event_type, sources, min_duration_secs filtreleri.
+  - `match_states = None` → varsayılan `["OPEN", "DEGRADED"]`
+  - Her None matcher = her şeyi eşleştirir.
+- `cooldown_cutoff(cooldown_secs, now)` → cutoff datetime.
+- Payload builders: `build_slack_payload`, `build_generic_payload`, `build_jira_payload`, `build_payload`.
+  - Slack: `attachments` — severity rengi, başlık, cihaz bilgisi.
+  - Jira: `summary`, `priority` (Highest/High/Medium), `labels: ["netmanager", severity]`.
+  - Generic: düz JSON dict — tüm incident alanları.
+
+#### `escalation_sender.py` — Webhook Teslimat
+- `send_webhook(rule, incident, dry_run=False)` — `httpx.AsyncClient` ile asenkron POST.
+- `dry_run=True`: HTTP isteği yapılmaz, sadece loglama.
+- Timeout: 10 saniye; `status_code < 400` → başarılı.
+
+#### `escalation_tasks.py` — Celery Evaluator
+- `evaluate_escalation_rules()` — her 5 dakikada çalışır (beat: 300s).
+- Tüm enabled kuralları + OPEN/DEGRADED incident'ları yükler.
+- Her (incident, rule) çifti: `matches_rule()` → cooldown DB sorgusu → `send_webhook()` → log insert.
+- Cooldown: `EscalationNotificationLog`'da aynı `(rule_id, incident_id)` için `status="sent"` + `sent_at >= cutoff` → atla.
+
+#### REST API (`escalation.py`)
+```
+GET/POST  /escalation-rules
+GET/PUT/DELETE  /escalation-rules/{id}
+POST  /escalation-rules/{id}/test?dry_run=true
+GET   /escalation-rules/logs?rule_id=&incident_id=&status=&limit=&offset=
+```
+- `_to_response()`: `webhook_headers` — yalnızca anahtar adları döndürülür (değerler maskelenir), `webhook_header_keys: list[str]`.
+- Route: `/escalation-rules` + `RoleRoute(minRole="admin")` + Sidebar kaydı.
+
+#### Frontend (`EscalationRules/index.tsx`)
+- `RuleDrawer`: matcher alanları (severity/event_type/source/state multi-select, min_duration), webhook (type/url/headers JSON), cooldown.
+- `LogsTab`: bildirim log tablosu — ✓ sent / ✗ failed / beaker dry_run ikonları.
+- Inline dry-run sonuç `Alert` (matched/response_code gösterimi).
+
+#### SSH Terminal İyileştirmeleri (Faz 4D kapsamında tamamlandı)
+- `SshTerminalPage/index.tsx` — bağımsız full-screen sayfa (AppLayout yok).
+- Toolbar: bağlantı durumu badge (connecting/connected/disconnected), Clear + Disconnect butonları.
+- Cihaz listesinden SSH butonu yeni sekmede açılır (`window.open`).
+- `buildWsUrl` (`ws.ts`): path'de `?` varsa `&token=...` kullanır — çift `?` hatası giderildi.
+
+### Known Limitations — Güncel Durum
+
+| ID | Durum | Açıklama |
+|----|-------|---------|
+| KL-1 | Açık | `create_all` tablo yönetimi — Alembic yok, yeni kolon için `main.py` ALTER TABLE gerekli |
+| KL-2 | Açık | `sources`/`timeline` JSON vs JSONB — şu an sorunsuz |
+| KL-3 | ✅ Faz 2A | RECOVERING sweep task eklendi |
+| KL-4 | Açık | `queued_events` flush sırasında yeniden bağlantı — teorik duplicate, dedup ile karşılanıyor |
+| KL-5 | ✅ Faz 2A | Multi-hop BFS suppression |
+| KL-6 | ✅ Faz 3A | `_merge_intervals` ile çakışan downtime çift sayımı düzeltildi |
+| KL-7 | ✅ Faz 4A | `_ab_peer_latency_loop` FastAPI bg task — gerçek A→B agent-to-agent latency ölçümü |
+| KL-8 | Açık | `SyntheticProbe.runNow` `agent_id` gerektiriyor — agentsiz probe çalıştırılamaz |
+| KL-9 | ✅ Faz 4B | 5 hypertable (TimescaleDB) — `device_availability_snapshots` + 4 diğer tablo dönüştürüldü |
+| KL-10 | Açık | `EscalationRule.webhook_headers` düz metin JSON — şifreleme Faz 5 kapsamında (credential vault ile) |
+| KL-11 | Açık | Escalation evaluator minimum tepki süresi 5 dk — çok kritik olaylar için azaltılabilir (Faz 5) |
+
+### Test Durumu
+
+**236/236 test geçiyor** (Faz 4 kümülatif):
+- `test_agent_peer_latency.py` — +9 test (4A)
+- `test_faz4b_timescale.py` — 8 test (4B)
+- `test_faz4c_sla_probes.py` — 13 test (4C)
+- `test_faz4d_incidents.py` — 12 test (4D)
+- `test_faz4e_escalation.py` — 20 test (4E)
+- Önceki testler: 174 test (Faz 1–3)
+
+---
+
 ## [Released] — Faz 3: Observability Foundation (3A → 3D)
 
 ### Merge: `feature/faz3d-dashboard-wiring` → `main`

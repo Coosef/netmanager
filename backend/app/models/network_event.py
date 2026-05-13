@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -10,6 +10,12 @@ from app.core.database import Base
 
 class NetworkEvent(Base):
     __tablename__ = "network_events"
+    __table_args__ = (
+        Index("ix_network_events_created_sev", "created_at", "severity"),
+        Index("ix_network_events_device_created", "device_id", text("created_at DESC")),
+        Index("ix_network_events_unacked", text("created_at DESC"),
+              postgresql_where=text("acknowledged = FALSE")),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     device_id: Mapped[Optional[int]] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"), index=True)

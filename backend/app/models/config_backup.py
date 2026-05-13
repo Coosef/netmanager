@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship  # noqa: F401
 
 from app.core.database import Base
@@ -9,6 +9,9 @@ from app.core.database import Base
 
 class ConfigBackup(Base):
     __tablename__ = "config_backups"
+    __table_args__ = (
+        Index("ix_config_backups_device_created", "device_id", text("created_at DESC")),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)

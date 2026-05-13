@@ -405,98 +405,133 @@
 
 ---
 
-## FAZ 4 — Advanced Observability & Intelligence 🔵
+## FAZ 4 — Advanced Observability & Intelligence ✅
 
-> Öncelik sırası onaylandı: 2026-05-13
+> Tamamlandı: 2026-05-13 | 236/236 test | 0 TypeScript hatası
 
-### 4A — Gerçek Agent-to-Agent Latency (Öncelik: Yüksek)
+### 4A — Gerçek Agent-to-Agent Latency ✅
+- ✅ KL-7 kapatıldı: `_ab_peer_latency_loop` FastAPI lifespan bg task (900s)
+- ✅ Agent A → Agent B `ping_check` — `agent_from = agent_a_id` olarak kaydedilir
+- ✅ Matrix'te gerçek ağ arası gecikme görünür (önceki: `agent_from="backend"` sabit değerdi)
+- ✅ +9 test (toplam 183)
 
-**Hedef:** `agent_from="backend"` kısıtlamasını aşmak (KL-7). Backend Celery worker WebSocket
-bağlantısı olmadığından şu an yalnızca backend→agent ölçümü yapılıyor.
+### 4B — TimescaleDB Hypertable ✅
+- ✅ KL-9 kapatıldı: 5 hypertable (`device_availability_snapshots`, `snmp_poll_results`, `agent_peer_latencies`, `synthetic_probe_results`, `syslog_events`)
+- ✅ `docker-compose.yml` → `timescaledb/timescaledb:latest-pg16`
+- ✅ `add_retention_policy` (90 gün) — Celery retention task devre dışı
+- ✅ +8 test (toplam 191)
 
-**Yaklaşım:**
-- FastAPI background task (`asyncio.create_task`) üzerinden agent A'ya `ping_check` gönder,
-  hedef: agent B'nin `last_ip`'si.
-- `agent_from = agent_a_id` olarak kaydedilir.
-- N ajanın tüm pair kombinasyonları için tetikleme: `online_agents × (online_agents - 1)` ping.
-- Celery değil; FastAPI lifespan `asyncio.create_task` ile periyodik tetikleme (900s).
+### 4C — Advanced Synthetic SLA Thresholds ✅
+- ✅ `SlaPolicy.probe_id` FK — probe başarı oranı SLA compliance'a dahil
+- ✅ Ardışık başarısız probe → `threshold_violated` event; latency SLA: `latency_ms > threshold_ms`
+- ✅ `/sla/compliance` probe SLA ihlallerini içeriyor
+- ✅ SyntheticProbes sayfasında "SLA: %98.2 (son 7g)" rozeti
+- ✅ +13 test (toplam 204)
 
-**Etki:** Matrix'te `agent_from != "backend"` satırlar görünür; gerçek ağ arası gecikme ölçülür.
+### 4D — Incident RCA Ekranı ✅
+- ✅ `Incident` + `IncidentTimeline` modelleri — OPEN/DEGRADED/RECOVERING/CLOSED state makinesi
+- ✅ `process_event()` servisi — state geçişleri timeline'a kaydedilir
+- ✅ `GET /incidents`, `GET /incidents/{id}`, `PATCH /incidents/{id}/state` API
+- ✅ `/incidents` sayfası — filtreli tablo, timeline modal, RCA detayı
+- ✅ +12 test (toplam 216)
 
-### 4B — TimescaleDB Hypertable Hazırlığı (Öncelik: Orta-Yüksek)
+### 4E — Escalation Rule Engine ✅
+- ✅ `EscalationRule` modeli: severity/event_type/source/state/duration matcher'lar + cooldown
+- ✅ Webhook desteği: Slack (attachment), Jira (priority/labels), Generic (düz JSON)
+- ✅ `evaluate_escalation_rules` Celery task (300s beat) — cooldown/dedup korumalı
+- ✅ `webhook_headers` maskeleme — API yanıtında yalnızca anahtar adları döner (KL-10)
+- ✅ Dry-run test endpoint + bildirim audit log
+- ✅ `/escalation-rules` sayfası — CRUD drawer, log sekmesi, inline dry-run Alert
+- ✅ SSH Terminal bağımsız sekme + toolbar (connection status, Clear, Disconnect)
+- ✅ +20 test (toplam 236)
 
-**Hedef:** KL-9'u kapatmak. `device_availability_snapshots` 1000+ cihaz × 365 gün = 365k satır;
-plain PostgreSQL range sorguları 30 gün penceresinde yavaşlamaya başlar.
+### Faz 4 KL Özeti
 
-**Yaklaşım:**
-- Docker Compose'a `timescaledb/timescaledb:latest-pg16` servisi ekle (mevcut `postgres` servisi fork'u).
-- `main.py` lifespan'a: `SELECT create_hypertable('device_availability_snapshots', 'ts', if_not_exists => TRUE)`.
-- `synthetic_probe_results` ve `agent_peer_latencies` tabloları da hypertable adayı.
-- Chunk interval: `device_availability_snapshots` → 7 gün · `probe_results` → 1 gün.
-- Retention policy: `add_retention_policy(interval => INTERVAL '90 days')` — Celery task devre dışı.
-
-**Kapsam dışı:** Plain PostgreSQL → TimescaleDB geçişi zero-downtime değil; mevcut veri pg_dump + restore gerekebilir. Faz 4 başlangıcında tam plan çıkarılacak.
-
-### 4C — Advanced Synthetic SLA Thresholds (Öncelik: Orta)
-
-**Hedef:** Synthetic probe sonuçlarını SLA politikalarına bağlamak.
-
-**Özellikler:**
-- `SlaPolicy` modeline `probe_id: Optional[int]` FK ekle.
-- Probe başarı oranı (ör. son 24h %95) → SLA compliance hesabına dahil.
-- `run_synthetic_probes` task: ardışık N başarısız probe → `threshold_violated` event (opsiyonel).
-- Latency SLA: `latency_ms > threshold_ms` → warning event.
-- Frontend: SyntheticProbes sayfasında probe başına "SLA: %98.2 (son 7g)" rozeti.
-- `/sla/compliance` endpoint'inde probe SLA ihlallerini göster.
-
-### 4D — Incident RCA Ekranı (Öncelik: Orta)
-
-**Hedef:** Mevcut `correlation_incident` + `Incident` verisini kullanıcıya okunabilir RCA olarak sunmak.
-
-**Özellikler:**
-- `/monitor` sayfasına veya ayrı `/rca` sayfasına "RCA Zaman Çizelgesi" bölümü.
-- Seçili incident → kök neden cihaz + etkilenen downstream cihazlar grafiği.
-- Timeline: ilk event → OPEN → DEGRADED → RECOVERING → CLOSED; her state geçişinde kaynak ve tetikleyici göster.
-- Synthetic probe başarısızlıkları + syslog normalize eventleri → incident üzerinde "Kanıtlar" paneli.
-- Correlation skoru göstergesi (mevcut `confidence` alanı kullanılır).
-- Export: PDF özet (mevcut `SlaReport` PDF pattern'ı).
-
-### 4E — Notification & Escalation Rule Engine (Öncelik: Orta)
-
-**Hedef:** Mevcut notification channel altyapısını (Slack/Teams/Email/Jira) rule-based escalation ile güçlendirmek.
-
-**Özellikler:**
-- `EscalationRule` modeli: `trigger_conditions` (JSON), `delay_minutes`, `channels`, `repeat_interval`, `max_repeats`.
-- Tetikleyiciler: incident state değişimi · probe başarısızlık sayısı · fleet availability < eşik · belirli cihaz/grup.
-- Örnekler:
-  - "CRITICAL incident 5dk OPEN kalırsa → Slack #ops-critical"
-  - "Probe 3x ardışık fail → Jira ticket oluştur"
-  - "Fleet availability 24h < %95 → Email digest gönder"
-- Celery task: her dakika tetiklenen rule evaluator.
-- Frontend: Settings → Eskalasyon Kuralları sekmesi (mevcut AlertRule UI pattern'ı).
-- **Dedup guard:** aynı rule + incident kombinasyonu `max_repeats` aşınca susar.
+| ID | Durum | Notlar |
+|----|-------|--------|
+| KL-7 | ✅ Faz 4A | Gerçek A→B agent-to-agent latency |
+| KL-9 | ✅ Faz 4B | 5 TimescaleDB hypertable |
+| KL-10 | Açık → Faz 5 | `webhook_headers` plaintext — credential vault şifrelemesi |
+| KL-11 | Açık → Faz 5 | Escalation minimum tepki süresi 5 dk — kritik olaylar için düşürülebilir |
 
 ---
 
-### Faz 4 Uygulama Sırası
+## FAZ 5 — Production Hardening & Platform Reliability 🔵
+
+> Öncelik: Çok Yüksek — Faz 4 sonrası production-ready olmak için kritik altyapı adımları
+
+### 5A — Alembic Migration (KL-1 Kapatma)
+
+**Hedef:** `create_all` + `ALTER TABLE` pattern'ından çıkmak; tüm şema değişiklikleri versiyonlanmış migration dosyaları ile yönetilmeli.
+
+**Kapsam:**
+- `alembic init` + `env.py` ayarı (async engine)
+- Mevcut şema için başlangıç migration (baseline revision)
+- `main.py` lifespan'dan `ALTER TABLE` bloklarını kaldır → Alembic revision'larına taşı
+- CI: her PR'da `alembic upgrade head` çalışmalı; downgrade test edilmeli
+- Rollback: `alembic downgrade -1` smoke test
+
+### 5B — Backup & Restore Otomasyonu
+
+**Hedef:** Veritabanı ve konfigürasyon yedeklerinin güvenilir, test edilmiş prosedürleri.
+
+**Kapsam:**
+- PostgreSQL/TimescaleDB `pg_dump` — cronjob (günlük, 3 kopya rotasyonu)
+- Backup doğrulama: `pg_restore --list` ile kontrol, boş dosya uyarısı
+- S3/SFTP remote kopya (opsiyonel, yapılandırma ile)
+- Restore smoke test script — yeni container'da restore + bağlantı testi
+- `docker-compose.prod.yml` — backup volume mount + cronjob servisi
+
+### 5C — Structured Logging & Metrics
+
+**Hedef:** Container log'larından ölçülebilir observability'ye geçiş.
+
+**Kapsam:**
+- `structlog` — JSON çıktısı (level, timestamp, request_id, duration_ms, user_id)
+- `/api/v1/health` genişletme: DB bağlantısı, Redis, Celery worker sayısı, TimescaleDB versiyon
+- `/api/v1/metrics` — Prometheus format (istekler/sn, hata oranı, DB pool kullanımı)
+- Celery task başarı/başarısız/süre metrikleri (Flower veya custom endpoint)
+- Frontend: Agents sayfasına Celery task queue durumu widget
+
+### 5D — Secret Encryption (KL-10 Kapatma)
+
+**Hedef:** `EscalationRule.webhook_headers` ve diğer hassas webhook konfigürasyonlarını şifreli saklamak.
+
+**Kapsam:**
+- Mevcut `AgentCredentialBundle` AES-256-GCM şifrelemesini (Sprint 11G) `webhook_headers` için yeniden kullan
+- `EncryptedJSON` SQLAlchemy TypeDecorator — `store/load` otomatik şifrele/çöz
+- Mevcut düz metin değerleri tek seferlik migration ile şifrele
+- Key rotation: yeni key ile re-encrypt (vault key versiyonlama)
+
+### 5E — High Availability & Rollback Plan
+
+**Hedef:** Deploy sırasında kesinti olmadan güncelleme; hatalı deploy'dan hızlı geri dönüş.
+
+**Kapsam:**
+- Blue/green container deploy: yeni image → sağlık kontrolü → traffic kesme → eski container dur
+- Rollback script: önceki image tag + son başarılı migration revision'ına `alembic downgrade`
+- `DEPLOY.md` — adım adım production deploy + rollback prosedürü
+- Health check endpoint'i Nginx/traefik ile entegre (unhealthy → eski versiyona yönlendir)
+
+### Faz 5 Uygulama Sırası
 
 ```
-4A → tek backend değişikliği, bağımsız sprint (1-2 gün)
-4B → altyapı değişikliği, dikkatli migration planı gerekli (2-3 gün)
-4C → 4B'den bağımsız, SlaPolicy mevcut (2 gün)
-4D → 4A + mevcut Incident/correlation verisi yeterli (3-4 gün)
-4E → en uzun sprint, model + task + UI (4-5 gün)
+5A → Alembic (bağımsız, her şeyden önce)
+5B → Backup otomasyon (5A tamamlandıktan sonra schema stable)
+5C → Logging/metrics (5A ile paralel yürütülebilir)
+5D → Secret encryption (5A tamamlandıktan sonra, migration güvenli)
+5E → HA/rollback (5A + 5B tamamlandıktan sonra)
 ```
 
-### Faz 4 Kısıtları (Önceden Belirlenmiş)
+### Faz 5 Başarı Kriterleri
 
-| Kısıt | Uygulama |
-|-------|----------|
-| Agresif polling yok | Periyodik task'lar: 4A=900s · 4E evaluator=60s |
-| Geriye dönük uyumluluk | `create_hypertable` idempotent (`if_not_exists`) |
-| Yeni global store yok | Tüm UI `useQuery` local state |
-| TypeScript sıfır hata | Her sprint sonunda `tsc --noEmit` |
-| 174 test baz çizgisi | Faz 4 tamamında en az 200+ test hedefi |
+| Kriter | Ölçüm |
+|--------|-------|
+| Sıfır `ALTER TABLE` `main.py`'de | Tüm şema `alembic revision`'larında |
+| Günlük backup + doğrulama | Cronjob log + alert |
+| Tüm sensitif config şifreli | `webhook_headers`, credential fields → `EncryptedJSON` |
+| `/health` endpoint production'da 200 | DB + Redis + Celery hepsi yeşil |
+| Rollback < 5 dk | Script ile test edildi |
 
 ---
 
