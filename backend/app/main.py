@@ -557,6 +557,23 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_apl_agent_from "
             "ON agent_peer_latencies (agent_from)"
         ))
+        # Faz 4C — SLA threshold columns on synthetic_probes
+        await conn.execute(text(
+            "ALTER TABLE synthetic_probes ADD COLUMN IF NOT EXISTS "
+            "sla_enabled BOOLEAN NOT NULL DEFAULT TRUE"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE synthetic_probes ADD COLUMN IF NOT EXISTS "
+            "sla_success_rate_pct FLOAT NOT NULL DEFAULT 99.0"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE synthetic_probes ADD COLUMN IF NOT EXISTS "
+            "sla_latency_ms FLOAT"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE synthetic_probes ADD COLUMN IF NOT EXISTS "
+            "sla_window_hours INTEGER NOT NULL DEFAULT 24"
+        ))
 
         # ── Faz 4B — TimescaleDB hypertables ─────────────────────────────────
         # Each DO block is idempotent: converts only if not already a hypertable.
