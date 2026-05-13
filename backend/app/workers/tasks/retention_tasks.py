@@ -3,10 +3,19 @@ import asyncio
 
 from app.workers.celery_app import celery_app
 
-# Retention windows (days) for time-series tables
+# Tables converted to TimescaleDB hypertables — retention is handled by
+# TimescaleDB's add_retention_policy (chunk drops), not manual DELETEs.
+HYPERTABLE_MANAGED = {
+    "snmp_poll_results",
+    "syslog_events",
+    "device_availability_snapshots",
+    "agent_peer_latencies",
+    "synthetic_probe_results",
+}
+
+# Retention windows (days) for plain-table time-series data.
+# Hypertable-managed tables are intentionally excluded from this dict.
 _RETENTION = {
-    "snmp_poll_results":  30,   # high-volume, polled every 5 min
-    "syslog_events":      30,   # high-volume syslog stream
     "notification_logs":  30,   # dedup/audit, low priority
     "command_executions": 90,   # useful audit trail
     "network_events":     90,   # event history
@@ -17,8 +26,6 @@ _RETENTION = {
 _MAC_ARP_INACTIVE_DAYS = 30
 # Keep non-golden config backups for this many days; golden backups are never deleted
 _CONFIG_BACKUP_DAYS = 90
-# Availability snapshots — daily granularity, 90 days is enough for trending
-_AVAILABILITY_SNAPSHOT_DAYS = 90
 
 
 @celery_app.task(name="app.workers.tasks.retention_tasks.cleanup_old_data")
@@ -38,11 +45,7 @@ async def _run():
         # ── Standard time-series tables ───────────────────────────────────────
         for table, days in _RETENTION.items():
             cutoff = now - timedelta(days=days)
-            ts_col = "polled_at" if table == "snmp_poll_results" else (
-                "received_at" if table == "syslog_events" else
-                "sent_at" if table == "notification_logs" else
-                "created_at"
-            )
+            ts_col = "sent_at" if table == "notification_logs" else "created_at"
             result = await db.execute(
                 text(f"DELETE FROM {table} WHERE {ts_col} < :cutoff"),
                 {"cutoff": cutoff},
@@ -66,7 +69,7 @@ async def _run():
         if r.rowcount:
             summary["arp_entries"] = r.rowcount
 
-        # ── Old non-golden config backups ─────────────────────────────────────
+        # ── Old non-golden config backups ────────────────────────────────────
         # Keep: (1) golden backups always, (2) latest 5 per device, (3) last 90 days
         backup_cutoff = now - timedelta(days=_CONFIG_BACKUP_DAYS)
         r = await db.execute(
@@ -90,15 +93,6 @@ async def _run():
         )
         if r.rowcount:
             summary["config_backups"] = r.rowcount
-
-        # ── Availability snapshots — keep last 90 days ────────────────────────
-        snap_cutoff = now - timedelta(days=_AVAILABILITY_SNAPSHOT_DAYS)
-        r = await db.execute(
-            text("DELETE FROM device_availability_snapshots WHERE ts < :cutoff"),
-            {"cutoff": snap_cutoff},
-        )
-        if r.rowcount:
-            summary["device_availability_snapshots"] = r.rowcount
 
         await db.commit()
 
