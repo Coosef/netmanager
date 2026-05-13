@@ -60,6 +60,7 @@ import OrgAdminPage from '@/pages/OrgAdmin'
 import PermissionsPage from '@/pages/Permissions'
 import InviteAcceptPage from '@/pages/InviteAccept'
 import SyntheticProbesPage from '@/pages/SyntheticProbes'
+import IncidentsPage from '@/pages/Incidents'
 
 dayjs.extend(relativeTime)
 dayjs.locale('tr')
@@ -257,6 +258,7 @@ function ThemedApp() {
               <Route path="org-admin" element={<RoleRoute minRole="admin"><OrgAdminPage /></RoleRoute>} />
               <Route path="permissions" element={<RoleRoute minRole="admin"><PermissionsPage /></RoleRoute>} />
               <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
+              <Route path="incidents" element={<PermRoute module="monitoring" action="view"><IncidentsPage /></PermRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>
