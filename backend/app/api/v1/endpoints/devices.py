@@ -2427,7 +2427,7 @@ async def get_device_availability(
       current  — latest Device scoring fields (may be None before first daily run)
       history  — list of daily snapshots ordered ascending by ts (up to `days` entries)
     """
-    from datetime import timezone
+    from datetime import datetime, timedelta, timezone
     from sqlalchemy import desc
     from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
 
