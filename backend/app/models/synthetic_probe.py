@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -47,6 +47,9 @@ class SyntheticProbe(Base):
 
 class SyntheticProbeResult(Base):
     __tablename__ = "synthetic_probe_results"
+    __table_args__ = (
+        Index("ix_spr_probe_ts", "probe_id", "measured_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     probe_id: Mapped[int] = mapped_column(

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, JSON
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -34,6 +34,9 @@ class NotificationChannel(Base):
 class NotificationLog(Base):
     """Tracks sent notifications to prevent duplicate sends."""
     __tablename__ = "notification_logs"
+    __table_args__ = (
+        Index("ix_notification_logs_channel_source", "channel_id", "source_type", "source_id"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     channel_id: Mapped[int] = mapped_column(ForeignKey("notification_channels.id", ondelete="CASCADE"), index=True)
