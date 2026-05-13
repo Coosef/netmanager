@@ -301,9 +301,6 @@ async def lifespan(app: FastAPI):
             ")"
         ))
         await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_discovery_results_agent ON discovery_results(agent_id)"
-        ))
-        await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS agent_credential_bundles ("
             "id SERIAL PRIMARY KEY, agent_id VARCHAR(32) NOT NULL UNIQUE, "
             "agent_aes_key_enc TEXT NOT NULL, bundle_version INTEGER NOT NULL DEFAULT 1, "
@@ -406,24 +403,13 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS full_name VARCHAR(255)"
         ))
-        # Composite indexes for Monitor page queries (created_at + acknowledged is the hottest path)
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_network_events_acked ON network_events(acknowledged)"
-        ))
+        # Composite indexes for Monitor page queries — single-col indexes managed by Alembic;
+        # composite/partial ones mirrored in model __table_args__ (create_all handles fresh DBs).
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_network_events_created_sev ON network_events(created_at, severity)"
         ))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_snmp_poll_results_device_polled ON snmp_poll_results(device_id, polled_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_syslog_events_received ON syslog_events(received_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_notification_logs_sent ON notification_logs(sent_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_audit_logs_created ON audit_logs(created_at)"
         ))
         # Composite indexes for config_backups — speeds up latest-per-device subquery in config_search
         await conn.execute(text(
@@ -505,10 +491,6 @@ async def lifespan(app: FastAPI):
                 experience_score FLOAT NOT NULL
             )
         """))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_das_device_ts "
-            "ON device_availability_snapshots (device_id, ts)"
-        ))
         # Faz 3B — synthetic probe definitions + results
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS synthetic_probes (
@@ -528,12 +510,6 @@ async def lifespan(app: FastAPI):
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_synthetic_probes_device ON synthetic_probes (device_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_synthetic_probes_agent ON synthetic_probes (agent_id)"
-        ))
         await conn.execute(text("""
             CREATE TABLE IF NOT EXISTS synthetic_probe_results (
                 id SERIAL PRIMARY KEY,
@@ -563,10 +539,6 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_apl_agent_to_ts "
             "ON agent_peer_latencies (agent_to, measured_at)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_apl_agent_from "
-            "ON agent_peer_latencies (agent_from)"
         ))
         # Faz 4C — SLA threshold columns on synthetic_probes
         await conn.execute(text(
@@ -666,18 +638,6 @@ async def lifespan(app: FastAPI):
                 sent_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_esc_notif_log_rule_id "
-            "ON escalation_notification_logs (rule_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_esc_notif_log_incident_id "
-            "ON escalation_notification_logs (incident_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_esc_notif_log_sent_at "
-            "ON escalation_notification_logs (sent_at)"
-        ))
 
         # TimescaleDB retention policies — drop old chunks automatically.
         # These replace the manual DELETE approach in retention_tasks.py.
