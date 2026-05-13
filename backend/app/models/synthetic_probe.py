@@ -33,6 +33,12 @@ class SyntheticProbe(Base):
     interval_secs: Mapped[int] = mapped_column(Integer, default=300)   # how often to probe
     timeout_secs: Mapped[int] = mapped_column(Integer, default=5)
 
+    # SLA threshold fields — Faz 4C
+    sla_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    sla_success_rate_pct: Mapped[float] = mapped_column(Float, default=99.0, nullable=False)
+    sla_latency_ms: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sla_window_hours: Mapped[int] = mapped_column(Integer, default=24, nullable=False)
+
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

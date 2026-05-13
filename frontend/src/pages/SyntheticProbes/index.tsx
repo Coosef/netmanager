@@ -5,10 +5,10 @@ import {
 } from 'antd'
 import {
   PlusOutlined, PlayCircleOutlined, DeleteOutlined,
-  CheckCircleOutlined, ReloadOutlined,
+  CheckCircleOutlined, ReloadOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { syntheticApi, type SyntheticProbe, type ProbeType } from '@/api/synthetic'
+import { syntheticApi, type SyntheticProbe, type ProbeType, type SLAStatus } from '@/api/synthetic'
 import dayjs from 'dayjs'
 
 const PROBE_TYPE_COLOR: Record<ProbeType, string> = {
@@ -35,47 +35,122 @@ const SEV_BORDER: Record<'critical' | 'warning', string> = {
   warning:  '#f59e0b',
 }
 
-// ── Expanded results sub-table ────────────────────────────────────────────────
-function ProbeResultsTable({ probeId }: { probeId: number }) {
+// ── SLA status badge ──────────────────────────────────────────────────────────
+function SLABadge({ status, enabled }: { status: SLAStatus | null; enabled: boolean }) {
+  if (!enabled) {
+    return <Tag color="default" style={{ fontSize: 11 }}>SLA Kapalı</Tag>
+  }
+  if (!status) return null
+  if (status.insufficient_data) {
+    return (
+      <Tooltip title={`${status.sample_count} / 5 ölçüm — daha fazla veriye ihtiyaç var`}>
+        <Tag color="default" style={{ fontSize: 11 }}>Yetersiz Veri</Tag>
+      </Tooltip>
+    )
+  }
+  if (status.compliant) {
+    const tip = `%${status.success_rate_pct?.toFixed(1)} başarı${status.avg_latency_ms != null ? ` · ${status.avg_latency_ms.toFixed(1)} ms ortalama` : ''}`
+    return (
+      <Tooltip title={tip}>
+        <Tag color="success" style={{ fontSize: 11, fontWeight: 600 }}>✓ Uyumlu</Tag>
+      </Tooltip>
+    )
+  }
+  const tip = status.breach_reason === 'success_rate'
+    ? `Başarı oranı: %${status.success_rate_pct?.toFixed(1)} (eşik: %${status.success_rate_pct})`
+    : `Ort. gecikme: ${status.avg_latency_ms?.toFixed(1)} ms — eşik aşıldı`
+  const color = status.breach_reason === 'latency' ? 'warning' : 'error'
+  const label = status.breach_reason === 'latency' ? '⚠ Gecikme' : '✗ İhlal'
+  return (
+    <Tooltip title={tip}>
+      <Tag color={color} style={{ fontSize: 11, fontWeight: 600 }}>{label}</Tag>
+    </Tooltip>
+  )
+}
+
+// ── Expanded row: results + SLA stats ────────────────────────────────────────
+function ProbeExpandedRow({ probe }: { probe: SyntheticProbe }) {
   const { data, isLoading } = useQuery({
-    queryKey: ['probe-results', probeId],
-    queryFn: () => syntheticApi.getResults(probeId, 20),
+    queryKey: ['probe-results', probe.id],
+    queryFn: () => syntheticApi.getResults(probe.id, 20),
     staleTime: 30_000,
   })
 
-  if (isLoading) return <Spin size="small" style={{ display: 'block', margin: '12px auto' }} />
-  if (!data?.length) return <div style={{ padding: '12px 0', color: '#888', fontSize: 13 }}>Henüz sonuç yok.</div>
+  const sla = probe.sla_status
 
   return (
-    <Table
-      dataSource={data}
-      rowKey="id"
-      size="small"
-      pagination={false}
-      style={{ marginLeft: 24 }}
-      columns={[
-        {
-          title: 'Sonuç', dataIndex: 'success', width: 90,
-          render: (ok: boolean) => ok
-            ? <Badge status="success" text={<span style={{ color: '#22c55e', fontWeight: 600 }}>✓ Başarılı</span>} />
-            : <Badge status="error"   text={<span style={{ color: '#ef4444', fontWeight: 600 }}>✗ Başarısız</span>} />,
-        },
-        {
-          title: 'Gecikme', dataIndex: 'latency_ms', width: 90,
-          render: (v: number | null) => v != null ? <span style={{ color: '#888', fontSize: 12 }}>{v.toFixed(1)} ms</span> : '—',
-        },
-        {
-          title: 'Detay', dataIndex: 'detail',
-          render: (v: string | null) => v
-            ? <Tooltip title={v}><span style={{ fontSize: 12, color: '#666' }}>{v.length > 60 ? v.slice(0, 60) + '…' : v}</span></Tooltip>
-            : '—',
-        },
-        {
-          title: 'Zaman', dataIndex: 'measured_at', width: 130,
-          render: (v: string) => <span style={{ fontSize: 12, color: '#888' }}>{dayjs(v).format('DD.MM HH:mm:ss')}</span>,
-        },
-      ]}
-    />
+    <div style={{ marginLeft: 24 }}>
+      {/* SLA stats bar */}
+      {probe.sla_enabled && sla && !sla.insufficient_data && (
+        <div style={{
+          display: 'flex', gap: 20, padding: '8px 0 10px',
+          borderBottom: '1px solid #f0f0f0', marginBottom: 8,
+          fontSize: 12, color: '#666',
+        }}>
+          <span>
+            <SafetyCertificateOutlined style={{ color: '#6366f1', marginRight: 4 }} />
+            <strong>SLA Penceresi:</strong> {sla.window_hours}s
+          </span>
+          <span>
+            <strong>Başarı Oranı:</strong>{' '}
+            <span style={{ color: sla.compliant ? '#22c55e' : '#ef4444', fontWeight: 600 }}>
+              {sla.success_rate_pct != null ? `%${sla.success_rate_pct.toFixed(2)}` : '—'}
+            </span>
+            {' '}(eşik: %{probe.sla_success_rate_pct})
+          </span>
+          {sla.avg_latency_ms != null && (
+            <span>
+              <strong>Ort. Gecikme:</strong>{' '}
+              <span style={{
+                color: probe.sla_latency_ms != null && sla.avg_latency_ms > probe.sla_latency_ms ? '#f59e0b' : '#22c55e',
+                fontWeight: 600,
+              }}>
+                {sla.avg_latency_ms.toFixed(1)} ms
+              </span>
+              {probe.sla_latency_ms != null && ` (eşik: ${probe.sla_latency_ms} ms)`}
+            </span>
+          )}
+          <span style={{ color: '#999' }}>{sla.sample_count} ölçüm</span>
+        </div>
+      )}
+
+      {/* Results table */}
+      {isLoading ? (
+        <Spin size="small" style={{ display: 'block', margin: '12px auto' }} />
+      ) : !data?.length ? (
+        <div style={{ padding: '12px 0', color: '#888', fontSize: 13 }}>Henüz sonuç yok.</div>
+      ) : (
+        <Table
+          dataSource={data}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          columns={[
+            {
+              title: 'Sonuç', dataIndex: 'success', width: 90,
+              render: (ok: boolean) => ok
+                ? <Badge status="success" text={<span style={{ color: '#22c55e', fontWeight: 600 }}>✓ Başarılı</span>} />
+                : <Badge status="error"   text={<span style={{ color: '#ef4444', fontWeight: 600 }}>✗ Başarısız</span>} />,
+            },
+            {
+              title: 'Gecikme', dataIndex: 'latency_ms', width: 90,
+              render: (v: number | null) => v != null
+                ? <span style={{ color: '#888', fontSize: 12 }}>{v.toFixed(1)} ms</span> : '—',
+            },
+            {
+              title: 'Detay', dataIndex: 'detail',
+              render: (v: string | null) => v
+                ? <Tooltip title={v}><span style={{ fontSize: 12, color: '#666' }}>{v.length > 60 ? v.slice(0, 60) + '…' : v}</span></Tooltip>
+                : '—',
+            },
+            {
+              title: 'Zaman', dataIndex: 'measured_at', width: 130,
+              render: (v: string) => <span style={{ fontSize: 12, color: '#888' }}>{dayjs(v).format('DD.MM HH:mm:ss')}</span>,
+            },
+          ]}
+        />
+      )}
+    </div>
   )
 }
 
@@ -95,7 +170,7 @@ function ProbeDrawer({ open, onClose, onCreated }: {
   })
 
   return (
-    <Drawer title="Yeni Synthetic Probe" open={open} onClose={onClose} width={420}
+    <Drawer title="Yeni Synthetic Probe" open={open} onClose={onClose} width={440}
       footer={
         <Space style={{ justifyContent: 'flex-end', width: '100%' }}>
           <Button onClick={onClose}>İptal</Button>
@@ -109,6 +184,10 @@ function ProbeDrawer({ open, onClose, onCreated }: {
           enabled: true,
           http_method: vals.http_method || 'GET',
           dns_record_type: vals.dns_record_type || 'A',
+          sla_enabled: vals.sla_enabled ?? true,
+          sla_success_rate_pct: vals.sla_success_rate_pct ?? 99.0,
+          sla_latency_ms: vals.sla_latency_ms ?? null,
+          sla_window_hours: vals.sla_window_hours ?? 24,
         })}
       >
         <Form.Item name="name" label="Adı" rules={[{ required: true }]}>
@@ -154,6 +233,26 @@ function ProbeDrawer({ open, onClose, onCreated }: {
         <Form.Item name="timeout_secs" label="Timeout (sn)" initialValue={5}>
           <InputNumber min={1} max={30} style={{ width: '100%' }} />
         </Form.Item>
+
+        {/* ── SLA thresholds ─────────────────────────── */}
+        <div style={{ borderTop: '1px solid #f0f0f0', paddingTop: 12, marginTop: 4 }}>
+          <div style={{ fontSize: 12, color: '#888', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <SafetyCertificateOutlined style={{ color: '#6366f1' }} />
+            SLA Eşikleri
+          </div>
+          <Form.Item name="sla_enabled" label="SLA Takibi" initialValue={true} valuePropName="checked">
+            <Switch size="small" />
+          </Form.Item>
+          <Form.Item name="sla_success_rate_pct" label="Min. Başarı Oranı (%)" initialValue={99.0}>
+            <InputNumber min={0} max={100} step={0.5} precision={1} style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="sla_latency_ms" label="Max. Ort. Gecikme (ms)" tooltip="Boş bırakılırsa gecikme kontrolü yapılmaz">
+            <InputNumber min={1} placeholder="sınır yok" style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="sla_window_hours" label="SLA Penceresi (saat)" initialValue={24}>
+            <InputNumber min={1} max={168} style={{ width: '100%' }} />
+          </Form.Item>
+        </div>
       </Form>
     </Drawer>
   )
@@ -190,6 +289,7 @@ export default function SyntheticProbesPage() {
       await syntheticApi.runNow(probe.id)
       message.success(`${probe.name} — probe çalıştırıldı`)
       qc.invalidateQueries({ queryKey: ['probe-results', probe.id] })
+      qc.invalidateQueries({ queryKey: ['synthetic-probes'] })
     } catch (e: any) {
       message.error(e?.response?.data?.detail || 'Çalıştırılamadı')
     } finally {
@@ -210,6 +310,12 @@ export default function SyntheticProbesPage() {
     {
       title: 'Tip', dataIndex: 'probe_type', key: 'type', width: 90,
       render: (t: ProbeType) => <Tag color={PROBE_TYPE_COLOR[t]}>{t.toUpperCase()}</Tag>,
+    },
+    {
+      title: 'SLA', key: 'sla', width: 120,
+      render: (_: unknown, row: SyntheticProbe) => (
+        <SLABadge status={row.sla_status} enabled={row.sla_enabled} />
+      ),
     },
     {
       title: 'Durum', key: 'enabled', width: 80,
@@ -282,17 +388,18 @@ export default function SyntheticProbesPage() {
           size="middle"
           pagination={{ pageSize: 20, showSizeChanger: false, hideOnSinglePage: true }}
           expandable={{
-            expandedRowRender: (row: SyntheticProbe) => <ProbeResultsTable probeId={row.id} />,
+            expandedRowRender: (row: SyntheticProbe) => <ProbeExpandedRow probe={row} />,
           }}
           onRow={(row: SyntheticProbe) => {
             const sev = PROBE_SEVERITY[row.probe_type]
-            return {
-              style: !row.enabled ? {
-                opacity: 0.55,
-                background: SEV_BG[sev],
-                borderLeft: `3px solid ${SEV_BORDER[sev]}`,
-              } : undefined,
+            const slaBreach = row.sla_enabled && row.sla_status?.compliant === false
+            const style: React.CSSProperties = {}
+            if (!row.enabled) style.opacity = 0.55
+            if (slaBreach) {
+              style.background = SEV_BG[sev]
+              style.borderLeft = `3px solid ${SEV_BORDER[sev]}`
             }
+            return { style: Object.keys(style).length ? style : undefined }
           }}
         />
       )}
