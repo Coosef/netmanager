@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, tasks, tenants, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, tasks, tenants, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
@@ -32,6 +32,7 @@ api_router.include_router(config_templates.router, prefix="/config-templates", t
 api_router.include_router(change_rollouts.router, prefix="/change-rollouts", tags=["Change Rollouts"])
 api_router.include_router(sla.router, prefix="/sla", tags=["SLA"])
 api_router.include_router(synthetic.router, prefix="/synthetic-probes", tags=["Synthetic Probes"])
+api_router.include_router(incidents.router, prefix="/incidents", tags=["Incidents"])
 api_router.include_router(api_tokens.router, prefix="/api-tokens", tags=["API Tokens"])
 api_router.include_router(racks.router, prefix="/racks", tags=["Racks"])
 api_router.include_router(tenants.router, prefix="/tenants", tags=["Tenants"])
