@@ -1,6 +1,6 @@
 # Production Deploy Checklist
 
-> NetManager — Faz 4 sonrası üretim ortamı prosedürleri  
+> NetManager — Faz 5B sonrası üretim ortamı prosedürleri  
 > Güncellendi: 2026-05-13
 
 Bu döküman; ilk kurulum, güncellemeler ve acil rollback senaryoları için adım adım prosedürleri kapsar.
@@ -162,60 +162,142 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
 
 ---
 
-## 5 — Backup & Restore
+## 5 — Backup & Restore (Faz 5B)
 
-### 5A — Manuel Tam Yedek
+Otomasyon scriptleri: `scripts/` dizininde 3 dosya.
+
+| Script | Amaç |
+|--------|------|
+| `netmanager-backup.sh` | TimescaleDB uyumlu tam yedek (pg custom format, compress=6) |
+| `netmanager-restore.sh` | `timescaledb_pre_restore` / `timescaledb_post_restore` ile güvenli restore |
+| `netmanager-backup-test.sh` | Geçici DB'ye dry-run restore, doğrulama, otomatik temizlik |
+
+### 5A — Otomatik Tam Yedek
 
 ```bash
-# Veritabanı yedeği (TimescaleDB dahil)
-docker exec switch-postgres-1 pg_dump -U netmgr -d network_manager \
-  --format=custom -f /var/lib/postgresql/data/backup_$(date +%Y%m%d_%H%M).dump
+# Varsayılan: ./backups/YYYYMMDD_HHMMSS/ altına yazar, 7 gün saklar
+cd /path/to/switch
+./scripts/netmanager-backup.sh
 
-# Host'a kopyala
-docker cp switch-postgres-1:/var/lib/postgresql/data/backup_$(date +%Y%m%d_%H%M).dump ./backups/
+# Özel dizin / saklama süresi
+BACKUP_DIR=/mnt/nas/netmanager-backups KEEP_DAYS=30 ./scripts/netmanager-backup.sh
 
-# Yedek boyutunu doğrula (0 byte olmamalı)
-ls -lh ./backups/backup_*.dump
+# Çıktı dosyaları:
+#   db.dump              — pg custom format (sıkıştırılmış, ~10MB)
+#   schema.sql           — sadece şema, insan okunabilir
+#   alembic_revision.txt — yedek anındaki Alembic revision
+#   manifest.json        — metadata (timestamp, tablo sayısı, DB boyutu)
+#   restore_catalog.txt  — pg_restore --list çıktısı (integrity kanıtı)
 ```
 
-### 5B — Yedekten Restore
+**Bütünlük kontrolü:** Script, `pg_restore --list` çıktısında `< 50` TABLE DATA varsa otomatik hata verir.
+
+### 5B — Yedekten Restore (Production)
 
 ```bash
-# 1. Mevcut container'ı durdur (veri kaybını önle)
+# 1. Uygulama servislerini durdur
 docker compose stop backend celery_worker celery_beat
 
-# 2. Yeni boş DB oluştur (gerekirse)
-docker exec switch-postgres-1 psql -U netmgr \
-  -c "DROP DATABASE IF EXISTS network_manager_restore; CREATE DATABASE network_manager_restore;"
+# 2. Restore (onay sorar — production DB'ye yazıyor, dikkatli!)
+TARGET_DB=network_manager_restore \
+  ./scripts/netmanager-restore.sh ./backups/20260513_164326
 
-# 3. Restore
-docker exec switch-postgres-1 pg_restore -U netmgr \
-  -d network_manager_restore /var/lib/postgresql/data/backup_YYYYMMDD_HHMM.dump
+# Onayı atlamak için (CI / otomatik senaryo):
+SKIP_CONFIRM=yes TARGET_DB=network_manager_restore \
+  ./scripts/netmanager-restore.sh ./backups/20260513_164326
 
-# 4. Doğrulama
-docker exec switch-postgres-1 psql -U netmgr -d network_manager_restore \
-  -c "SELECT COUNT(*) FROM devices;"
+# 3. Geçiş (emin olunca)
+# .env → DB_URL'yi network_manager_restore'a çevir
+docker compose up -d backend celery_worker celery_beat
 
-# 5. Geçiş (emin olunca)
-# DB_URL'yi .env'de network_manager_restore'a çevir → docker compose up -d backend
+# 4. Alembic stamp (restore sonrası head'i işaretle)
+docker exec -w /app switch-backend-1 alembic current
+# c3d4e5f6a7b8 (head) görünmeli — görünmüyorsa:
+docker exec -w /app switch-backend-1 alembic stamp head
 ```
+
+**TimescaleDB notu:** Restore script `timescaledb_pre_restore()` ve `timescaledb_post_restore()` çağrılarını otomatik yapar. Manuel pg_restore kullanıyorsanız bu çağrıları elle yapın.
+
+### 5C — Yedek Bütünlük Testi (Dry-Run)
+
+```bash
+# En son yedeği geçici DB'ye restore et, doğrula, sil:
+./scripts/netmanager-backup-test.sh
+
+# Belirli yedeği test et:
+./scripts/netmanager-backup-test.sh ./backups/20260513_164326
+
+# Başarılı çıktı:
+# [PASS] Table count: 59
+# [PASS] Hypertables: 5 (agent_peer_latencies, device_availability_snapshots, ...)
+# [PASS] Core table counts OK
+# [PASS] Alembic revision: c3d4e5f6a7b8
+# [PASS] TimescaleDB version: 2.26.3
+```
+
+**CI entegrasyonu:** `netmanager-backup-test.sh` sıfır exit code ile çıkarsa yedek geçerlidir. Başarısız olursa geçici DB otomatik silinir, exit 1 döner.
+
+### 5D — TimescaleDB Retention + Yedek Çakışması
+
+TimescaleDB retention policy varsayılan olarak **30 gün** veri tutar. Backup script son yedekten bu yana 30 günden fazla zaman geçmişse uyarı verir:
+
+```
+WARNING: last backup was X days ago — TimescaleDB retention (30d) may have
+         deleted data not captured in any backup.
+```
+
+| Backup sıklığı | Retention penceresi | Veri kaybı riski |
+|----------------|---------------------|------------------|
+| Günlük | 30 gün | Yok |
+| Haftalık | 30 gün | Haftalık — retention ile çakışmaz |
+| 30 gün+ arası | 30 gün | ⚠️ Bazı hypertable verileri backup'a alınmadan silinebilir |
+
+**Öneri:** Production'da `cron` ile günlük veya haftalık backup.
+
+```bash
+# Crontab (haftalık, Pazar 02:00)
+0 2 * * 0 cd /path/to/switch && BACKUP_DIR=/mnt/backups KEEP_DAYS=30 ./scripts/netmanager-backup.sh >> /var/log/netmanager-backup.log 2>&1
+```
+
+### 5E — Volume Backup (İkincil)
+
+PostgreSQL verisi `postgres_data` named volume'ündedir. DB dump'a ek olarak, volume snapshot alınabilir:
+
+```bash
+# Volume tar snapshot (container durdurulmuş halde — veri tutarlılığı için)
+docker compose stop postgres
+docker run --rm \
+  -v switch_postgres_data:/data \
+  -v $(pwd)/backups:/backup \
+  alpine tar czf /backup/postgres_volume_$(date +%Y%m%d).tar.gz -C /data .
+docker compose start postgres
+```
+
+Bu ikincil yöntemdir. Birincil yöntem her zaman `netmanager-backup.sh` (pg_dump tabanlı).
 
 ---
 
 ## 6 — Rollback Prosedürü
 
+> **Rollback öncesi zorunlu adım:** Deploy öncesi her zaman bir yedek alın.
+> ```bash
+> ./scripts/netmanager-backup.sh   # yedek ./backups/YYYYMMDD_HHMMSS/ altına yazılır
+> ```
+
 ### 6A — Hızlı Rollback (image tag ile)
 
 ```bash
-# Önceki başarılı image tag'ini bul
+# 0. Deploy öncesi yedek alındığından emin ol (yukarıdaki zorunlu adım)
+
+# 1. Önceki başarılı image tag'ini bul
 docker images | grep switch-backend | head -5
 
-# Backend'i önceki image ile başlat
+# 2. Backend'i önceki image ile başlat
 docker compose stop backend
 docker tag switch-backend:previous switch-backend:current
 docker compose up -d backend
 
-# Doğrula
+# 3. Doğrula
 curl -s http://localhost:8000/health
 ```
 
@@ -420,6 +502,7 @@ docker exec -w /app switch-backend-1 alembic downgrade -1
 | ID | Açıklama | Planlanan Çözüm |
 |----|----------|----------------|
 | KL-1 | `main.py` ALTER TABLE — Alembic yok | ✅ Faz 5A — kapatıldı |
+| KL-2 | Backup/restore TimescaleDB uyumluluğu | ✅ Faz 5B — kapatıldı |
 | KL-8 | SyntheticProbe.runNow agent gerektiriyor | Faz 5 — local fallback |
 | KL-10 | `webhook_headers` plaintext JSON | Faz 5D — EncryptedJSON TypeDecorator |
 | KL-11 | Escalation evaluator min tepki 5 dk | Faz 5 — konfigüre edilebilir interval |
