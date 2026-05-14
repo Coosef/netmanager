@@ -16,3 +16,7 @@ os.environ.setdefault(
     "CREDENTIAL_ENCRYPTION_KEY",
     "dGVzdC1jcmVkZW50aWFsLWtleS0zMi1ieXRlcy14eHh4"
 )
+# Faz 5C: suppress log noise in tests, disable prometheus multiprocess dir
+os.environ.setdefault("LOG_LEVEL", "WARNING")
+os.environ.setdefault("LOG_FORMAT", "console")
+os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", "")

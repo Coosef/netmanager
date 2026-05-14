@@ -27,6 +27,7 @@ celery_app = Celery(
         "app.workers.tasks.synthetic_tasks",
         "app.workers.tasks.agent_peer_tasks",
         "app.workers.tasks.escalation_tasks",
+        "app.workers.tasks.metrics_tasks",
     ],
 )
 
@@ -154,5 +155,11 @@ celery_app.conf.update(
             "task": "app.workers.tasks.escalation_tasks.evaluate_escalation_rules",
             "schedule": 300.0,
         },
+        "collect-infrastructure-metrics-every-minute": {
+            "task": "app.workers.tasks.metrics_tasks.collect_infrastructure_metrics",
+            "schedule": 60.0,
+        },
     },
 )
+
+import app.workers.signals  # noqa: E402,F401 — register Celery signal handlers

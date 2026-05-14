@@ -37,6 +37,10 @@ class Settings(BaseSettings):
     # Example: https://ws.systrack.app
     AGENT_WS_URL: str = ""
 
+    # Logging
+    LOG_LEVEL: str = "INFO"    # DEBUG | INFO | WARNING | ERROR
+    LOG_FORMAT: str = "json"   # "json" (prod) | "console" (dev)
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

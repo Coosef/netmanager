@@ -22,6 +22,11 @@ frontend/.vite/
 celerybeat-schedule
 celerybeat.pid
 
+# Prometheus multiprocess files (written during tests / dev)
+backend/counter_*.db
+backend/gauge_*.db
+backend/histogram_*.db
+
 # Editor
 .idea/
 *.swp
