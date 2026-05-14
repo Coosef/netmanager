@@ -50,9 +50,8 @@ def _build_fernet(new_key: str, old_key: str):
 
 
 def _rotate(conn, multi, table: str, col: str, dry_run: bool) -> int:
-    rows = conn.execute(
-        f"SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''"
-    ).fetchall()
+    conn.execute(f"SELECT id, {col} FROM {table} WHERE {col} IS NOT NULL AND {col} != ''")
+    rows = conn.fetchall()
     count = 0
     for row_id, value in rows:
         try:
@@ -61,8 +60,6 @@ def _rotate(conn, multi, table: str, col: str, dry_run: bool) -> int:
             print(f"  WARN: {table}.{col} id={row_id} — could not decrypt (skipped)", file=sys.stderr)
             continue
         new_ciphertext = multi.encrypt(plaintext).decode()
-        if new_ciphertext == value:
-            continue  # already using primary key
         if not dry_run:
             conn.execute(
                 f"UPDATE {table} SET {col} = %s WHERE id = %s",
