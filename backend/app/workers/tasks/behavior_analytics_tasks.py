@@ -6,12 +6,15 @@ Sprint 14A — Ağ Davranış Analitiği
 """
 import asyncio
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 import redis
 
 from app.core.config import settings
 from app.workers.celery_app import celery_app
+
+log = logging.getLogger(__name__)
 
 _redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
@@ -45,7 +48,7 @@ async def _do_check_topology_drift():
         )).scalar_one_or_none()
 
         if not golden:
-            print("[topology_twin] No golden baseline — skipping drift check")
+            log.debug("topology_twin: no golden baseline, skipping drift check")
             return
 
         golden_keys = {_link_key(lnk) for lnk in (golden.links or [])}
@@ -60,7 +63,7 @@ async def _do_check_topology_drift():
         removed_count = len(golden_keys - current_links)
 
         if added_count == 0 and removed_count == 0:
-            print("[topology_twin] No drift detected")
+            log.debug("topology_twin: no drift detected")
             return
 
         if _is_dup(0, "topology_drift", f"{added_count}_{removed_count}", ttl=3600 * 6):
@@ -97,7 +100,7 @@ async def _do_check_topology_drift():
         _redis.publish("network:events", json.dumps(payload))
         _redis.lpush("network:events:recent", json.dumps(payload))
         _redis.ltrim("network:events:recent", 0, 499)
-        print(f"[topology_twin] Drift event fired: +{added_count} / -{removed_count}")
+        log.info("topology_twin: drift event fired", extra={"added": added_count, "removed": removed_count})
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -259,8 +262,8 @@ async def _do_update_baselines():
                                    known_vlans=known)
 
         await db.commit()
-        print(f"[behavior] Baselines updated — "
-              f"{len(mac_rows)} MAC, {len(traffic_rows)} traffic, {len(vlan_count_rows)} VLAN")
+        log.info("behavior: baselines updated, mac=%d traffic=%d vlan=%d",
+                 len(mac_rows), len(traffic_rows), len(vlan_count_rows))
 
 
 # ── detect_anomalies impl ─────────────────────────────────────────────────────
@@ -282,7 +285,7 @@ async def _do_detect_anomalies():
         bl: dict[tuple, NetworkBaseline] = {(b.device_id, b.metric_type): b for b in all_bl}
 
         if not bl:
-            print("[behavior] No baselines yet — skipping anomaly detection")
+            log.debug("behavior: no baselines yet, skipping anomaly detection")
             return
 
         def _get_device_cache() -> dict:
@@ -431,4 +434,4 @@ async def _do_detect_anomalies():
                 _redis.lpush("network:events:recent", json.dumps(p))
             _redis.ltrim("network:events:recent", 0, 499)
 
-        print(f"[behavior] Anomaly scan done — {fired} events fired")
+        log.info("behavior: anomaly scan done, fired=%d", fired)

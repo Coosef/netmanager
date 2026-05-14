@@ -43,6 +43,9 @@ google-genai==1.14.0
 # Rate limiting
 slowapi==0.1.9
 
+# Observability
+prometheus-client==0.21.1
+
 # Utilities
 httpx==0.28.1
 python-dotenv>=1.2.2

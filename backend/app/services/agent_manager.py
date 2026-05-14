@@ -16,6 +16,7 @@ import redis as _redis_sync
 
 from fastapi import WebSocket
 from app.core.config import settings
+from app.core.metrics import WS_CONNECTIONS_ACTIVE
 
 log = logging.getLogger("agent_manager")
 
@@ -92,6 +93,7 @@ class AgentManager:
                 pass
         self._connections[agent_id] = websocket
         self._meta[agent_id] = {**meta, "connected_at": datetime.now(timezone.utc).isoformat()}
+        WS_CONNECTIONS_ACTIVE.inc()
         try:
             _get_sync_redis().setex(f"agent:{agent_id}:online", _AGENT_ONLINE_TTL, "1")
         except Exception:
@@ -99,6 +101,8 @@ class AgentManager:
         log.info(f"Agent connected: {agent_id} ({meta.get('hostname', '?')} / {meta.get('platform', '?')})")
 
     async def disconnect(self, agent_id: str):
+        if agent_id in self._connections:
+            WS_CONNECTIONS_ACTIVE.dec()
         self._connections.pop(agent_id, None)
         self._meta.pop(agent_id, None)
         self._security.pop(agent_id, None)

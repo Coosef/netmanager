@@ -1,7 +1,10 @@
 """Periodic data retention / table cleanup task."""
 import asyncio
+import logging
 
 from app.workers.celery_app import celery_app
+
+log = logging.getLogger(__name__)
 
 # Tables converted to TimescaleDB hypertables — retention is handled by
 # TimescaleDB's add_retention_policy (chunk drops), not manual DELETEs.
@@ -97,4 +100,4 @@ async def _run():
         await db.commit()
 
     if summary:
-        print(f"[retention] Cleaned up: { {k: v for k, v in summary.items()} }")
+        log.info("retention: cleanup complete, summary=%s", dict(summary))

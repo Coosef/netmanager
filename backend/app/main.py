@@ -1,9 +1,13 @@
+import os
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
@@ -12,7 +16,23 @@ from sqlalchemy import text
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.database import async_engine, Base
+from app.core.logging_config import configure_logging
+from app.core.metrics import (
+    HTTP_REQUESTS_TOTAL,
+    HTTP_REQUEST_DURATION_SECONDS,
+)
+from app.core.utils import normalize_path
 import app.models  # noqa: F401 — register all models with Base
+
+configure_logging()
+
+_req_log = structlog.get_logger("netmanager.http")
+
+# Paths excluded from request logging and HTTP metrics (avoid log storms)
+_SKIP_LOG_PATHS = frozenset({
+    "/health", "/health/ready", "/health/live",
+    "/metrics", "/openapi.json", "/api/docs", "/api/redoc",
+})
 
 limiter = Limiter(key_func=get_remote_address, default_limits=["1000/minute"])
 
@@ -1145,17 +1165,65 @@ app.add_middleware(
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
-    """Attach a unique request_id and start timer to every request."""
+    """Attach request_id + timing, log completed requests, update HTTP metrics."""
     request.state.request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.started_at = time.monotonic()
+
+    # Bind context so every log line during this request carries request_id
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(
+        request_id=request.state.request_id,
+        method=request.method,
+        path=request.url.path,
+    )
+
     response = await call_next(request)
     response.headers["X-Request-ID"] = request.state.request_id
+
+    if request.url.path not in _SKIP_LOG_PATHS:
+        duration_ms = round((time.monotonic() - request.state.started_at) * 1000, 1)
+        _req_log.info(
+            "http_request",
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+        )
+        norm = _normalize_path(request.url.path)
+        HTTP_REQUESTS_TOTAL.labels(
+            method=request.method,
+            path=norm,
+            status_code=str(response.status_code),
+        ).inc()
+        HTTP_REQUEST_DURATION_SECONDS.labels(
+            method=request.method,
+            path=norm,
+        ).observe(duration_ms / 1000)
+
     return response
 
 
 app.include_router(api_router, prefix="/api/v1")
 
+# /health is served by the health router (health.py) — backward-compat
+# endpoint is included there.  Register it after api_router so /health/ready
+# does not collide with any /api/v1 route.
+from app.api.v1.endpoints.health import router as health_router  # noqa: E402
+app.include_router(health_router)
 
-@app.get("/health")
-async def health():
-    return {"status": "ok", "app": settings.APP_NAME}
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics_endpoint():
+    """Prometheus scrape endpoint. Supports multiprocess mode via PROMETHEUS_MULTIPROC_DIR."""
+    from prometheus_client import (
+        CollectorRegistry,
+        generate_latest,
+        multiprocess,
+        CONTENT_TYPE_LATEST,
+    )
+    prom_dir = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "")
+    if prom_dir:
+        registry = CollectorRegistry()
+        multiprocess.MultiProcessCollector(registry)
+        data = generate_latest(registry)
+    else:
+        data = generate_latest()
+    return Response(content=data, media_type=CONTENT_TYPE_LATEST)

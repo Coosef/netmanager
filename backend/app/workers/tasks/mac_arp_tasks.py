@@ -1,8 +1,11 @@
 """Periodic MAC address table and ARP table collection task."""
 import asyncio
 import concurrent.futures
+import logging
 
 from app.workers.celery_app import celery_app
+
+log = logging.getLogger(__name__)
 
 
 def _run_async(coro):
@@ -41,9 +44,7 @@ def collect_mac_arp_all():
             succeeded = sum(1 for r in results if isinstance(r, dict))
             total_mac = sum(r.get("mac_collected", 0) for r in results if isinstance(r, dict))
             total_arp = sum(r.get("arp_collected", 0) for r in results if isinstance(r, dict))
-            print(
-                f"[mac_arp] Collected from {succeeded}/{len(devices)} devices — "
-                f"MAC: {total_mac}, ARP: {total_arp}"
-            )
+            log.info("mac_arp: collection complete, succeeded=%d/%d mac=%d arp=%d",
+                     succeeded, len(devices), total_mac, total_arp)
 
     _run_async(_run())
