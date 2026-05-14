@@ -43,6 +43,16 @@ celery_app.conf.update(
     result_expires=86400,  # 24 hours
     beat_max_loop_interval=300,
     task_default_queue="default",
+    # Faz 5E — Celery resilience
+    task_soft_time_limit=1200,           # 20 min → SoftTimeLimitExceeded (task can clean up)
+    task_time_limit=1500,                # 25 min → SIGKILL (hard ceiling)
+    worker_max_memory_per_child=524288,  # 512 MB per worker (KB) → recycle on OOM
+    broker_connection_retry_on_startup=True,
+    broker_transport_options={
+        "socket_timeout": 5,
+        "socket_connect_timeout": 5,
+        "retry_policy": {"timeout": 5.0},
+    },
     task_routes={
         "app.workers.tasks.bulk_tasks.*": {"queue": "bulk"},
         "app.workers.tasks.monitor_tasks.*": {"queue": "monitor"},

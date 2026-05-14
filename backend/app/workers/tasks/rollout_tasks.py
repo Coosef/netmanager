@@ -23,7 +23,8 @@ def _diff_configs(before: str, after: str) -> list[str]:
     ))
 
 
-@celery_app.task(bind=True, name="app.workers.tasks.rollout_tasks.execute_rollout_task")
+@celery_app.task(bind=True, name="app.workers.tasks.rollout_tasks.execute_rollout_task",
+                 soft_time_limit=3600, time_limit=3900)
 def execute_rollout_task(self, rollout_id: int):
     async def _run():
         from app.core.database import make_worker_session
@@ -248,7 +249,8 @@ async def _notify_rollout_failure(db, rollout, rollout_id: int, final_status: st
         pass
 
 
-@celery_app.task(bind=True, name="app.workers.tasks.rollout_tasks.execute_rollback_task")
+@celery_app.task(bind=True, name="app.workers.tasks.rollout_tasks.execute_rollback_task",
+                 soft_time_limit=3600, time_limit=3900)
 def execute_rollback_task(self, rollout_id: int):
     """Restore pre-rollout backup for each successfully applied device."""
     async def _run():
