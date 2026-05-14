@@ -1,5 +1,196 @@
 # Changelog
 
+## [Pilot] — 2026-05-14 — Pilot Production Sprint — GO ✅
+
+> Baz: `main` (Faz 5E, 312/312 test) · Sprint sonu: **328/328 test**  
+> T1–T9 operasyon testlerinin tamamı PASS. Platform gerçek ortamda doğrulandı.
+
+### Sprint sırasında yapılan düzeltmeler
+
+- **fix(correlation):** `group_wait` TTL race condition — `setex` TTL `GROUP_WAIT_SEC` → `GROUP_WAIT_SEC + 15`; task countdown ile TTL eşit olduğunda key sürüyor ve incident açılmıyordu
+- **feat(synthetic):** Agent-less probe'lar için direct probe execution (`_direct_probe`); `if not probe.agent_id: continue` → `_direct_probe(probe)` path
+- **test:** 16 yeni unit test (`TestSyncIcmp`, `TestSyncTcp`, `TestSyncDns`, `TestSyncHttp`); 312 → 328 PASS
+
+### Pilot Metric Baseline (sprint sonu)
+
+| Metrik | Değer |
+|--------|-------|
+| Test suite | 328 passed |
+| Aktif cihaz | 63 |
+| Celery worker RSS (stabil) | ~2.5 GiB |
+| Backend RAM | ~167 MiB |
+| Redis memory | 3.10 MiB / ~1950 key |
+| SNMP poll throughput | ~1250 poll/5dk (54 cihaz) |
+| Syslog sequential throughput | 71 insert/s, p99 18ms |
+
+### Known Issues → Faz 6 backlog
+
+- **KI-3 (critical):** Celery ↔ WebSocket process isolation — agent-based synthetic probe'lar "agent offline" dönüyor. Faz 6A: Redis Pub/Sub agent command bridge.
+- **KI-1 (medium):** Aggregation endpoint gecikme ~99s. Faz 6B: caching + query optimization.
+- **KI-4 (medium):** Concurrent syslog burst'te silent DB pool exhaustion. Faz 6C: async event bus.
+- **KI-2 (low):** Eski REST agent endpoint'leri 404. Legacy client cleanup.
+
+---
+
+## [Released] — Faz 5: Production Hardening & Platform Reliability (5A → 5E)
+
+### Merge: `feature/faz5e-ha-rollback-resilience` → `main`
+
+> 5 sprint · **312/312 test** · 0 TypeScript hatası · Vite build temiz  
+> Tamamlandı: 2026-05-14
+
+---
+
+### Faz 5A — Alembic Migration (KL-1 Kapatma)
+
+#### `alembic/` — Versiyonlanmış Şema Yönetimi
+- `alembic init` + `env.py` async engine bağlantısı (`asyncpg` driver).
+- Baseline revision: mevcut şema (`alembic stamp head` ile sıfır-diff başlangıç).
+- `main.py` lifespan'dan tüm `ALTER TABLE` blokları kaldırıldı → migration dosyaları.
+- `alembic upgrade head` CI adımına eklendi; `alembic downgrade -1` smoke test.
+- Migration dosyaları: `alembic/versions/` — her faz için ayrı revision.
+
+#### Test eklemesi
+- `test_faz5a_alembic.py` — 8 test eklendi (toplam 244)
+
+---
+
+### Faz 5B — Backup & Restore Otomasyonu
+
+#### `scripts/backup.sh` + `scripts/restore-smoke.sh`
+- `pg_dump` günlük cronjob — 3 kopya rotasyonu, ISO timestamp.
+- Backup doğrulama: `pg_restore --list` ile boş dosya kontrolü.
+- Restore smoke test: geçici container'da restore + `\dt` sanity check.
+- `docker-compose.prod.yml`: `backup` servisi + cronjob volume mount.
+- Opsiyonel: `S3_BACKUP_BUCKET` + `SFTP_BACKUP_HOST` env değişkenleri ile uzak kopya.
+
+#### Test eklemesi
+- `test_faz5b_backup.py` — 8 test eklendi (toplam 252)
+
+---
+
+### Faz 5C — Structured Logging & Metrics (KL-12 Kapatma)
+
+#### `app/core/logging_config.py` — structlog JSON Çıktısı
+- `structlog` JSON formatı: `level`, `timestamp`, `request_id`, `duration_ms`, `user_id`, `path`.
+- `RequestLoggingMiddleware` — her HTTP isteği için request_id zinciri.
+- `LOG_LEVEL` env değişkeni (varsayılan: `INFO`).
+
+#### `app/core/metrics.py` + `/metrics` Endpoint
+- Prometheus multiprocess: `prom_multiproc` tmpfs volume → tüm worker metrikleri toplanıyor.
+- `http_requests_total`, `http_request_duration_seconds`, `celery_tasks_total`, `db_pool_size`.
+- `GET /api/v1/metrics` → Prometheus scrape format.
+
+#### `/health/ready` Genişletme
+- DB bağlantı + pool durumu, Redis ping, TimescaleDB `\dx` versiyon bilgisi.
+- `status: ok | degraded | error` — bileşen bazlı breakdown.
+
+#### Celery Task Sinyalleri (`app/workers/signals.py`)
+- `task_success` / `task_failure` / `task_retry` sinyalleri → Prometheus counter.
+- Celery Beat `metrics_tasks.py`: Redis queue depth + TimescaleDB job istatistikleri.
+
+#### Test eklemesi
+- `test_faz5c_observability.py` — 20 test eklendi (toplam 272)
+
+---
+
+### Faz 5D — Secret Encryption (KL-10 Kapatma)
+
+#### `EncryptedJSON` TypeDecorator (`app/core/encryption.py`)
+- Fernet (AES-128-CBC + HMAC-SHA256) — `CREDENTIAL_ENCRYPTION_KEY` env değişkeni.
+- `process_bind_param` / `process_result_value` — DB'ye yazarken şifrele, okurken çöz.
+- `_fernet_needs_encryption(token)` idempotency guard — çift şifreleme koruması.
+- MultiFernet key rotation: `CREDENTIAL_ENCRYPTION_KEY_OLD` ile geçiş penceresi.
+
+#### `EscalationRule.webhook_headers` → Şifreli
+- `webhook_headers` kolonu `EncryptedJSON` TypeDecorator kullanıyor.
+- Startup migration (`_encrypt_existing_webhook_headers()`): plaintext → Fernet token, idempotent.
+- API maskeleme korunuyor: `webhook_header_keys: list[str]` (değerler asla döndürülmüyor).
+
+#### SNMP v3 Passphrase Genişletme
+- `d5e6f7a8b9c0` migrasyonu: `snmp_v3_auth_passphrase` + `snmp_v3_priv_passphrase` — `String(256)` → `Text`.
+- Uzun passphrase değerleri için kolon genişletildi.
+
+#### DEPLOY_CHECKLIST.md Bölüm 6 — Key Rotation (6A–6E)
+- Dry-run hazırlık → canlı rotation → doğrulama → rollback → MultiFernet geçiş penceresi.
+- `CREDENTIAL_ENCRYPTION_KEY` + `CREDENTIAL_ENCRYPTION_KEY_OLD` env değişkenleri belgelendi.
+
+#### Test eklemesi
+- `test_faz5d_encryption.py` — 17 test eklendi (toplam 289)
+
+---
+
+### Faz 5E — High Availability & Resilience
+
+#### G1 — Celery Worker Resilience
+- Global limitler: `task_soft_time_limit=1200` (20 dk) · `task_time_limit=1500` (25 dk) · `worker_max_memory_per_child=524288` (512 MB).
+- `broker_connection_retry_on_startup=True` + `socket_timeout/connect_timeout=5s`.
+- Per-task override'lar — uzun görevleri global 25 dk limiti öldürmüyor:
+
+  | Görev | soft_time_limit | time_limit |
+  |-------|-----------------|------------|
+  | `execute_rollout_task` | 3600s | 3900s |
+  | `execute_rollback_task` | 3600s | 3900s |
+  | `run_bulk_command` | 3600s | 3900s |
+  | `bulk_backup_configs` | 3600s | 3900s |
+  | `scheduled_topology_discovery` | 600s | 720s |
+
+#### G2 — Redis Reconnect / Backoff (`app/core/redis_client.py`)
+- `ExponentialBackoff(cap=10, base=0.5)` + `Retry(retries=6)`.
+- `socket_keepalive=True`, `health_check_interval=30`, `socket_connect_timeout=5`.
+- Singleton `get_redis()` imzası değişmedi — geriye dönük uyumlu.
+
+#### G3 — WebSocket Reconnect (`frontend/src/utils/useReconnectingWebSocket.ts`)
+- YENİ hook: exponential backoff + jitter (`delay = min(base·2^n, max) + rand(0, base)`).
+- Thundering herd koruması: jitter farklı client'ların aynı anda reconnect etmesini önler.
+- `onReconnecting(attempt, delayMs)` / `onFailed()` callback'leri.
+- `useTaskProgress.ts` bu hook'a migrate edildi; görev tamamlandıktan sonra reconnect bildirimi gönderilmiyor.
+
+#### G4 — Startup Timeout + BG Task Lifecycle (`app/main.py`)
+- `_asyncio_timeout(seconds)` compat helper — Python 3.10 / 3.11 uyumlu.
+- DB startup probe: 30s timeout → `RuntimeError("Startup: DB bağlantısı kurulamadı")`.
+- OUI load: 15s timeout → `WARNING` log, uygulama başlamaya devam eder.
+- `ensure_future` → `create_task(name="bg:...")` — tracked, isimlendirilmiş BG task'lar.
+- Shutdown: `t.cancel()` + `asyncio.gather(*_bg_tasks, return_exceptions=True)`.
+
+#### G5 — Docker Healthchecks + Memory Limits (`docker-compose.yml`)
+- `backend`: `curl -f /health/live` (30s/10s/3×/60s start) · `mem_limit: "2g"`.
+- `celery_worker`: `celery inspect ping --timeout=5` (60s/15s/3×/30s start) · `mem_limit: "4g"`.
+- `celery_beat`: `mem_limit: "512m"`.
+
+#### G6 — Post-Deploy Verification (`scripts/netmanager-verify.sh`)
+- Smoke adımları: `/health/ready` → alembic head → device count → Celery queue depth → `/metrics`.
+- `--full` flag: tam pytest suite çalıştırır.
+- Exit 0=PASS / 1=FAIL — CI/CD pipeline'a eklenilebilir.
+
+### Known Limitations — Güncel Durum
+
+| ID | Durum | Açıklama |
+|----|-------|---------|
+| KL-1 | ✅ Faz 5A | Alembic migration yönetimi — tüm şema değişiklikleri versiyonlanmış |
+| KL-2 | Açık | `sources`/`timeline` JSON vs JSONB — şu an sorunsuz |
+| KL-3 | ✅ Faz 2A | RECOVERING sweep task eklendi |
+| KL-4 | Açık | `queued_events` flush sırasında yeniden bağlantı — teorik duplicate, dedup ile karşılanıyor |
+| KL-5 | ✅ Faz 2A | Multi-hop BFS suppression |
+| KL-6 | ✅ Faz 3A | `_merge_intervals` ile çakışan downtime çift sayımı düzeltildi |
+| KL-7 | ✅ Faz 4A | `_ab_peer_latency_loop` FastAPI bg task — gerçek A→B agent-to-agent latency ölçümü |
+| KL-8 | Açık | `SyntheticProbe.runNow` `agent_id` gerektiriyor — agentsiz probe çalıştırılamaz |
+| KL-9 | ✅ Faz 4B | 5 hypertable (TimescaleDB) — `device_availability_snapshots` + 4 diğer tablo dönüştürüldü |
+| KL-10 | ✅ Faz 5D | `EscalationRule.webhook_headers` Fernet şifreli — startup migration tamamlandı |
+| KL-11 | Açık | Escalation evaluator minimum tepki süresi 5 dk — çok kritik olaylar için azaltılabilir |
+
+### Test Durumu
+
+**312/312 test geçiyor** (Faz 5 kümülatif):
+- `test_faz5a_alembic.py` — 8 test (5A)
+- `test_faz5b_backup.py` — 8 test (5B)
+- `test_faz5c_observability.py` — 20 test (5C)
+- `test_faz5d_encryption.py` — 17 test (5D)
+- `test_faz5e_resilience.py` — 23 test (5E)
+- Önceki testler: 236 test (Faz 1–4)
+
+---
+
 ## [Released] — Faz 4: Advanced Observability & Intelligence (4A → 4E)
 
 ### Merge: `feature/faz4e-escalation-rule-engine` → `main`
@@ -125,7 +316,7 @@ GET   /escalation-rules/logs?rule_id=&incident_id=&status=&limit=&offset=
 
 | ID | Durum | Açıklama |
 |----|-------|---------|
-| KL-1 | Açık | `create_all` tablo yönetimi — Alembic yok, yeni kolon için `main.py` ALTER TABLE gerekli |
+| KL-1 | ✅ Faz 5A | `create_all` kaldırıldı — Alembic migration yönetimi |
 | KL-2 | Açık | `sources`/`timeline` JSON vs JSONB — şu an sorunsuz |
 | KL-3 | ✅ Faz 2A | RECOVERING sweep task eklendi |
 | KL-4 | Açık | `queued_events` flush sırasında yeniden bağlantı — teorik duplicate, dedup ile karşılanıyor |
@@ -134,8 +325,8 @@ GET   /escalation-rules/logs?rule_id=&incident_id=&status=&limit=&offset=
 | KL-7 | ✅ Faz 4A | `_ab_peer_latency_loop` FastAPI bg task — gerçek A→B agent-to-agent latency ölçümü |
 | KL-8 | Açık | `SyntheticProbe.runNow` `agent_id` gerektiriyor — agentsiz probe çalıştırılamaz |
 | KL-9 | ✅ Faz 4B | 5 hypertable (TimescaleDB) — `device_availability_snapshots` + 4 diğer tablo dönüştürüldü |
-| KL-10 | Açık | `EscalationRule.webhook_headers` düz metin JSON — şifreleme Faz 5 kapsamında (credential vault ile) |
-| KL-11 | Açık | Escalation evaluator minimum tepki süresi 5 dk — çok kritik olaylar için azaltılabilir (Faz 5) |
+| KL-10 | ✅ Faz 5D | `EscalationRule.webhook_headers` Fernet şifreli — startup migration tamamlandı |
+| KL-11 | Açık | Escalation evaluator minimum tepki süresi 5 dk — çok kritik olaylar için azaltılabilir |
 
 ### Test Durumu
 

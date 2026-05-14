@@ -29,29 +29,32 @@ NetManager is a full-stack network management system (NMS) built for teams manag
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Browser  →  React 18 + Ant Design 5  (Vite, TypeScript)   │
+│  └─ WebSocket reconnect: backoff+jitter (useReconnecting…)  │
 └──────────────────────┬──────────────────────────────────────┘
                        │ REST / WebSocket
 ┌──────────────────────▼──────────────────────────────────────┐
 │  FastAPI 0.115  (async, Pydantic v2)   :8000                │
-│  ├─ /api/v1/*  (35+ endpoint groups)                        │
-│  ├─ WebSocket  /ws/events                                   │
-│  └─ Background lifespan tasks (DB migrations, seeding)      │
+│  ├─ /api/v1/*  (35+ endpoint groups)  /metrics (Prometheus) │
+│  ├─ WebSocket  /ws/events  /ws/tasks/{id}                   │
+│  ├─ Background tasks: tracked create_task, cancel on exit   │
+│  └─ Startup: 30s DB timeout, Alembic upgrade head           │
 └──────┬───────────────┬───────────────────────────────────────┘
        │               │
 ┌──────▼─────┐  ┌──────▼──────────────────────────────────────┐
-│TimescaleDB │  │  Celery Workers  (30 concurrent)            │
+│TimescaleDB │  │  Celery Workers  (30 concurrent, mem 4 GB)  │
 │(PostgreSQL │  │  ├─ SSH tasks (backup, probe, run)          │
 │ pg16)      │  │  ├─ SNMP polling (5 min beat)               │
 │            │  │  ├─ Monitor / event detection                │
 │            │  │  ├─ Playbook execution                       │
 │            │  │  ├─ Config drift check (daily)              │
-│            │  │  └─ EOL / lifecycle alerts                  │
+│            │  │  └─ Time limits: global 25 min, rollout 65 min │
 └────────────┘  └──────┬──────────────────────────────────────┘
                         │
 ┌───────────────────────▼──────┐  ┌──────────────────────────┐
-│  Redis 7  (broker + cache)   │  │  Proxy Agents            │
+│  Redis 8  (broker + cache)   │  │  Proxy Agents            │
 │  └─ Celery broker/result     │  │  (Python WebSocket —     │
 │  └─ Event dedup TTL          │  │   macOS/Linux/Windows)   │
+│  └─ ExponentialBackoff retry │  │                          │
 └──────────────────────────────┘  └──────────────────────────┘
 ```
 

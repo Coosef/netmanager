@@ -26,6 +26,7 @@ def get_redis() -> aioredis.Redis:
                 socket.TCP_KEEPCNT: 3,
             },
             socket_connect_timeout=5,
+            socket_timeout=5,           # read/write timeout — frozen socket'ların event loop'u bloke etmesini önler
             health_check_interval=30,
         )
     return _redis

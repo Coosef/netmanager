@@ -130,7 +130,9 @@ async def _handle_problem(
             return None  # group_wait is still running — absorb duplicate
 
         try:
-            sync_redis.setex(gw_key, GROUP_WAIT_SEC, "1")
+            # TTL is GROUP_WAIT_SEC + 15 so the key outlives the task's countdown
+            # and is still present when open_incident_after_wait checks it.
+            sync_redis.setex(gw_key, GROUP_WAIT_SEC + 15, "1")
         except Exception:
             pass
 

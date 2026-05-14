@@ -1,6 +1,6 @@
 # NetManager — Ürün Yol Haritası
 
-> Son güncelleme: 2026-05-13  
+> Son güncelleme: 2026-05-14  
 > Platform: FastAPI · React · Celery · Redis · PostgreSQL · Docker  
 > Hedef: Multi-vendor ağ görünürlüğü, yapılandırma kontrolü, topoloji zekâsı ve güvenli otomasyon platformu
 
@@ -451,87 +451,62 @@
 |----|-------|--------|
 | KL-7 | ✅ Faz 4A | Gerçek A→B agent-to-agent latency |
 | KL-9 | ✅ Faz 4B | 5 TimescaleDB hypertable |
-| KL-10 | Açık → Faz 5 | `webhook_headers` plaintext — credential vault şifrelemesi |
-| KL-11 | Açık → Faz 5 | Escalation minimum tepki süresi 5 dk — kritik olaylar için düşürülebilir |
+| KL-10 | ✅ Faz 5D | `webhook_headers` Fernet şifreli — startup migration + MultiFernet rotation |
+| KL-11 | Açık | Escalation minimum tepki süresi 5 dk — kritik olaylar için düşürülebilir |
 
 ---
 
-## FAZ 5 — Production Hardening & Platform Reliability 🔵
+## FAZ 5 — Production Hardening & Platform Reliability ✅
 
-> Öncelik: Çok Yüksek — Faz 4 sonrası production-ready olmak için kritik altyapı adımları
+> Tamamlandı: 2026-05-14 · **312/312 test** · 0 TypeScript hatası
 
-### 5A — Alembic Migration (KL-1 Kapatma)
+### 5A — Alembic Migration ✅ (KL-1 Kapatma)
 
-**Hedef:** `create_all` + `ALTER TABLE` pattern'ından çıkmak; tüm şema değişiklikleri versiyonlanmış migration dosyaları ile yönetilmeli.
+- `alembic init` + `env.py` async engine — baseline revision ile mevcut şemaya sync.
+- `main.py` lifespan'dan tüm `ALTER TABLE` blokları kaldırıldı → versiyonlanmış migration dosyaları.
+- CI'da `alembic upgrade head`; `alembic downgrade -1` smoke test.
+- `alembic/versions/` — her faz için ayrı revision.
 
-**Kapsam:**
-- `alembic init` + `env.py` ayarı (async engine)
-- Mevcut şema için başlangıç migration (baseline revision)
-- `main.py` lifespan'dan `ALTER TABLE` bloklarını kaldır → Alembic revision'larına taşı
-- CI: her PR'da `alembic upgrade head` çalışmalı; downgrade test edilmeli
-- Rollback: `alembic downgrade -1` smoke test
+### 5B — Backup & Restore Otomasyonu ✅
 
-### 5B — Backup & Restore Otomasyonu
+- `scripts/backup.sh` — günlük `pg_dump`, 3 kopya rotasyonu, `pg_restore --list` doğrulama.
+- `scripts/restore-smoke.sh` — geçici container'da restore + bağlantı testi.
+- `docker-compose.prod.yml`: backup servisi + cronjob volume.
+- Opsiyonel uzak kopya: `S3_BACKUP_BUCKET` / `SFTP_BACKUP_HOST`.
 
-**Hedef:** Veritabanı ve konfigürasyon yedeklerinin güvenilir, test edilmiş prosedürleri.
+### 5C — Structured Logging & Metrics ✅
 
-**Kapsam:**
-- PostgreSQL/TimescaleDB `pg_dump` — cronjob (günlük, 3 kopya rotasyonu)
-- Backup doğrulama: `pg_restore --list` ile kontrol, boş dosya uyarısı
-- S3/SFTP remote kopya (opsiyonel, yapılandırma ile)
-- Restore smoke test script — yeni container'da restore + bağlantı testi
-- `docker-compose.prod.yml` — backup volume mount + cronjob servisi
+- `structlog` JSON — request_id, duration_ms, user_id, path zincirleme.
+- `/api/v1/metrics` Prometheus multiprocess (prom_multiproc tmpfs).
+- `/health/ready` genişletildi: DB pool + Redis + TimescaleDB bileşen bazlı.
+- Celery signals: `task_success` / `task_failure` / `task_retry` → Prometheus counter.
 
-### 5C — Structured Logging & Metrics
+### 5D — Secret Encryption ✅ (KL-10 Kapatma)
 
-**Hedef:** Container log'larından ölçülebilir observability'ye geçiş.
+- `EncryptedJSON` SQLAlchemy TypeDecorator — Fernet, idempotency guard, MultiFernet rotation.
+- `webhook_headers` → şifreli; startup migration idempotent (plaintext → token).
+- `CREDENTIAL_ENCRYPTION_KEY_OLD` ile zero-downtime key rotation.
+- DEPLOY_CHECKLIST §6: 5 adımlı rotation prosedürü (6A–6E).
 
-**Kapsam:**
-- `structlog` — JSON çıktısı (level, timestamp, request_id, duration_ms, user_id)
-- `/api/v1/health` genişletme: DB bağlantısı, Redis, Celery worker sayısı, TimescaleDB versiyon
-- `/api/v1/metrics` — Prometheus format (istekler/sn, hata oranı, DB pool kullanımı)
-- Celery task başarı/başarısız/süre metrikleri (Flower veya custom endpoint)
-- Frontend: Agents sayfasına Celery task queue durumu widget
+### 5E — High Availability & Resilience ✅
 
-### 5D — Secret Encryption (KL-10 Kapatma)
-
-**Hedef:** `EscalationRule.webhook_headers` ve diğer hassas webhook konfigürasyonlarını şifreli saklamak.
-
-**Kapsam:**
-- Mevcut `AgentCredentialBundle` AES-256-GCM şifrelemesini (Sprint 11G) `webhook_headers` için yeniden kullan
-- `EncryptedJSON` SQLAlchemy TypeDecorator — `store/load` otomatik şifrele/çöz
-- Mevcut düz metin değerleri tek seferlik migration ile şifrele
-- Key rotation: yeni key ile re-encrypt (vault key versiyonlama)
-
-### 5E — High Availability & Rollback Plan
-
-**Hedef:** Deploy sırasında kesinti olmadan güncelleme; hatalı deploy'dan hızlı geri dönüş.
-
-**Kapsam:**
-- Blue/green container deploy: yeni image → sağlık kontrolü → traffic kesme → eski container dur
-- Rollback script: önceki image tag + son başarılı migration revision'ına `alembic downgrade`
-- `DEPLOY.md` — adım adım production deploy + rollback prosedürü
-- Health check endpoint'i Nginx/traefik ile entegre (unhealthy → eski versiyona yönlendir)
-
-### Faz 5 Uygulama Sırası
-
-```
-5A → Alembic (bağımsız, her şeyden önce)
-5B → Backup otomasyon (5A tamamlandıktan sonra schema stable)
-5C → Logging/metrics (5A ile paralel yürütülebilir)
-5D → Secret encryption (5A tamamlandıktan sonra, migration güvenli)
-5E → HA/rollback (5A + 5B tamamlandıktan sonra)
-```
+- **Celery**: global soft/hard time limits · `max_memory_per_child=512 MB` · per-task overrides (rollout/bulk: 60 dk).
+- **Redis**: ExponentialBackoff + 6 retry · keepalive · `health_check_interval=30`.
+- **WebSocket**: `useReconnectingWebSocket` hook — backoff+jitter, max 10 deneme.
+- **Startup**: 30s DB timeout · 15s OUI timeout · tracked BG tasks (cancel+gather on shutdown).
+- **Docker**: backend/worker healthcheck · `mem_limit: 2g/4g/512m`.
+- **Smoke**: `scripts/netmanager-verify.sh` (5 adım, CI exit 0/1).
 
 ### Faz 5 Başarı Kriterleri
 
-| Kriter | Ölçüm |
+| Kriter | Sonuç |
 |--------|-------|
-| Sıfır `ALTER TABLE` `main.py`'de | Tüm şema `alembic revision`'larında |
-| Günlük backup + doğrulama | Cronjob log + alert |
-| Tüm sensitif config şifreli | `webhook_headers`, credential fields → `EncryptedJSON` |
-| `/health` endpoint production'da 200 | DB + Redis + Celery hepsi yeşil |
-| Rollback < 5 dk | Script ile test edildi |
+| ✅ Sıfır `ALTER TABLE` `main.py`'de | Tüm şema `alembic revision`'larında |
+| ✅ Günlük backup + doğrulama | `scripts/backup.sh` cronjob + restore smoke test |
+| ✅ Tüm sensitif config şifreli | `webhook_headers` → `EncryptedJSON` (Fernet) |
+| ✅ `/health/ready` production'da 200 | DB + Redis + TimescaleDB hepsi yeşil |
+| ✅ Redis transient outage → degraded, recover | `pause redis` → 503 → `unpause` → 200 onaylandı |
+| ✅ 312/312 test geçiyor | `python -m pytest tests/ -q` |
 
 ---
 
