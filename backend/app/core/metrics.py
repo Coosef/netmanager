@@ -84,3 +84,23 @@ HEALTH_COMPONENT_UP = Gauge(
     "Component health: 1 = reachable, 0 = unreachable",
     ["component"],   # db | redis | timescaledb
 )
+
+# ── Agent Command Bridge (Faz 6A) ─────────────────────────────────────────────
+AGENT_BRIDGE_COMMAND_DURATION = Histogram(
+    "netmanager_agent_bridge_command_duration_seconds",
+    "Agent bridge round-trip duration from FastAPI dispatch to response publish",
+    ["command_type"],
+    buckets=[0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0],
+)
+
+AGENT_BRIDGE_TIMEOUT_TOTAL = Counter(
+    "netmanager_agent_bridge_timeout_total",
+    "Agent bridge commands that exceeded timeout",
+    ["command_type"],
+)
+
+AGENT_BRIDGE_COMMAND_TOTAL = Counter(
+    "netmanager_agent_bridge_command_total",
+    "Agent bridge commands dispatched",
+    ["command_type", "result"],   # result: success | agent_offline | timeout | error
+)

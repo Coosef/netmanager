@@ -66,6 +66,9 @@ celery_app.conf.update(
         "app.workers.tasks.rotation_tasks.*": {"queue": "monitor"},
         "app.workers.tasks.rollout_tasks.*": {"queue": "monitor"},
         "app.workers.tasks.behavior_analytics_tasks.*": {"queue": "monitor"},
+        # Faz 6A — agent-dispatched tasks get their own isolated queue
+        "app.workers.tasks.synthetic_tasks.*": {"queue": "agent_cmd"},
+        "app.workers.tasks.agent_peer_tasks.*": {"queue": "agent_cmd"},
     },
     beat_schedule={
         "poll-device-status-every-5min": {

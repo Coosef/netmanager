@@ -728,6 +728,14 @@ async def lifespan(app: FastAPI):
     except asyncio.TimeoutError:
         _startup_log.warning("startup: OUI yüklemesi zaman aştı — arka planda yeniden denenecek")
 
+    # Faz 6A — Agent Command Bridge: relay Celery→agent commands via Redis Pub/Sub
+    from app.services.agent_bridge import agent_bridge_listener as _bridge
+    from app.core.redis_client import get_redis as _get_redis
+    try:
+        await _bridge.start(redis_client=_get_redis(), manager=_am)
+    except Exception:
+        _startup_log.exception("startup: agent_bridge failed to start (non-fatal)")
+
     # Background tasks — tracked for graceful shutdown cancellation
     _bg_tasks = [
         asyncio.create_task(_backfill_mac_oui(),         name="bg:mac_oui"),
@@ -737,7 +745,11 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    # Graceful shutdown: cancel background loops before disposing engine
+    # Graceful shutdown: stop bridge then cancel background loops
+    try:
+        await _bridge.stop()
+    except Exception:
+        pass
     for _t in _bg_tasks:
         _t.cancel()
     await asyncio.gather(*_bg_tasks, return_exceptions=True)
