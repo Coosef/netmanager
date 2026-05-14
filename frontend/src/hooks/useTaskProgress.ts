@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react'
+import { useRef } from 'react'
 import { notification } from 'antd'
 import { useQueryClient } from '@tanstack/react-query'
 import { buildWsUrl } from '@/utils/ws'
+import { useReconnectingWebSocket } from '@/utils/useReconnectingWebSocket'
 
 interface ProgressMsg {
   task_id: number
@@ -16,7 +17,8 @@ interface ProgressMsg {
 
 /**
  * Opens a WebSocket to /api/v1/ws/tasks/{taskId} and shows an antd notification
- * with live progress. Closes and updates notification when task finishes.
+ * with live progress. Automatically reconnects with exponential backoff + jitter
+ * if the connection drops mid-task (e.g. backend restart).
  */
 export function useTaskProgress(taskId: number | null, options?: {
   title?: string
@@ -24,33 +26,37 @@ export function useTaskProgress(taskId: number | null, options?: {
   invalidateKeys?: string[][]
 }) {
   const qc = useQueryClient()
-  const wsRef = useRef<WebSocket | null>(null)
   const notifKey = `task-progress-${taskId}`
+  const doneRef = useRef(false)
 
-  useEffect(() => {
-    if (!taskId) return
+  const url = taskId ? buildWsUrl(`/api/v1/ws/tasks/${taskId}`) : null
 
-    const url = buildWsUrl(`/api/v1/ws/tasks/${taskId}`)
+  useReconnectingWebSocket(url, {
+    maxAttempts: 10,
+    baseDelayMs: 1000,
+    maxDelayMs: 20_000,
 
-    notification.open({
-      key: notifKey,
-      message: options?.title || `Görev #${taskId} çalışıyor`,
-      description: 'Başlatılıyor...',
-      duration: 0,
-      placement: 'bottomRight',
-    })
+    onOpen() {
+      if (doneRef.current) return
+      notification.open({
+        key: notifKey,
+        message: options?.title || `Görev #${taskId} çalışıyor`,
+        description: 'Başlatılıyor...',
+        duration: 0,
+        placement: 'bottomRight',
+      })
+    },
 
-    const ws = new WebSocket(url)
-    wsRef.current = ws
-
-    ws.onmessage = (e) => {
+    onMessage(e) {
       try {
         const msg: ProgressMsg = JSON.parse(e.data)
         const isDone = ['success', 'partial', 'failed', 'cancelled'].includes(msg.status)
 
         const desc = msg.error
           ? `Hata: ${msg.error}`
-          : `Tamamlanan: ${msg.completed}  Başarısız: ${msg.failed}${msg.depth !== undefined ? `  Derinlik: ${msg.depth}` : ''}${msg.ip ? `  — ${msg.ip}` : ''}`
+          : `Tamamlanan: ${msg.completed}  Başarısız: ${msg.failed}${
+              msg.depth !== undefined ? `  Derinlik: ${msg.depth}` : ''
+            }${msg.ip ? `  — ${msg.ip}` : ''}`
 
         notification.open({
           key: notifKey,
@@ -58,33 +64,42 @@ export function useTaskProgress(taskId: number | null, options?: {
           description: desc,
           duration: isDone ? 5 : 0,
           type: isDone
-            ? msg.status === 'success' ? 'success' : msg.status === 'partial' ? 'warning' : 'error'
+            ? msg.status === 'success' ? 'success'
+              : msg.status === 'partial' ? 'warning'
+              : 'error'
             : undefined,
           placement: 'bottomRight',
         })
 
         if (isDone) {
-          ws.close()
+          doneRef.current = true
           options?.invalidateKeys?.forEach((key) => qc.invalidateQueries({ queryKey: key }))
           options?.onDone?.()
         }
-      } catch { /* ignore */ }
-    }
+      } catch { /* ignore malformed frames */ }
+    },
 
-    ws.onerror = () => {
+    onReconnecting(attempt, delayMs) {
+      if (doneRef.current) return
       notification.open({
         key: notifKey,
         message: options?.title || `Görev #${taskId}`,
-        description: 'WebSocket bağlantısı kesildi',
+        description: `Bağlantı kesildi — yeniden bağlanıyor (${attempt}/10, ${Math.round(delayMs / 1000)}s)`,
         type: 'warning',
-        duration: 4,
+        duration: 0,
         placement: 'bottomRight',
       })
-    }
+    },
 
-    return () => {
-      ws.close()
-      wsRef.current = null
-    }
-  }, [taskId])
+    onFailed() {
+      notification.open({
+        key: notifKey,
+        message: options?.title || `Görev #${taskId}`,
+        description: 'Bağlantı kesildi — görevi API üzerinden kontrol edin',
+        type: 'error',
+        duration: 8,
+        placement: 'bottomRight',
+      })
+    },
+  })
 }

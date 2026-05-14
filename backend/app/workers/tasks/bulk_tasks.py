@@ -51,7 +51,8 @@ def _run_async(coro):
         loop.close()
 
 
-@celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.run_bulk_command")
+@celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.run_bulk_command",
+                 soft_time_limit=3600, time_limit=3900)
 def run_bulk_command(self, task_id: int, device_ids: list[int], commands: list[str], is_config: bool = False):
     db = _get_db()
     ssh = SSHManager()
@@ -120,7 +121,8 @@ def run_bulk_command(self, task_id: int, device_ids: list[int], commands: list[s
         db.close()
 
 
-@celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.bulk_backup_configs")
+@celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.bulk_backup_configs",
+                 soft_time_limit=3600, time_limit=3900)
 def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: int):
     db = _get_db()
     ssh = SSHManager()
@@ -259,7 +261,8 @@ def _notify_backup_failures(db: Session, failed: int, completed: int, results: d
         pass
 
 
-@celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.bulk_password_change")
+@celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.bulk_password_change",
+                 soft_time_limit=3600, time_limit=3900)
 def bulk_password_change(self, task_id: int, device_ids: list[int], new_password: str, created_by: int):
     db = _get_db()
     ssh = SSHManager()

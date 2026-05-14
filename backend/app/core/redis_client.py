@@ -1,7 +1,10 @@
 import json
+import socket
 from typing import Any, Optional
 
 import redis.asyncio as aioredis
+from redis.backoff import ExponentialBackoff
+from redis.retry import Retry
 
 from app.core.config import settings
 
@@ -11,7 +14,20 @@ _redis: Optional[aioredis.Redis] = None
 def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:
-        _redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        _redis = aioredis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            retry_on_timeout=True,
+            retry=Retry(ExponentialBackoff(cap=10, base=0.5), retries=6),
+            socket_keepalive=True,
+            socket_keepalive_options={
+                socket.TCP_KEEPIDLE: 60,
+                socket.TCP_KEEPINTVL: 10,
+                socket.TCP_KEEPCNT: 3,
+            },
+            socket_connect_timeout=5,
+            health_check_interval=30,
+        )
     return _redis
 
 

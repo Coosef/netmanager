@@ -381,7 +381,8 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
     _run_async(_run())
 
 
-@celery_app.task(name="app.workers.tasks.topology_tasks.scheduled_topology_discovery")
+@celery_app.task(name="app.workers.tasks.topology_tasks.scheduled_topology_discovery",
+                 soft_time_limit=600, time_limit=720)
 def scheduled_topology_discovery():
     async def _run():
         from app.core.database import AsyncSessionLocal

@@ -1,5 +1,7 @@
+import asyncio
 import os
 import re
+import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -37,8 +39,39 @@ _SKIP_LOG_PATHS = frozenset({
 limiter = Limiter(key_func=get_remote_address, default_limits=["1000/minute"])
 
 
+_startup_log = structlog.get_logger("netmanager.startup")
+
+
+def _asyncio_timeout(seconds: float):
+    """asyncio.timeout() compat: Python 3.11+ native, 3.10 via wait_for wrapper."""
+    if sys.version_info >= (3, 11):
+        return asyncio.timeout(seconds)
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def _compat():
+        task = asyncio.current_task()
+        handle = asyncio.get_event_loop().call_later(seconds, task.cancel)
+        try:
+            yield
+        except asyncio.CancelledError:
+            raise asyncio.TimeoutError()
+        finally:
+            handle.cancel()
+
+    return _compat()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── DB startup with timeout ───────────────────────────────────────────────
+    try:
+        async with _asyncio_timeout(30):
+            async with async_engine.begin() as conn:
+                pass  # probe connection
+    except asyncio.TimeoutError:
+        raise RuntimeError("Startup: DB bağlantısı 30s içinde kurulamadı")
+
     async with async_engine.begin() as conn:
         # ── DEPRECATED: create_all + ALTER TABLE pattern ──────────────────────
         # Faz 5A (2026-05-13): Alembic is now the authoritative schema manager.
@@ -689,19 +722,26 @@ async def lifespan(app: FastAPI):
 
     # Load OUI vendor database (downloads IEEE CSV if not cached)
     from app.services import oui_service as _oui
-    await _oui.ensure_loaded()
+    try:
+        async with _asyncio_timeout(15):
+            await _oui.ensure_loaded()
+    except asyncio.TimeoutError:
+        _startup_log.warning("startup: OUI yüklemesi zaman aştı — arka planda yeniden denenecek")
 
-    # Backfill oui_vendor/device_type for existing MAC entries (runs in background)
-    import asyncio as _asyncio
-    _asyncio.ensure_future(_backfill_mac_oui())
-
-    # Agent-aware device status poller — runs inside FastAPI so agent_manager connections are live
-    _asyncio.ensure_future(_agent_device_status_loop())
-
-    # A→B agent peer latency loop — requires live WebSocket connections (FastAPI process only)
-    _asyncio.ensure_future(_ab_peer_latency_loop())
+    # Background tasks — tracked for graceful shutdown cancellation
+    _bg_tasks = [
+        asyncio.create_task(_backfill_mac_oui(),         name="bg:mac_oui"),
+        asyncio.create_task(_agent_device_status_loop(), name="bg:device_status"),
+        asyncio.create_task(_ab_peer_latency_loop(),     name="bg:peer_latency"),
+    ]
 
     yield
+
+    # Graceful shutdown: cancel background loops before disposing engine
+    for _t in _bg_tasks:
+        _t.cancel()
+    await asyncio.gather(*_bg_tasks, return_exceptions=True)
+    _startup_log.info("startup: background tasks cancelled")
     await async_engine.dispose()
 
 
