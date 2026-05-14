@@ -1,7 +1,7 @@
 # Production Deploy Checklist
 
-> NetManager — Faz 5B sonrası üretim ortamı prosedürleri  
-> Güncellendi: 2026-05-13
+> NetManager — Faz 5D sonrası üretim ortamı prosedürleri  
+> Güncellendi: 2026-05-14
 
 Bu döküman; ilk kurulum, güncellemeler ve acil rollback senaryoları için adım adım prosedürleri kapsar.
 
@@ -12,9 +12,9 @@ Bu döküman; ilk kurulum, güncellemeler ve acil rollback senaryoları için ad
 Tüm adımlar tamamlanmadan `docker compose up` çalıştırılmamalıdır.
 
 ```bash
-# 1. Test süiti tümüyle geçmeli (236/236)
+# 1. Test süiti tümüyle geçmeli (289/289)
 cd backend && python -m pytest tests/ -q
-# Beklenen: 236 passed in X.XXs
+# Beklenen: 289 passed in X.XXs
 
 # 2. TypeScript sıfır hata
 cd frontend && npm run type-check
@@ -277,7 +277,126 @@ Bu ikincil yöntemdir. Birincil yöntem her zaman `netmanager-backup.sh` (pg_dum
 
 ---
 
-## 6 — Rollback Prosedürü
+## 6 — Credential Encryption Key Rotation (Faz 5D)
+
+> **Gerçek rotation ne zaman yapılır:** Sadece `CREDENTIAL_ENCRYPTION_KEY` değiştirilmesi gerektiğinde (güvenlik ihlali şüphesi, key süresi, personel değişikliği). Rutin deploy'larda bu bölüm atlanır.
+
+### 6A — Rotation Öncesi Hazırlık
+
+```bash
+# 1. Yeni key üret (güvenli rastgele)
+python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+# Çıktıyı kaydet — bu <YENİ_KEY> olacak
+
+# 2. Mevcut aktif key = <ESKİ_KEY>
+# .env veya secrets manager'dan CREDENTIAL_ENCRYPTION_KEY değerini al
+
+# 3. Zorunlu: DB yedeği al
+./scripts/netmanager-backup.sh
+# backups/YYYYMMDD_HHMMSS/db.dump oluştuğunu doğrula
+
+# 4. Dry-run: kaç credential etkilenecek?
+docker compose exec backend sh -c \
+  'CREDENTIAL_ENCRYPTION_KEY_OLD=$CREDENTIAL_ENCRYPTION_KEY \
+   python /app/scripts/rotate_credentials.py --dry-run'
+# Beklenen çıktı:
+#   [rotate_credentials] mode=DRY-RUN
+#   devices.ssh_password_enc: N secret(s) would be rotated
+#   ...
+#   [rotate_credentials] Dry-run complete. Would rotate: N secret(s)
+```
+
+### 6B — Rotation (Bakım Penceresi Gerektirir)
+
+```bash
+# 1. Backend/Celery servislerini durdur (rotation sırasında yazma olmamalı)
+docker compose stop backend celery_worker celery_beat
+
+# 2. Rotation scriptini çalıştır
+docker compose run --rm \
+  -e CREDENTIAL_ENCRYPTION_KEY=<YENİ_KEY> \
+  -e CREDENTIAL_ENCRYPTION_KEY_OLD=<ESKİ_KEY> \
+  -e SYNC_DATABASE_URL=postgresql+psycopg2://netmgr:netmgr123@postgres:5432/network_manager \
+  -e ROTATION_BACKUP_CONFIRMED=1 \
+  backend python /app/scripts/rotate_credentials.py
+# Beklenen: "[rotate_credentials] Committed. Total rotated: N"
+
+# 3. .env'i güncelle — yeni key aktif, eski key kaldır
+CREDENTIAL_ENCRYPTION_KEY=<YENİ_KEY>
+CREDENTIAL_ENCRYPTION_KEY_OLD=   # artık boş
+
+# 4. Servisleri yeniden başlat
+docker compose up -d backend celery_worker celery_beat
+```
+
+### 6C — Rotation Sonrası Doğrulama
+
+```bash
+# Mevcut key ile decrypt çalışıyor mu?
+docker compose exec backend python -c "
+from app.core.security import encrypt_credential, decrypt_credential
+enc = encrypt_credential('smoke-test')
+assert decrypt_credential(enc) == 'smoke-test'
+print('OK: new key encrypt/decrypt çalışıyor')
+"
+
+# DB'deki credential'lar yeni key ile decryptable mı?
+docker compose exec backend python -c "
+import asyncio, os
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
+from app.core.security import decrypt_credential
+
+async def check():
+    engine = create_async_engine(os.environ['DATABASE_URL'])
+    async with engine.connect() as conn:
+        rows = (await conn.execute(
+            text(\"SELECT id, ssh_password_enc FROM devices WHERE ssh_password_enc IS NOT NULL LIMIT 3\")
+        )).fetchall()
+        for r in rows:
+            plain = decrypt_credential(r[1])
+            print(f'id={r[0]}: decrypted OK (len={len(plain)})')
+    await engine.dispose()
+
+asyncio.run(check())
+"
+
+# API smoke test
+curl -s http://localhost:8000/health/ready
+# {"status": "ready"} beklenir
+```
+
+### 6D — Rotation Rollback
+
+Bir şeyler ters giderse (rotation yarıda kesildiyse):
+
+```bash
+# 1. Servisleri durdur
+docker compose stop backend celery_worker celery_beat
+
+# 2. DB'yi yedekten geri yükle (bakım öncesi alınan yedek)
+./scripts/netmanager-restore.sh ./backups/<ROTATION_ÖNCESİ_TIMESTAMP>
+
+# 3. .env'i eski key'e geri döndür
+CREDENTIAL_ENCRYPTION_KEY=<ESKİ_KEY>
+CREDENTIAL_ENCRYPTION_KEY_OLD=   # boş
+
+# 4. Servisleri başlat
+docker compose up -d backend celery_worker celery_beat
+```
+
+### 6E — MultiFernet Geçiş Penceresi
+
+Key rotation sırasında **iki key aynı anda aktif** olabilir (zero-downtime):
+
+1. `.env`'e `CREDENTIAL_ENCRYPTION_KEY_OLD=<ESKİ_KEY>` ekle, `CREDENTIAL_ENCRYPTION_KEY=<YENİ_KEY>` yap
+2. Servisleri yeniden başlat — MultiFernet: yeni key ile şifreler, eski key ile de açar
+3. `rotate_credentials.py` çalıştır — tüm değerleri yeni key ile yeniden şifreler
+4. `CREDENTIAL_ENCRYPTION_KEY_OLD` boşalt, servisleri yeniden başlat
+
+---
+
+## 7 — Rollback Prosedürü (Uygulama)
 
 > **Rollback öncesi zorunlu adım:** Deploy öncesi her zaman bir yedek alın.
 > ```bash
@@ -327,7 +446,7 @@ docker exec switch-postgres-1 psql -U netmgr -d network_manager \
 
 ---
 
-## 7 — Gözlemlenebilirlik Kontrol Noktaları
+## 8 — Gözlemlenebilirlik Kontrol Noktaları
 
 ### Hızlı Durum Özeti
 
@@ -362,7 +481,7 @@ docker exec switch-postgres-1 psql -U netmgr -d network_manager \
 
 ---
 
-## 8 — Ortam Değişkenleri (Zorunlu)
+## 9 — Ortam Değişkenleri (Zorunlu)
 
 ```bash
 # Backend zorunlu
@@ -372,8 +491,12 @@ REDIS_URL=           # redis://host:6379/0
 ALLOWED_ORIGINS=     # https://your-domain.com
 
 # Backend opsiyonel (varsayılan değerler var)
-CELERY_BROKER_URL=   # varsayılan REDIS_URL ile aynı
-LOG_LEVEL=           # INFO (prod) / DEBUG (dev)
+CELERY_BROKER_URL=                    # varsayılan REDIS_URL ile aynı
+LOG_LEVEL=                            # INFO (prod) / DEBUG (dev)
+LOG_FORMAT=                           # json (prod) / console (dev)
+PROMETHEUS_MULTIPROC_DIR=             # tmpfs mount path (örn. /tmp/prom_multiproc)
+CREDENTIAL_ENCRYPTION_KEY=            # 32-byte URL-safe base64 Fernet key (zorunlu)
+CREDENTIAL_ENCRYPTION_KEY_OLD=        # sadece key rotation sırasında dolu; sonra boşaltılır
 
 # TimescaleDB (Faz 4B)
 # DB_URL'de TimescaleDB'ye işaret etmeli — plain PostgreSQL değil
@@ -381,18 +504,18 @@ LOG_LEVEL=           # INFO (prod) / DEBUG (dev)
 
 ---
 
-## 9 — Bilinen Sorunlar & Geçici Çözümler
+## 10 — Bilinen Sorunlar & Geçici Çözümler
 
 | Sorun | Çözüm |
 |-------|-------|
 | `__pycache__` sorunu: container restart loop, eski `.pyc` | `find backend -name "__pycache__" -type d \| xargs rm -rf` + restart |
 | Celery Beat duplicate task (restart sonrası) | `docker compose restart celery_beat` — beat state temizlenir |
 | TimescaleDB ilk başlatmada yavaş | Extension yüklenmesi 30–60s sürebilir; health check'e bekleme ekle |
-| `webhook_headers` plaintext (KL-10) | Faz 5'e kadar: webhook URL + header değerlerini `.env`'de tutmayın, DB'de saklayın |
+| `webhook_headers` plaintext (KL-10) | ✅ Faz 5D ile kapatıldı — artık DB'de Fernet ile şifreli |
 
 ---
 
-## 10 — Migration Review Checklist (Zorunlu)
+## 11 — Migration Review Checklist (Zorunlu)
 
 Her PR'da schema değişikliği varsa aşağıdaki liste tamamlanmadan merge edilmez.
 
@@ -432,7 +555,7 @@ python -m pytest tests/ -q
 
 ---
 
-## 11 — Staging → Production Migration Dry-Run Prosedürü
+## 12 — Staging → Production Migration Dry-Run Prosedürü
 
 ### Adım 1 — Staging'de Uygula
 
@@ -497,12 +620,12 @@ docker exec -w /app switch-backend-1 alembic downgrade -1
 
 ---
 
-## 12 — Açık Maddeler (KL Tablosu)
+## 13 — Açık Maddeler (KL Tablosu)
 
 | ID | Açıklama | Planlanan Çözüm |
 |----|----------|----------------|
 | KL-1 | `main.py` ALTER TABLE — Alembic yok | ✅ Faz 5A — kapatıldı |
 | KL-2 | Backup/restore TimescaleDB uyumluluğu | ✅ Faz 5B — kapatıldı |
 | KL-8 | SyntheticProbe.runNow agent gerektiriyor | Faz 5 — local fallback |
-| KL-10 | `webhook_headers` plaintext JSON | Faz 5D — EncryptedJSON TypeDecorator |
+| KL-10 | `webhook_headers` plaintext JSON | ✅ Faz 5D — kapatıldı (Fernet encrypt + startup migration) |
 | KL-11 | Escalation evaluator min tepki 5 dk | Faz 5 — konfigüre edilebilir interval |
