@@ -456,6 +456,9 @@ async def lifespan(app: FastAPI):
         ))
         # Encrypt any existing plaintext SNMP community strings
         await _encrypt_existing_snmp_communities(conn)
+        # Encrypt any existing plaintext SNMP v3 passphrases and webhook headers (Faz 5D)
+        await _encrypt_existing_snmpv3_passphrases(conn)
+        await _encrypt_existing_webhook_headers(conn)
         # change_rollouts execution result columns
         await conn.execute(text(
             "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS total_devices INTEGER NOT NULL DEFAULT 0"
@@ -827,31 +830,12 @@ async def _backfill_mac_oui():
         print(f"[OUI backfill] {len(rows)} MAC entries enriched.")
 
 
-async def _encrypt_existing_snmp_communities(conn) -> None:
-    """One-time migration: encrypt any plaintext SNMP community strings in devices and credential_profiles."""
-    from app.core.security import encrypt_credential, decrypt_credential_safe
-    from cryptography.fernet import InvalidToken
-
-    def _needs_encryption(val: str) -> bool:
-        try:
-            from cryptography.fernet import Fernet
-            from app.core.config import settings
-            Fernet(settings.CREDENTIAL_ENCRYPTION_KEY.encode()).decrypt(val.encode())
-            return False  # already encrypted
-        except Exception:
-            return True  # plaintext
-
-    for table in ("devices", "credential_profiles"):
-        rows = (await conn.execute(
-            text(f"SELECT id, snmp_community FROM {table} WHERE snmp_community IS NOT NULL AND snmp_community != ''")
-        )).fetchall()
-        for row_id, community in rows:
-            if _needs_encryption(community):
-                encrypted = encrypt_credential(community)
-                await conn.execute(
-                    text(f"UPDATE {table} SET snmp_community = :enc WHERE id = :id"),
-                    {"enc": encrypted, "id": row_id},
-                )
+from app.core.encryption_migrations import (  # noqa: E402
+    _fernet_needs_encryption,
+    _encrypt_existing_snmp_communities,
+    _encrypt_existing_snmpv3_passphrases,
+    _encrypt_existing_webhook_headers,
+)
 
 
 async def _seed_builtin_templates():

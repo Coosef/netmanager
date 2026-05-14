@@ -9,13 +9,15 @@ import time.
 """
 import os
 
+# Generate a valid Fernet key if none is set (previous key decoded to 33 bytes — invalid)
+if "CREDENTIAL_ENCRYPTION_KEY" not in os.environ:
+    from cryptography.fernet import Fernet as _F
+    os.environ["CREDENTIAL_ENCRYPTION_KEY"] = _F.generate_key().decode()
+
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///test_app.db")
 os.environ.setdefault("SYNC_DATABASE_URL", "sqlite:///test_app.db")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-in-unit-tests")
-os.environ.setdefault(
-    "CREDENTIAL_ENCRYPTION_KEY",
-    "dGVzdC1jcmVkZW50aWFsLWtleS0zMi1ieXRlcy14eHh4"
-)
+os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY_OLD", "")
 # Faz 5C: suppress log noise in tests, disable prometheus multiprocess dir
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("LOG_FORMAT", "console")

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt as pyjwt
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, MultiFernet
 from jwt.exceptions import InvalidTokenError as JWTError  # noqa: F401 — re-exported for callers
 from passlib.context import CryptContext
 
@@ -10,14 +10,17 @@ from app.core.config import settings
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-_fernet: Optional[Fernet] = None
+_multi: Optional[MultiFernet] = None
 
 
-def _get_fernet() -> Fernet:
-    global _fernet
-    if _fernet is None:
-        _fernet = Fernet(settings.CREDENTIAL_ENCRYPTION_KEY.encode())
-    return _fernet
+def _get_fernet() -> MultiFernet:
+    global _multi
+    if _multi is None:
+        keys = [Fernet(settings.CREDENTIAL_ENCRYPTION_KEY.encode())]
+        if settings.CREDENTIAL_ENCRYPTION_KEY_OLD:
+            keys.append(Fernet(settings.CREDENTIAL_ENCRYPTION_KEY_OLD.encode()))
+        _multi = MultiFernet(keys)
+    return _multi
 
 
 def hash_password(password: str) -> str:

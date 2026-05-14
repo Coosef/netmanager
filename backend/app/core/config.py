@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str
     CREDENTIAL_ENCRYPTION_KEY: str
+    CREDENTIAL_ENCRYPTION_KEY_OLD: str = ""  # Set during key rotation; clear after rotate_credentials.py
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 480
     ALGORITHM: str = "HS256"
 
