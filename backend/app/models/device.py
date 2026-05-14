@@ -118,9 +118,9 @@ class Device(Base):
     # SNMP v3 (USM)
     snmp_v3_username: Mapped[Optional[str]] = mapped_column(String(128))
     snmp_v3_auth_protocol: Mapped[Optional[str]] = mapped_column(String(8))   # md5 | sha1
-    snmp_v3_auth_passphrase: Mapped[Optional[str]] = mapped_column(String(256))
+    snmp_v3_auth_passphrase: Mapped[Optional[str]] = mapped_column(Text)
     snmp_v3_priv_protocol: Mapped[Optional[str]] = mapped_column(String(8))   # des | aes128
-    snmp_v3_priv_passphrase: Mapped[Optional[str]] = mapped_column(String(256))
+    snmp_v3_priv_passphrase: Mapped[Optional[str]] = mapped_column(Text)
 
     # Status
     status: Mapped[str] = mapped_column(String(32), default=DeviceStatus.UNKNOWN)

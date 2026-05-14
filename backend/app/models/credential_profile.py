@@ -31,9 +31,9 @@ class CredentialProfile(Base):
     # SNMP v3
     snmp_v3_username: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     snmp_v3_auth_protocol: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
-    snmp_v3_auth_passphrase: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    snmp_v3_auth_passphrase: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     snmp_v3_priv_protocol: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
-    snmp_v3_priv_passphrase: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    snmp_v3_priv_passphrase: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     created_by: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True

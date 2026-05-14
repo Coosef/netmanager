@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.security import encrypt_credential, decrypt_credential_safe
 from app.models.escalation_rule import EscalationRule, EscalationNotificationLog
 from app.models.incident import Incident, IncidentState
 from app.services.escalation_matcher import matches_rule
@@ -118,7 +119,8 @@ def _to_response(rule: EscalationRule) -> RuleResponse:
     header_keys: list[str] = []
     if rule.webhook_headers:
         try:
-            header_keys = list(json.loads(rule.webhook_headers).keys())
+            _raw = decrypt_credential_safe(rule.webhook_headers)
+            header_keys = list(json.loads(_raw).keys()) if _raw else []
         except (json.JSONDecodeError, TypeError):
             pass
     return RuleResponse(
@@ -163,7 +165,7 @@ def _apply_create(rule: EscalationRule, data: RuleCreate | RuleUpdate) -> None:
         elif isinstance(data, RuleCreate):
             setattr(rule, list_field, None)
     if data.webhook_headers is not None:
-        rule.webhook_headers = json.dumps(data.webhook_headers)
+        rule.webhook_headers = encrypt_credential(json.dumps(data.webhook_headers))
     elif isinstance(data, RuleCreate):
         rule.webhook_headers = None
 

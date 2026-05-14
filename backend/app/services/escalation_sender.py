@@ -9,6 +9,7 @@ from typing import Optional, TYPE_CHECKING
 
 import httpx
 
+from app.core.security import decrypt_credential_safe
 from app.services.escalation_matcher import build_payload
 
 if TYPE_CHECKING:
@@ -36,9 +37,11 @@ async def send_webhook(
 
     if rule.webhook_headers:
         try:
-            extra = json.loads(rule.webhook_headers)
-            if isinstance(extra, dict):
-                headers.update(extra)
+            _raw = decrypt_credential_safe(rule.webhook_headers)
+            if _raw:
+                extra = json.loads(_raw)
+                if isinstance(extra, dict):
+                    headers.update(extra)
         except (json.JSONDecodeError, TypeError):
             log.warning("escalation rule %d: invalid webhook_headers JSON", rule.id)
 
