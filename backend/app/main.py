@@ -1187,7 +1187,7 @@ async def request_id_middleware(request: Request, call_next):
             status_code=response.status_code,
             duration_ms=duration_ms,
         )
-        norm = _normalize_path(request.url.path)
+        norm = normalize_path(request.url.path)
         HTTP_REQUESTS_TOTAL.labels(
             method=request.method,
             path=norm,
