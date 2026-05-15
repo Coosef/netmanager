@@ -40,14 +40,24 @@ class AgentBridgeListener:
     def __init__(self):
         self._task: asyncio.Task | None = None
         self._pubsub = None
-        self._redis: aioredis.Redis | None = None
+        self._pubsub_conn: aioredis.Redis | None = None  # dedicated — no socket_timeout
+        self._redis: aioredis.Redis | None = None        # for publish/setex (shared)
         self._manager = None
 
     async def start(self, redis_client: aioredis.Redis, manager) -> None:
         """Start bridge listener — call once in lifespan startup."""
+        from app.core.config import settings
         self._redis = redis_client
         self._manager = manager
-        self._pubsub = redis_client.pubsub()
+        # Pub/Sub listener needs its own connection without socket_timeout so
+        # listen() can block indefinitely waiting for the next message.
+        # The shared redis_client has socket_timeout=5 (for health/command ops).
+        self._pubsub_conn = aioredis.from_url(
+            settings.REDIS_URL,
+            decode_responses=True,
+            # No socket_timeout — pubsub listen() must not time out between messages
+        )
+        self._pubsub = self._pubsub_conn.pubsub()
         await self._pubsub.psubscribe(_CMD_PATTERN)
         self._task = asyncio.create_task(self._listen_loop(), name="bg:agent_bridge")
         log.info("bridge: listener started, pattern=%s", _CMD_PATTERN)
@@ -64,6 +74,11 @@ class AgentBridgeListener:
             try:
                 await self._pubsub.punsubscribe(_CMD_PATTERN)
                 await self._pubsub.aclose()
+            except Exception:
+                pass
+        if self._pubsub_conn:
+            try:
+                await self._pubsub_conn.aclose()
             except Exception:
                 pass
         log.info("bridge: listener stopped")
