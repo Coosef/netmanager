@@ -1258,15 +1258,16 @@ def _find_corrupt_prom_multiproc_files(prom_dir: str) -> list[str]:
     each container to a per-hostname subdir to fix the root cause.
     """
     import glob
-    import json
     from prometheus_client.multiprocess import MultiProcessCollector
 
     bad: list[str] = []
     for fpath in glob.glob(os.path.join(prom_dir, "*.db")):
         try:
+            # merge() returns a list; iterating triggers any parse error.
             list(MultiProcessCollector.merge([fpath]))
-        except (json.JSONDecodeError, ValueError, OSError, struct.error,
-                UnicodeDecodeError) as exc:  # noqa: F821 — struct imported lazily
+        except Exception:
+            # Anything that can't be parsed is corrupt — we delete it anyway,
+            # so a broad catch is correct here.
             bad.append(fpath)
     return bad
 
@@ -1276,12 +1277,10 @@ async def metrics_endpoint():
     """Prometheus scrape endpoint. Supports multiprocess mode via PROMETHEUS_MULTIPROC_DIR.
 
     Resilient to corrupt multiproc files (which can happen when multiple
-    containers' pid=1 share the same multiproc volume). On JSONDecodeError /
-    parse error during the collect pass, identifies and removes corrupt files
-    then retries the scrape so the endpoint stays available.
+    containers' pid=1 share the same multiproc volume). On collect failure,
+    identifies and removes corrupt files then retries the scrape so the
+    endpoint stays available.
     """
-    import json
-    import struct                        # noqa: F401 — used by _find_corrupt_prom_multiproc_files
     from prometheus_client import (
         CollectorRegistry,
         generate_latest,
@@ -1296,13 +1295,18 @@ async def metrics_endpoint():
         registry = CollectorRegistry()
         multiprocess.MultiProcessCollector(registry)
         return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
-    except (json.JSONDecodeError, ValueError, struct.error, UnicodeDecodeError) as exc:
-        _startup_log.warning(  # noqa: F821 — defined earlier in module
+    except Exception as exc:
+        _startup_log.warning(
             "metrics: multiproc collect failed (%s) — cleaning corrupt files", exc,
         )
 
     # Cleanup pass: find + delete corrupt files
-    bad = _find_corrupt_prom_multiproc_files(prom_dir)
+    try:
+        bad = _find_corrupt_prom_multiproc_files(prom_dir)
+    except Exception:
+        _startup_log.exception("metrics: cleanup scan failed, returning in-process fallback")
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
     for fpath in bad:
         try:
             os.unlink(fpath)
