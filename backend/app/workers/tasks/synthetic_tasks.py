@@ -214,13 +214,39 @@ async def _run_probes():
                 continue
 
             if probe.agent_id:
-                result = await agent_manager.execute_synthetic_probe(
-                    agent_id=probe.agent_id,
-                    probe_type=probe.probe_type,
-                    target=probe.target,
-                    timeout=probe.timeout_secs,
-                    **_probe_kwargs(probe),
-                )
+                # Faz 6A: route through Redis Pub/Sub bridge (Celery process cannot
+                # access FastAPI's in-memory WebSocket connections directly).
+                # Fallback to _direct_probe on bridge timeout or agent offline.
+                try:
+                    from app.services.agent_bridge_client import send_agent_command
+                    bridge_resp = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: send_agent_command(
+                            agent_id=probe.agent_id,
+                            command_type="synthetic_probe",
+                            payload={
+                                "probe_type": probe.probe_type,
+                                "target": probe.target,
+                                "timeout": probe.timeout_secs,
+                                **_probe_kwargs(probe),
+                            },
+                            timeout=probe.timeout_secs + 10,
+                        ),
+                    )
+                    if bridge_resp.get("success") and bridge_resp.get("result"):
+                        result = bridge_resp["result"]
+                    else:
+                        log.debug(
+                            "synthetic: bridge error for probe=%d — %s, falling back",
+                            probe.id, bridge_resp.get("error"),
+                        )
+                        result = await _direct_probe(probe)
+                except Exception:
+                    log.debug(
+                        "synthetic: bridge unavailable for probe=%d, falling back",
+                        probe.id, exc_info=True,
+                    )
+                    result = await _direct_probe(probe)
             else:
                 result = await _direct_probe(probe)
 

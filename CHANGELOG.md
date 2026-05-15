@@ -1,5 +1,66 @@
 # Changelog
 
+## [Faz 6A] — 2026-05-15 — Agent Command Bridge + Queue Separation
+
+> Pilot sonrası ilk feature sprint · **344/344 test** · S1–S8 smoke PASS  
+> Merge: `feature/faz6a-agent-command-bridge` → `main`
+
+### KI-3 kapanışı — Celery ↔ WebSocket process isolation çözümü
+
+Celery worker'lar uvicorn process'inden ayrı OS process olduğu için `AgentManager._connections` her zaman boştu. Pilot'ta tüm agent-based synthetic probe'lar "agent offline" döndürüyordu. Bu sprint'te Redis Pub/Sub tabanlı request-response bridge ile kalıcı çözüm geldi.
+
+**Yapı:**
+
+```
+Celery (agent_cmd queue) → publish agent:bridge:cmd:{agent_id}
+                          ↓
+Redis Pub/Sub  ←→  FastAPI AgentBridgeListener (psubscribe agent:bridge:cmd:*)
+                          ↓
+                  agent_manager.execute_synthetic_probe / ping_check
+                          ↓
+                  publish agent:bridge:res:{request_id}  +  SETEX fallback (60s TTL)
+                          ↓
+Celery subscribe-before-publish + listen() + SETEX poll → response or RuntimeError → direct probe fallback
+```
+
+### Yapılan değişiklikler
+
+- **feat(bridge):** `app/services/agent_bridge.py` — `AgentBridgeListener` (pattern-subscribe, fire-and-forget dispatch, exception isolation, dedicated pubsub connection)
+- **feat(bridge):** `app/services/agent_bridge_client.py` — `send_agent_command()` (subscribe-before-publish invariant, SETEX fallback poll, RuntimeError on full timeout)
+- **feat(workers):** 3 ayrı Celery worker pool — `celery_worker` (monitor, conc=16, 3g), `celery_agent_worker` (agent_cmd, conc=8, 1g), `celery_default_worker` (default+bulk, conc=8, 2g)
+- **feat(routing):** `synthetic_tasks.*` ve `agent_peer_tasks.*` → `agent_cmd` queue (`task_routes`)
+- **feat(synthetic):** `_run_probes()` bridge entegrasyonu — bridge başarılı → sonuç sakla, bridge fail/timeout/exception → `_direct_probe(probe)` fallback (correlation flow ASLA kırılmaz)
+- **feat(metrics):** 3 yeni Prometheus metric — `netmanager_agent_bridge_command_duration_seconds` (Histogram), `netmanager_agent_bridge_timeout_total` (Counter), `netmanager_agent_bridge_command_total` (Counter, labels: command_type + result)
+- **fix(bridge):** pubsub connection için dedicated `aioredis.from_url()` (paylaşılan client'ın `socket_timeout=5`'i pubsub listen()'i 5s'de düşürüyordu)
+- **test:** `test_faz6a_agent_bridge.py` — 16 yeni unit test (client/listener/synthetic_tasks integration); 328 → **344 PASS**
+
+### Smoke test sonuçları (merge öncesi)
+
+| # | Test | Sonuç |
+|---|------|-------|
+| S1 | Bridge listener startup | ✅ `bridge: listener started, pattern=agent:bridge:cmd:*` |
+| S2 | celery_agent_worker ping | ✅ 3 worker node online (`monitor@`, `agent_cmd@`, `default@`) |
+| S3 | Bridge dispatches synthetic_probe | ✅ Prometheus `agent_bridge_command_total` counter incrementing |
+| S4 | Agent offline → fallback to direct probe | ✅ Direct probe results stored (success=True, latency 63–66ms) |
+| S5 | `/metrics` bridge metrics present | ✅ duration histogram + counters export ediliyor |
+| S6 | Queue depths zero (no backlog) | ✅ default=0 bulk=0 monitor=0 agent_cmd=0 |
+| S7 | Backend restart → bridge re-starts | ✅ lifespan hook çalışıyor, listener restart sonrası tekrar başladı |
+| S8 | Full test suite | ✅ 344/344 PASS (1.95s) |
+
+### Faz 6A bileşen kuralları
+
+- Bridge timeout production'da correlation flow'unu **ASLA** kırmaz: her bridge hatası (timeout / agent_offline / Redis down / exception) `_direct_probe` fallback'ine düşer.
+- Subscribe-before-publish invariant'ı: Celery `pubsub.subscribe(res_channel)` HER ZAMAN `r.publish(cmd_channel, ...)` öncesinde çalışır → response race'i imkânsız.
+- SETEX fallback key (60s TTL): bridge `publish` + `setex` aynı yanıtla → Celery pubsub listen() kaçırırsa `r.get(fb_key)` ile telafi.
+- Beat schedule değişmedi (sadece routing eklendi): synthetic + agent_peer task'ları `agent_cmd` queue'sundan çalışır, diğer tüm task'lar mevcut queue'larda kalır.
+
+### KI durumu
+
+- **KI-3 (critical):** ✅ **ÇÖZÜLDÜ** — Agent command bridge production'a alındı. Production gözlem devam ediyor (bridge metric'leri Grafana'da takip edilecek).
+- KI-1, KI-2, KI-4: Faz 6B+ backlog'unda kalıyor (değişmedi).
+
+---
+
 ## [Pilot] — 2026-05-14 — Pilot Production Sprint — GO ✅
 
 > Baz: `main` (Faz 5E, 312/312 test) · Sprint sonu: **328/328 test**  
