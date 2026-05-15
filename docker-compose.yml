@@ -3,6 +3,19 @@ version: '3.8'
 services:
   postgres:
     image: timescale/timescaledb:latest-pg16
+    # max_connections bumped from default 50 (TimescaleDB image override) to
+    # 200 — Faz 6A introduced 3 separate Celery worker pools, total demand
+    # across backend + 3 workers + beat + flower can spike to ~120 with the
+    # current SQLAlchemy pool_size=20/overflow=40 config. With max=50 we hit
+    # asyncpg.exceptions.TooManyConnectionsError under normal load (observed
+    # 126 errors/hour post-deploy, triggering agent WS flap).
+    # 6GB host RAM comfortably supports 200 conn (~3GB peak).
+    command:
+      - "postgres"
+      - "-c"
+      - "max_connections=200"
+      - "-c"
+      - "shared_buffers=512MB"
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-netmgr}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-netmgr123}
