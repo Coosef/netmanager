@@ -14,12 +14,19 @@ def run_security_audit(self, task_id: int, device_ids: list[int]):
     async def _run():
         from datetime import datetime, timezone
         from sqlalchemy import select, update
+        import redis as _redis_lib
+        from app.core.config import settings
         from app.core.database import make_worker_session
         from app.models.device import Device
         from app.models.security_audit import SecurityAudit
         from app.models.task import Task, TaskStatus
+        from app.services.cache_invalidation import invalidate_device_risk
         from app.services.security_audit_service import run_device_audit
         from app.services.ssh_manager import ssh_manager
+
+        _inv_redis = _redis_lib.from_url(
+            settings.REDIS_URL, decode_responses=True, socket_timeout=2,
+        )
 
         async with make_worker_session()() as db:
             await db.execute(
@@ -57,6 +64,8 @@ def run_security_audit(self, task_id: int, device_ids: list[int]):
                     failed_count += 1
                 else:
                     success_count += 1
+                    # Faz 6B G4: compliance score changed → invalidate device risk cache
+                    invalidate_device_risk(_inv_redis, device.id, tenant_id=device.tenant_id)
 
             final_status = (
                 TaskStatus.SUCCESS if failed_count == 0
@@ -96,6 +105,8 @@ def scheduled_compliance_scan():
 
         _redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
         critical: list[dict] = []  # score < 50 (grade D or F)
+        # Faz 6B G4: cache invalidation on audit completion
+        from app.services.cache_invalidation import invalidate_device_risk
 
         async with make_worker_session()() as db:
             result = await db.execute(
@@ -117,6 +128,10 @@ def scheduled_compliance_scan():
                     )
                     db.add(audit)
                     await db.commit()
+
+                    # Faz 6B G4: compliance score changed → invalidate device risk cache
+                    if not error:
+                        invalidate_device_risk(_redis, device.id, tenant_id=device.tenant_id)
 
                     if not error and score < 50:
                         critical.append({
