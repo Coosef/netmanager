@@ -42,6 +42,12 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"    # DEBUG | INFO | WARNING | ERROR
     LOG_FORMAT: str = "json"   # "json" (prod) | "console" (dev)
 
+    # Aggregation cache (Faz 6B)
+    AGG_CACHE_ENABLED: bool = True
+    AGG_CACHE_FRESH_SECS: int = 60        # served without revalidation
+    AGG_CACHE_STALE_SECS: int = 240       # SWR window — total Redis TTL = fresh + stale
+    AGG_CACHE_SLOW_COMPUTE_WARN_SECS: float = 5.0
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

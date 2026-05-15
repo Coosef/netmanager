@@ -104,3 +104,30 @@ AGENT_BRIDGE_COMMAND_TOTAL = Counter(
     "Agent bridge commands dispatched",
     ["command_type", "result"],   # result: success | agent_offline | timeout | error
 )
+
+# ── Aggregation Cache (Faz 6B) ────────────────────────────────────────────────
+AGG_DURATION = Histogram(
+    "netmanager_aggregation_duration_seconds",
+    "Aggregation endpoint compute / serve duration",
+    ["endpoint", "cache_status"],   # endpoint: sla_fleet | risk_fleet | ...
+    buckets=[0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0],
+)
+
+CACHE_OPS = Counter(
+    "netmanager_cache_operations_total",
+    "Cache operations by pattern and result",
+    ["operation", "key_pattern", "result"],
+    # operation: get | set | invalidate
+    # result: hit_fresh | hit_stale | miss | lock_contended | bypass | error
+)
+
+CACHE_UNAVAILABLE = Counter(
+    "netmanager_cache_unavailable_total",
+    "Cache operations that fell back due to Redis unavailability",
+)
+
+CACHE_REDIS_KEYS = Gauge(
+    "netmanager_cache_redis_keys",
+    "Approximate count of cached keys by pattern",
+    ["key_pattern"],
+)
