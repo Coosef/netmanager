@@ -1,5 +1,51 @@
 # Changelog
 
+## [Faz 6B G7] — 2026-05-16 — Production Cleanup & Tuning
+
+> Faz 6C öncesi altyapı temizliği · **440/440 test**
+> Merge: `feature/faz6b-g7-cleanup-tuning` → `main`
+
+Faz 6A/6B sırasında biriken 5 production hardening maddesi — büyük feature
+değil, event bus'a (Faz 6C) temiz zeminde geçmek için altyapı temizliği.
+
+**G7-1 — DB pool right-sizing**
+- `async_engine` + `sync_engine` `pool_size=20/max_overflow=40` (60/engine)
+  idi → 6 process × 2 engine = 720 worst-case, `max_connections=200`'e karşı.
+- `settings.DB_POOL_SIZE` (5) / `DB_MAX_OVERFLOW` (10) ile configurable →
+  6 × 2 × 15 = 180 worst-case. `max_connections=200` hotfix'inin altındaki
+  yapısal over-allocation giderildi.
+
+**G7-2 — prom_multiproc per-service subdir**
+- Tüm container'lar `/tmp/prom_multiproc`'u paylaşıyordu, hepsi pid=1 →
+  aynı `counter_1.db`'ye yazıp birbirini bozuyordu.
+- Her servis kendi `/tmp/prom_multiproc/<servis>` subdir'ine yazar; start
+  komutu subdir'i boot'ta temizler. `/metrics` artık tüm subdir'leri
+  glob+merge eden `_AllServicesMultiprocCollector` kullanıyor.
+
+**G7-3 — Celery healthcheck hostname fix**
+- Worker healthcheck'leri `--destination=monitor@$HOSTNAME` (exec-form) →
+  compose `$HOSTNAME`'i host'tan boş interpolate ediyordu → kalıcı
+  false "unhealthy". `CMD-SHELL` + `$$HOSTNAME` ile container içinde
+  runtime'da resolve. celery_beat scheduler olduğu için `inspect ping`
+  hiç eşleşmiyordu → pid-1 cmdline kontrolüne çevrildi.
+
+**G7-4 — Fleet version-bump debounce**
+- Her device event fleet version'ı INCR ediyordu → cache her event'te
+  ölüyordu (hit ratio ~0). `_bump_fleet_version_debounced`: SETNX guard
+  ile debounce penceresinde (`AGG_CACHE_INVALIDATION_DEBOUNCE_SECS`, 30s)
+  en fazla 1 bump. Per-device DELETE ve device-CRUD invalidation debounce
+  edilmez.
+
+**G7-5 — Decommissioned agent cleanup runbook**
+- `scripts/agent-cleanup-audit.sh` — backend log'undaki 403 WS handshake
+  spam'ini tespit eder, DB ile cross-reference yapar, agent başına çözüm
+  önerir. Kod değişikliği yok (403 doğru davranış); operasyonel prosedür.
+
+### Test
+- 436 → **440 PASS** (+4 version-bump debounce testi).
+
+---
+
 ## [Faz 6B] — 2026-05-16 — Caching Layer + Aggregation Optimization
 
 > KI-1 çözümü · **435/435 test** (344 → 435, +91)
