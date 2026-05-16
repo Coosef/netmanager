@@ -1,5 +1,71 @@
 # Changelog
 
+## [Faz 6B] — 2026-05-16 — Caching Layer + Aggregation Optimization
+
+> KI-1 çözümü · **435/435 test** (344 → 435, +91)
+> Merge: `feature/faz6b-cache-aggregation-optimization` → `main`
+
+### KI-1 kapanışı — aggregation endpoint latency
+
+Pilot sırasında `/sla/fleet-summary` ve `/intelligence/fleet/risk` endpoint'leri
+~99s gecikme gösteriyordu. Kök neden: her cihaz için ayrı DB sorgusu (N+1).
+6B bu endpoint'leri tek/üç bulk SQL'e indirdi ve önüne stale-while-revalidate
+cache katmanı koydu.
+
+**G1 — AggregationCache (`app/services/cache.py`)**
+- Async Redis cache: iki katmanlı TTL (`fresh_secs` + `stale_secs`), SWR.
+- Single-flight SETNX lock → cache stampede koruması.
+- Her Redis op'unda 50ms hard timeout (event loop güvenliği).
+- Redis erişilemezse compute çalışır, yazma denenmez (fallback).
+- X-Cache-Bypass desteği; >5s compute uyarı metriği.
+- JSON encoder: datetime / date / Decimal / UUID / set.
+- 4 Prometheus metric: AGG_DURATION, CACHE_OPS, CACHE_UNAVAILABLE, CACHE_REDIS_KEYS.
+
+**G2 — `/sla/fleet-summary`: N+1 → 1 sorgu**
+- `_calc_uptime_bulk` — N cihaz için tek SQL, device_id+created_at sıralı grouping.
+- Orijinal `_calc_uptime` algoritmasıyla birebir parite (parity testleri ile garanti).
+- Versioned cache key + X-Cache-Status response header.
+
+**G3 — `/intelligence/fleet/risk`: N+1 → 3 bulk sorgu + async migration**
+- `_calc_risk_bulk` — audit (DISTINCT ON), events, flap counts: 3 sorgu.
+- Sprint 12A risk formülü birebir korundu (parity testi).
+- Sync `redis.from_url()` async cache katmanına taşındı (event loop blocking giderildi).
+
+**G4 — Event-driven cache invalidation (`app/services/cache_invalidation.py`)**
+- 3 sync helper: `invalidate_for_event` / `invalidate_device_risk` / `invalidate_all_fleet_caches`.
+- 5 hook noktası: correlation_engine, security_audit (×2), backup_tasks, bulk_tasks.
+- Versioning modeli (SCAN+DEL yerine version INCR) → fleet-wide invalidation O(1).
+- Tüm helper'lar Redis-error-safe; correlation hot path çift try/except korumalı.
+
+**G5 — Cache warmer (`app/workers/tasks/cache_warmer_tasks.py`)**
+- Beat task (60s, `default` queue): dirty device/tenant set'lerini consume eder.
+- `asyncio.Semaphore(5)` ile DB aggregation concurrency sınırlı.
+- Single-runner lock + target dedup + G1 single-flight → duplicate warmup storm yok.
+- SREM member-specific drain → crash-safe (kalan marker'lar sonraki cycle'da retry).
+
+### Sprint sırasında yapılan production hotfix'ler
+
+- **fix(prod):** PostgreSQL `max_connections` 50 → 200 + shared_buffers 512MB.
+  Faz 6A queue separation (4 → 6 process) `TooManyConnectionsError` yaratıyordu
+  (126/saat), agent WS flap'e sebep oluyordu. (commit `843c4da`)
+- **fix(prod):** `/metrics` corrupt multiproc dosyalarına dayanıklı hale getirildi
+  (try → corrupt file scan/delete → retry). Backend healthcheck `curl` → `python3`
+  (image'da curl yok). (commit `2048b9d`, `376cb9e`)
+
+### Test
+
+- 6 yeni test dosyası, +91 test: `test_faz6b_cache` (17), `_sla_bulk` (20),
+  `_intelligence_bulk` (16), `_cache_invalidation` (21), `_cache_warmer` (17).
+- 344 → **435 PASS**, 0 regression.
+
+### Faz 6B G7 backlog (sonraki sprint)
+
+- SQLAlchemy `pool_size` 20/40 → 5/10 right-sizing (max_connections kalıcı çözüm).
+- `prom_multiproc` per-container subdir (pid=1 çakışması kök çözümü).
+- Celery worker healthcheck `$HOSTNAME` resolve bug (cosmetic false-unhealthy).
+
+---
+
 ## [Faz 6A] — 2026-05-15 — Agent Command Bridge + Queue Separation
 
 > Pilot sonrası ilk feature sprint · **344/344 test** · S1–S8 smoke PASS  
