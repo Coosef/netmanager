@@ -10,7 +10,22 @@ production where FastAPI + Celery workers share a tmpfs dir).
 
 Naming convention: netmanager_<component>_<metric>_<unit>
 Grafana-ready: all labels kept low-cardinality (path normalised to /{id}).
+
+Faz 6B G7: each service writes to its OWN PROMETHEUS_MULTIPROC_DIR subdir
+(/tmp/prom_multiproc/<service>) so cross-container pid=1 collisions can no
+longer corrupt .db files. The directory is created here at import time —
+before any metric is recorded — so prometheus_client never hits a missing
+dir on first write.
 """
+import os as _os
+
+_mp_dir = _os.environ.get("PROMETHEUS_MULTIPROC_DIR", "")
+if _mp_dir:
+    try:
+        _os.makedirs(_mp_dir, exist_ok=True)
+    except OSError:
+        pass
+
 from prometheus_client import Counter, Gauge, Histogram
 
 # ── HTTP ─────────────────────────────────────────────────────────────────────

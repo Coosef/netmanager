@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     AGG_CACHE_STALE_SECS: int = 240       # SWR window — total Redis TTL = fresh + stale
     AGG_CACHE_SLOW_COMPUTE_WARN_SECS: float = 5.0
 
+    # DB connection pool (Faz 6B G7 — right-sized for max_connections=200)
+    # Each process holds up to (DB_POOL_SIZE + DB_MAX_OVERFLOW) per engine,
+    # and there are 2 engines (async + sync). With 6 processes that is
+    # 6 × 2 × (5 + 10) = 180 worst-case — comfortably under Postgres' 200.
+    DB_POOL_SIZE: int = 5
+    DB_MAX_OVERFLOW: int = 10
+
+    # Faz 6B G7: coalesce fleet-cache version bumps. Without debounce every
+    # device event INCRs the version, killing the fleet cache on each event
+    # → near-zero hit ratio under load. With debounce the version bumps at
+    # most once per window; max added staleness ≈ this window.
+    AGG_CACHE_INVALIDATION_DEBOUNCE_SECS: int = 30
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

@@ -47,7 +47,12 @@ services:
 
   backend:
     build: ./backend
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30 --proxy-headers --forwarded-allow-ips='*'
+    # Faz 6B G7: clear this service's own multiproc subdir on start (stale .db
+    # files from dead pids would otherwise accumulate); exec keeps SIGTERM.
+    command:
+      - /bin/sh
+      - -c
+      - "rm -rf /tmp/prom_multiproc/backend && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-graceful-shutdown 30 --proxy-headers --forwarded-allow-ips='*'"
     volumes:
       - ./backend:/app
       - config_backups:/app/backups
@@ -59,7 +64,8 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc
+      # Faz 6B G7: per-service subdir — no cross-container pid=1 collision
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/backend
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,7 +90,10 @@ services:
   # monitor: high-concurrency I/O-bound polling (SNMP, topology, playbooks, analytics)
   celery_worker:
     build: ./backend
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=16 -Q monitor -n monitor@%h
+    command:
+      - /bin/sh
+      - -c
+      - "rm -rf /tmp/prom_multiproc/celery_worker && exec celery -A app.workers.celery_app worker --loglevel=info --concurrency=16 -Q monitor -n monitor@%h"
     volumes:
       - ./backend:/app
       - config_backups:/app/backups
@@ -94,7 +103,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,8 +111,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "celery", "-A", "app.workers.celery_app", "inspect", "ping",
-             "--timeout=5", "--destination=monitor@$HOSTNAME"]
+      # Faz 6B G7: CMD-SHELL so $HOSTNAME resolves inside the container at
+      # run time ($$ escapes compose interpolation); matches celery's %h node.
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout=5 --destination=monitor@$$HOSTNAME"]
       interval: 60s
       timeout: 15s
       retries: 3
@@ -118,7 +128,10 @@ services:
   # agent_cmd: bridge-dispatched commands to agents (RTT-bound, moderate concurrency)
   celery_agent_worker:
     build: ./backend
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=8 -Q agent_cmd -n agent_cmd@%h
+    command:
+      - /bin/sh
+      - -c
+      - "rm -rf /tmp/prom_multiproc/celery_agent_worker && exec celery -A app.workers.celery_app worker --loglevel=info --concurrency=8 -Q agent_cmd -n agent_cmd@%h"
     volumes:
       - ./backend:/app
       - prom_multiproc:/tmp/prom_multiproc
@@ -127,7 +140,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_agent_worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,8 +148,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "celery", "-A", "app.workers.celery_app", "inspect", "ping",
-             "--timeout=5", "--destination=agent_cmd@$HOSTNAME"]
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout=5 --destination=agent_cmd@$$HOSTNAME"]
       interval: 60s
       timeout: 15s
       retries: 3
@@ -151,7 +163,10 @@ services:
   # default + bulk: correlation tasks, driver, backup, bulk SSH/config ops
   celery_default_worker:
     build: ./backend
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=8 -Q default,bulk -n default@%h
+    command:
+      - /bin/sh
+      - -c
+      - "rm -rf /tmp/prom_multiproc/celery_default_worker && exec celery -A app.workers.celery_app worker --loglevel=info --concurrency=8 -Q default,bulk -n default@%h"
     volumes:
       - ./backend:/app
       - config_backups:/app/backups
@@ -161,7 +176,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_default_worker
     depends_on:
       postgres:
         condition: service_healthy
@@ -169,8 +184,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "celery", "-A", "app.workers.celery_app", "inspect", "ping",
-             "--timeout=5", "--destination=default@$HOSTNAME"]
+      test: ["CMD-SHELL", "celery -A app.workers.celery_app inspect ping --timeout=5 --destination=default@$$HOSTNAME"]
       interval: 60s
       timeout: 15s
       retries: 3
@@ -184,7 +198,10 @@ services:
 
   celery_beat:
     build: ./backend
-    command: celery -A app.workers.celery_app beat --loglevel=info
+    command:
+      - /bin/sh
+      - -c
+      - "rm -rf /tmp/prom_multiproc/celery_beat && exec celery -A app.workers.celery_app beat --loglevel=info"
     volumes:
       - ./backend:/app
       - prom_multiproc:/tmp/prom_multiproc
@@ -193,7 +210,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
-      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_beat
     depends_on:
       postgres:
         condition: service_healthy
@@ -201,8 +218,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "celery", "-A", "app.workers.celery_app", "inspect", "ping",
-             "--timeout=5", "--destination=celery@$HOSTNAME"]
+      # Faz 6B G7: beat is a scheduler, not a worker — `inspect ping` never
+      # matched it (always false-unhealthy). Verify pid 1 is the beat process.
+      test: ["CMD-SHELL", "grep -aq beat /proc/1/cmdline || exit 1"]
       interval: 120s
       timeout: 15s
       retries: 3
