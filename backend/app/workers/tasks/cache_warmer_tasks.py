@@ -85,37 +85,57 @@ def warm_aggregation_cache():
 
 
 async def _warm() -> dict:
+    """
+    Warmer body. Creates a FRESH async Redis client + AggregationCache per
+    invocation.
+
+    Why fresh, not the get_redis() / get_aggregation_cache() singletons:
+    every Celery task run does its own `asyncio.run()`, which builds a new
+    event loop. The module-level async redis client binds its connection
+    pool to whatever loop was current at construction — reusing it on a
+    later run raises "future attached to a different loop". A per-run
+    client is bound to the current loop and closed in `finally`.
+    """
     from app.core.config import settings
 
     if not settings.AGG_CACHE_ENABLED:
         return {"status": "disabled", "warmed": 0}
 
-    from app.core.redis_client import get_redis
-    redis = get_redis()
+    import redis.asyncio as aioredis
+    from app.services.cache import AggregationCache
 
-    # Single-runner lock — overlapping beat ticks skip rather than double-run.
-    try:
-        got_lock = await redis.set(
-            _WARMER_LOCK_KEY, "1", nx=True, ex=_WARMER_LOCK_TTL_SECS,
-        )
-    except Exception as exc:
-        log.warning("warmer: redis unavailable, skipping cycle — %s", exc)
-        return {"status": "redis_down", "warmed": 0}
-
-    if not got_lock:
-        log.debug("warmer: previous run still active, skipping cycle")
-        return {"status": "locked", "warmed": 0}
+    redis = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    cache = AggregationCache(redis)
 
     try:
-        return await _run_warm(redis, settings)
+        # Single-runner lock — overlapping beat ticks skip rather than double-run.
+        try:
+            got_lock = await redis.set(
+                _WARMER_LOCK_KEY, "1", nx=True, ex=_WARMER_LOCK_TTL_SECS,
+            )
+        except Exception as exc:
+            log.warning("warmer: redis unavailable, skipping cycle — %s", exc)
+            return {"status": "redis_down", "warmed": 0}
+
+        if not got_lock:
+            log.debug("warmer: previous run still active, skipping cycle")
+            return {"status": "locked", "warmed": 0}
+
+        try:
+            return await _run_warm(redis, cache, settings)
+        finally:
+            try:
+                await redis.delete(_WARMER_LOCK_KEY)
+            except Exception:
+                pass
     finally:
         try:
-            await redis.delete(_WARMER_LOCK_KEY)
+            await redis.aclose()
         except Exception:
             pass
 
 
-async def _run_warm(redis, settings) -> dict:
+async def _run_warm(redis, cache, settings) -> dict:
     # Non-destructive snapshot of dirty sets.
     try:
         dirty_devices = set(await redis.smembers(_DIRTY_DEVICE_SET))
@@ -128,7 +148,7 @@ async def _run_warm(redis, settings) -> dict:
 
     sem = asyncio.Semaphore(_WARM_CONCURRENCY)
     results = await asyncio.gather(
-        *(_warm_target(kind, tid, sem, settings) for kind, tid in targets),
+        *(_warm_target(kind, tid, sem, settings, cache) for kind, tid in targets),
         return_exceptions=True,
     )
 
@@ -181,11 +201,14 @@ def _tenant_fully_warmed(raw_tenant, success: dict) -> bool:
     return bool(success.get(("sla", tid)) and success.get(("risk", tid)))
 
 
-async def _warm_target(kind: str, tenant_id, sem: asyncio.Semaphore, settings) -> bool:
+async def _warm_target(
+    kind: str, tenant_id, sem: asyncio.Semaphore, settings, cache,
+) -> bool:
     """
     Warm one fleet cache entry. Returns True on success, False on failure.
 
-    Uses AggregationCache.get_or_compute so:
+    `cache` is the per-invocation AggregationCache (bound to this run's
+    event loop — see _warm() docstring). Uses get_or_compute so:
       - an invalidated key (version bumped) → MISS → compute + write
       - a still-fresh key → cache hit, no redundant DB aggregation
     """
@@ -194,9 +217,6 @@ async def _warm_target(kind: str, tenant_id, sem: asyncio.Semaphore, settings) -
     async with sem:
         try:
             from app.core.database import make_worker_session
-            from app.services.cache import get_aggregation_cache
-
-            cache = get_aggregation_cache()
 
             async with make_worker_session()() as db:
                 if kind == "sla":

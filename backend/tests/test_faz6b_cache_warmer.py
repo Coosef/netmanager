@@ -32,6 +32,7 @@ class FakeAsyncRedis:
         self.srem_calls = []
         self.delete_calls = []
         self.lock_held = False  # simulate another runner holding the lock
+        self.closed = False
 
     async def set(self, key, value, *, nx=False, ex=None):
         if self.down:
@@ -60,6 +61,9 @@ class FakeAsyncRedis:
                 s.discard(m)
                 removed += 1
         return removed
+
+    async def aclose(self):
+        self.closed = True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -122,11 +126,13 @@ class TestWarmGuards:
 
         fake = FakeAsyncRedis()
         fake.lock_held = True   # another runner holds it
-        monkeypatch.setattr(
-            "app.core.redis_client.get_redis", lambda: fake,
-        )
+        # _warm() builds its own client via redis.asyncio.from_url — patch that
+        import redis.asyncio as aioredis
+        monkeypatch.setattr(aioredis, "from_url", lambda *a, **k: fake)
+
         out = await cache_warmer_tasks._warm()
         assert out["status"] == "locked"
+        assert fake.closed is True   # per-run client must be closed
 
     @pytest.mark.asyncio
     async def test_redis_down_returns_redis_down(self, monkeypatch):
@@ -136,11 +142,12 @@ class TestWarmGuards:
 
         fake = FakeAsyncRedis()
         fake.down = True
-        monkeypatch.setattr(
-            "app.core.redis_client.get_redis", lambda: fake,
-        )
+        import redis.asyncio as aioredis
+        monkeypatch.setattr(aioredis, "from_url", lambda *a, **k: fake)
+
         out = await cache_warmer_tasks._warm()
         assert out["status"] == "redis_down"
+        assert fake.closed is True
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -158,12 +165,12 @@ class TestRunWarmOrchestration:
         fake.sets["agg:dirty:device"] = {"1", "2"}
 
         # Every warm succeeds
-        async def stub_warm(kind, tid, sem, settings):
+        async def stub_warm(kind, tid, sem, settings, cache):
             return True
         monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
 
         settings = MagicMock()
-        out = await cache_warmer_tasks._run_warm(fake, settings)
+        out = await cache_warmer_tasks._run_warm(fake, MagicMock(), settings)
 
         assert out["status"] == "ok"
         assert out["warmed"] == 4   # no-filter sla+risk + tenant7 sla+risk
@@ -184,14 +191,14 @@ class TestRunWarmOrchestration:
         fake = FakeAsyncRedis()
         fake.sets["agg:dirty:tenant"] = {"9"}
 
-        async def stub_warm(kind, tid, sem, settings):
+        async def stub_warm(kind, tid, sem, settings, cache):
             # tenant 9 risk fails; everything else ok
             if kind == "risk" and tid == 9:
                 return False
             return True
         monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
 
-        out = await cache_warmer_tasks._run_warm(fake, MagicMock())
+        out = await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
         assert out["errors"] == 1
         # tenant 9 NOT fully warmed → not in any SREM for the tenant set
         tenant_srems = [c[1] for c in fake.srem_calls if c[0] == "agg:dirty:tenant"]
@@ -206,13 +213,13 @@ class TestRunWarmOrchestration:
         fake = FakeAsyncRedis()
         fake.sets["agg:dirty:device"] = {"1", "2", "3"}
 
-        async def stub_warm(kind, tid, sem, settings):
+        async def stub_warm(kind, tid, sem, settings, cache):
             if kind == "sla" and tid is None:
                 return False   # no-filter sla fails
             return True
         monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
 
-        await cache_warmer_tasks._run_warm(fake, MagicMock())
+        await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
         device_srems = [c for c in fake.srem_calls if c[0] == "agg:dirty:device"]
         assert device_srems == [], "device markers must survive a no-filter failure"
 
@@ -223,13 +230,13 @@ class TestRunWarmOrchestration:
 
         fake = FakeAsyncRedis()
 
-        async def stub_warm(kind, tid, sem, settings):
+        async def stub_warm(kind, tid, sem, settings, cache):
             if kind == "risk":
                 raise RuntimeError("boom")
             return True
         monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
 
-        out = await cache_warmer_tasks._run_warm(fake, MagicMock())
+        out = await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
         # sla succeeded, risk raised → counted as error, no crash
         assert out["status"] == "ok"
         assert out["warmed"] == 1
