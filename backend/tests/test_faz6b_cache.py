@@ -164,37 +164,58 @@ class TestGetOrCompute:
         assert len(calls) == 1   # still only 1 call
 
     @pytest.mark.asyncio
-    async def test_hit_stale_returns_old_and_refreshes(self):
+    async def test_stale_entry_recomputed_synchronously(self):
+        """A stale entry triggers a synchronous recompute (no background task).
+
+        Background refresh was removed: a detached task would outlive the
+        caller's DB session. Stale → compute inline, single-flight protected.
+        """
         cache, r = _cache_with_fake()
-        # Pre-populate with an entry that is past fresh window
         envelope = {
             "payload": {"value": "old"},
-            "written_at": time.time() - 120,   # 120 seconds old
-            "fresh_secs": 60,                   # fresh window = 60s, so this is stale
+            "written_at": time.time() - 120,   # 120s old → past 60s fresh window
+            "fresh_secs": 60,
         }
         r.store["agg:test:3"] = json.dumps(envelope)
 
-        compute_called = asyncio.Event()
+        compute_calls = []
 
         async def compute():
-            compute_called.set()
+            compute_calls.append("c")
             return {"value": "new"}
 
         payload, status = await cache.get_or_compute(
             key="agg:test:3", compute=compute,
             fresh_secs=60, stale_secs=240, key_pattern="test",
         )
-        # Stale value returned immediately
-        assert status == CacheStatus.HIT_STALE
-        assert payload == {"value": "old"}
-
-        # Background refresh kicked off — wait briefly for it to run
-        await asyncio.wait_for(compute_called.wait(), timeout=1.0)
-        # Give the refresh task a tick to finish writing
-        await asyncio.sleep(0.05)
-        # New value should now be in cache
+        # Stale → synchronous recompute → fresh value returned, status MISS
+        assert status == CacheStatus.MISS
+        assert payload == {"value": "new"}
+        assert len(compute_calls) == 1
+        # Cache now holds the freshly computed value
         new_envelope = json.loads(r.store["agg:test:3"])
         assert new_envelope["payload"] == {"value": "new"}
+
+    @pytest.mark.asyncio
+    async def test_stale_served_when_compute_fails(self):
+        """If recompute fails but a stale entry exists, serve stale as fallback."""
+        cache, r = _cache_with_fake()
+        envelope = {
+            "payload": {"value": "stale-fallback"},
+            "written_at": time.time() - 120,
+            "fresh_secs": 60,
+        }
+        r.store["agg:test:3b"] = json.dumps(envelope)
+
+        async def failing_compute():
+            raise RuntimeError("DB down")
+
+        payload, status = await cache.get_or_compute(
+            key="agg:test:3b", compute=failing_compute,
+            fresh_secs=60, stale_secs=240, key_pattern="test",
+        )
+        assert status == CacheStatus.HIT_STALE
+        assert payload == {"value": "stale-fallback"}
 
 
 # ── 3. Bypass behavior ────────────────────────────────────────────────────────

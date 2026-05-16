@@ -159,26 +159,39 @@ class AggregationCache:
             payload = await self._compute_with_timing(compute, key_pattern, "redis_down")
             return payload, CacheStatus.REDIS_DOWN
 
-        if entry is not None:
-            if entry.is_fresh():
-                CACHE_OPS.labels(operation="get", key_pattern=key_pattern, result="hit_fresh").inc()
-                AGG_DURATION.labels(endpoint=key_pattern, cache_status="hit_fresh").observe(0.0)
-                return entry.payload, CacheStatus.HIT_FRESH
+        if entry is not None and entry.is_fresh():
+            CACHE_OPS.labels(operation="get", key_pattern=key_pattern, result="hit_fresh").inc()
+            AGG_DURATION.labels(endpoint=key_pattern, cache_status="hit_fresh").observe(0.0)
+            return entry.payload, CacheStatus.HIT_FRESH
 
-            # Stale — serve it AND trigger background refresh (best effort)
-            CACHE_OPS.labels(operation="get", key_pattern=key_pattern, result="hit_stale").inc()
-            AGG_DURATION.labels(endpoint=key_pattern, cache_status="hit_stale").observe(0.0)
-            asyncio.create_task(
-                self._background_refresh(key, compute, fresh_secs, stale_secs, key_pattern),
-                name=f"cache:refresh:{key_pattern}",
+        # MISS or STALE — synchronous single-flight compute.
+        #
+        # We intentionally do NOT spawn a background refresh task here. The
+        # `compute` callback typically closes over a request/worker DB session
+        # whose lifetime ends when the caller returns; a detached task would
+        # then touch a closed session (sqlalchemy IllegalStateChangeError).
+        # Synchronous compute keeps everything inside the caller's context.
+        # Stampede is still bounded by the SETNX single-flight lock.
+        try:
+            payload, status = await self._compute_under_lock(
+                key, compute, fresh_secs, stale_secs, key_pattern,
             )
-            return entry.payload, CacheStatus.HIT_STALE
-
-        # Miss — single-flight compute
-        payload, status = await self._compute_under_lock(
-            key, compute, fresh_secs, stale_secs, key_pattern,
-        )
-        return payload, status
+            return payload, status
+        except Exception:
+            # Compute failed — if we still hold a stale entry, serve it as a
+            # last-resort fallback so the caller gets data instead of a 500.
+            if entry is not None:
+                CACHE_OPS.labels(
+                    operation="get", key_pattern=key_pattern, result="hit_stale",
+                ).inc()
+                AGG_DURATION.labels(
+                    endpoint=key_pattern, cache_status="hit_stale",
+                ).observe(0.0)
+                log.warning(
+                    "cache: compute failed for %s — serving stale entry", key,
+                )
+                return entry.payload, CacheStatus.HIT_STALE
+            raise
 
     async def invalidate(self, key: str, key_pattern: str = "unknown") -> bool:
         """Best-effort delete. Returns True if a key was removed."""
@@ -331,23 +344,11 @@ class AggregationCache:
             entry, redis_ok = await self._read(key, key_pattern)
             if not redis_ok:
                 return None
-            if entry is not None:
+            # Only a FRESH entry means the lock holder finished — a lingering
+            # stale entry must not be mistaken for the new value.
+            if entry is not None and entry.is_fresh():
                 return entry
         return None
-
-    async def _background_refresh(
-        self,
-        key: str,
-        compute: Callable[[], Awaitable[dict]],
-        fresh_secs: int,
-        stale_secs: int,
-        key_pattern: str,
-    ) -> None:
-        try:
-            payload = await self._compute_with_timing(compute, key_pattern, "refresh")
-            await self._write(key, payload, fresh_secs, stale_secs, key_pattern)
-        except Exception:
-            log.exception("cache: background refresh failed key=%s", key)
 
     async def _compute_with_timing(
         self,
