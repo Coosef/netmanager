@@ -102,12 +102,23 @@ async def process_event(
     incident: Incident | None = result.scalar_one_or_none()
 
     if is_problem:
-        return await _handle_problem(
+        result = await _handle_problem(
             fp, device_id, event_type, component, source,
             severity, confidence, incident, db, sync_redis,
         )
     else:
-        return await _handle_recovery(incident, source, db)
+        result = await _handle_recovery(incident, source, db)
+
+    # Faz 6B G4: invalidate aggregation cache for this event.
+    # Non-fatal; cache_invalidation itself swallows Redis errors, but we
+    # also guard against import failures so correlation never breaks.
+    try:
+        from app.services.cache_invalidation import invalidate_for_event
+        invalidate_for_event(sync_redis, device_id, event_type)
+    except Exception:
+        log.debug("corr: cache invalidation failed (non-fatal)", exc_info=True)
+
+    return result
 
 
 # ── Problem path ──────────────────────────────────────────────────────────────

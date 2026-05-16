@@ -1,20 +1,57 @@
 """SLA Policy management & Uptime analytics."""
+import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
 from app.models.sla_policy import SlaPolicy
+from app.services.cache import get_aggregation_cache
 
 router = APIRouter()
+
+
+_SLA_FLEET_VERSION_KEY = "agg:_version:sla_fleet"
+
+
+def _loc_key_part(loc: Optional[list[str]]) -> str:
+    """Stable, low-cardinality key segment for location_filter."""
+    if loc is None:
+        return "_"
+    if not loc:
+        return "empty"
+    raw = "|".join(sorted(loc)).encode("utf-8")
+    return hashlib.sha1(raw).hexdigest()[:8]
+
+
+def fleet_summary_cache_key(
+    version: int,
+    tenant_filter,
+    location_filter: Optional[list[str]],
+    window_days: int,
+    site: Optional[str],
+) -> str:
+    """
+    Build the /sla/fleet-summary cache key. Single source of truth shared by
+    the endpoint and the Faz 6B cache warmer so they never drift.
+    """
+    return (
+        f"agg:sla:fleet"
+        f":v={version}"
+        f":t={tenant_filter if tenant_filter is not None else '_'}"
+        f":loc={_loc_key_part(location_filter)}"
+        f":w={window_days}"
+        f":s={site or '_'}"
+    )
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -91,6 +128,85 @@ async def _calc_uptime(
 
     uptime = max(0.0, (total_secs - offline_secs) / total_secs * 100)
     return round(uptime, 3)
+
+
+# ── Bulk uptime (Faz 6B: N+1 → 1 query) ───────────────────────────────────────
+
+def _compute_uptime_from_events(
+    events_by_device: dict[int, list[tuple[str, datetime]]],
+    device_ids: list[int],
+    since: datetime,
+    now: datetime,
+    total_secs: float,
+) -> dict[int, float]:
+    """
+    Pure function — same algorithm as `_calc_uptime`, applied per device.
+
+    Devices with no events default to 100.0 uptime, matching original behavior.
+    If a device's first event in the window is `device_online`, the device is
+    treated as offline from `since` until that event (started offline).
+    """
+    result: dict[int, float] = {}
+    for did in device_ids:
+        rows = events_by_device.get(did, [])
+        if not rows:
+            result[did] = 100.0
+            continue
+
+        offline_secs = 0.0
+        offline_start: Optional[datetime] = None
+        if rows[0][0] == "device_online":
+            offline_start = since
+
+        for etype, ts in rows:
+            if etype == "device_offline":
+                if offline_start is None:
+                    offline_start = ts
+            elif etype == "device_online":
+                if offline_start is not None:
+                    offline_secs += (ts - offline_start).total_seconds()
+                    offline_start = None
+
+        if offline_start is not None:
+            offline_secs += (now - offline_start).total_seconds()
+
+        uptime = max(0.0, (total_secs - offline_secs) / total_secs * 100)
+        result[did] = round(uptime, 3)
+    return result
+
+
+async def _calc_uptime_bulk(
+    db: AsyncSession,
+    device_ids: list[int],
+    window_days: int,
+    now: datetime,
+) -> dict[int, float]:
+    """
+    Bulk uptime calculation — ONE SQL query for N devices.
+
+    Returns: {device_id: uptime_pct}.  Replaces the N+1 loop of per-device
+    `_calc_uptime` calls in fleet_summary.  Algorithm is identical to the
+    single-device version (see `_compute_uptime_from_events`).
+    """
+    if not device_ids:
+        return {}
+
+    since = now - timedelta(days=window_days)
+    total_secs = window_days * 86400
+
+    rows = (await db.execute(
+        select(NetworkEvent.device_id, NetworkEvent.event_type, NetworkEvent.created_at)
+        .where(NetworkEvent.device_id.in_(device_ids))
+        .where(NetworkEvent.event_type.in_(["device_offline", "device_online"]))
+        .where(NetworkEvent.created_at >= since)
+        .order_by(NetworkEvent.device_id.asc(), NetworkEvent.created_at.asc())
+    )).fetchall()
+
+    events_by_device: dict[int, list[tuple[str, datetime]]] = {}
+    for did, etype, ts in rows:
+        events_by_device.setdefault(did, []).append((etype, ts))
+
+    return _compute_uptime_from_events(events_by_device, device_ids, since, now, total_secs)
 
 
 # ── SLA Policy CRUD ───────────────────────────────────────────────────────────
@@ -364,16 +480,19 @@ async def _calc_uptime_range(
 
 # ── Fleet Summary (for dashboard widget) ─────────────────────────────────────
 
-@router.get("/fleet-summary")
-async def fleet_summary(
-    window_days: int = Query(30, ge=1, le=90),
-    site: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
-):
-    """Aggregated uptime stats for the whole fleet."""
+_EMPTY_FLEET_SUMMARY = {
+    "total": 0, "above_99": 0, "above_95": 0, "below_95": 0, "avg_uptime_pct": 0,
+}
+
+
+async def _compute_fleet_summary(
+    db: AsyncSession,
+    window_days: int,
+    site: Optional[str],
+    location_filter: Optional[list[str]],
+    tenant_filter,
+) -> dict:
+    """Pure compute — used by the endpoint directly and as the cache miss callback."""
     now = datetime.now(timezone.utc)
     fleet_q = select(Device).where(Device.is_active == True)
     if tenant_filter is not None:
@@ -381,7 +500,7 @@ async def fleet_summary(
     if location_filter is not None:
         eff = [s for s in location_filter if not site or s == site] if site else location_filter
         if not eff:
-            return {"total": 0, "above_99": 0, "above_95": 0, "below_95": 0, "avg_uptime_pct": 0}
+            return dict(_EMPTY_FLEET_SUMMARY)
         fleet_q = fleet_q.where(Device.site.in_(eff))
         site = None
     if site:
@@ -389,23 +508,21 @@ async def fleet_summary(
     devices = (await db.execute(fleet_q)).scalars().all()
 
     if not devices:
-        return {"total": 0, "above_99": 0, "above_95": 0, "below_95": 0, "avg_uptime_pct": 0}
+        return dict(_EMPTY_FLEET_SUMMARY)
 
-    uptimes = []
-    for d in devices:
-        pct = await _calc_uptime(db, d.id, window_days, now)
-        uptimes.append(pct)
+    # Faz 6B: single SQL for all devices (was N+1)
+    uptimes_map = await _calc_uptime_bulk(db, [d.id for d in devices], window_days, now)
+    uptimes = [uptimes_map[d.id] for d in devices]
 
     above_99 = sum(1 for u in uptimes if u >= 99.0)
     above_95 = sum(1 for u in uptimes if 95.0 <= u < 99.0)
     below_95 = sum(1 for u in uptimes if u < 95.0)
     avg = round(sum(uptimes) / len(uptimes), 2) if uptimes else 0
 
-    # Worst 5
     worst = sorted(
         [{"hostname": d.hostname, "device_id": d.id, "uptime_pct": pct}
          for d, pct in zip(devices, uptimes)],
-        key=lambda x: x["uptime_pct"]
+        key=lambda x: x["uptime_pct"],
     )[:5]
 
     return {
@@ -417,3 +534,38 @@ async def fleet_summary(
         "avg_uptime_pct": avg,
         "worst_devices": worst,
     }
+
+
+@router.get("/fleet-summary")
+async def fleet_summary(
+    request: Request,
+    response: Response,
+    window_days: int = Query(30, ge=1, le=90),
+    site: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+    location_filter: LocationNameFilter = None,
+    tenant_filter: TenantFilter = None,
+):
+    """Aggregated uptime stats for the whole fleet (cached, Faz 6B)."""
+    bypass = request.headers.get("X-Cache-Bypass") == "1"
+
+    cache = get_aggregation_cache()
+    version = await cache.read_version(_SLA_FLEET_VERSION_KEY)
+    cache_key = fleet_summary_cache_key(
+        version, tenant_filter, location_filter, window_days, site,
+    )
+
+    async def _compute() -> dict:
+        return await _compute_fleet_summary(db, window_days, site, location_filter, tenant_filter)
+
+    payload, status = await cache.get_or_compute(
+        key=cache_key,
+        compute=_compute,
+        fresh_secs=settings.AGG_CACHE_FRESH_SECS,
+        stale_secs=settings.AGG_CACHE_STALE_SECS,
+        key_pattern="sla_fleet",
+        bypass=bypass,
+    )
+    response.headers["X-Cache-Status"] = status.value
+    return payload

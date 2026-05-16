@@ -58,6 +58,19 @@ def backup_device_task(device_id: int, created_by: int | None = None):
         )
         db.commit()
         db.refresh(backup)
+
+        # Faz 6B G4: backup freshness changed → invalidate device risk cache
+        try:
+            import redis as _redis_lib
+            from app.core.config import settings
+            from app.services.cache_invalidation import invalidate_device_risk
+            _inv_redis = _redis_lib.from_url(
+                settings.REDIS_URL, decode_responses=True, socket_timeout=2,
+            )
+            invalidate_device_risk(_inv_redis, device_id, tenant_id=device.tenant_id)
+        except Exception:
+            pass  # invalidation is best-effort; never block backup completion
+
         return {"success": True, "backup_id": backup.id, "hash": config_hash}
 
     except Exception as exc:

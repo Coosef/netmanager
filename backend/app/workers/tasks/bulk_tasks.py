@@ -124,6 +124,14 @@ def run_bulk_command(self, task_id: int, device_ids: list[int], commands: list[s
 @celery_app.task(bind=True, name="app.workers.tasks.bulk_tasks.bulk_backup_configs",
                  soft_time_limit=3600, time_limit=3900)
 def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: int):
+    # Faz 6B G4: bulk backup completion invalidates per-device risk cache
+    import redis as _redis_lib
+    from app.core.config import settings
+    from app.services.cache_invalidation import invalidate_device_risk
+    _inv_redis = _redis_lib.from_url(
+        settings.REDIS_URL, decode_responses=True, socket_timeout=2,
+    )
+
     db = _get_db()
     ssh = SSHManager()
     results = {}
@@ -163,6 +171,8 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
                         )
                     )
                     db.commit()
+                    # Faz 6B G4: backup freshness changed → invalidate device risk
+                    invalidate_device_risk(_inv_redis, device.id, tenant_id=device.tenant_id)
                     results[str(device.id)] = {"hostname": device.hostname, "success": True, "hash": config_hash}
                     completed += 1
                 else:
