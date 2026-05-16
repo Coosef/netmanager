@@ -33,6 +33,27 @@ def _loc_key_part(loc: Optional[list[str]]) -> str:
     return hashlib.sha1(raw).hexdigest()[:8]
 
 
+def fleet_summary_cache_key(
+    version: int,
+    tenant_filter,
+    location_filter: Optional[list[str]],
+    window_days: int,
+    site: Optional[str],
+) -> str:
+    """
+    Build the /sla/fleet-summary cache key. Single source of truth shared by
+    the endpoint and the Faz 6B cache warmer so they never drift.
+    """
+    return (
+        f"agg:sla:fleet"
+        f":v={version}"
+        f":t={tenant_filter if tenant_filter is not None else '_'}"
+        f":loc={_loc_key_part(location_filter)}"
+        f":w={window_days}"
+        f":s={site or '_'}"
+    )
+
+
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class SlaPolicyCreate(BaseModel):
@@ -531,13 +552,8 @@ async def fleet_summary(
 
     cache = get_aggregation_cache()
     version = await cache.read_version(_SLA_FLEET_VERSION_KEY)
-    cache_key = (
-        f"agg:sla:fleet"
-        f":v={version}"
-        f":t={tenant_filter if tenant_filter is not None else '_'}"
-        f":loc={_loc_key_part(location_filter)}"
-        f":w={window_days}"
-        f":s={site or '_'}"
+    cache_key = fleet_summary_cache_key(
+        version, tenant_filter, location_filter, window_days, site,
     )
 
     async def _compute() -> dict:

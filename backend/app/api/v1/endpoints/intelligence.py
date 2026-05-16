@@ -52,6 +52,25 @@ def _loc_key_part(loc: Optional[list[str]]) -> str:
     return hashlib.sha1(raw).hexdigest()[:8]
 
 
+def fleet_risk_cache_key(
+    version: int,
+    tenant_filter,
+    location_filter: Optional[list[str]],
+    limit: int,
+) -> str:
+    """
+    Build the /intelligence/fleet/risk cache key. Single source of truth
+    shared by the endpoint and the Faz 6B cache warmer to prevent drift.
+    """
+    return (
+        f"agg:risk:fleet"
+        f":v={version}"
+        f":t={tenant_filter if tenant_filter is not None else '_'}"
+        f":loc={_loc_key_part(location_filter)}"
+        f":limit={limit}"
+    )
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _risk_level(score: float) -> str:
@@ -411,13 +430,7 @@ async def fleet_risk(
 
     cache = get_aggregation_cache()
     version = await cache.read_version(_RISK_FLEET_VERSION_KEY)
-    cache_key = (
-        f"agg:risk:fleet"
-        f":v={version}"
-        f":t={tenant_filter if tenant_filter is not None else '_'}"
-        f":loc={_loc_key_part(location_filter)}"
-        f":limit={limit}"
-    )
+    cache_key = fleet_risk_cache_key(version, tenant_filter, location_filter, limit)
 
     async def _compute() -> dict:
         return await _compute_fleet_risk(db, limit, location_filter, tenant_filter)

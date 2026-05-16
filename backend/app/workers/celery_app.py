@@ -28,6 +28,7 @@ celery_app = Celery(
         "app.workers.tasks.agent_peer_tasks",
         "app.workers.tasks.escalation_tasks",
         "app.workers.tasks.metrics_tasks",
+        "app.workers.tasks.cache_warmer_tasks",
     ],
 )
 
@@ -170,6 +171,11 @@ celery_app.conf.update(
         },
         "collect-infrastructure-metrics-every-minute": {
             "task": "app.workers.tasks.metrics_tasks.collect_infrastructure_metrics",
+            "schedule": 60.0,
+        },
+        # Faz 6B G5 — keep KI-1 aggregation caches warm (default queue)
+        "warm-aggregation-cache-every-60s": {
+            "task": "app.workers.tasks.cache_warmer_tasks.warm_aggregation_cache",
             "schedule": 60.0,
         },
     },
