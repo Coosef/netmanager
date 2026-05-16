@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = 5
     DB_MAX_OVERFLOW: int = 10
 
+    # Faz 6B G7: coalesce fleet-cache version bumps. Without debounce every
+    # device event INCRs the version, killing the fleet cache on each event
+    # → near-zero hit ratio under load. With debounce the version bumps at
+    # most once per window; max added staleness ≈ this window.
+    AGG_CACHE_INVALIDATION_DEBOUNCE_SECS: int = 30
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

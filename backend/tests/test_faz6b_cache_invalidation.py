@@ -49,6 +49,13 @@ class FakeSyncRedis:
         self.counters[key] = self.counters.get(key, 0) + 1
         return self.counters[key]
 
+    def set(self, key, value, *, nx=False, ex=None):
+        self._check("set", key, value)
+        if nx and key in self.kv:
+            return None        # NX fails — key already exists in this window
+        self.kv[key] = value
+        return True
+
     def sadd(self, key, member):
         self._check("sadd", key, member)
         self.sets.setdefault(key, set()).add(member)
@@ -135,6 +142,55 @@ class TestInvalidateForEvent:
         expire_count = sum(1 for c in r.calls if c[0] == "expire" and c[1] == "agg:dirty:device")
         assert sadd_count == 2
         assert expire_count == 2
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 1b. Fleet version-bump debounce (G7-4)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestVersionBumpDebounce:
+
+    def test_burst_coalesced_into_one_bump(self):
+        """Many events in one debounce window → exactly one version INCR."""
+        from app.services.cache_invalidation import invalidate_for_event
+        r = FakeSyncRedis()
+        # 5 device events for 5 devices, all within the same window
+        for did in range(1, 6):
+            invalidate_for_event(r, device_id=did, event_type="device_offline")
+        # device_offline affects both fleets — each bumped exactly once
+        assert r.counters.get("agg:_version:risk_fleet") == 1
+        assert r.counters.get("agg:_version:sla_fleet") == 1
+
+    def test_per_device_delete_not_debounced(self):
+        """The per-device risk key DELETE fires for every event (not debounced)."""
+        from app.services.cache_invalidation import invalidate_for_event
+        r = FakeSyncRedis()
+        for did in range(1, 6):
+            invalidate_for_event(r, device_id=did, event_type="device_offline")
+        deletes = [c for c in r.calls if c[0] == "delete"
+                   and c[1].startswith("agg:risk:device:")]
+        assert len(deletes) == 5   # one per device, every time
+
+    def test_debounce_disabled_bumps_every_event(self, monkeypatch):
+        """AGG_CACHE_INVALIDATION_DEBOUNCE_SECS=0 → plain INCR per event."""
+        from app.core import config
+        from app.services.cache_invalidation import invalidate_for_event
+        monkeypatch.setattr(config.settings, "AGG_CACHE_INVALIDATION_DEBOUNCE_SECS", 0)
+        r = FakeSyncRedis()
+        for did in range(1, 4):
+            invalidate_for_event(r, device_id=did, event_type="device_offline")
+        assert r.counters.get("agg:_version:risk_fleet") == 3
+        assert r.counters.get("agg:_version:sla_fleet") == 3
+
+    def test_guard_key_carries_ttl(self):
+        """The debounce guard is SET with an expiry so the window self-clears."""
+        from app.services.cache_invalidation import invalidate_for_event
+        r = FakeSyncRedis()
+        invalidate_for_event(r, device_id=1, event_type="device_offline")
+        # guard keys for both fleet versions were SET
+        set_keys = [c[1] for c in r.calls if c[0] == "set"]
+        assert "agg:_version:risk_fleet:debounce" in set_keys
+        assert "agg:_version:sla_fleet:debounce" in set_keys
 
 
 # ══════════════════════════════════════════════════════════════════════════════

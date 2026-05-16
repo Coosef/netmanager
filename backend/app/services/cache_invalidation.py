@@ -85,10 +85,12 @@ def invalidate_for_event(
         return
 
     if affects_risk:
+        # Per-device delete is NOT debounced — cheap, and the single-device
+        # endpoint must stay correct. Fleet version bump IS debounced.
         _try_delete(sync_redis, _RISK_DEVICE_KEY.format(device_id=device_id))
-        _try_incr(sync_redis, _RISK_FLEET_VERSION)
+        _bump_fleet_version_debounced(sync_redis, _RISK_FLEET_VERSION)
     if affects_sla:
-        _try_incr(sync_redis, _SLA_FLEET_VERSION)
+        _bump_fleet_version_debounced(sync_redis, _SLA_FLEET_VERSION)
 
     _mark_dirty(sync_redis, device_id, tenant_id)
 
@@ -108,7 +110,7 @@ def invalidate_device_risk(
     SLA fleet cache is NOT bumped here — uptime is unaffected.
     """
     _try_delete(sync_redis, _RISK_DEVICE_KEY.format(device_id=device_id))
-    _try_incr(sync_redis, _RISK_FLEET_VERSION)
+    _bump_fleet_version_debounced(sync_redis, _RISK_FLEET_VERSION)
     _mark_dirty(sync_redis, device_id, tenant_id)
 
 
@@ -116,6 +118,9 @@ def invalidate_all_fleet_caches(sync_redis) -> None:
     """
     Bump BOTH fleet version counters. Use when device CRUD invalidates every
     fleet-scoped cache (insert/delete/site change/tenant change/is_active flip).
+
+    NOT debounced — device CRUD is rare and admin-initiated; the new device
+    must show up immediately.
     """
     _try_incr(sync_redis, _SLA_FLEET_VERSION)
     _try_incr(sync_redis, _RISK_FLEET_VERSION)
@@ -146,6 +151,36 @@ def _try_incr(sync_redis, key: str) -> None:
         sync_redis.incr(key)
     except Exception as exc:
         log.debug("cache-invalidate: incr %s failed — %s", key, exc)
+
+
+def _bump_fleet_version_debounced(sync_redis, version_key: str) -> None:
+    """
+    INCR the fleet version at most once per debounce window.
+
+    A guard key (`<version_key>:debounce`) is SET NX EX <window>. Only the
+    event that wins the SETNX — the first in the window — performs the INCR;
+    every other event in the window is coalesced into that single bump.
+
+    Effect: under a burst of device events the fleet cache key stays stable
+    instead of being killed on every event, so reads keep hitting the cache.
+    Trade-off: at most ~<window> seconds of added staleness on fleet data,
+    which the cache warmer then refreshes anyway.
+    """
+    from app.core.config import settings
+
+    window = settings.AGG_CACHE_INVALIDATION_DEBOUNCE_SECS
+    if window <= 0:
+        # Debounce disabled — behave like the plain INCR.
+        _try_incr(sync_redis, version_key)
+        return
+
+    guard_key = f"{version_key}:debounce"
+    try:
+        first_in_window = sync_redis.set(guard_key, "1", nx=True, ex=window)
+        if first_in_window:
+            sync_redis.incr(version_key)
+    except Exception as exc:
+        log.debug("cache-invalidate: debounced bump %s failed — %s", version_key, exc)
 
 
 def _try_sadd_with_ttl(sync_redis, set_key: str, member: str) -> None:
