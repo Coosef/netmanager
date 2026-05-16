@@ -1246,54 +1246,74 @@ from app.api.v1.endpoints.health import router as health_router  # noqa: E402
 app.include_router(health_router)
 
 
-def _find_corrupt_prom_multiproc_files(prom_dir: str) -> list[str]:
+def _prom_multiproc_root() -> str:
     """
-    Test each .db file in PROMETHEUS_MULTIPROC_DIR by feeding it to
-    MultiProcessCollector.merge() in isolation. Files that raise are
-    considered corrupt and returned for caller to delete.
+    Parent directory holding the per-service multiproc subdirs.
 
-    Corruption happens when multiple containers share the multiproc volume
-    but each has a process at pid=1 (Docker namespacing) → they all write to
-    the same `counter_1.db` / `gauge_1.db` files. Faz 6B G7 follow-up moves
-    each container to a per-hostname subdir to fix the root cause.
+    Faz 6B G7: every container writes to its OWN subdir
+    (/tmp/prom_multiproc/<service>) so pid=1 collisions across containers
+    can no longer corrupt each other's .db files. The backend's own
+    PROMETHEUS_MULTIPROC_DIR points at its subdir; the scrape endpoint
+    merges every subdir under the shared root.
+    """
+    own = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "").rstrip("/")
+    return os.path.dirname(own) if own else ""
+
+
+class _AllServicesMultiprocCollector:
+    """Collector that merges prometheus multiproc .db files across ALL
+    per-service subdirs under the shared root."""
+
+    def __init__(self, root: str):
+        self._root = root
+
+    def collect(self):
+        import glob
+        from prometheus_client.multiprocess import MultiProcessCollector
+        files = glob.glob(os.path.join(self._root, "*", "*.db"))
+        return MultiProcessCollector.merge(files, accumulate=True)
+
+
+def _find_corrupt_prom_multiproc_files(root: str) -> list[str]:
+    """
+    Test each .db file under root/<service>/*.db by feeding it to
+    MultiProcessCollector.merge() in isolation. Files that raise are
+    considered corrupt and returned for the caller to delete.
+
+    Post-G7 corruption should be rare (per-service subdirs eliminate the
+    cross-container pid=1 collision) — this stays as defense-in-depth for
+    processes killed mid-write.
     """
     import glob
     from prometheus_client.multiprocess import MultiProcessCollector
 
     bad: list[str] = []
-    for fpath in glob.glob(os.path.join(prom_dir, "*.db")):
+    for fpath in glob.glob(os.path.join(root, "*", "*.db")):
         try:
-            # merge() returns a list; iterating triggers any parse error.
             list(MultiProcessCollector.merge([fpath]))
         except Exception:
-            # Anything that can't be parsed is corrupt — we delete it anyway,
-            # so a broad catch is correct here.
             bad.append(fpath)
     return bad
 
 
 @app.get("/metrics", include_in_schema=False)
 async def metrics_endpoint():
-    """Prometheus scrape endpoint. Supports multiprocess mode via PROMETHEUS_MULTIPROC_DIR.
-
-    Resilient to corrupt multiproc files (which can happen when multiple
-    containers' pid=1 share the same multiproc volume). On collect failure,
-    identifies and removes corrupt files then retries the scrape so the
-    endpoint stays available.
+    """Prometheus scrape endpoint — merges multiproc metrics across every
+    per-service subdir. Resilient to corrupt files: on collect failure,
+    removes corrupt files then retries so the endpoint stays available.
     """
     from prometheus_client import (
         CollectorRegistry,
         generate_latest,
-        multiprocess,
         CONTENT_TYPE_LATEST,
     )
-    prom_dir = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "")
-    if not prom_dir:
+    root = _prom_multiproc_root()
+    if not root:
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     try:
         registry = CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
+        registry.register(_AllServicesMultiprocCollector(root))
         return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
     except Exception as exc:
         _startup_log.warning(
@@ -1302,7 +1322,7 @@ async def metrics_endpoint():
 
     # Cleanup pass: find + delete corrupt files
     try:
-        bad = _find_corrupt_prom_multiproc_files(prom_dir)
+        bad = _find_corrupt_prom_multiproc_files(root)
     except Exception:
         _startup_log.exception("metrics: cleanup scan failed, returning in-process fallback")
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
@@ -1310,18 +1330,17 @@ async def metrics_endpoint():
     for fpath in bad:
         try:
             os.unlink(fpath)
-            _startup_log.warning("metrics: removed corrupt file %s", os.path.basename(fpath))
+            _startup_log.warning("metrics: removed corrupt file %s", fpath)
         except OSError:
             pass
 
     # Retry once after cleanup
     try:
         registry = CollectorRegistry()
-        multiprocess.MultiProcessCollector(registry)
+        registry.register(_AllServicesMultiprocCollector(root))
         return Response(content=generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
     except Exception:
-        # Last-resort: return in-process registry data only (workers' metrics lost
-        # for this scrape). Empty response would break Prometheus scrape; partial
-        # data keeps the endpoint healthy.
+        # Last-resort: in-process registry only (workers' metrics lost for
+        # this scrape). Keeps the endpoint 200 instead of breaking the scrape.
         _startup_log.exception("metrics: multiproc still failing after cleanup, returning fallback")
         return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
