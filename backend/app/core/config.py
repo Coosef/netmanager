@@ -61,6 +61,11 @@ class Settings(BaseSettings):
     # most once per window; max added staleness ≈ this window.
     AGG_CACHE_INVALIDATION_DEBOUNCE_SECS: int = 30
 
+    # Faz 6C: syslog ingestion goes through the Redis Streams event bus.
+    # Caps concurrent inserts on the FALLBACK path (event bus unavailable)
+    # so a burst cannot open one DB connection per event (the KI-4 mode).
+    SYSLOG_FALLBACK_CONCURRENCY: int = 8
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]
