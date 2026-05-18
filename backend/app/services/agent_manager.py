@@ -30,6 +30,17 @@ _AGENT_ONLINE_TTL = 120  # seconds; refreshed on every heartbeat (agent sends ev
 
 def _get_sync_redis():
     return _redis_sync.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=2)
+
+
+def _bump_publish_metric(stream: str, result: str) -> None:
+    """Faz 6C: record an event-bus publish outcome. Never raises."""
+    try:
+        from app.core.metrics import EVENT_BUS_PUBLISH_TOTAL
+        EVENT_BUS_PUBLISH_TOTAL.labels(stream=stream, result=result).inc()
+    except Exception:
+        pass
+
+
 _EMA_ALPHA = 0.3       # exponential moving average weight for latency
 
 # Commands that are always safe regardless of mode (read-only show commands)
@@ -448,56 +459,43 @@ class AgentManager:
     # ── Syslog event handling ─────────────────────────────────────────────────
 
     async def _handle_syslog_event(self, agent_id: str, msg: dict):
+        """
+        Faz 6C: publish the syslog event to the Redis Streams event bus
+        instead of writing it to the DB inline.
+
+        The old path opened one DB connection per event via make_worker_session
+        — under a burst that meant thousands of concurrent connections and pool
+        exhaustion (KI-4). Now ingestion is a single XADD (microseconds, no DB);
+        the event_consumer service drains the stream in bounded batches.
+
+        If the event bus is unavailable, fall back to a *bounded* direct insert
+        (semaphore-capped) so a burst still cannot exhaust the pool.
+        """
+        payload = {
+            "agent_id": agent_id,
+            "source_ip": msg.get("source_ip", ""),
+            "facility": msg.get("facility", 0),
+            "severity": msg.get("severity", 7),
+            "message": msg.get("message", ""),
+            "received_at": datetime.now(timezone.utc),
+        }
+        from app.services.event_bus import STREAM_SYSLOG, get_event_bus
         try:
-            from app.core.database import make_worker_session
-            from app.models.syslog_event import SyslogEvent
+            entry_id = await get_event_bus().publish(STREAM_SYSLOG, payload)
+            if entry_id is not None:
+                _bump_publish_metric(STREAM_SYSLOG, "ok")
+                return  # handed off to the event_consumer
+        except Exception as exc:
+            log.debug(f"Syslog event bus publish error: {exc}")
 
-            source_ip  = msg.get("source_ip", "")
-            facility   = msg.get("facility", 0)
-            severity_i = msg.get("severity", 7)
-            message    = msg.get("message", "")
-
-            async with make_worker_session()() as db:
-                ev = SyslogEvent(
-                    agent_id=agent_id,
-                    source_ip=source_ip,
-                    facility=facility,
-                    severity=severity_i,
-                    message=message,
-                    received_at=datetime.now(timezone.utc),
-                )
-                db.add(ev)
-                await db.commit()
-
-                # ── Correlation engine — availability-impacting messages only ──
-                # Raw SyslogEvent is always written above, regardless of this path.
-                from app.services.syslog_normalizer import normalize, AVAILABILITY_EVENT_TYPES
-                normalized = normalize(facility, severity_i, message)
-                if normalized and normalized.event_type in AVAILABILITY_EVENT_TYPES:
-                    from sqlalchemy import select
-                    from app.models.device import Device
-                    row = await db.execute(
-                        select(Device.id).where(Device.ip_address == source_ip)
-                    )
-                    device_id = row.scalar_one_or_none()
-                    if device_id:
-                        try:
-                            from app.services.correlation_engine import process_event as _corr
-                            _redis = _get_sync_redis()
-                            await _corr(
-                                device_id  = device_id,
-                                event_type = normalized.event_type,
-                                component  = normalized.component,
-                                source     = "syslog",
-                                is_problem = normalized.is_problem,
-                                db         = db,
-                                sync_redis = _redis,
-                                severity   = normalized.severity,
-                            )
-                        except Exception as corr_err:
-                            log.warning(f"Syslog correlation error (non-fatal): {corr_err}")
-        except Exception as e:
-            log.debug(f"Syslog persist error: {e}")
+        # Fallback — event bus unavailable. Bounded direct insert.
+        try:
+            from app.services.syslog_ingest import fallback_persist
+            ok = await fallback_persist(payload, _get_sync_redis())
+            _bump_publish_metric(STREAM_SYSLOG, "fallback" if ok else "error")
+        except Exception as exc:
+            log.debug(f"Syslog fallback persist error: {exc}")
+            _bump_publish_metric(STREAM_SYSLOG, "error")
 
     # ── D4: SNMP Trap handling ────────────────────────────────────────────────
 

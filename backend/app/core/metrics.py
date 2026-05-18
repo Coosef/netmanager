@@ -146,3 +146,35 @@ CACHE_REDIS_KEYS = Gauge(
     "Approximate count of cached keys by pattern",
     ["key_pattern"],
 )
+
+# ── Event Bus / ingestion (Faz 6C) ────────────────────────────────────────────
+EVENT_BUS_PUBLISH_TOTAL = Counter(
+    "netmanager_event_bus_publish_total",
+    "Event bus publish outcomes by stream",
+    ["stream", "result"],          # result: ok | fallback | error
+)
+
+EVENT_STREAM_DEPTH = Gauge(
+    "netmanager_event_stream_depth",
+    "Current entry count of an ingest stream (XLEN)",
+    ["stream"],
+)
+
+EVENT_CONSUMER_LAG = Gauge(
+    "netmanager_event_consumer_lag",
+    "Undelivered + pending backlog for a stream consumer group",
+    ["stream", "group"],
+)
+
+EVENT_CONSUMER_BATCH_DURATION = Histogram(
+    "netmanager_event_consumer_batch_duration_seconds",
+    "event_consumer batch persist duration",
+    ["stream"],
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
+)
+
+EVENT_CONSUMER_CLAIMED_TOTAL = Counter(
+    "netmanager_event_consumer_claimed_total",
+    "Stale entries reclaimed via XAUTOCLAIM (crashed-consumer recovery)",
+    ["stream"],
+)

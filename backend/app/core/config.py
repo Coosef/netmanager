@@ -61,6 +61,17 @@ class Settings(BaseSettings):
     # most once per window; max added staleness ≈ this window.
     AGG_CACHE_INVALIDATION_DEBOUNCE_SECS: int = 30
 
+    # Faz 6C: syslog ingestion goes through the Redis Streams event bus.
+    # Caps concurrent inserts on the FALLBACK path (event bus unavailable)
+    # so a burst cannot open one DB connection per event (the KI-4 mode).
+    SYSLOG_FALLBACK_CONCURRENCY: int = 8
+
+    # Faz 6C: event_consumer service — drains ingest streams in bounded batches.
+    EVENT_CONSUMER_BATCH_COUNT: int = 200          # entries per XREADGROUP
+    EVENT_CONSUMER_BLOCK_MS: int = 2000            # XREADGROUP block timeout
+    EVENT_CONSUMER_CLAIM_INTERVAL_SECS: int = 30   # how often to run claim_stale
+    EVENT_CONSUMER_CLAIM_MIN_IDLE_SECS: int = 60   # pending age before reclaim
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

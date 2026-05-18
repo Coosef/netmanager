@@ -232,6 +232,44 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  # Faz 6C — ingestion data plane: drains the ingest:syslog Redis Stream and
+  # persists batches. Decoupled from the backend (control plane) so a syslog
+  # burst can never exhaust the DB pool (KI-4).
+  event_consumer:
+    build: ./backend
+    command:
+      - /bin/sh
+      - -c
+      - "rm -rf /tmp/prom_multiproc/event_consumer && exec python -m app.services.event_consumer"
+    volumes:
+      - ./backend:/app
+      - prom_multiproc:/tmp/prom_multiproc
+    env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - REDIS_URL=redis://redis:6379/0
+      - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/event_consumer
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      # Consumer refreshes event_consumer:alive (TTL 30s) every loop iteration.
+      test: ["CMD-SHELL", "python3 -c \"import os,redis,sys; sys.exit(0 if redis.from_url(os.environ['REDIS_URL']).exists('event_consumer:alive') else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: "512m"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   flower:
     build: ./backend
     command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
