@@ -68,9 +68,16 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
 # ---------------------------------------------------------------------------
 
 class SystemRole(str, Enum):
-    SUPER_ADMIN = "super_admin"  # Platform-wide; unrestricted
-    ORG_ADMIN = "org_admin"      # Full access within their org; manages users/perms
-    MEMBER = "member"            # Access governed by PermissionSet assignments
+    """Faz 7 — the consolidated 4-role system model. Row visibility is
+    enforced by RLS; this is the coarse system role. Action-level rights
+    remain governed by PermissionSet / PermissionEngine."""
+    SUPER_ADMIN = "super_admin"        # Platform-wide; bypasses RLS
+    ORG_ADMIN = "org_admin"           # Full access within their organization
+    LOCATION_ADMIN = "location_admin"  # Manage their assigned location(s)
+    VIEWER = "viewer"                  # Read-only, org/location scoped
+
+    # Deprecated alias — pre-Faz-7 value; M4 remaps existing rows to VIEWER.
+    MEMBER = "member"
 
 
 class User(Base):
@@ -92,7 +99,7 @@ class User(Base):
 
     # --- New RBAC fields ---
     system_role: Mapped[str] = mapped_column(
-        String(32), default=SystemRole.MEMBER, nullable=False
+        String(32), default=SystemRole.VIEWER, nullable=False
     )
     organization_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True

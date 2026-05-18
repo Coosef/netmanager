@@ -187,15 +187,21 @@ def require_permission(module: str, action: str):
 
 
 def require_system_role(*roles: SystemRole):
-    """Require one of the given system-level roles (super_admin, org_admin, member).
+    """
+    Require one of the given system roles — Faz 7 4-role model
+    (super_admin / org_admin / location_admin / viewer).
 
-    Falls back to legacy `role` field so existing users whose system_role
-    defaulted to 'member' before the RBAC migration are not locked out.
+    A 'member' value (the pre-Faz-7 default, before migration M4 ran) is
+    treated as 'viewer'. The legacy `role` column is still consulted as a
+    fallback so an un-migrated user is never wrongly locked out.
     """
     async def _checker(user: Annotated[User, Depends(get_current_active_user)]) -> User:
-        if user.system_role in roles:
+        sr = user.system_role
+        if sr == SystemRole.MEMBER:          # pre-M4 value
+            sr = SystemRole.VIEWER
+        if sr in roles:
             return user
-        # Legacy fallback: map old `role` values to new system roles
+        # Legacy fallback — un-migrated user whose system_role is stale.
         if user.role == UserRole.SUPER_ADMIN and SystemRole.SUPER_ADMIN in roles:
             return user
         if user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN) and SystemRole.ORG_ADMIN in roles:
@@ -212,4 +218,10 @@ SuperAdminOnly = Annotated[User, Depends(require_system_role(SystemRole.SUPER_AD
 OrgAdminOrAbove = Annotated[
     User,
     Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
+]
+LocationAdminOrAbove = Annotated[
+    User,
+    Depends(require_system_role(
+        SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN, SystemRole.LOCATION_ADMIN,
+    )),
 ]
