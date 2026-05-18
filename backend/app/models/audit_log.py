@@ -11,6 +11,12 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Faz 7 — org scope: stamped by the _scoping before_insert hook, drives
+    # the audit_logs RLS policy. Nullable: pre-auth events (failed logins)
+    # have no org and stay super-admin-only.
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     action: Mapped[str] = mapped_column(String(128), nullable=False, index=True)

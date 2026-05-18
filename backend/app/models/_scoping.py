@@ -96,6 +96,17 @@ def _lookup_first(connection, sql: str):
         return None
 
 
+def _guc_int(connection, name: str):
+    """Read an RLS session GUC as an int — empty / unset yields None."""
+    try:
+        row = connection.execute(text(
+            f"SELECT NULLIF(current_setting('{name}', true), '')::int"
+        )).first()
+        return row[0] if row is not None else None
+    except Exception:
+        return None
+
+
 def _column_not_null(target, name: str) -> bool:
     try:
         col = target.__table__.columns.get(name)
@@ -134,14 +145,22 @@ def _stamp_scoping(_mapper, connection, target) -> None:
                 needs_org = False
                 break
 
-    # 3. Fall back to the request/task context.
+    # 3. Fall back to the request/task context. ContextVars do not always
+    #    cross into SQLAlchemy's async flush greenlet, so when they read
+    #    empty we consult the RLS session GUCs — those are reliably set on
+    #    the connection (apply_rls_context for requests, the after_begin
+    #    hook for sync workers) and are the source of truth at flush time.
     if needs_org:
         org_id = get_current_org_id()
+        if org_id is None:
+            org_id = _guc_int(connection, "app.current_org_id")
         if org_id is not None:
             target.organization_id = org_id
             needs_org = False
     if needs_loc:
         loc_id = get_current_location_id()
+        if loc_id is None:
+            loc_id = _guc_int(connection, "app.current_location_id")
         if loc_id is not None:
             target.location_id = loc_id
             needs_loc = False
