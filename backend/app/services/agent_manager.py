@@ -614,17 +614,19 @@ class AgentManager:
                         # Correlation errors must never break trap ingest flow
                         log.warning(f"SNMP trap correlation error (non-fatal): {corr_err}")
 
-            # Publish to Redis event stream for real-time UI updates
+            # Publish to Redis event stream for real-time UI updates —
+            # org-scoped: derive org from the trap's device_id.
             try:
-                r = _get_sync_redis()
-                r.publish("network:events", _json.dumps({
+                from app.core.event_publish import publish_network_event
+                publish_network_event({
                     "event_type": f"snmp_trap_{trap_name}",
                     "severity": severity,
                     "title": title,
                     "message": message,
                     "source_ip": source_ip,
                     "agent_id": agent_id,
-                }))
+                    "device_id": device_id,
+                }, _get_sync_redis())
             except Exception:
                 pass
 
@@ -672,19 +674,22 @@ class AgentManager:
                         agent_id,
                     )
                     return
+                _evt_org = evt.organization_id
+                _evt_loc = evt.location_id
                 db.add(evt)
                 await db.commit()
 
-            # Publish to Redis event stream
-            r = _redis_sync.from_url(_settings.REDIS_URL, decode_responses=True)
-            r.publish("network:events", _json.dumps({
+            # Publish to Redis event stream — org-scoped to the agent's org.
+            from app.core.event_publish import publish_network_event
+            publish_network_event({
                 "event_type": "local_anomaly",
                 "severity": "warning",
                 "title": title,
                 "message": message,
                 "agent_id": agent_id,
                 "anomaly_type": anomaly_type,
-            }))
+            }, _redis_sync.from_url(_settings.REDIS_URL, decode_responses=True),
+               organization_id=_evt_org, location_id=_evt_loc)
             log.info(f"Agent {agent_id} local_anomaly: {anomaly_type} — {message}")
         except Exception as e:
             log.debug(f"Local anomaly handler error: {e}")

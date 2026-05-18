@@ -97,9 +97,8 @@ async def _do_check_topology_drift():
             "message": evt.message,
             "ts": datetime.now(timezone.utc).isoformat(),
         }
-        _redis.publish("network:events", json.dumps(payload))
-        _redis.lpush("network:events:recent", json.dumps(payload))
-        _redis.ltrim("network:events:recent", 0, 499)
+        from app.core.event_publish import publish_network_event
+        publish_network_event(payload, _redis)
         log.info("topology_twin: drift event fired", extra={"added": added_count, "removed": removed_count})
 
 
@@ -429,9 +428,8 @@ async def _do_detect_anomalies():
 
         if fired:
             await db.commit()
+            from app.core.event_publish import publish_network_event
             for p in notify_queue:
-                _redis.publish("network:events", json.dumps(p))
-                _redis.lpush("network:events:recent", json.dumps(p))
-            _redis.ltrim("network:events:recent", 0, 499)
+                publish_network_event(p, _redis)
 
         log.info("behavior: anomaly scan done, fired=%d", fired)

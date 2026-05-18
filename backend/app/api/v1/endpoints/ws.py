@@ -21,50 +21,57 @@ async def _authenticate_ws(websocket: WebSocket, token: Optional[str]) -> bool:
     return True
 
 
-async def _get_tenant_device_ids(token: str) -> Optional[set]:
-    """
-    Faz 7 — the set of device_ids the token owner may see on a realtime
-    stream, or None for a super-admin (sees all). The device set is read
-    under the user's RLS context (scoped by ORGANIZATION), so the stream
-    filter inherits DB-enforced isolation instead of the legacy tenant_id
-    match.
-    """
+async def _resolve_ws_scope(token: str) -> tuple[Optional[int], bool]:
+    """Faz 7 phase6d — resolve a realtime connection's tenancy scope:
+    (organization_id, is_super_admin).
+
+      * super-admin            → (None, True)   — every org channel
+      * org-bound user         → (org_id, False)
+      * unknown / org-less user→ (None, False)  — no channel
+
+    The org id picks the per-org Redis channel the socket subscribes to,
+    so cross-org frames are never delivered to it."""
     from app.core.database import AsyncSessionLocal
-    from app.core.org_context import set_org_context, clear_org_context
-    from app.core.rls import apply_rls_context
-    from app.models.device import Device
     from app.models.user import User, UserRole, SystemRole
 
     payload = decode_access_token(token)
     if not payload:
-        return set()
+        return None, False
     user_id = payload.get("sub")
     if not user_id:
-        return set()
+        return None, False
 
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
+        user = (await db.execute(
             select(User).where(User.id == int(user_id), User.is_active == True)
-        )
-        user = result.scalar_one_or_none()
+        )).scalar_one_or_none()
         if not user:
-            return set()
-
+            return None, False
         if user.system_role == SystemRole.SUPER_ADMIN or user.role == UserRole.SUPER_ADMIN:
-            return None  # sees everything
+            return None, True
+        return user.organization_id, False
 
-        if not user.organization_id:
-            return set()
 
-        set_org_context(user.organization_id, None, False)
-        await apply_rls_context(db)
-        try:
-            rows = (await db.execute(
-                select(Device.id).where(Device.is_active == True)
-            )).scalars().all()
-        finally:
-            clear_org_context()
-        return set(rows)
+def _event_channels(base: str, org_id: Optional[int], is_super: bool):
+    """Return (subscribe_args, is_pattern, recent_key|None) for a per-org
+    pub/sub stream. Super-admins pattern-subscribe every org channel."""
+    if is_super:
+        return f"{base}:org:*", True, None
+    if org_id is None:
+        return None, False, None
+    return f"{base}:org:{org_id}", False, f"{base}:recent:org:{org_id}"
+
+
+def _location_ok(raw: str, active_location: Optional[int]) -> bool:
+    """A frame passes when no location filter is active, or the event has
+    no location, or its location matches the connection's active one."""
+    if active_location is None:
+        return True
+    try:
+        loc = json.loads(raw).get("location_id")
+    except Exception:
+        return True
+    return loc is None or loc == active_location
 
 
 @router.websocket("/tasks/{task_id}")
@@ -95,41 +102,37 @@ async def task_progress_ws(
 async def anomalies_ws(
     websocket: WebSocket,
     token: Optional[str] = Query(default=None),
+    location: Optional[int] = Query(default=None),
 ):
-    if not await _authenticate_ws(websocket, token):
+    org_id, is_super = await _resolve_ws_scope(token or "")
+    if not token or not decode_access_token(token):
+        await websocket.close(code=4001)
         return
-
-    accessible_ids = await _get_tenant_device_ids(token or "")
-
-    def _anomaly_allowed(raw: str) -> bool:
-        if accessible_ids is None:
-            return True
-        try:
-            data = json.loads(raw)
-            dev_id = data.get("device_id")
-            return dev_id is not None and dev_id in accessible_ids
-        except Exception:
-            return False
+    sub, is_pattern, _ = _event_channels("anomalies", org_id, is_super)
+    if sub is None:
+        await websocket.close(code=4003)  # org-less user — no stream
+        return
 
     await websocket.accept()
     r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     pubsub = r.pubsub()
-    await pubsub.subscribe("anomalies")
-
-    recent_stp = await r.lrange("anomalies:stp", 0, 19)
-    recent_loop = await r.lrange("anomalies:loop", 0, 19)
-    for item in recent_stp + recent_loop:
-        if _anomaly_allowed(item):
-            await websocket.send_text(item)
+    if is_pattern:
+        await pubsub.psubscribe(sub)
+    else:
+        await pubsub.subscribe(sub)
 
     try:
         async for message in pubsub.listen():
-            if message["type"] == "message" and _anomaly_allowed(message["data"]):
+            if message["type"] in ("message", "pmessage") \
+                    and _location_ok(message["data"], location):
                 await websocket.send_text(message["data"])
     except WebSocketDisconnect:
         pass
     finally:
-        await pubsub.unsubscribe("anomalies")
+        if is_pattern:
+            await pubsub.punsubscribe(sub)
+        else:
+            await pubsub.unsubscribe(sub)
         await r.aclose()
 
 
@@ -137,42 +140,46 @@ async def anomalies_ws(
 async def events_ws(
     websocket: WebSocket,
     token: Optional[str] = Query(default=None),
+    location: Optional[int] = Query(default=None),
 ):
-    """Live network events stream (persisted events: device_offline, stp, loop, port, etc.)"""
-    if not await _authenticate_ws(websocket, token):
+    """Live network events stream — subscribes only to the caller's
+    organization channel (super-admins pattern-subscribe every org)."""
+    org_id, is_super = await _resolve_ws_scope(token or "")
+    if not token or not decode_access_token(token):
+        await websocket.close(code=4001)
         return
-
-    accessible_ids = await _get_tenant_device_ids(token or "")
-
-    def _allowed(raw: str) -> bool:
-        if accessible_ids is None:
-            return True
-        try:
-            data = json.loads(raw)
-            dev_id = data.get("device_id")
-            return dev_id is not None and dev_id in accessible_ids
-        except Exception:
-            return False
+    sub, is_pattern, recent_key = _event_channels("network:events", org_id, is_super)
+    if sub is None:
+        await websocket.close(code=4003)  # org-less user — no stream
+        return
 
     await websocket.accept()
     r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     pubsub = r.pubsub()
-    await pubsub.subscribe("network:events")
+    if is_pattern:
+        await pubsub.psubscribe(sub)
+    else:
+        await pubsub.subscribe(sub)
 
-    # Replay last 30 events on connect
-    recent = await r.lrange("network:events:recent", 0, 29)
-    for item in reversed(recent):
-        if _allowed(item):
-            await websocket.send_text(item)
+    # Replay the last 30 events on connect (org-scoped list).
+    if recent_key:
+        recent = await r.lrange(recent_key, 0, 29)
+        for item in reversed(recent):
+            if _location_ok(item, location):
+                await websocket.send_text(item)
 
     try:
         async for message in pubsub.listen():
-            if message["type"] == "message" and _allowed(message["data"]):
+            if message["type"] in ("message", "pmessage") \
+                    and _location_ok(message["data"], location):
                 await websocket.send_text(message["data"])
     except WebSocketDisconnect:
         pass
     finally:
-        await pubsub.unsubscribe("network:events")
+        if is_pattern:
+            await pubsub.punsubscribe(sub)
+        else:
+            await pubsub.unsubscribe(sub)
         await r.aclose()
 
 
@@ -193,27 +200,39 @@ async def ssh_terminal_ws(
     if not await _authenticate_ws(websocket, token):
         return
 
-    # Resolve device + credentials — validate tenant ownership first
+    # Resolve device + credentials — validate org ownership first.
     import paramiko
     from sqlalchemy import select
     from app.core.database import AsyncSessionLocal
+    from app.core.org_context import set_org_context, clear_org_context, superadmin_context
+    from app.core.rls import apply_rls_context
     from app.core.security import decrypt_credential_safe, decrypt_credential
     from app.models.device import Device
-    from app.models.user import User, UserRole, SystemRole
 
-    accessible_ids = await _get_tenant_device_ids(token or "")
-
-    async with AsyncSessionLocal() as db:
-        dev_q = select(Device).where(Device.id == device_id, Device.is_active == True)
-        device = (await db.execute(dev_q)).scalar_one_or_none()
-
-    if not device:
-        await websocket.close(code=4004)
+    org_id, is_super = await _resolve_ws_scope(token or "")
+    if org_id is None and not is_super:
+        await websocket.close(code=4003)  # org-less user
         return
 
-    # Check tenant ownership (accessible_ids is None only for super_admin)
-    if accessible_ids is not None and device_id not in accessible_ids:
-        await websocket.close(code=4003)
+    # Look the device up under the caller's RLS context — a device in
+    # another organization is simply invisible, so cross-org SSH is
+    # rejected by the same DB policy that scopes every other query.
+    async with AsyncSessionLocal() as db:
+        dev_q = select(Device).where(Device.id == device_id, Device.is_active == True)
+        if is_super:
+            with superadmin_context():
+                await apply_rls_context(db)
+                device = (await db.execute(dev_q)).scalar_one_or_none()
+        else:
+            set_org_context(org_id, None, False)
+            await apply_rls_context(db)
+            try:
+                device = (await db.execute(dev_q)).scalar_one_or_none()
+            finally:
+                clear_org_context()
+
+    if not device:
+        await websocket.close(code=4004)  # absent or cross-org → not found
         return
 
     username = device.ssh_username or ""
