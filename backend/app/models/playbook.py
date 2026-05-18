@@ -37,6 +37,10 @@ class Playbook(Base):
     tenant_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
     created_at: Mapped[datetime] = mapped_column(
@@ -74,6 +78,11 @@ class PlaybookRun(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
     playbook: Mapped["Playbook"] = relationship("Playbook", back_populates="runs")

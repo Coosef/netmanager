@@ -36,3 +36,7 @@ class SnmpPollResult(Base):
     # Derived utilization (filled in by the next poll that calculates delta)
     in_utilization_pct: Mapped[Optional[float]] = mapped_column(Float)
     out_utilization_pct: Mapped[Optional[float]] = mapped_column(Float)
+
+    # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    location_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)

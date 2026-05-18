@@ -19,3 +19,7 @@ class DeviceAvailabilitySnapshot(Base):
     availability_7d: Mapped[float] = mapped_column(Float, nullable=False)
     mtbf_hours: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     experience_score: Mapped[float] = mapped_column(Float, nullable=False)
+
+    # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
+    organization_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    location_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)

@@ -16,6 +16,15 @@ class Agent(Base):
 
     tenant_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    location_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     status: Mapped[str] = mapped_column(String(16), default="offline")
     last_heartbeat: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     last_ip: Mapped[Optional[str]] = mapped_column(String(64))

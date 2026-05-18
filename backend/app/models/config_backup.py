@@ -26,6 +26,13 @@ class ConfigBackup(Base):
     tenant_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
     )
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    location_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )

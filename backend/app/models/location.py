@@ -21,6 +21,12 @@ class Location(Base):
         ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
     )
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Geographic metadata
     city: Mapped[Optional[str]] = mapped_column(String(128))
     country: Mapped[Optional[str]] = mapped_column(String(64))
