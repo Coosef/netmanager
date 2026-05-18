@@ -59,10 +59,19 @@ async def process_batch(bus, entries, sync_redis, is_retry: bool) -> int:
 
     payloads = [e.data for e in entries]
     ids = [e.id for e in entries]
+    t0 = time.monotonic()
     try:
         async with make_worker_session()() as db:
             persisted = await persist_and_correlate(db, payloads, sync_redis)
         await bus.ack(STREAM_SYSLOG, GROUP_PERSIST, ids)
+        # Metric failure must not undo a successful persist — own try/except.
+        try:
+            from app.core.metrics import EVENT_CONSUMER_BATCH_DURATION
+            EVENT_CONSUMER_BATCH_DURATION.labels(stream=STREAM_SYSLOG).observe(
+                time.monotonic() - t0,
+            )
+        except Exception:
+            pass
         log.info(
             "event_consumer: persisted batch size=%d retry=%s", persisted, is_retry,
         )
@@ -102,6 +111,11 @@ async def consume_cycle(bus, sync_redis, consumer_name: str, claim_due: bool) ->
         )
         if claimed:
             log.info("event_consumer: reclaimed %d stale entries", len(claimed))
+            try:
+                from app.core.metrics import EVENT_CONSUMER_CLAIMED_TOTAL
+                EVENT_CONSUMER_CLAIMED_TOTAL.labels(stream=STREAM_SYSLOG).inc(len(claimed))
+            except Exception:
+                pass
             persisted += await process_batch(bus, claimed, sync_redis, is_retry=True)
 
     batch = await bus.consume_batch(

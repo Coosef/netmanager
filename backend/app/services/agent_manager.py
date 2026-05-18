@@ -30,6 +30,17 @@ _AGENT_ONLINE_TTL = 120  # seconds; refreshed on every heartbeat (agent sends ev
 
 def _get_sync_redis():
     return _redis_sync.from_url(settings.REDIS_URL, decode_responses=True, socket_timeout=2)
+
+
+def _bump_publish_metric(stream: str, result: str) -> None:
+    """Faz 6C: record an event-bus publish outcome. Never raises."""
+    try:
+        from app.core.metrics import EVENT_BUS_PUBLISH_TOTAL
+        EVENT_BUS_PUBLISH_TOTAL.labels(stream=stream, result=result).inc()
+    except Exception:
+        pass
+
+
 _EMA_ALPHA = 0.3       # exponential moving average weight for latency
 
 # Commands that are always safe regardless of mode (read-only show commands)
@@ -468,10 +479,11 @@ class AgentManager:
             "message": msg.get("message", ""),
             "received_at": datetime.now(timezone.utc),
         }
+        from app.services.event_bus import STREAM_SYSLOG, get_event_bus
         try:
-            from app.services.event_bus import STREAM_SYSLOG, get_event_bus
             entry_id = await get_event_bus().publish(STREAM_SYSLOG, payload)
             if entry_id is not None:
+                _bump_publish_metric(STREAM_SYSLOG, "ok")
                 return  # handed off to the event_consumer
         except Exception as exc:
             log.debug(f"Syslog event bus publish error: {exc}")
@@ -479,9 +491,11 @@ class AgentManager:
         # Fallback — event bus unavailable. Bounded direct insert.
         try:
             from app.services.syslog_ingest import fallback_persist
-            await fallback_persist(payload, _get_sync_redis())
+            ok = await fallback_persist(payload, _get_sync_redis())
+            _bump_publish_metric(STREAM_SYSLOG, "fallback" if ok else "error")
         except Exception as exc:
             log.debug(f"Syslog fallback persist error: {exc}")
+            _bump_publish_metric(STREAM_SYSLOG, "error")
 
     # ── D4: SNMP Trap handling ────────────────────────────────────────────────
 

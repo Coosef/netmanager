@@ -19,6 +19,8 @@ from app.core.database import async_engine, make_worker_session
 from app.core.metrics import (
     DB_POOL_CHECKED_OUT,
     DB_POOL_OVERFLOW,
+    EVENT_CONSUMER_LAG,
+    EVENT_STREAM_DEPTH,
     REDIS_QUEUE_DEPTH,
     TIMESCALE_JOB_FAILURES_TOTAL,
     TIMESCALE_JOB_LAST_SUCCESS_TS,
@@ -51,8 +53,40 @@ def collect_infrastructure_metrics():
 
 async def _run():
     await _collect_redis_queue_depth()
+    await _collect_event_stream_metrics()
     await _collect_timescale_job_stats()
     _collect_db_pool_stats()
+
+
+async def _collect_event_stream_metrics():
+    """Faz 6C: ingest stream depth (XLEN) + consumer-group lag."""
+    try:
+        import redis.asyncio as aioredis
+        from app.services.event_bus import GROUP_PERSIST, STREAM_SNMP, STREAM_SYSLOG
+
+        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        try:
+            for stream in (STREAM_SYSLOG, STREAM_SNMP):
+                try:
+                    depth = await r.xlen(stream)
+                except Exception:
+                    depth = 0   # stream not created yet
+                EVENT_STREAM_DEPTH.labels(stream=stream).set(depth)
+
+            try:
+                groups = await r.xinfo_groups(STREAM_SYSLOG)
+            except Exception:
+                groups = []
+            for g in groups or []:
+                if g.get("name") == GROUP_PERSIST:
+                    lag = g.get("lag")
+                    EVENT_CONSUMER_LAG.labels(
+                        stream=STREAM_SYSLOG, group=GROUP_PERSIST,
+                    ).set(int(lag if lag is not None else g.get("pending", 0)))
+        finally:
+            await r.aclose()
+    except Exception as exc:
+        log.warning("metrics: event stream metrics collection failed: %s", exc)
 
 
 async def _collect_redis_queue_depth():
