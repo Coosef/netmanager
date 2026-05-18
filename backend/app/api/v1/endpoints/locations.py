@@ -244,8 +244,15 @@ async def delete_location(
             update(Device).where(Device.site == loc.name).values(site=None)
         )
 
-    await db.delete(loc)
-    await db.commit()
+    # Faz 7 — soft delete: RLS hides the location afterward; reversible.
+    # archived_visible() keeps the post-update row valid mid-statement.
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        loc.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
 
 
 # ── User-Location assignment endpoints ──────────────────────────────────────

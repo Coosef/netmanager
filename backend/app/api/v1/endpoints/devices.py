@@ -910,15 +910,19 @@ async def bulk_delete_devices(
     if not devices:
         raise HTTPException(status_code=404, detail="No matching devices found")
 
+    # Faz 7 — soft delete: stamp deleted_at, RLS hides them afterward.
+    # archived_visible() keeps the post-update rows valid mid-statement.
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    _now = datetime.now(timezone.utc)
     for d in devices:
         await ssh_manager.close_device(d.id)
-
-    from app.models.topology import TopologyLink
-    await db.execute(_del(ConfigBackup).where(ConfigBackup.device_id.in_(device_ids)))
-    await db.execute(_del(TopologyLink).where(TopologyLink.neighbor_device_id.in_(device_ids)))
-    for d in devices:
-        await db.delete(d)
-    await db.commit()
+    with archived_visible():
+        await apply_rls_context(db)
+        for d in devices:
+            d.deleted_at = _now
+        await db.commit()
 
     await log_action(
         db, current_user, "devices_bulk_deleted", "device", None, None,
@@ -1296,6 +1300,55 @@ async def bulk_fetch_info_stream(
     )
 
 
+@router.get("/archived/list")
+async def list_archived_devices(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Faz 7 — soft-deleted devices, visible only via this admin flow
+    (RLS reveals them under app.include_archived)."""
+    if not current_user.has_permission("device:delete"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        rows = (await db.execute(
+            select(Device).where(Device.deleted_at.is_not(None))
+        )).scalars().all()
+        return [
+            {"id": d.id, "hostname": d.hostname, "ip_address": d.ip_address,
+             "deleted_at": d.deleted_at.isoformat()}
+            for d in rows
+        ]
+
+
+@router.post("/{device_id}/restore")
+async def restore_device(
+    device_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Faz 7 — admin restore: clear deleted_at so the device is live again."""
+    if not current_user.has_permission("device:delete"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        device = (await db.execute(
+            select(Device).where(Device.id == device_id)
+        )).scalar_one_or_none()
+        if not device or device.deleted_at is None:
+            raise HTTPException(status_code=404, detail="No archived device with that id")
+        device.deleted_at = None
+        await db.commit()
+        hostname = device.hostname
+    await log_action(db, current_user, "device_restored", "device", device_id, hostname, request=request)
+    return {"restored": device_id, "hostname": hostname}
+
+
 @router.delete("/{device_id}", status_code=204)
 async def delete_device(
     device_id: int,
@@ -1306,19 +1359,24 @@ async def delete_device(
     if not current_user.has_permission("device:delete"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    from app.models.config_backup import ConfigBackup
-    from sqlalchemy import delete as _del
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
 
     device = await _get_device_scoped(db, device_id, current_user)
+    hostname = device.hostname
 
-    from app.models.topology import TopologyLink
+    # Faz 7 — soft delete: stamp deleted_at; RLS hides the row from every
+    # query thereafter. Reversible via the admin restore flow. Live SSH
+    # sessions are still closed. The UPDATE itself runs under
+    # archived_visible() so the post-update (deleted_at != NULL) row still
+    # satisfies the RLS policy mid-statement.
     await ssh_manager.close_device(device_id)
-    await db.execute(_del(ConfigBackup).where(ConfigBackup.device_id == device_id))
-    # Clean up topology links where this device is the neighbor target (SET NULL FK won't remove the row)
-    await db.execute(_del(TopologyLink).where(TopologyLink.neighbor_device_id == device_id))
-    await db.delete(device)
-    await db.commit()
-    await log_action(db, current_user, "device_deleted", "device", device_id, device.hostname, request=request)
+    with archived_visible():
+        await apply_rls_context(db)
+        device.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+    await log_action(db, current_user, "device_deleted", "device", device_id, hostname, request=request)
 
 
 @router.post("/{device_id}/test", response_model=DeviceTestResult)

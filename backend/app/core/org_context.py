@@ -33,6 +33,45 @@ _current_location_id: ContextVar[Optional[int]] = ContextVar(
 _is_super_admin: ContextVar[bool] = ContextVar(
     "is_super_admin", default=False,
 )
+# The acting user id — set by the auth dependency; read by the
+# tenant-audit before_flush hook to attribute org/location transitions.
+_current_user_id: ContextVar[Optional[int]] = ContextVar(
+    "current_user_id", default=None,
+)
+
+
+# The acting user's username — set by the auth dependency; the tenant-
+# audit hook needs it because audit_logs.username is NOT NULL.
+_current_username: ContextVar[Optional[str]] = ContextVar(
+    "current_username", default=None,
+)
+
+
+def set_current_user_id(user_id: Optional[int]) -> None:
+    _current_user_id.set(user_id)
+
+
+def get_current_user_id() -> Optional[int]:
+    return _current_user_id.get()
+
+
+def set_current_username(username: Optional[str]) -> None:
+    _current_username.set(username)
+
+
+def get_current_username() -> Optional[str]:
+    return _current_username.get()
+
+
+# When True, RLS reveals soft-deleted (deleted_at IS NOT NULL) rows —
+# used ONLY by the explicit admin restore / archived-listing flow.
+_include_archived: ContextVar[bool] = ContextVar(
+    "include_archived", default=False,
+)
+
+
+def get_include_archived() -> bool:
+    return _include_archived.get()
 
 
 def set_org_context(
@@ -96,3 +135,14 @@ def superadmin_context():
     platform-level maintenance that must span every organization."""
     with org_context(None, None, is_super_admin=True):
         yield
+
+
+@contextmanager
+def archived_visible():
+    """Run a block in which RLS also reveals soft-deleted rows — the
+    explicit admin restore / archived-listing flow only."""
+    token = _include_archived.set(True)
+    try:
+        yield
+    finally:
+        _include_archived.reset(token)

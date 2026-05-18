@@ -157,3 +157,8 @@ class _SchemaSession:
 from app.core import rls as _rls  # noqa: E402
 
 _rls.install_rls_hooks()
+
+# Faz 7 Phase 6a — tenant-critical audit trail (org/location/deleted_at).
+from app.core import tenant_audit as _tenant_audit  # noqa: E402
+
+_tenant_audit.install_tenant_audit_hook()

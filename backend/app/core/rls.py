@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 from app.core.org_context import (
     get_current_location_id,
     get_current_org_id,
+    get_include_archived,
     get_is_super_admin,
 )
 
@@ -37,28 +38,11 @@ log = logging.getLogger("netmanager.rls")
 _SET_CONTEXT_SQL = text(
     "SELECT set_config('app.current_org_id', :org, true), "
     "       set_config('app.current_location_id', :loc, true), "
-    "       set_config('app.is_super_admin', :sa, true)"
+    "       set_config('app.is_super_admin', :sa, true), "
+    "       set_config('app.include_archived', :ia, true)"
 )
 
 _installed = False
-
-
-def _apply_rls_context(session, transaction, connection) -> None:
-    """after_begin hook — push org_context into the transaction's GUCs."""
-    if connection.dialect.name != "postgresql":
-        return  # RLS is PostgreSQL-only; SQLite tests skip silently.
-    org = get_current_org_id()
-    loc = get_current_location_id()
-    is_super = get_is_super_admin()
-    try:
-        connection.execute(_SET_CONTEXT_SQL, {
-            "org": str(org) if org is not None else None,
-            "loc": str(loc) if loc is not None else None,
-            "sa": "on" if is_super else "off",
-        })
-    except Exception:
-        # Fail closed: leave the GUCs unset → policies match zero rows.
-        log.exception("rls: failed to apply session context")
 
 
 def _context_params() -> dict:
@@ -68,7 +52,19 @@ def _context_params() -> dict:
         "org": str(org) if org is not None else None,
         "loc": str(loc) if loc is not None else None,
         "sa": "on" if get_is_super_admin() else "off",
+        "ia": "on" if get_include_archived() else "off",
     }
+
+
+def _apply_rls_context(session, transaction, connection) -> None:
+    """after_begin hook — push org_context into the transaction's GUCs."""
+    if connection.dialect.name != "postgresql":
+        return  # RLS is PostgreSQL-only; SQLite tests skip silently.
+    try:
+        connection.execute(_SET_CONTEXT_SQL, _context_params())
+    except Exception:
+        # Fail closed: leave the GUCs unset → policies match zero rows.
+        log.exception("rls: failed to apply session context")
 
 
 async def apply_rls_context(db) -> None:

@@ -311,8 +311,16 @@ async def delete_agent(
     if not current_user.has_permission("device:delete"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     agent = await _get_agent_scoped(agent_id, db, tenant_filter)
-    agent.is_active = False
-    await db.commit()
+    # Faz 7 — soft delete: deactivate + stamp deleted_at (RLS hides it).
+    # archived_visible() keeps the post-update row valid mid-statement.
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        agent.is_active = False
+        agent.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
 
 
 # ── Security config ───────────────────────────────────────────────────────────

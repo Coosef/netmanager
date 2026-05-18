@@ -72,6 +72,10 @@ async def get_current_user(
             location_id = None
 
     set_org_context(org_id, location_id, is_super)
+    # Attribute org/location transitions to this user (tenant-audit hook).
+    from app.core.org_context import set_current_user_id, set_current_username
+    set_current_user_id(user.id)
+    set_current_username(user.username)
     # The auth query above already opened this session's transaction, so
     # the after_begin hook fired before the org was known — re-apply now.
     from app.core.rls import apply_rls_context
