@@ -72,6 +72,10 @@ async def get_current_user(
             location_id = None
 
     set_org_context(org_id, location_id, is_super)
+    # The auth query above already opened this session's transaction, so
+    # the after_begin hook fired before the org was known — re-apply now.
+    from app.core.rls import apply_rls_context
+    await apply_rls_context(db)
     return user
 
 
@@ -101,60 +105,27 @@ def require_roles(*roles: UserRole):
 async def get_tenant_context(
     current_user: Annotated[User, Depends(get_current_active_user)],
 ) -> Optional[int]:
-    if current_user.role == UserRole.SUPER_ADMIN:
-        return None
-    # admin with no tenant_id must not see all orgs — treat as no-match
-    return current_user.tenant_id if current_user.tenant_id is not None else -1
+    # Faz 7 — legacy tenant filtering is superseded by PostgreSQL RLS.
+    # Returning None makes every `if tenant_filter is not None:` guard in
+    # the endpoints skip its manual .where(Device.tenant_id == ...) — the
+    # RLS policies (migration M5) now do the org scoping at the DB.
+    return None
 
 
 async def get_accessible_location_ids(
     current_user: Annotated[User, Depends(get_current_active_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Optional[list[int]]:
-    from app.models.location import Location
-    from app.models.user_location import UserLocation
-
-    if current_user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
-        return None
-
-    if current_user.role == UserRole.ORG_VIEWER:
-        if not current_user.tenant_id:
-            return []
-        rows = (await db.execute(
-            select(Location.id).where(Location.tenant_id == current_user.tenant_id)
-        )).fetchall()
-        return [r[0] for r in rows]
-
-    rows = (await db.execute(
-        select(UserLocation.location_id).where(UserLocation.user_id == current_user.id)
-    )).fetchall()
-    return [r[0] for r in rows]
+    # Faz 7 — superseded by RLS (the active-location GUC scopes rows).
+    return None
 
 
 async def get_accessible_location_names(
     current_user: Annotated[User, Depends(get_current_active_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> Optional[list[str]]:
-    from app.models.location import Location
-    from app.models.user_location import UserLocation
-
-    if current_user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
-        return None
-
-    if current_user.role == UserRole.ORG_VIEWER:
-        if not current_user.tenant_id:
-            return []
-        rows = (await db.execute(
-            select(Location.name).where(Location.tenant_id == current_user.tenant_id)
-        )).fetchall()
-        return [r[0] for r in rows]
-
-    rows = (await db.execute(
-        select(Location.name)
-        .join(UserLocation, Location.id == UserLocation.location_id)
-        .where(UserLocation.user_id == current_user.id)
-    )).fetchall()
-    return [r[0] for r in rows]
+    # Faz 7 — superseded by RLS.
+    return None
 
 
 CurrentUser = Annotated[User, Depends(get_current_active_user)]

@@ -61,6 +61,37 @@ def _apply_rls_context(session, transaction, connection) -> None:
         log.exception("rls: failed to apply session context")
 
 
+def _context_params() -> dict:
+    org = get_current_org_id()
+    loc = get_current_location_id()
+    return {
+        "org": str(org) if org is not None else None,
+        "loc": str(loc) if loc is not None else None,
+        "sa": "on" if get_is_super_admin() else "off",
+    }
+
+
+async def apply_rls_context(db) -> None:
+    """
+    Apply the current org_context to an ALREADY-OPEN async session's
+    transaction.
+
+    The after_begin hook only fires once, when a transaction begins. In a
+    request the auth dependency opens the transaction (loading the user)
+    BEFORE it knows the org — so the hook runs with empty context. This
+    re-pushes the GUCs once the org is resolved; because set_config uses
+    is_local := true the values still vanish at COMMIT. Call right after
+    set_org_context() in the request path.
+    """
+    try:
+        bind = db.get_bind()
+        if bind.dialect.name != "postgresql":
+            return
+        await db.execute(_SET_CONTEXT_SQL, _context_params())
+    except Exception:
+        log.exception("rls: failed to re-apply session context")
+
+
 def install_rls_hooks() -> None:
     """Register the after_begin hook on the global Session class. Idempotent.
     Called at import time (see the bottom of app/core/database.py)."""

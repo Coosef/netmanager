@@ -79,7 +79,19 @@ async def lifespan(app: FastAPI):
     except asyncio.TimeoutError:
         raise RuntimeError("Startup: DB bağlantısı 30s içinde kurulamadı")
 
-    async with async_engine.begin() as conn:
+    # Faz 7 — the runtime engine connects with the non-superuser netmgr_app
+    # role (so RLS applies). Schema bootstrap below is owner-only DDL, so it
+    # runs on a short-lived SUPERUSER engine built from MIGRATION_DATABASE_URL.
+    from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+    from sqlalchemy.pool import NullPool as _NullPool
+    _mig_url = os.environ.get("MIGRATION_DATABASE_URL", "")
+    _ddl_url = (
+        _mig_url.replace("+psycopg2", "+asyncpg")
+        if _mig_url else str(async_engine.url)
+    )
+    _ddl_engine = _create_async_engine(_ddl_url, poolclass=_NullPool)
+
+    async with _ddl_engine.begin() as conn:
         # ── DEPRECATED: create_all + ALTER TABLE pattern ──────────────────────
         # Faz 5A (2026-05-13): Alembic is now the authoritative schema manager.
         # DO NOT add new ALTER TABLE, CREATE TABLE, or CREATE INDEX statements
@@ -715,6 +727,10 @@ async def lifespan(app: FastAPI):
                 f"SELECT add_retention_policy('{_tbl}', INTERVAL '{_interval}',"
                 f" if_not_exists => true)"
             ))
+
+    # Schema bootstrap done — drop the superuser engine; the rest of the
+    # lifespan (seeding) runs on the normal netmgr_app engine.
+    await _ddl_engine.dispose()
 
     await _create_default_tenant()
     await _create_default_admin()

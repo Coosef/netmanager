@@ -22,8 +22,16 @@ async def _authenticate_ws(websocket: WebSocket, token: Optional[str]) -> bool:
 
 
 async def _get_tenant_device_ids(token: str) -> Optional[set]:
-    """Return set of device_ids the token owner can see, or None for super_admin (sees all)."""
+    """
+    Faz 7 — the set of device_ids the token owner may see on a realtime
+    stream, or None for a super-admin (sees all). The device set is read
+    under the user's RLS context (scoped by ORGANIZATION), so the stream
+    filter inherits DB-enforced isolation instead of the legacy tenant_id
+    match.
+    """
     from app.core.database import AsyncSessionLocal
+    from app.core.org_context import set_org_context, clear_org_context
+    from app.core.rls import apply_rls_context
     from app.models.device import Device
     from app.models.user import User, UserRole, SystemRole
 
@@ -45,15 +53,17 @@ async def _get_tenant_device_ids(token: str) -> Optional[set]:
         if user.system_role == SystemRole.SUPER_ADMIN or user.role == UserRole.SUPER_ADMIN:
             return None  # sees everything
 
-        if not user.tenant_id:
+        if not user.organization_id:
             return set()
 
-        rows = (await db.execute(
-            select(Device.id).where(
-                Device.tenant_id == user.tenant_id,
-                Device.is_active == True,
-            )
-        )).scalars().all()
+        set_org_context(user.organization_id, None, False)
+        await apply_rls_context(db)
+        try:
+            rows = (await db.execute(
+                select(Device.id).where(Device.is_active == True)
+            )).scalars().all()
+        finally:
+            clear_org_context()
         return set(rows)
 
 

@@ -64,6 +64,15 @@ _LOCK_WAIT_MAX_SECS = 2.0              # waiter timeout when another req holds l
 _LOCK_POLL_INTERVAL_SECS = 0.05        # waiter polls cache every 50ms
 
 
+def _org_scoped_key(key: str) -> str:
+    """Faz 7 — prefix a cache key with the active organization so cached
+    aggregates never collide across orgs. A None org (super-admin viewing
+    fleet-wide, or background context) maps to a shared 'o=_' namespace."""
+    from app.core.org_context import get_current_org_id
+    org = get_current_org_id()
+    return f"o={org if org is not None else '_'}:{key}"
+
+
 class CacheStatus(str, Enum):
     HIT_FRESH = "hit_fresh"
     HIT_STALE = "hit_stale"
@@ -144,6 +153,11 @@ class AggregationCache:
         Status is exposed so endpoints can set response headers and so
         metrics can attribute behavior.
         """
+        # Faz 7 — namespace the key by the active organization so one org
+        # can never read another's cached aggregate (the compute() runs
+        # RLS-scoped, but the cache key must not collide across orgs).
+        key = _org_scoped_key(key)
+
         # Hard bypass: feature flag off, or X-Cache-Bypass header
         if bypass or not settings.AGG_CACHE_ENABLED:
             CACHE_OPS.labels(operation="get", key_pattern=key_pattern, result="bypass").inc()
@@ -195,6 +209,7 @@ class AggregationCache:
 
     async def invalidate(self, key: str, key_pattern: str = "unknown") -> bool:
         """Best-effort delete. Returns True if a key was removed."""
+        key = _org_scoped_key(key)  # Faz 7 — match get_or_compute's namespacing
         try:
             n = await asyncio.wait_for(
                 self._redis.delete(key),

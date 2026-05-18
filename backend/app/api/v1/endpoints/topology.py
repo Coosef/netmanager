@@ -84,9 +84,17 @@ async def get_topology_graph(
         effective_sites = eff
         site = None
 
-    # Only use cache for unrestricted (SA) requests
-    cache_key = f"topology:graph:{group_id or 'all'}:{site or 'all'}"
-    if not refresh and tenant_filter is None and effective_sites is None:
+    # Faz 7 — the cache key is namespaced by the active org + location, so
+    # one org can never be served another's cached graph. The underlying
+    # build_graph queries are RLS-scoped regardless.
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    _org = get_current_org_id()
+    _loc = get_current_location_id()
+    cache_key = (
+        f"topology:graph:o={_org}:l={_loc}:"
+        f"{group_id or 'all'}:{site or 'all'}"
+    )
+    if not refresh and effective_sites is None:
         cached = await get_json(cache_key)
         if cached:
             return cached
@@ -94,7 +102,7 @@ async def get_topology_graph(
     svc = TopologyService(ssh_manager)
     graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites, tenant_id=tenant_filter)
 
-    if tenant_filter is None and effective_sites is None:
+    if effective_sites is None:
         await set_json(cache_key, graph, ttl=300)
 
     # Always patch node statuses with live DB values so cached graph never shows stale online/offline
