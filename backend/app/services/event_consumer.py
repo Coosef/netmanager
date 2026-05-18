@@ -39,11 +39,32 @@ _HEARTBEAT_KEY = "event_consumer:alive"
 _HEARTBEAT_TTL_SECS = 30
 
 
+# ── Stream → persist-handler registry ─────────────────────────────────────────
+#
+# Faz 6C.1: the consumer drains BOTH ingest streams. Each stream has its own
+# persist handler; syslog also runs correlation, SNMP is a pure bulk insert.
+
+async def _persist_syslog(db, payloads, sync_redis) -> int:
+    from app.services.syslog_ingest import persist_and_correlate
+    return await persist_and_correlate(db, payloads, sync_redis)
+
+
+async def _persist_snmp(db, payloads, sync_redis) -> int:
+    from app.services.snmp_ingest import persist_snmp_batch
+    return await persist_snmp_batch(db, payloads)   # SNMP has no correlation
+
+
+def _stream_handlers() -> dict:
+    """{stream: persist_handler}. Order = drain order within a cycle."""
+    from app.services.event_bus import STREAM_SNMP, STREAM_SYSLOG
+    return {STREAM_SYSLOG: _persist_syslog, STREAM_SNMP: _persist_snmp}
+
+
 # ── Batch processing (testable units) ─────────────────────────────────────────
 
-async def process_batch(bus, entries, sync_redis, is_retry: bool) -> int:
+async def process_batch(bus, stream: str, entries, sync_redis, is_retry: bool) -> int:
     """
-    Persist one batch of stream entries and ACK them. Returns rows persisted.
+    Persist one batch of `stream` entries and ACK them. Returns rows persisted.
 
     On failure:
       - fresh batch (is_retry=False) → left pending; claim_stale retries it.
@@ -51,80 +72,92 @@ async def process_batch(bus, entries, sync_redis, is_retry: bool) -> int:
         a poison batch cannot cycle forever.
     """
     from app.core.database import make_worker_session
-    from app.services.event_bus import GROUP_PERSIST, STREAM_SYSLOG
-    from app.services.syslog_ingest import persist_and_correlate
+    from app.services.event_bus import GROUP_PERSIST
 
     if not entries:
         return 0
 
+    handler = _stream_handlers()[stream]
     payloads = [e.data for e in entries]
     ids = [e.id for e in entries]
     t0 = time.monotonic()
     try:
         async with make_worker_session()() as db:
-            persisted = await persist_and_correlate(db, payloads, sync_redis)
-        await bus.ack(STREAM_SYSLOG, GROUP_PERSIST, ids)
+            persisted = await handler(db, payloads, sync_redis)
+        await bus.ack(stream, GROUP_PERSIST, ids)
         # Metric failure must not undo a successful persist — own try/except.
         try:
             from app.core.metrics import EVENT_CONSUMER_BATCH_DURATION
-            EVENT_CONSUMER_BATCH_DURATION.labels(stream=STREAM_SYSLOG).observe(
+            EVENT_CONSUMER_BATCH_DURATION.labels(stream=stream).observe(
                 time.monotonic() - t0,
             )
         except Exception:
             pass
         log.info(
-            "event_consumer: persisted batch size=%d retry=%s", persisted, is_retry,
+            "event_consumer: persisted batch stream=%s size=%d retry=%s",
+            stream, persisted, is_retry,
         )
         return persisted
     except Exception:
         log.exception(
-            "event_consumer: batch persist failed (size=%d retry=%s)",
-            len(entries), is_retry,
+            "event_consumer: batch persist failed stream=%s size=%d retry=%s",
+            stream, len(entries), is_retry,
         )
         if is_retry:
             # Second failure — give up on this batch so it stops cycling.
-            await bus.to_dead_letter(STREAM_SYSLOG, entries)
-            await bus.ack(STREAM_SYSLOG, GROUP_PERSIST, ids)
-            log.warning("event_consumer: dead-lettered batch size=%d", len(entries))
+            await bus.to_dead_letter(stream, entries)
+            await bus.ack(stream, GROUP_PERSIST, ids)
+            log.warning(
+                "event_consumer: dead-lettered batch stream=%s size=%d",
+                stream, len(entries),
+            )
         # fresh failure → leave un-acked, claim_stale will retry
         return 0
 
 
 async def consume_cycle(bus, sync_redis, consumer_name: str, claim_due: bool) -> int:
     """
-    One consumer iteration. Returns rows persisted this cycle.
+    One consumer iteration across ALL ingest streams. Returns rows persisted.
 
-    When `claim_due`, first reclaims stale pending entries from a crashed
-    consumer (XAUTOCLAIM) and reprocesses them as a retry batch; then reads a
-    fresh batch.
+    For each stream: when `claim_due`, reclaim stale pending entries from a
+    crashed consumer (XAUTOCLAIM) and reprocess them as a retry batch; then
+    read a fresh batch.
     """
     from app.core.config import settings
-    from app.services.event_bus import GROUP_PERSIST, STREAM_SYSLOG
+    from app.services.event_bus import GROUP_PERSIST
 
     persisted = 0
 
-    if claim_due:
-        claimed = await bus.claim_stale(
-            STREAM_SYSLOG, GROUP_PERSIST, consumer_name,
-            min_idle_ms=settings.EVENT_CONSUMER_CLAIM_MIN_IDLE_SECS * 1000,
-            count=settings.EVENT_CONSUMER_BATCH_COUNT,
-        )
-        if claimed:
-            log.info("event_consumer: reclaimed %d stale entries", len(claimed))
-            try:
-                from app.core.metrics import EVENT_CONSUMER_CLAIMED_TOTAL
-                EVENT_CONSUMER_CLAIMED_TOTAL.labels(stream=STREAM_SYSLOG).inc(len(claimed))
-            except Exception:
-                pass
-            persisted += await process_batch(bus, claimed, sync_redis, is_retry=True)
+    for stream in _stream_handlers():
+        if claim_due:
+            claimed = await bus.claim_stale(
+                stream, GROUP_PERSIST, consumer_name,
+                min_idle_ms=settings.EVENT_CONSUMER_CLAIM_MIN_IDLE_SECS * 1000,
+                count=settings.EVENT_CONSUMER_BATCH_COUNT,
+            )
+            if claimed:
+                log.info(
+                    "event_consumer: reclaimed %d stale entries stream=%s",
+                    len(claimed), stream,
+                )
+                try:
+                    from app.core.metrics import EVENT_CONSUMER_CLAIMED_TOTAL
+                    EVENT_CONSUMER_CLAIMED_TOTAL.labels(stream=stream).inc(len(claimed))
+                except Exception:
+                    pass
+                persisted += await process_batch(
+                    bus, stream, claimed, sync_redis, is_retry=True,
+                )
 
-    batch = await bus.consume_batch(
-        STREAM_SYSLOG, GROUP_PERSIST, consumer_name,
-        count=settings.EVENT_CONSUMER_BATCH_COUNT,
-        block_ms=settings.EVENT_CONSUMER_BLOCK_MS,
-    )
-    if batch:
-        persisted += await process_batch(bus, batch, sync_redis, is_retry=False)
+        batch = await bus.consume_batch(
+            stream, GROUP_PERSIST, consumer_name,
+            count=settings.EVENT_CONSUMER_BATCH_COUNT,
+            block_ms=settings.EVENT_CONSUMER_BLOCK_MS,
+        )
+        if batch:
+            persisted += await process_batch(
+                bus, stream, batch, sync_redis, is_retry=False,
+            )
 
     return persisted
 
@@ -145,7 +178,7 @@ async def run() -> None:
 
     from app.core.config import settings
     from app.core.logging_config import configure_logging
-    from app.services.event_bus import EventBus, GROUP_PERSIST, STREAM_SYSLOG
+    from app.services.event_bus import EventBus, GROUP_PERSIST
 
     configure_logging()
 
@@ -163,7 +196,8 @@ async def run() -> None:
     consumer_name = f"{socket.gethostname()}-{os.getpid()}"
     log.info("event_consumer: starting as %s", consumer_name)
 
-    await bus.ensure_group(STREAM_SYSLOG, GROUP_PERSIST)
+    for stream in _stream_handlers():
+        await bus.ensure_group(stream, GROUP_PERSIST)
 
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

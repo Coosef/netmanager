@@ -102,15 +102,27 @@ async def _run():
 
         poll_results = list(await asyncio.gather(*[fetch_one(d) for d in devices]))
 
-        # ── 6. Sequential DB writes + utilization calculation ──────────────────
-        all_new_rows: list[dict] = []
+        # ── 6. Utilization calculation → publish to ingest:snmp stream ─────────
+        # Faz 6C.1: poll results go through the event bus (event_consumer
+        # persists them in bounded batches), unifying the ingestion model
+        # with syslog. If Redis is unavailable, failed rows fall back to a
+        # direct insert on this task's session — same as the pre-6C.1 path.
+        all_new_rows: list[dict] = []      # small dicts for alert checks
+        all_persist_rows: list[dict] = []  # full SnmpPollResult field dicts
         for device, ifaces in poll_results:
             if not ifaces:
                 continue
             device_prev = prev_map.get(device.id, {})
-            rows = _write_rows(db, device, ifaces, device_prev, now)
-            all_new_rows.extend(rows)
+            persist_rows, alert_rows = _compute_rows(device, ifaces, device_prev, now)
+            all_persist_rows.extend(persist_rows)
+            all_new_rows.extend(alert_rows)
 
+        failed = _publish_snmp_rows(all_persist_rows)
+        if failed:
+            # Event bus unavailable for these — direct insert on this session.
+            from app.services.snmp_ingest import build_snmp_row
+            for row in failed:
+                db.add(build_snmp_row(row))
         await db.commit()
 
         # ── 7. Alert rule checks ───────────────────────────────────────────────
@@ -151,11 +163,19 @@ async def _load_prev_snapshots(db, device_ids: list[int]) -> dict[int, dict]:
     return result
 
 
-def _write_rows(db, device, ifaces: list, device_prev: dict, now) -> list[dict]:
-    """Calculate utilization from pre-loaded snapshots and add SnmpPollResult rows to session."""
-    from app.models.snmp_metric import SnmpPollResult
+def _compute_rows(device, ifaces: list, device_prev: dict, now) -> tuple[list[dict], list[dict]]:
+    """
+    Calculate utilization from pre-loaded snapshots.
 
-    new_rows: list[dict] = []
+    Returns (persist_rows, alert_rows):
+      persist_rows — full SnmpPollResult field dicts, published to ingest:snmp
+      alert_rows   — small dicts consumed by _check_alert_rules (in-memory)
+
+    Faz 6C.1: no longer writes to the DB session — persistence moved to the
+    event_consumer. The utilization math is unchanged.
+    """
+    persist_rows: list[dict] = []
+    alert_rows: list[dict] = []
     for iface in ifaces:
         if_index = iface.get("if_index")
         if if_index is None:
@@ -186,21 +206,20 @@ def _write_rows(db, device, ifaces: list, device_prev: dict, now) -> list[dict]:
             elapsed = max((now - prev_at).total_seconds(), 1)
             error_rate = round((in_err_delta + out_err_delta) / elapsed * 60, 4)
 
-        db.add(SnmpPollResult(
-            device_id=device.id,
-            polled_at=now,
-            if_index=if_index,
-            if_name=iface.get("name"),
-            speed_mbps=iface.get("speed_mbps"),
-            in_octets=iface.get("in_octets"),
-            out_octets=iface.get("out_octets"),
-            in_errors=iface.get("in_errors"),
-            out_errors=iface.get("out_errors"),
-            in_utilization_pct=in_util,
-            out_utilization_pct=out_util,
-        ))
-
-        new_rows.append({
+        persist_rows.append({
+            "device_id": device.id,
+            "polled_at": now,
+            "if_index": if_index,
+            "if_name": iface.get("name"),
+            "speed_mbps": iface.get("speed_mbps"),
+            "in_octets": iface.get("in_octets"),
+            "out_octets": iface.get("out_octets"),
+            "in_errors": iface.get("in_errors"),
+            "out_errors": iface.get("out_errors"),
+            "in_utilization_pct": in_util,
+            "out_utilization_pct": out_util,
+        })
+        alert_rows.append({
             "device_id": device.id,
             "hostname": device.hostname,
             "if_name": iface.get("name") or "",
@@ -209,7 +228,23 @@ def _write_rows(db, device, ifaces: list, device_prev: dict, now) -> list[dict]:
             "error_rate": error_rate,
         })
 
-    return new_rows
+    return persist_rows, alert_rows
+
+
+def _publish_snmp_rows(rows: list[dict]) -> list[dict]:
+    """
+    Publish SNMP poll rows to the ingest:snmp stream. Returns the rows that
+    FAILED to publish (Redis unavailable) so the caller can fall back to a
+    direct insert. Each row goes to the stream XOR the fallback — never both,
+    so there are no duplicate poll rows.
+    """
+    from app.services.event_bus import STREAM_SNMP, publish_sync
+
+    failed: list[dict] = []
+    for row in rows:
+        if publish_sync(STREAM_SNMP, row) is None:
+            failed.append(row)
+    return failed
 
 
 async def _check_alert_rules(device, new_rows: list[dict], rules: list):
