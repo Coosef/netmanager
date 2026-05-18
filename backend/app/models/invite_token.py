@@ -22,7 +22,7 @@ class InviteToken(Base):
 
     # New RBAC fields
     system_role: Mapped[str] = mapped_column(String(32), nullable=False, default="member")
-    org_id: Mapped[Optional[int]] = mapped_column(
+    organization_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
     )
     permission_set_id: Mapped[Optional[int]] = mapped_column(

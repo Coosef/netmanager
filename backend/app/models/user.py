@@ -94,7 +94,7 @@ class User(Base):
     system_role: Mapped[str] = mapped_column(
         String(32), default=SystemRole.MEMBER, nullable=False
     )
-    org_id: Mapped[Optional[int]] = mapped_column(
+    organization_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("organizations.id", ondelete="SET NULL"), nullable=True, index=True
     )
 

@@ -283,7 +283,7 @@ async def invite_to_org(
         role="viewer",  # legacy
         tenant_id=None,
         system_role=payload.system_role,
-        org_id=org_id,
+        organization_id=org_id,
         permission_set_id=payload.permission_set_id,
         created_by=current_user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=payload.expires_hours),
@@ -535,10 +535,10 @@ async def list_all_users(
 ):
     query = select(User).order_by(User.username).offset(skip).limit(limit)
     if org_id is not None:
-        query = query.where(User.org_id == org_id)
+        query = query.where(User.organization_id == org_id)
     users = (await db.execute(query)).scalars().all()
     total = (await db.execute(select(func.count()).select_from(User).where(
-        User.org_id == org_id if org_id is not None else True
+        User.organization_id == org_id if org_id is not None else True
     ))).scalar() or 0
     return {"total": total, "users": [_user_dict(u) for u in users]}
 
@@ -563,7 +563,7 @@ async def update_user(
     if full_name is not None:
         user.full_name = full_name
     if org_id is not None:
-        user.org_id = org_id
+        user.organization_id = org_id
     await db.commit()
     await db.refresh(user)
     return _user_dict(user)
@@ -582,7 +582,7 @@ def _user_dict(u: User) -> dict:
         "is_active": u.is_active,
         "system_role": u.system_role,
         "role": u.role,
-        "org_id": u.org_id,
+        "org_id": u.organization_id,
         "tenant_id": u.tenant_id,
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,

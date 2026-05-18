@@ -439,16 +439,16 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_role VARCHAR(32) NOT NULL DEFAULT 'member'"
         ))
         await conn.execute(text(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL"
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL"
         ))
         await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_users_org_id ON users(org_id)"
+            "CREATE INDEX IF NOT EXISTS ix_users_organization_id ON users(organization_id)"
         ))
         await conn.execute(text(
             "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS system_role VARCHAR(32) NOT NULL DEFAULT 'member'"
         ))
         await conn.execute(text(
-            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE"
+            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE"
         ))
         await conn.execute(text(
             "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS permission_set_id INTEGER REFERENCES permission_sets(id) ON DELETE SET NULL"
@@ -1099,11 +1099,13 @@ async def _ensure_default_org():
             if t_id == 0:
                 # fallback: assign users with no tenant and no org
                 r = await db.execute(
-                    _upd(User).where(User.tenant_id.is_(None), User.org_id.is_(None)).values(org_id=o_id)
+                    _upd(User).where(
+                        User.tenant_id.is_(None), User.organization_id.is_(None)
+                    ).values(organization_id=o_id)
                 )
             else:
                 r = await db.execute(
-                    _upd(User).where(User.tenant_id == t_id).values(org_id=o_id)
+                    _upd(User).where(User.tenant_id == t_id).values(organization_id=o_id)
                 )
             if r.rowcount:
                 print(f"[Org] {r.rowcount} user(s) → org_id={o_id} (tenant={t_id})")
