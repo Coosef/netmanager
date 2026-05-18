@@ -326,6 +326,45 @@ class AgentManager:
                 if not fut.done():
                     fut.set_result({"success": success, "output": output, "type": "ssh_result"})
 
+    # ── Agent ingest scope enforcement (Faz 7 phase6e) ────────────────────────
+
+    async def _devices_in_agent_scope(self, db, agent_id: str, device_ids) -> set:
+        """Of `device_ids`, return the subset whose organization + location
+        match the agent's. An agent is bound to exactly one org+location;
+        a report referencing a device outside that scope is a cross-scope
+        write — dropped here with a logged warning so the agent cannot
+        mutate another location's devices."""
+        from sqlalchemy import select
+        from app.models.agent import Agent
+        from app.models.device import Device
+
+        agent = await db.get(Agent, agent_id)
+        if agent is None or agent.organization_id is None:
+            log.warning("agent_manager: agent %s has no org/location — "
+                        "ingest dropped", agent_id)
+            return set()
+
+        ids = [d for d in set(device_ids) if d is not None]
+        if not ids:
+            return set()
+        rows = (await db.execute(
+            select(Device.id, Device.organization_id, Device.location_id)
+            .where(Device.id.in_(ids))
+        )).all()
+
+        allowed: set = set()
+        for did, d_org, d_loc in rows:
+            if d_org == agent.organization_id and d_loc == agent.location_id:
+                allowed.add(did)
+            else:
+                log.warning(
+                    "agent_manager: agent %s (org=%s,loc=%s) ingest for "
+                    "device %s (org=%s,loc=%s) rejected — cross-scope write",
+                    agent_id, agent.organization_id, agent.location_id,
+                    did, d_org, d_loc,
+                )
+        return allowed
+
     # ── Device status reporting ───────────────────────────────────────────────
 
     async def _handle_device_status_report(self, agent_id: str, msg: dict):
@@ -344,6 +383,15 @@ class AgentManager:
             now_utc = datetime.now(timezone.utc)
 
             async with make_worker_session()() as db:
+                # Faz 7 — drop reports for devices outside the agent's
+                # organization + location before any write.
+                allowed_ids = await self._devices_in_agent_scope(
+                    db, agent_id, [r.get("device_id") for r in results]
+                )
+                results = [r for r in results if r.get("device_id") in allowed_ids]
+                if not results:
+                    return
+
                 # Fetch active maintenance windows once for this batch
                 mw_rows = await db.execute(
                     select(MaintenanceWindow).where(
@@ -534,6 +582,14 @@ class AgentManager:
 
                 device_id = device_row[0] if device_row else None
                 hostname = device_row[1] if device_row else source_ip
+
+                # Faz 7 — a trap may only be attributed to a device in the
+                # agent's own org+location; otherwise drop the device link.
+                if device_id is not None:
+                    if device_id not in await self._devices_in_agent_scope(
+                        db, agent_id, [device_id]
+                    ):
+                        device_id = None
 
                 # Check maintenance window (suppress events during maintenance)
                 if device_id:

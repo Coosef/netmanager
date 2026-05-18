@@ -270,6 +270,24 @@ async def create_agent(
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+    # Faz 7 — bind the agent to exactly one organization + location. The
+    # location is resolved here and its org is authoritative; a cross-org
+    # location id is invisible under RLS, so it cannot be selected.
+    from app.core.org_context import get_current_location_id
+    from app.models.location import Location
+
+    loc_id = payload.location_id or get_current_location_id()
+    if loc_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Agent bir lokasyona bağlanmalı — location_id gerekli",
+        )
+    loc = (await db.execute(
+        select(Location).where(Location.id == loc_id)
+    )).scalar_one_or_none()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
+
     agent_id = _gen_id()
     raw_key = _gen_key()
 
@@ -281,6 +299,8 @@ async def create_agent(
         created_by=current_user.id,
         command_mode="all",
         tenant_id=tenant_filter,
+        organization_id=loc.organization_id,
+        location_id=loc.id,
     )
     db.add(agent)
     await db.commit()
