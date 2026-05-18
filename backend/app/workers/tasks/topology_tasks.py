@@ -404,6 +404,9 @@ def scheduled_topology_discovery():
                 device_ids=device_ids,
                 total_devices=len(device_ids),
                 created_by=1,
+                # Fleet-wide scheduled task — no request context; stamp
+                # the org from the devices it operates on (Faz 7).
+                organization_id=devices[0].organization_id,
             )
             db.add(task)
             await db.commit()
