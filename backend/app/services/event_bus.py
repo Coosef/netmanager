@@ -254,6 +254,62 @@ class EventBus:
         return 0
 
 
+# ── Sync publisher (Faz 6C G5 — for Celery / sync contexts) ───────────────────
+#
+# The EventBus class is async. SNMP polling and other Celery tasks run in a
+# sync context, so they need a sync way to publish. publish_sync provides a
+# generic hook: any sync producer can XADD to a stream. (Full SNMP migration —
+# routing poll results through a consumer — is a deliberate follow-up step;
+# this just makes the bus reachable from sync code.)
+
+_sync_client = None
+
+
+def _get_sync_client():
+    """Lazily-built sync redis client. Sync redis clients are thread-safe and
+    connection-pooled, so a module-level singleton is safe across Celery
+    worker threads/forks (unlike the async client)."""
+    global _sync_client
+    if _sync_client is None:
+        import redis as _redis_sync
+        from app.core.config import settings
+        _sync_client = _redis_sync.from_url(
+            settings.REDIS_URL, decode_responses=True, socket_timeout=5,
+        )
+    return _sync_client
+
+
+def publish_sync(
+    stream: str,
+    payload: dict,
+    maxlen: int = _DEFAULT_MAXLEN,
+) -> Optional[str]:
+    """
+    Sync XADD — for Celery / sync producers (e.g. SNMP poll tasks).
+
+    Mirrors EventBus.publish: JSON payload into one `data` field, MAXLEN ~trim.
+    Returns the entry id, or None on any failure. Never raises.
+    """
+    try:
+        raw = json.dumps(payload, cls=_EventEncoder, separators=(",", ":"))
+    except (TypeError, ValueError) as exc:
+        log.warning("event_bus: publish_sync payload not serializable — %s", exc)
+        return None
+    try:
+        return _get_sync_client().xadd(
+            stream, {"data": raw}, maxlen=maxlen, approximate=True,
+        )
+    except (RedisError, OSError) as exc:
+        log.warning("event_bus: publish_sync to %s failed — %s", stream, exc)
+        return None
+
+
+def reset_sync_client_for_tests() -> None:
+    """Test helper — clears the sync client singleton."""
+    global _sync_client
+    _sync_client = None
+
+
 # ── Backend-side singleton ────────────────────────────────────────────────────
 
 _bus: Optional[EventBus] = None

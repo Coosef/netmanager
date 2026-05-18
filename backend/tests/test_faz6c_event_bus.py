@@ -323,6 +323,47 @@ class TestDeadLetterAndObservability:
 # 6. parsing helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
+class TestPublishSync:
+    """G5 — generic sync publish hook for Celery / sync producers."""
+
+    def test_publish_sync_xadds(self, monkeypatch):
+        from app.services import event_bus
+        event_bus.reset_sync_client_for_tests()
+
+        class FakeSync:
+            def __init__(self):
+                self.added = []
+            def xadd(self, stream, fields, maxlen=None, approximate=True):
+                self.added.append((stream, fields))
+                return "1-1"
+
+        fake = FakeSync()
+        monkeypatch.setattr(event_bus, "_get_sync_client", lambda: fake)
+
+        eid = event_bus.publish_sync(event_bus.STREAM_SNMP, {"oid": "1.3.6", "value": 42})
+        assert eid == "1-1"
+        assert fake.added[0][0] == event_bus.STREAM_SNMP
+        decoded = json.loads(fake.added[0][1]["data"])
+        assert decoded == {"oid": "1.3.6", "value": 42}
+
+    def test_publish_sync_redis_error_returns_none(self, monkeypatch):
+        from app.services import event_bus
+        event_bus.reset_sync_client_for_tests()
+
+        class FailSync:
+            def xadd(self, *a, **k):
+                raise RedisError("down")
+
+        monkeypatch.setattr(event_bus, "_get_sync_client", lambda: FailSync())
+        assert event_bus.publish_sync(event_bus.STREAM_SNMP, {"x": 1}) is None
+
+    def test_publish_sync_non_serializable_returns_none(self, monkeypatch):
+        from app.services import event_bus
+        event_bus.reset_sync_client_for_tests()
+        monkeypatch.setattr(event_bus, "_get_sync_client", lambda: None)
+        assert event_bus.publish_sync(event_bus.STREAM_SNMP, {"bad": object()}) is None
+
+
 class TestParsingHelpers:
 
     def test_parse_pairs_skips_missing_and_corrupt(self):
