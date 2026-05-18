@@ -170,6 +170,12 @@ class AgentManager:
         except Exception:
             return
 
+        # Faz 7 — agent message handling is trusted data-plane code; run
+        # it RLS-bypassed (this WS task is agent-scoped). Rows written
+        # here are org-stamped per row by the before_insert hook.
+        from app.core.org_context import set_org_context
+        set_org_context(None, None, is_super_admin=True)
+
         msg_type = msg.get("type")
 
         # Standard request/response results

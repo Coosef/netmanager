@@ -54,6 +54,12 @@ def on_task_prerun(task_id: str, task, **kwargs):
     _task_starts.__dict__[task_id] = time.monotonic()
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(celery_task_id=task_id, task_name=task.name)
+    # Faz 7 — Celery tasks are trusted internal system code: beat jobs are
+    # fleet-wide, and user-triggered tasks act on IDs the RLS-scoped API
+    # endpoint already validated. Run RLS-bypassed; row WRITES are still
+    # org-stamped per row by the before_insert hook (device/agent-derived).
+    from app.core.org_context import set_org_context
+    set_org_context(None, None, is_super_admin=True)
     log.info("task_started", task_name=task.name)
 
 
@@ -64,6 +70,8 @@ def on_task_postrun(task_id: str, task, state: str, **kwargs):
     queue = _get_queue(task.name)
     CELERY_TASK_DURATION_SECONDS.labels(task_name=task.name, queue=queue).observe(duration)
     CELERY_TASK_TOTAL.labels(task_name=task.name, queue=queue, status="success").inc()
+    from app.core.org_context import clear_org_context
+    clear_org_context()
     log.info("task_completed", task_name=task.name, duration_s=round(duration, 3), state=state)
 
 
