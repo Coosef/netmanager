@@ -37,6 +37,11 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if user is None:
         raise credentials_exception
+
+    # Faz 7 — publish the caller's org into request context so the
+    # before_insert hook (app/models/_scoping.py) stamps every scoped row.
+    from app.core.org_context import set_org_context
+    set_org_context(user.organization_id)
     return user
 
 

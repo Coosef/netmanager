@@ -1,5 +1,6 @@
 from app.models.tenant import Tenant
 from app.models.user import User, UserRole, SystemRole
+from app.models import _scoping  # noqa: F401 — registers the org-stamping insert hook
 from app.models.shared.plan import Plan
 from app.models.shared.organization import Organization
 from app.models.shared.permission_set import PermissionSet
