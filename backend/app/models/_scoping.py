@@ -55,6 +55,55 @@ def _lookup(connection, table: str, key, columns: str):
         return None
 
 
+# Last-resort defaults, cached per process. Used only when a NOT NULL
+# scoping column could not be resolved any other way — so a scoped insert
+# can never fail on the constraint (worst case: the row lands on the
+# default org / its "Unassigned" location).
+_default_org_cache = None
+_default_loc_cache = None
+
+
+def _default_org(connection):
+    global _default_org_cache
+    if _default_org_cache is None:
+        row = _lookup_first(
+            connection, "SELECT id FROM organizations ORDER BY id LIMIT 1"
+        )
+        if row is not None:
+            _default_org_cache = row[0]
+    return _default_org_cache
+
+
+def _default_location(connection):
+    global _default_loc_cache
+    if _default_loc_cache is None:
+        row = _lookup_first(
+            connection,
+            "SELECT l.id FROM locations l JOIN organizations o "
+            "  ON o.id = l.organization_id "
+            "WHERE l.name = 'Unassigned — ' || o.slug "
+            "ORDER BY o.id LIMIT 1",
+        )
+        if row is not None:
+            _default_loc_cache = row[0]
+    return _default_loc_cache
+
+
+def _lookup_first(connection, sql: str):
+    try:
+        return connection.execute(text(sql)).first()
+    except Exception:
+        return None
+
+
+def _column_not_null(target, name: str) -> bool:
+    try:
+        col = target.__table__.columns.get(name)
+        return col is not None and not col.nullable
+    except Exception:
+        return False
+
+
 def _stamp_scoping(_mapper, connection, target) -> None:
     needs_org = getattr(target, "organization_id", _SENTINEL) is None
     needs_loc = getattr(target, "location_id", _SENTINEL) is None
@@ -90,10 +139,21 @@ def _stamp_scoping(_mapper, connection, target) -> None:
         org_id = get_current_org_id()
         if org_id is not None:
             target.organization_id = org_id
+            needs_org = False
     if needs_loc:
         loc_id = get_current_location_id()
         if loc_id is not None:
             target.location_id = loc_id
+            needs_loc = False
+
+    # 4. Last-resort safety net — a NOT NULL scoping column that is still
+    #    unresolved gets the default org / Unassigned location, so the
+    #    insert can never fail on the constraint. Nullable columns
+    #    (audit_logs / api_tokens / users) are left as-is.
+    if needs_org and _column_not_null(target, "organization_id"):
+        target.organization_id = _default_org(connection)
+    if needs_loc and _column_not_null(target, "location_id"):
+        target.location_id = _default_location(connection)
 
 
 # Registering on Mapper fires the hook for every mapped class in the app.

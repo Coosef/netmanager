@@ -19,5 +19,5 @@ class AgentCredentialBundle(Base):
 
     # Faz 7 — multi-tenant isolation
     organization_id = Column(
-        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )

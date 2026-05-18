@@ -21,5 +21,5 @@ class DeviceAvailabilitySnapshot(Base):
     experience_score: Mapped[float] = mapped_column(Float, nullable=False)
 
     # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
-    organization_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
-    location_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    organization_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    location_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)

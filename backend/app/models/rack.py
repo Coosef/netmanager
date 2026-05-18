@@ -19,8 +19,8 @@ class Rack(Base):
     )
 
     # Faz 7 — multi-tenant isolation
-    organization_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
 
@@ -44,6 +44,6 @@ class RackItem(Base):
     )
 
     # Faz 7 — multi-tenant isolation
-    organization_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )

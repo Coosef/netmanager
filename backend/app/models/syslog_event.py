@@ -20,7 +20,7 @@ class SyslogEvent(Base):
     )
 
     # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
-    organization_id = Column(Integer, nullable=True, index=True)
+    organization_id = Column(Integer, nullable=False, index=True)
 
     __table_args__ = (
         Index("ix_syslog_agent_received", "agent_id", "received_at"),

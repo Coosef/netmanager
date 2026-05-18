@@ -38,6 +38,13 @@ log = logging.getLogger("netmanager.event_consumer")
 _HEARTBEAT_KEY = "event_consumer:alive"
 _HEARTBEAT_TTL_SECS = 30
 
+# Faz 7 — fallback org/location context for the data plane. Resolved once
+# at startup (see run()). The before_insert hook derives org precisely per
+# row (device_id / agent_id); this is the fallback for rows it cannot
+# resolve — e.g. a syslog event from an unregistered agent.
+_FALLBACK_ORG_ID: int | None = None
+_FALLBACK_LOCATION_ID: int | None = None
+
 
 # ── Stream → persist-handler registry ─────────────────────────────────────────
 #
@@ -72,6 +79,7 @@ async def process_batch(bus, stream: str, entries, sync_redis, is_retry: bool) -
         a poison batch cannot cycle forever.
     """
     from app.core.database import make_worker_session
+    from app.core.org_context import org_context
     from app.services.event_bus import GROUP_PERSIST
 
     if not entries:
@@ -82,8 +90,11 @@ async def process_batch(bus, stream: str, entries, sync_redis, is_retry: bool) -
     ids = [e.id for e in entries]
     t0 = time.monotonic()
     try:
-        async with make_worker_session()() as db:
-            persisted = await handler(db, payloads, sync_redis)
+        # Faz 7 — run under the fallback org context; the before_insert
+        # hook still derives org precisely per row where it can.
+        with org_context(_FALLBACK_ORG_ID, _FALLBACK_LOCATION_ID):
+            async with make_worker_session()() as db:
+                persisted = await handler(db, payloads, sync_redis)
         await bus.ack(stream, GROUP_PERSIST, ids)
         # Metric failure must not undo a successful persist — own try/except.
         try:
@@ -192,6 +203,29 @@ async def run() -> None:
         settings.REDIS_URL, decode_responses=True, socket_timeout=5,
     )
     bus = EventBus(redis)
+
+    # Faz 7 — resolve the fallback org/location once: the oldest org and
+    # its "Unassigned" location. Used as the org context for rows the
+    # before_insert hook cannot resolve from a device/agent.
+    global _FALLBACK_ORG_ID, _FALLBACK_LOCATION_ID
+    try:
+        from sqlalchemy import text as _text
+        from app.core.database import make_worker_session
+        async with make_worker_session()() as _s:
+            row = (await _s.execute(_text(
+                "SELECT o.id, l.id FROM organizations o "
+                "LEFT JOIN locations l ON l.organization_id = o.id "
+                "  AND l.name = 'Unassigned — ' || o.slug "
+                "ORDER BY o.id LIMIT 1"
+            ))).first()
+        if row is not None:
+            _FALLBACK_ORG_ID, _FALLBACK_LOCATION_ID = row[0], row[1]
+        log.info(
+            "event_consumer: fallback context org=%s location=%s",
+            _FALLBACK_ORG_ID, _FALLBACK_LOCATION_ID,
+        )
+    except Exception:
+        log.exception("event_consumer: could not resolve fallback org context")
 
     consumer_name = f"{socket.gethostname()}-{os.getpid()}"
     log.info("event_consumer: starting as %s", consumer_name)

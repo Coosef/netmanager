@@ -45,8 +45,8 @@ class SyntheticProbe(Base):
     )
 
     # Faz 7 — multi-tenant isolation
-    organization_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     location_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
@@ -71,4 +71,4 @@ class SyntheticProbeResult(Base):
     )
 
     # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
-    organization_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    organization_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)

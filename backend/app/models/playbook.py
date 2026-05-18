@@ -38,8 +38,8 @@ class Playbook(Base):
         ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
     )
     # Faz 7 — multi-tenant isolation
-    organization_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -81,8 +81,8 @@ class PlaybookRun(Base):
     )
 
     # Faz 7 — multi-tenant isolation
-    organization_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True, index=True
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     playbook: Mapped["Playbook"] = relationship("Playbook", back_populates="runs")

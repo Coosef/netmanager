@@ -643,7 +643,12 @@ class AgentManager:
             details = msg.get("details", {})
             details["agent_id"] = agent_id
 
+            from app.models.agent import Agent
+
             async with make_worker_session()() as db:
+                # Device-less event — derive org/location from the agent
+                # (Faz 7: organization_id is NOT NULL).
+                agent = await db.get(Agent, agent_id)
                 evt = NetworkEvent(
                     device_id=None,
                     device_hostname=None,
@@ -652,7 +657,15 @@ class AgentManager:
                     title=title,
                     message=message,
                     details=details,
+                    organization_id=agent.organization_id if agent else None,
+                    location_id=agent.location_id if agent else None,
                 )
+                if evt.organization_id is None:
+                    log.warning(
+                        "agent_manager: local_anomaly from unknown agent %s — skipping",
+                        agent_id,
+                    )
+                    return
                 db.add(evt)
                 await db.commit()
 
