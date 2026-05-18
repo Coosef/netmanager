@@ -1,5 +1,61 @@
 # Changelog
 
+## [Faz 6C] — 2026-05-18 — Async Event Bus (KI-4 çözümü)
+
+> Ingestion → processing decoupling · **483/483 test**
+> Merge: `feature/faz6c-async-event-bus` → `main`
+
+### KI-4 kapanışı — concurrent syslog burst → DB pool exhaustion
+
+Pilot T6'da 1000 eşzamanlı syslog event'inden sadece 148'i persist olmuştu.
+Kök neden: `agent_manager._handle_syslog_event` her event için ayrı bir DB
+connection açıyordu (`make_worker_session` per event) — burst = binlerce
+eşzamanlı connection = pool tükenmesi, hatalar `log.debug` ile sessizce
+yutuluyordu. Faz 6C ingestion ile processing'i Redis Streams ile ayırdı.
+
+**G1 — `event_bus.py`** — Redis Streams abstraction:
+`publish` / `consume_batch` / `ack` / `claim_stale` (XAUTOCLAIM) /
+`to_dead_letter` / `depth` / `group_lag`. Streams seçildi (Pub/Sub değil):
+persistent, consumer group, at-least-once, crash recovery, MAXLEN backpressure.
+
+**G2 — syslog ingestion → stream**: `_handle_syslog_event` artık tek `XADD`
+yapıyor (mikrosaniye, DB'ye dokunmuyor). `syslog_ingest.persist_and_correlate`
+ortak persist yolu (bulk insert + correlation). Redis erişilemezse
+semaphore-bounded fallback (`SYSLOG_FALLBACK_CONCURRENCY=8`) — degraded modda
+bile burst pool'u tüketemiyor.
+
+**G3 — `event_consumer.py`**: stream'i bounded batch'lerle (200) drain eden
+standalone servis. Tek DB session, sıralı batch → DB sabit yük görür.
+İki-strike dead-letter, XAUTOCLAIM ile crashed-consumer recovery.
+
+**G4 — `event_consumer` docker servisi**: control plane (backend) / data
+plane (event_consumer) ayrımı. `mem_limit 512m`, heartbeat healthcheck.
+
+**G5 — `publish_sync`**: Celery/sync context'ler için generic sync publish
+hook (SNMP tam migration sonraki mini-adım).
+
+**G6 — observability**: 5 metric — `event_bus_publish_total`,
+`event_stream_depth`, `event_consumer_lag`, `event_consumer_batch_duration`,
+`event_consumer_claimed_total`.
+
+### KI-4 burst testi sonucu
+
+| Metrik | Eski (pilot T6) | Faz 6C |
+|--------|----------------|--------|
+| 5000 eşzamanlı event ingestion | pool exhaustion | 0.03s, 180k event/s |
+| Persist edilen | 148/1000 | **5000/5000** (kayıp 0) |
+| PG connection (burst sırasında) | tükeniyor | 27 / 200 |
+| Consumer error / TooManyConnections | sessiz hata | 0 / 0 |
+
+### Test
+- 3 yeni test dosyası, +43 test: `event_bus` (23), `syslog_ingest` (13),
+  `event_consumer` (7). 440 → **483 PASS**.
+
+### Sonraki mini-adım
+- SNMP poll sonuçlarının `ingest:snmp` stream'ine tam migration.
+
+---
+
 ## [Faz 6B G7] — 2026-05-16 — Production Cleanup & Tuning
 
 > Faz 6C öncesi altyapı temizliği · **440/440 test**
