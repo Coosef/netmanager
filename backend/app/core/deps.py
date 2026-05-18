@@ -1,11 +1,12 @@
 from typing import Annotated, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.database import get_db
+from app.core.org_context import set_org_context
 from app.core.security import decode_access_token
 from app.models.user import User, UserRole, SystemRole
 
@@ -16,7 +17,15 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 # Core auth dependencies (unchanged)
 # ---------------------------------------------------------------------------
 
+def _is_super_admin(user: User) -> bool:
+    return (
+        user.system_role == SystemRole.SUPER_ADMIN
+        or user.role == UserRole.SUPER_ADMIN
+    )
+
+
 async def get_current_user(
+    request: Request,
     token: Annotated[str, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
@@ -38,10 +47,31 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
 
-    # Faz 7 — publish the caller's org into request context so the
-    # before_insert hook (app/models/_scoping.py) stamps every scoped row.
-    from app.core.org_context import set_org_context
-    set_org_context(user.organization_id)
+    # Faz 7 — publish the full RLS context for this request. The
+    # before_insert hook stamps new rows from it; the RLS session hook
+    # (app/core/rls.py) scopes every query to it.
+    is_super = _is_super_admin(user)
+    org_id = user.organization_id
+    # A super-admin may scope to one org via X-Org-Id (else they bypass RLS).
+    x_org = request.headers.get("X-Org-Id")
+    if is_super and x_org:
+        try:
+            org_id = int(x_org)
+            is_super = False
+        except (TypeError, ValueError):
+            pass
+    # Active location (X-Location-Id) — empty ⇒ all locations in the org.
+    # A foreign location_id is harmless: RLS still requires the org to
+    # match, so it simply yields no rows.
+    location_id: Optional[int] = None
+    x_loc = request.headers.get("X-Location-Id")
+    if x_loc:
+        try:
+            location_id = int(x_loc)
+        except (TypeError, ValueError):
+            location_id = None
+
+    set_org_context(org_id, location_id, is_super)
     return user
 
 
@@ -131,6 +161,26 @@ CurrentUser = Annotated[User, Depends(get_current_active_user)]
 TenantFilter = Annotated[Optional[int], Depends(get_tenant_context)]
 LocationFilter = Annotated[Optional[list[int]], Depends(get_accessible_location_ids)]
 LocationNameFilter = Annotated[Optional[list[str]], Depends(get_accessible_location_names)]
+
+
+# ── Faz 7 — RLS-scoped DB session ─────────────────────────────────────────────
+
+async def get_scoped_db(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _user: Annotated[User, Depends(get_current_active_user)],
+) -> AsyncSession:
+    """
+    A DB session with the RLS org/location context guaranteed in place —
+    get_current_user publishes it and the rls.py session hook pushes it
+    into PostgreSQL GUCs, so every query is policy-scoped. Endpoints can
+    depend on this instead of get_db; existing endpoints that already take
+    `CurrentUser` are scoped automatically (the context is set the moment
+    the user is resolved).
+    """
+    return db
+
+
+ScopedDb = Annotated[AsyncSession, Depends(get_scoped_db)]
 
 
 # ---------------------------------------------------------------------------

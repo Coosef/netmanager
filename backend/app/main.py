@@ -64,6 +64,13 @@ def _asyncio_timeout(seconds: float):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Faz 7 — the whole startup bootstrap (schema, seeding, default org)
+    # runs RLS-bypassed; it is platform-level work that spans every org.
+    # Cleared before `yield` so request handlers start from a clean
+    # context (each request re-establishes its own via get_current_user).
+    from app.core.org_context import set_org_context, clear_org_context
+    set_org_context(None, None, is_super_admin=True)
+
     # ── DB startup with timeout ───────────────────────────────────────────────
     try:
         async with _asyncio_timeout(30):
@@ -736,12 +743,17 @@ async def lifespan(app: FastAPI):
     except Exception:
         _startup_log.exception("startup: agent_bridge failed to start (non-fatal)")
 
-    # Background tasks — tracked for graceful shutdown cancellation
+    # Background tasks — tracked for graceful shutdown cancellation.
+    # Created while the super-admin context is still active so each loop
+    # task inherits it (they are fleet-wide — span every organization).
     _bg_tasks = [
         asyncio.create_task(_backfill_mac_oui(),         name="bg:mac_oui"),
         asyncio.create_task(_agent_device_status_loop(), name="bg:device_status"),
         asyncio.create_task(_ab_peer_latency_loop(),     name="bg:peer_latency"),
     ]
+
+    # Bootstrap done — drop the super-admin context before serving requests.
+    clear_org_context()
 
     yield
 

@@ -149,3 +149,11 @@ class _SchemaSession:
 
     async def __aexit__(self, *args):
         await self._session.__aexit__(*args)
+
+
+# ── Faz 7 — Row-Level Security ────────────────────────────────────────────────
+# Install the RLS session-context hook (after_begin → set GUCs) for every
+# session created from any engine above. Import-time side effect.
+from app.core import rls as _rls  # noqa: E402
+
+_rls.install_rls_hooks()

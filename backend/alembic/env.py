@@ -75,6 +75,15 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Faz 7 — run migrations with RLS bypassed, so a data migration is
+        # never silently row-filtered by a policy. DDL is unaffected; this
+        # is a safety net for any future data-touching revision.
+        try:
+            from sqlalchemy import text as _text
+            connection.execute(_text("SET app.is_super_admin = 'on'"))
+        except Exception:
+            pass
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
