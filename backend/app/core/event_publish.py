@@ -133,8 +133,38 @@ TOPOLOGY_EVENT_TYPES = (
     "topology_links_updated",   # a discovery run changed links
     "topology_node_added",      # a device entered the topology
     "topology_node_removed",    # a device left the topology
+    "topology_node_updated",    # a device's attributes/status changed
+    "topology_edge_added",      # a link appeared
+    "topology_edge_removed",    # a link disappeared
+    "topology_edge_updated",    # a link's metrics changed
     "topology_drift",           # current topology diverged from the golden snapshot
 )
+
+
+def _graphver_key(organization_id: int) -> str:
+    return f"topology:graphver:o={organization_id}"
+
+
+def get_topology_graph_version(organization_id: int, redis_client=None) -> int:
+    """Current monotonic topology graph version for an org. The v2 graph
+    response carries this; every topology realtime event carries the next
+    value, so the frontend can detect a missed patch and full-refetch."""
+    r = redis_client or _sync_redis()
+    try:
+        v = r.get(_graphver_key(organization_id))
+        return int(v) if v is not None else 0
+    except Exception:
+        return 0
+
+
+def bump_topology_graph_version(organization_id: int, redis_client=None) -> int:
+    """Increment and return the org's topology graph version — called by
+    any flow that mutates the topology (discovery, link save, drift)."""
+    r = redis_client or _sync_redis()
+    try:
+        return int(r.incr(_graphver_key(organization_id)))
+    except Exception:
+        return 0
 
 
 def publish_topology_event(event_type: str, organization_id: int,
@@ -143,12 +173,19 @@ def publish_topology_event(event_type: str, organization_id: int,
     """Publish a dedicated topology realtime event to an organization's
     channel. `event_type` should be one of TOPOLOGY_EVENT_TYPES. The org
     is explicit (topology events are often device-less / fleet-level), so
-    isolation never depends on device_id resolution."""
+    isolation never depends on device_id resolution.
+
+    Every event bumps and carries the org's `graph_version` — the v2 graph
+    response exposes the same counter, giving the frontend a sequence it
+    can reconcile against (a gap ⇒ full refetch)."""
+    r = redis_client  # may be None → helpers fall back to _sync_redis()
+    graph_version = bump_topology_graph_version(organization_id, r)
     payload = {
         "event_type": event_type,
         "severity": extra.pop("severity", "info"),
         "ts": datetime.now(timezone.utc).isoformat(),
+        "graph_version": graph_version,
         **extra,
     }
-    publish_network_event(payload, redis_client,
+    publish_network_event(payload, r,
                           organization_id=organization_id, location_id=location_id)

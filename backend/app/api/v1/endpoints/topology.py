@@ -69,18 +69,27 @@ async def get_topology_graph(
     group_id: int = Query(None),
     site: str = Query(None),
     refresh: bool = Query(False),
+    v: int = Query(1, ge=1, le=2, description="Contract version: 1 (legacy) | 2 (Final Gold Release)"),
 ):
-    """Return React Flow compatible graph. Cached in Redis for 5 minutes."""
+    """Topology graph.
+
+    `v=1` (default) — the legacy React Flow contract the current topology
+    page consumes; unchanged for backward compatibility until the
+    feature-flag cutover.
+    `v=2` — the Final Gold Release contract: hierarchy + cluster tree +
+    rich edges + semantic-zoom hints + realtime-patch protocol.
+
+    Org/location isolation is enforced by PostgreSQL RLS — the cache key
+    is additionally namespaced by org + location + contract version so no
+    org is ever served another's (or another version's) cached graph.
+    """
     effective_sites: list[str] | None = None
 
-    # Faz 7 — the cache key is namespaced by the active org + location, so
-    # one org can never be served another's cached graph. The underlying
-    # build_graph queries are RLS-scoped regardless.
     from app.core.org_context import get_current_org_id, get_current_location_id
     _org = get_current_org_id()
     _loc = get_current_location_id()
     cache_key = (
-        f"topology:graph:o={_org}:l={_loc}:"
+        f"topology:graph:o={_org}:l={_loc}:v={v}:"
         f"{group_id or 'all'}:{site or 'all'}"
     )
     if not refresh and effective_sites is None:
@@ -89,7 +98,10 @@ async def get_topology_graph(
             return cached
 
     svc = TopologyService(ssh_manager)
-    graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites)
+    if v == 2:
+        graph = await svc.build_graph_v2(db, group_id, site=site, sites=effective_sites)
+    else:
+        graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites)
 
     if effective_sites is None:
         await set_json(cache_key, graph, ttl=300)
