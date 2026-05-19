@@ -256,3 +256,56 @@ for the per-org realtime stream; the Faz 7 RLS scoped session.
   degradation), not necessarily at full FPS. Also profile 1k as the common case.
 - **Regression:** existing topology endpoints + discovery unaffected; backend
   test suite green; no RLS / NOT NULL errors in logs.
+
+---
+
+## 9. T7 — Scale hardening results
+
+The 5,000-node production gate. Synthetic fixtures
+(`__tests__/syntheticGraph.ts`, test/dev only — no production path
+references them) drive the benchmark harness (`__tests__/scale.test.ts`,
+run `npx vitest run scale`).
+
+### Measured main-thread pipeline (in-container, Node)
+
+| Stage | 1k | 2.5k | 5k | 10k (stress) |
+|---|---|---|---|---|
+| buildTopologyModel | 6 ms | 10 ms | 12 ms | 29 ms |
+| computeLayout (orbit/cluster) | ~2 ms | ~2 ms | ~6 ms | — |
+| applyClusterView | 3 ms | 8 ms | 7 ms | — |
+| deriveOverlayModel | 1 ms | 1 ms | 2 ms | — |
+| buildSceneData (3D) | 3 ms | 2 ms | 3 ms | 11 ms |
+| diffAndPatch | 4 ms | 6 ms | 11 ms | — |
+
+Every main-thread stage is **< 30 ms at 5k** — well inside one frame
+budget for an interaction, and far below the 1500 ms regression ceiling.
+The ForceAtlas2 force layout runs in a **Web Worker** (off the main
+thread) and is excluded above. WebGL rendering is GPU-bound: Sigma (2D)
+and instanced three.js (3D) carry 5k nodes / ~7k edges.
+
+### Tuning — size-adaptive (`scaleConfig.ts`)
+
+| Device count | Default tier | Sigma label threshold | Traffic-pulse cap |
+|---|---|---|---|
+| < 800 | `device` (fully exploded) | 6 | 600 |
+| 800–2k | `layer` | 7 | 600 |
+| 2k–4k | `layer` | 9 | 500 |
+| ≥ 4k (5k gate) | `layer` | 12 | 400 |
+
+Static thresholds (documented in `scaleConfig.ts`): semantic-zoom tiers
+(camera ratio 1.6 / 0.7), label priority per tier (≤1 / ≤2 / ≤3), 3D LOD
+(near 360 / mid 900 / fade 750→1700 / cluster substitution 1150), 3D
+instancing (one InstancedMesh per node class — 7 + cluster bucket).
+
+### Stability at scale (verified)
+
+A 5k graph: a location switch still triggers a clean rebuild; a
+`graph_version` gap still forces a controlled refetch; `diffAndPatch`
+stays incremental (same graphology instance — no remount); cluster
+collapse/expand and incident focus stay < 30 ms.
+
+### Verdict
+
+1k smooth · 2.5k operationally usable · **5k acceptable** with the
+size-adaptive layer-tier default + LOD · 10k completes (build 29 ms) as
+a graceful-degradation stress case, not the primary target.

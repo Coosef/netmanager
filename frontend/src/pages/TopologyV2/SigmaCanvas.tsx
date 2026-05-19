@@ -22,6 +22,7 @@ import {
   resolveNodeOverlay, resolveEdgeOverlay, NODE_TONE_COLOR, EDGE_TONE_COLOR,
   type OverlayContext,
 } from './overlays/overlayStyle'
+import { scaleProfile } from './scaleConfig'
 
 export interface SelectedNode {
   id: string
@@ -60,6 +61,7 @@ export default function SigmaCanvas({
     if (!containerRef.current) return
     styleGraph(model)
     applyClusterView(model, collapsed)
+    const profile = scaleProfile(model.deviceCount)
 
     const renderer = new Sigma(model.graph, containerRef.current, {
       renderLabels: true,
@@ -67,7 +69,7 @@ export default function SigmaCanvas({
       labelSize: 11,
       labelWeight: '500',
       labelFont: 'Inter, system-ui, sans-serif',
-      labelRenderedSizeThreshold: 6,
+      labelRenderedSizeThreshold: profile.labelThreshold,
       defaultEdgeColor: '#475569',
       minCameraRatio: 0.04,
       maxCameraRatio: 4,
@@ -114,7 +116,7 @@ export default function SigmaCanvas({
       },
     })
     sigmaRef.current = renderer
-    trafficRef.current = createTrafficAnimator(renderer, model.graph)
+    trafficRef.current = createTrafficAnimator(renderer, model.graph, profile.trafficAnimationMaxHot)
 
     const camera = renderer.getCamera()
     const onCam = () => {

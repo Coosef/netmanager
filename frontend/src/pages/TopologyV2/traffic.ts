@@ -12,7 +12,7 @@ import type Graph from 'graphology'
 const PERIOD_S = 2.4
 const AMPLITUDE = 0.16
 const FPS_MS = 90
-const MAX_HOT = 600 // above this, keep intensity static (let T7 tune)
+const DEFAULT_MAX_HOT = 600 // hot-edge cap; T7 tunes it per graph size
 
 function isHot(attr: Record<string, unknown>): boolean {
   if (attr.edgeKind !== 'link') return false
@@ -29,8 +29,12 @@ export interface TrafficAnimator {
 /**
  * Build a traffic animator over a mounted Sigma renderer. The hot-edge
  * set is recomputed on `start()`, so call it again after a graph patch.
+ * `maxHot` caps animation cost — above it the fabric stays statically
+ * coloured (T7 passes a size-tuned value).
  */
-export function createTrafficAnimator(sigma: Sigma, graph: Graph): TrafficAnimator {
+export function createTrafficAnimator(
+  sigma: Sigma, graph: Graph, maxHot: number = DEFAULT_MAX_HOT,
+): TrafficAnimator {
   let timer: ReturnType<typeof setInterval> | null = null
   let hot: string[] = []
 
@@ -73,7 +77,7 @@ export function createTrafficAnimator(sigma: Sigma, graph: Graph): TrafficAnimat
     start() {
       this.stop()
       collect()
-      if (!hot.length || hot.length > MAX_HOT) return // static — no animation
+      if (!hot.length || hot.length > maxHot) return // static — no animation
       timer = setInterval(tick, FPS_MS)
     },
     stop() {

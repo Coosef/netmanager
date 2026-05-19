@@ -36,6 +36,7 @@ import {
   keyboardAction, isPanelVisible, isPanelExpanded, togglePanel, type PanelId,
 } from './noc/nocUi'
 import { loadUiPrefs, saveUiPrefs } from './noc/uiPrefs'
+import { scaleProfile } from './scaleConfig'
 
 const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
 const BORDER = '1px solid rgba(148, 163, 184, 0.18)'
@@ -121,7 +122,12 @@ export default function TopologyV2Page() {
         setDrift(null)
         setPatchSignal(0)
         setSelected(null) // location switch — clear stale selection
-        return { model: buildTopologyModel(data), locationId: activeLocationId }
+        const model = buildTopologyModel(data)
+        // T7 — open at a size-appropriate cluster tier so a large graph
+        // never starts fully exploded.
+        setTier(scaleProfile(model.deviceCount).defaultTier)
+        setAutoMode(true)
+        return { model, locationId: activeLocationId }
       }
       diffAndPatch(prev!.model, data)
       expectedVersion.current = data.graph_version
