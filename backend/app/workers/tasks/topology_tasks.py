@@ -164,6 +164,13 @@ def discover_topology(self, task_id: int, device_ids: list[int]):
             for key in _redis.keys("topology:graph:*"):
                 _redis.delete(key)
 
+            # Topology T0 — notify each affected org's realtime stream so
+            # the topology UI patches instead of waiting for the 60s poll.
+            from app.core.event_publish import publish_topology_event
+            for _org in {d.organization_id for d in devices if d.organization_id}:
+                publish_topology_event("topology_links_updated", _org, _redis,
+                                       completed=completed, failed=failed)
+
             await ssh.close_all()
 
     _run_async(_run())
@@ -197,6 +204,15 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
                 ))
                 await db.commit()
                 return
+
+            # Faz 7 / topology T0 — scope the rest of the cascade to the
+            # source device's organization + location. Without this the
+            # task inherits the worker's super-admin context and would
+            # match ghost neighbours against EVERY org's inventory.
+            from app.core.org_context import set_org_context
+            from app.core.rls import apply_rls_context
+            set_org_context(source.organization_id, source.location_id, is_super_admin=False)
+            await apply_rls_context(db)
 
             ssh_username = source.ssh_username
             ssh_password = decrypt_credential(source.ssh_password_enc)
@@ -377,6 +393,15 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
 
             for key in _redis.keys("topology:graph:*"):
                 _redis.delete(key)
+
+            # Topology T0 — per-org realtime notification (hop discovery is
+            # scoped to the source device's org/location, set above).
+            from app.core.event_publish import publish_topology_event
+            publish_topology_event(
+                "topology_links_updated", source.organization_id, _redis,
+                location_id=source.location_id,
+                completed=completed, failed=failed, discovered=len(discovered_new),
+            )
 
     _run_async(_run())
 

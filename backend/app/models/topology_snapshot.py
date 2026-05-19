@@ -31,3 +31,8 @@ class TopologySnapshot(Base):
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Topology T0 — optional location scope: NULL ⇒ an org-wide snapshot,
+    # a value ⇒ a snapshot of one location's topology (location-scoped diffs).
+    location_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )

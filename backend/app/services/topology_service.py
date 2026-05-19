@@ -540,16 +540,18 @@ class TopologyService:
         group_id: int | None = None,
         site: str | None = None,
         sites: list[str] | None = None,
-        tenant_id: int | None = None,
     ) -> dict:
-        """Build React Flow compatible graph from topology_links."""
+        """Build React Flow compatible graph from topology_links.
+
+        Org/location isolation is enforced by PostgreSQL RLS on the
+        `devices` and `topology_links` tables — the legacy `tenant_id`
+        filter was removed in the topology T0 hardening pass.
+        """
         # Opportunistically re-link any ghost nodes that are now in inventory
         await self._rematch_ghost_links(db)
 
-        # Fetch all devices
+        # Fetch all devices (RLS-scoped to the caller's org + location)
         device_query = select(Device).where(Device.is_active == True)
-        if tenant_id is not None:
-            device_query = device_query.where(Device.tenant_id == tenant_id)
         if group_id:
             device_query = device_query.where(Device.group_id == group_id)
         if sites is not None:

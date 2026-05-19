@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional, Union
 
 import redis as _redis_sync
@@ -123,3 +124,31 @@ def publish_anomaly(payload: Union[dict, str], redis_client=None, *,
     """Publish an anomaly to its organization's channel."""
     _publish("anomalies", payload, redis_client, False,
              organization_id, location_id)
+
+
+# Topology realtime event types — carried on the per-org network:events
+# channel so the topology UI can patch its graph incrementally instead of
+# polling. The frontend filters frames whose event_type starts "topology_".
+TOPOLOGY_EVENT_TYPES = (
+    "topology_links_updated",   # a discovery run changed links
+    "topology_node_added",      # a device entered the topology
+    "topology_node_removed",    # a device left the topology
+    "topology_drift",           # current topology diverged from the golden snapshot
+)
+
+
+def publish_topology_event(event_type: str, organization_id: int,
+                           redis_client=None, *, location_id: Optional[int] = None,
+                           **extra) -> None:
+    """Publish a dedicated topology realtime event to an organization's
+    channel. `event_type` should be one of TOPOLOGY_EVENT_TYPES. The org
+    is explicit (topology events are often device-less / fleet-level), so
+    isolation never depends on device_id resolution."""
+    payload = {
+        "event_type": event_type,
+        "severity": extra.pop("severity", "info"),
+        "ts": datetime.now(timezone.utc).isoformat(),
+        **extra,
+    }
+    publish_network_event(payload, redis_client,
+                          organization_id=organization_id, location_id=location_id)
