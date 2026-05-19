@@ -311,6 +311,11 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
                             await db.refresh(existing)
                         else:
                             real_device = Device(
+                                # Faz 8 phase B — explicit ownership: a
+                                # hop-discovered device inherits the source
+                                # device's org + location.
+                                organization_id=source.organization_id,
+                                location_id=source.location_id,
                                 hostname=device_info.get("hostname") or ip,
                                 ip_address=ip,
                                 vendor=source.vendor,

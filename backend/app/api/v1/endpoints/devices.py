@@ -437,7 +437,23 @@ async def create_device(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Device with this IP already exists")
 
+    # Faz 8 phase B — explicit organization/location ownership. A device
+    # belongs to exactly one org + one location; both are resolved here,
+    # not left to the scoping hook's (now removed) default fallback.
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    org_id = get_current_org_id()
+    location_id = get_current_location_id()
+    if org_id is None:
+        raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
+    if location_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cihaz oluşturmak için etkin bir lokasyon seçili olmalı (All Locations modunda cihaz eklenemez)",
+        )
+
     device = Device(
+        organization_id=org_id,
+        location_id=location_id,
         hostname=payload.hostname or payload.ip_address,
         ip_address=payload.ip_address,
         device_type=payload.device_type,
@@ -616,6 +632,19 @@ async def import_devices_csv(
     except UnicodeDecodeError:
         text = content.decode("latin-1")
 
+    # Faz 8 phase B — explicit ownership: every imported device lands in
+    # the caller's active organization + location; no default fallback.
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    org_id = get_current_org_id()
+    location_id = get_current_location_id()
+    if org_id is None:
+        raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
+    if location_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cihaz içe aktarmak için etkin bir lokasyon seçili olmalı",
+        )
+
     reader = csv.DictReader(io.StringIO(text))
     required = {"ip_address", "ssh_username", "ssh_password"}
 
@@ -696,6 +725,8 @@ async def import_devices_csv(
             else:
                 hostname = row.get("hostname", "").strip() or ip
                 device = Device(
+                    organization_id=org_id,
+                    location_id=location_id,
                     hostname=hostname,
                     ip_address=ip,
                     device_type=device_type,

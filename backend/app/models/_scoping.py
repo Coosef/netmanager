@@ -1,11 +1,9 @@
 """
-Automatic organization_id / location_id stamping — Faz 7.
+Automatic organization_id / location_id stamping — Faz 7, hardened in Faz 8.
 
-Registers a single SQLAlchemy ``before_insert`` hook on the declarative
-Mapper (fires for every model). When a row is inserted into a scoped
-table and its organization_id / location_id are still unset, they are
-resolved — so the M3 NOT NULL constraints are safe and no insert site
-can be missed.
+A single SQLAlchemy ``before_insert`` hook (fires for every model). When a
+row is inserted into a scoped table and its organization_id /
+location_id are still unset, they are resolved from an explicit source.
 
 Resolution order for each row:
   1. A device-bound row (non-null device_id) inherits organization_id
@@ -14,20 +12,30 @@ Resolution order for each row:
      (agent / synthetic probe / playbook / escalation rule /
      notification channel / user) via whichever FK column is present.
   3. Anything still unset falls back to the request/task context
-     (app.core.org_context).
+     (app.core.org_context — ContextVars, or the RLS session GUCs).
 
-Values the caller set explicitly are never overwritten — batch ingest
-code that stamps rows itself is unaffected. Parent lookups are
-best-effort: a failure never breaks the insert.
+Faz 8 — **fail closed**: if a NOT NULL scoping column cannot be resolved
+by ANY of the three explicit sources, the insert is REJECTED with a
+``ScopedContextError`` and a structured log line. There is NO silent
+default-organization / "Unassigned"-location fallback any more — a row
+can never be misattributed to the wrong tenant.
+
+Values the caller set explicitly are never overwritten — endpoints and
+batch ingest that stamp rows themselves are unaffected (and, per Faz 8,
+the scoped endpoints now do exactly that).
 
 Imported for its side effect by app/models/__init__.py.
 """
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import event, text
 from sqlalchemy.orm import Mapper
 
 from app.core.org_context import get_current_org_id, get_current_location_id
+
+log = logging.getLogger("netmanager.scoping")
 
 _SENTINEL = "n/a"
 
@@ -44,54 +52,18 @@ _PARENT_ORG_FK = (
 )
 
 
+class ScopedContextError(RuntimeError):
+    """A scoped row was inserted without a resolvable organization /
+    location. Faz 8: such writes fail closed rather than defaulting."""
+
+
 def _lookup(connection, table: str, key, columns: str):
     """Best-effort SELECT of scoping columns from a parent row."""
     try:
         return connection.execute(
-            text(f"SELECT {columns} FROM {table} WHERE id = :k"),
+            text(f"SELECT {columns} FROM {table} WHERE id = :k"),  # noqa: S608 — fixed table
             {"k": key},
         ).first()
-    except Exception:
-        return None
-
-
-# Last-resort defaults, cached per process. Used only when a NOT NULL
-# scoping column could not be resolved any other way — so a scoped insert
-# can never fail on the constraint (worst case: the row lands on the
-# default org / its "Unassigned" location).
-_default_org_cache = None
-_default_loc_cache = None
-
-
-def _default_org(connection):
-    global _default_org_cache
-    if _default_org_cache is None:
-        row = _lookup_first(
-            connection, "SELECT id FROM organizations ORDER BY id LIMIT 1"
-        )
-        if row is not None:
-            _default_org_cache = row[0]
-    return _default_org_cache
-
-
-def _default_location(connection):
-    global _default_loc_cache
-    if _default_loc_cache is None:
-        row = _lookup_first(
-            connection,
-            "SELECT l.id FROM locations l JOIN organizations o "
-            "  ON o.id = l.organization_id "
-            "WHERE l.name = 'Unassigned — ' || o.slug "
-            "ORDER BY o.id LIMIT 1",
-        )
-        if row is not None:
-            _default_loc_cache = row[0]
-    return _default_loc_cache
-
-
-def _lookup_first(connection, sql: str):
-    try:
-        return connection.execute(text(sql)).first()
     except Exception:
         return None
 
@@ -113,6 +85,27 @@ def _column_not_null(target, name: str) -> bool:
         return col is not None and not col.nullable
     except Exception:
         return False
+
+
+def _reject(target, column: str) -> None:
+    """Fail closed — refuse a scoped insert with no resolvable context."""
+    table = getattr(target, "__tablename__", type(target).__name__)
+    log.error(
+        "scoped-write rejected: %s.%s unresolved",
+        table, column,
+        extra={
+            "operation": "insert",
+            "model": table,
+            "missing_context": column,
+            "reason": "no device parent, no parent FK, no org/location context",
+        },
+    )
+    raise ScopedContextError(
+        f"Scoped write rejected: {table}.{column} could not be resolved from a "
+        f"device parent, a parent FK, or the request/task context. "
+        f"Resolve organization/location explicitly before inserting — there is "
+        f"no default-organization fallback."
+    )
 
 
 def _stamp_scoping(_mapper, connection, target) -> None:
@@ -147,9 +140,9 @@ def _stamp_scoping(_mapper, connection, target) -> None:
 
     # 3. Fall back to the request/task context. ContextVars do not always
     #    cross into SQLAlchemy's async flush greenlet, so when they read
-    #    empty we consult the RLS session GUCs — those are reliably set on
-    #    the connection (apply_rls_context for requests, the after_begin
-    #    hook for sync workers) and are the source of truth at flush time.
+    #    empty we consult the RLS session GUCs — reliably set on the
+    #    connection (apply_rls_context for requests, after_begin for
+    #    sync workers).
     if needs_org:
         org_id = get_current_org_id()
         if org_id is None:
@@ -165,14 +158,14 @@ def _stamp_scoping(_mapper, connection, target) -> None:
             target.location_id = loc_id
             needs_loc = False
 
-    # 4. Last-resort safety net — a NOT NULL scoping column that is still
-    #    unresolved gets the default org / Unassigned location, so the
-    #    insert can never fail on the constraint. Nullable columns
-    #    (audit_logs / api_tokens / users) are left as-is.
+    # 4. Fail closed — Faz 8. A NOT NULL scoping column still unresolved
+    #    is REJECTED. No silent default-org / Unassigned-location fallback;
+    #    a row is never misattributed to another tenant. Nullable scoping
+    #    columns (audit_logs / api_tokens / users) are left as-is.
     if needs_org and _column_not_null(target, "organization_id"):
-        target.organization_id = _default_org(connection)
+        _reject(target, "organization_id")
     if needs_loc and _column_not_null(target, "location_id"):
-        target.location_id = _default_location(connection)
+        _reject(target, "location_id")
 
 
 # Registering on Mapper fires the hook for every mapped class in the app.

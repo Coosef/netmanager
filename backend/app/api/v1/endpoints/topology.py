@@ -479,6 +479,18 @@ async def discover_ghost(
 
     real_hostname = fetched_info.get("hostname") or ghost_hostname or ghost_ip
 
+    # Faz 8 phase B — explicit ownership for a newly inventoried ghost
+    # device: inherit the source device's org + location, else the
+    # request context. No default-org fallback.
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    _ghost_org = source.organization_id if source else get_current_org_id()
+    _ghost_loc = source.location_id if source else get_current_location_id()
+    if not existing and (_ghost_org is None or _ghost_loc is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Ghost cihazı envantere almak için kaynak cihaz ya da etkin lokasyon gerekli",
+        )
+
     if existing:
         new_device = existing
         is_new = False
@@ -496,6 +508,8 @@ async def discover_ghost(
         await db.refresh(existing)
     else:
         new_device = Device(
+            organization_id=_ghost_org,
+            location_id=_ghost_loc,
             hostname=real_hostname,
             ip_address=ghost_ip,
             vendor=target_vendor,

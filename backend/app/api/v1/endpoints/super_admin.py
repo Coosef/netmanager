@@ -239,9 +239,13 @@ async def create_org(
         is_active=True,
         role="admin",  # legacy
         system_role=SystemRole.ORG_ADMIN,
-        org_id=org.id,
+        # Faz 8 phase B — fix: the org-admin must be bound to the new org.
+        # (Was `org_id=` — an unmapped attribute — leaving the admin org-less.)
+        organization_id=org.id,
     )
     db.add(admin)
+    if admin.organization_id is None:
+        raise HTTPException(500, "İç hata: organizasyon yöneticisi org'a bağlanamadı")
     await db.commit()
     await db.refresh(org)
     return _org_dict(org)

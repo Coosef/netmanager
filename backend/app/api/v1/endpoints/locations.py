@@ -129,7 +129,19 @@ async def create_location(
     if current_user.role == UserRole.ADMIN:
         tenant_id = current_user.tenant_id
 
+    # Faz 8 phase B — explicit organization ownership. The location is
+    # created in the caller's effective organization (a super-admin's
+    # X-Org-Id resolves the same way); no default-org fallback.
+    from app.core.org_context import get_current_org_id
+    org_id = get_current_org_id()
+    if org_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Lokasyon oluşturmak için etkin bir organizasyon bağlamı gerekli",
+        )
+
     loc = Location(
+        organization_id=org_id,
         name=payload.name,
         description=payload.description,
         address=payload.address,
