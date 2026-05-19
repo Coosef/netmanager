@@ -27,6 +27,9 @@ import { diffAndPatch, applyTopologyEvent, ingestStrategy, type TopologyEvent } 
 import { useTopologyRealtime } from './realtime'
 import { collapsedSetForTier, expandCluster, type ClusterTier } from './clustering'
 import SigmaCanvas, { type SelectedNode } from './SigmaCanvas'
+import Topology3D from './three/Topology3D'
+import type { LayoutMode } from './three/layout3d'
+import type { CameraMode } from './three/CameraRig'
 import type { ZoomTier } from './rendering'
 
 const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
@@ -59,6 +62,9 @@ export default function TopologyV2Page() {
   const [autoMode, setAutoMode] = useState(true)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<SelectedNode | null>(null)
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d')
+  const [layoutMode, setLayoutMode] = useState<LayoutMode>('orbit')
+  const [cameraMode, setCameraMode] = useState<CameraMode>('orbit')
 
   // ── ingest contract data — build once per location, else patch in place ──
   useEffect(() => {
@@ -140,15 +146,27 @@ export default function TopologyV2Page() {
         background: 'radial-gradient(ellipse at 50% 35%, #0b1424 0%, #060b16 70%, #03070f 100%)',
       }}
     >
-      {engine && (
+      {engine && viewMode === '2d' && (
         <SigmaCanvas
-          key={`loc:${engine.locationId}`}
+          key={`2d:${engine.locationId}`}
           model={engine.model}
           collapsed={collapsed}
           patchSignal={patchSignal}
           onExpandCluster={handleExpandCluster}
           onSelectNode={setSelected}
           onZoomTier={handleZoomTier}
+        />
+      )}
+      {engine && viewMode === '3d' && (
+        <Topology3D
+          key={`3d:${engine.locationId}`}
+          model={engine.model}
+          collapsed={collapsed}
+          patchSignal={patchSignal}
+          mode={layoutMode}
+          cameraMode={cameraMode}
+          onSelectNode={setSelected}
+          onExpandCluster={handleExpandCluster}
         />
       )}
 
@@ -203,6 +221,38 @@ export default function TopologyV2Page() {
         background: PANEL_BG, border: BORDER, borderRadius: 10,
         display: 'flex', flexDirection: 'column', gap: 10,
       }}>
+        <div style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, letterSpacing: 0.4 }}>
+          MOTOR
+        </div>
+        <Segmented
+          size="small" block value={viewMode}
+          onChange={(v) => setViewMode(v as '2d' | '3d')}
+          options={[
+            { label: '2D Sigma', value: '2d' },
+            { label: '3D Tactical', value: '3d' },
+          ]}
+        />
+        {viewMode === '3d' && (
+          <>
+            <Segmented
+              size="small" block value={layoutMode}
+              onChange={(v) => setLayoutMode(v as LayoutMode)}
+              options={[
+                { label: 'Tactical Orbit', value: 'orbit' },
+                { label: 'Harmonic Cluster', value: 'cluster' },
+              ]}
+            />
+            <Segmented
+              size="small" block value={cameraMode}
+              onChange={(v) => setCameraMode(v as CameraMode)}
+              options={[
+                { label: 'Sabit Yörünge', value: 'orbit' },
+                { label: 'Veri Akışı', value: 'traverse' },
+              ]}
+            />
+          </>
+        )}
+
         <div style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, letterSpacing: 0.4 }}>
           <AppstoreOutlined /> KÜMELEME
         </div>
