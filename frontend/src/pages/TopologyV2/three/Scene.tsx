@@ -8,7 +8,7 @@
  */
 import { useMemo } from 'react'
 import type { TopologyModel } from '../graphModel'
-import { buildSceneData } from './sceneData'
+import { buildSceneData, type OverlayContext } from './sceneData'
 import { computeLayout, type LayoutMode } from './layout3d'
 import NodesLayer from './NodesLayer'
 import EdgesLayer from './EdgesLayer'
@@ -22,11 +22,12 @@ interface SceneProps {
   mode: LayoutMode
   cameraMode: CameraMode
   focusNodeId: string | null
+  overlay?: OverlayContext
   onSelect: (id: string) => void
 }
 
 export default function Scene({
-  model, collapsed, patchSignal, mode, cameraMode, focusNodeId, onSelect,
+  model, collapsed, patchSignal, mode, cameraMode, focusNodeId, overlay, onSelect,
 }: SceneProps) {
   // 3D positions are deterministic — recompute only when the graph
   // structure (node count) or the layout mode changes, NOT on every
@@ -37,11 +38,12 @@ export default function Scene({
     [model, mode, model.graph.order],
   )
 
-  // Re-bucket instances + repack edges on each patch; cheap, reuses layout.
+  // Re-bucket instances + repack edges on each patch / overlay change;
+  // cheap, reuses the layout.
   const data = useMemo(
-    () => buildSceneData(model, collapsed, layout),
+    () => buildSceneData(model, collapsed, layout, overlay),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [model, collapsed, layout, patchSignal],
+    [model, collapsed, layout, patchSignal, overlay],
   )
 
   const focus = focusNodeId ? data.layout.get(focusNodeId) ?? null : null

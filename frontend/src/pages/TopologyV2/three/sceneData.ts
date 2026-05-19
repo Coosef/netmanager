@@ -12,6 +12,12 @@ import type { Vec3 } from './layout3d'
 import {
   classifyNode, statusTint, NODE_CLASS_STYLE, type NodeClass,
 } from './nodeClasses'
+import {
+  resolveNodeOverlay, resolveEdgeOverlay, NODE_TONE_COLOR, EDGE_TONE_COLOR,
+  type OverlayContext,
+} from '../overlays/overlayStyle'
+
+export type { OverlayContext }
 
 export interface InstanceRec {
   id: string
@@ -55,6 +61,7 @@ export function buildSceneData(
   model: TopologyModel,
   collapsed: Set<string>,
   layout: Map<string, Vec3>,
+  overlay?: OverlayContext,
 ): SceneData {
   applyClusterView(model, collapsed)
   const graph = model.graph
@@ -83,11 +90,25 @@ export function buildSceneData(
     const style = NODE_CLASS_STYLE[cls]
     const tint = statusTint(attr.status)
     const importance = attr.importanceScore ?? 0.3
-    nodes[cls].push({
-      id, pos,
-      color: tint.override || style.color,
-      scale: style.size * (0.7 + importance * 0.6) * tint.mul,
-    })
+    let finalClass = cls
+    let color = tint.override || style.color
+    let scale = style.size * (0.7 + importance * 0.6) * tint.mul
+
+    if (overlay) {
+      const res = resolveNodeOverlay(id, overlay.model, overlay.layers, overlay.focus)
+      if (res.tone === 'threat') {
+        finalClass = 'threat'                        // wires the T4 threat class
+        color = NODE_TONE_COLOR.threat
+        scale *= 1.25
+      } else if (res.tone === 'dim') {
+        color = NODE_TONE_COLOR.dim
+        scale *= 0.82
+      } else if (res.tone !== 'normal' && NODE_TONE_COLOR[res.tone]) {
+        color = NODE_TONE_COLOR[res.tone]
+        scale *= 1 + res.emphasis * 0.3
+      }
+    }
+    nodes[finalClass].push({ id, pos, color, scale })
   })
 
   // ── edges → packed vertex buffer ──────────────────────────────────────
@@ -98,8 +119,21 @@ export function buildSceneData(
     const s = layout.get(source)
     const t = layout.get(target)
     if (!s || !t) return
-    const flow = Math.max(0, Math.min(1, attr.utilization ?? 0))
+    let flow = Math.max(0, Math.min(1, attr.utilization ?? 0))
     tmp.set(edgeColor(attr.anomalyState ?? 'none', attr.trafficClass ?? 'unknown'))
+
+    if (overlay && attr.edgeKind === 'link') {
+      const res = resolveEdgeOverlay(edge, overlay.model, overlay.layers, overlay.focus)
+      if (res.tone === 'dim') {
+        tmp.set(EDGE_TONE_COLOR.dim)
+        flow = 0                                     // quiet — no flow on dimmed paths
+      } else if (res.tone !== 'normal' && EDGE_TONE_COLOR[res.tone]) {
+        tmp.set(EDGE_TONE_COLOR[res.tone])
+        if (res.tone === 'focus' || res.tone === 'bottleneck' || res.tone === 'suspicious') {
+          flow = Math.max(flow, 0.6)                 // keep affected paths flowing
+        }
+      }
+    }
     visible.push({ s, t, flow, color: tmp.clone(), seed: hashSeed(edge) })
   })
 

@@ -12,6 +12,7 @@ import { Canvas } from '@react-three/fiber'
 import type { TopologyModel } from '../graphModel'
 import type { SelectedNode } from '../SigmaCanvas'
 import Scene from './Scene'
+import type { OverlayContext } from './sceneData'
 import type { LayoutMode } from './layout3d'
 import type { CameraMode } from './CameraRig'
 
@@ -22,12 +23,13 @@ interface Topology3DProps {
   /** Tactical Orbit vs Harmonic Cluster layout. */
   mode: LayoutMode
   cameraMode: CameraMode
+  overlay?: OverlayContext
   onSelectNode: (node: SelectedNode | null) => void
   onExpandCluster: (clusterId: string) => void
 }
 
 export default function Topology3D({
-  model, collapsed, patchSignal, mode, cameraMode, onSelectNode, onExpandCluster,
+  model, collapsed, patchSignal, mode, cameraMode, overlay, onSelectNode, onExpandCluster,
 }: Topology3DProps) {
   const [focusNodeId, setFocusNodeId] = useState<string | null>(null)
 
@@ -56,6 +58,7 @@ export default function Topology3D({
         mode={mode}
         cameraMode={cameraMode}
         focusNodeId={focusNodeId}
+        overlay={overlay}
         onSelect={handleSelect}
       />
     </Canvas>

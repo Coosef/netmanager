@@ -31,6 +31,9 @@ import Topology3D from './three/Topology3D'
 import type { LayoutMode } from './three/layout3d'
 import type { CameraMode } from './three/CameraRig'
 import type { ZoomTier } from './rendering'
+import { deriveOverlayModel, OVERLAY_LAYERS, type OverlayLayer } from './overlays/overlayModel'
+import { computeFocusSet } from './overlays/focus'
+import type { OverlayContext } from './overlays/overlayStyle'
 
 const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
 const BORDER = '1px solid rgba(148, 163, 184, 0.18)'
@@ -45,6 +48,20 @@ const TRAFFIC_LEGEND: [string, string][] = [
   ['Idle', '#334155'], ['Normal', '#22c55e'], ['High', '#f59e0b'], ['Saturated', '#ef4444'],
 ]
 
+const LAYER_META: Record<OverlayLayer, { label: string; color: string }> = {
+  anomalyHeat: { label: 'Anomali Isısı', color: '#f59e0b' },
+  threats: { label: 'Tehdit', color: '#ef4444' },
+  staleLinks: { label: 'Bayat Link', color: '#f59e0b' },
+  asymmetric: { label: 'Asimetrik', color: '#f97316' },
+  ghosts: { label: 'Ghost', color: '#52617a' },
+  bottlenecks: { label: 'Darboğaz', color: '#ef4444' },
+  suspicious: { label: 'Şüpheli Yol', color: '#dc2626' },
+}
+
+const HINT_DOT: Record<string, string> = {
+  info: '#38bdf8', warning: '#f59e0b', critical: '#ef4444',
+}
+
 interface Engine { model: TopologyModel; locationId: number | null }
 
 export default function TopologyV2Page() {
@@ -53,7 +70,10 @@ export default function TopologyV2Page() {
 
   const [engine, setEngine] = useState<Engine | null>(null)
   const [patchSignal, setPatchSignal] = useState(0)
-  const [drift, setDrift] = useState(false)
+  const [drift, setDrift] = useState<TopologyEvent | null>(null)
+  const [overlayLayers, setOverlayLayers] = useState<Set<OverlayLayer>>(
+    () => new Set(OVERLAY_LAYERS),
+  )
   const expectedVersion = useRef(0)
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
@@ -78,7 +98,7 @@ export default function TopologyV2Page() {
       if (strategy === 'rebuild') {
         // first load, or the active location changed — clean reset
         expectedVersion.current = data.graph_version
-        setDrift(false)
+        setDrift(null)
         setPatchSignal(0)
         return { model: buildTopologyModel(data), locationId: activeLocationId }
       }
@@ -105,7 +125,7 @@ export default function TopologyV2Page() {
       const outcome = applyTopologyEvent(prev.model, event, expectedVersion.current)
       expectedVersion.current = outcome.version
       if (outcome.status === 'applied') setPatchSignal((v) => v + 1)
-      else if (outcome.status === 'drift') setDrift(true)
+      else if (outcome.status === 'drift') setDrift(event)
       else if (outcome.status === 'refetch') scheduleRefetch()
       // 'stale' → ignored
       return prev
@@ -133,6 +153,32 @@ export default function TopologyV2Page() {
   const handleTier = (t: ClusterTier) => { setAutoMode(false); setTier(t) }
   const goFullscreen = () => rootRef.current?.requestFullscreen?.()
 
+  // ── T5 overlays — a pure projection of the RLS-scoped model ──────────────
+  const overlayModel = useMemo(
+    () => (engine ? deriveOverlayModel(engine.model) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [engine, patchSignal],
+  )
+  const focusSet = useMemo(
+    () => (engine && selected && selected.kind !== 'cluster'
+      ? computeFocusSet(engine.model, selected.id)
+      : null),
+    [engine, selected],
+  )
+  const overlay = useMemo<OverlayContext | undefined>(
+    () => (overlayModel
+      ? { model: overlayModel, layers: overlayLayers, focus: focusSet }
+      : undefined),
+    [overlayModel, overlayLayers, focusSet],
+  )
+  const toggleLayer = (layer: OverlayLayer) =>
+    setOverlayLayers((prev) => {
+      const next = new Set(prev)
+      if (next.has(layer)) next.delete(layer)
+      else next.add(layer)
+      return next
+    })
+
   const rtBadge = useMemo(() => {
     const map = { open: 'success', connecting: 'processing', closed: 'default' } as const
     return map[rtStatus]
@@ -152,6 +198,7 @@ export default function TopologyV2Page() {
           model={engine.model}
           collapsed={collapsed}
           patchSignal={patchSignal}
+          overlay={overlay}
           onExpandCluster={handleExpandCluster}
           onSelectNode={setSelected}
           onZoomTier={handleZoomTier}
@@ -165,6 +212,7 @@ export default function TopologyV2Page() {
           patchSignal={patchSignal}
           mode={layoutMode}
           cameraMode={cameraMode}
+          overlay={overlay}
           onSelectNode={setSelected}
           onExpandCluster={handleExpandCluster}
         />
@@ -182,14 +230,22 @@ export default function TopologyV2Page() {
         </div>
       )}
 
-      {/* drift banner */}
+      {/* drift detail banner */}
       {drift && (
-        <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)' }}>
+        <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)', maxWidth: 540 }}>
           <Alert
             type="warning" showIcon icon={<WarningOutlined />}
-            message="Topoloji drift tespit edildi — altın referanstan sapma"
-            action={<Button size="small" onClick={() => { setDrift(false); void refetch() }}>Yenile</Button>}
-            closable onClose={() => setDrift(false)}
+            message="Topoloji Drift — altın referanstan sapma"
+            description={
+              <div style={{ fontSize: 12 }}>
+                <div>{String(drift.message ?? 'Topoloji yapısı altın referanstan farklılaştı')}</div>
+                <div style={{ color: '#94a3b8', marginTop: 4 }}>
+                  graph v{drift.graph_version} · {String(drift.ts ?? '').slice(11, 19)}
+                </div>
+              </div>
+            }
+            action={<Button size="small" onClick={() => { setDrift(null); void refetch() }}>İncele</Button>}
+            closable onClose={() => setDrift(null)}
           />
         </div>
       )}
@@ -278,10 +334,37 @@ export default function TopologyV2Page() {
             <Button size="small" icon={<FullscreenOutlined />} onClick={goFullscreen} />
           </Tooltip>
         </div>
+        <div style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, letterSpacing: 0.4 }}>
+          İSTİHBARAT KATMANLARI
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+          {OVERLAY_LAYERS.map((layer) => {
+            const on = overlayLayers.has(layer)
+            const meta = LAYER_META[layer]
+            return (
+              <span
+                key={layer}
+                onClick={() => toggleLayer(layer)}
+                style={{
+                  cursor: 'pointer', fontSize: 10, padding: '2px 7px', borderRadius: 5,
+                  border: `1px solid ${on ? meta.color : 'rgba(148,163,184,0.25)'}`,
+                  color: on ? '#e2e8f0' : '#64748b',
+                  background: on ? `${meta.color}22` : 'transparent',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                }}
+              >
+                <span style={{ width: 6, height: 6, borderRadius: 6, background: on ? meta.color : '#475569' }} />
+                {meta.label}
+              </span>
+            )
+          })}
+        </div>
+
         {engine && (
           <div style={{ color: '#64748b', fontSize: 11, lineHeight: 1.7 }}>
             <div>{engine.model.deviceCount} cihaz · {engine.model.ghostCount} ghost</div>
             <div>{engine.model.clusters.size} küme · graph v{engine.model.graphVersion}</div>
+            {focusSet && <div style={{ color: '#38bdf8' }}>Olay odağı: {focusSet.nodes.size} cihaz etkilenebilir</div>}
           </div>
         )}
       </div>
@@ -294,6 +377,34 @@ export default function TopologyV2Page() {
         <Legend title="Katman" items={LAYER_LEGEND} />
         <Legend title="Trafik" items={TRAFFIC_LEGEND} />
       </div>
+
+      {/* tactical intelligence — rule-derived hints */}
+      {overlayModel && overlayModel.hints.length > 0 && (
+        <div style={{
+          position: 'absolute', bottom: 16, right: 16, width: 250, padding: 12,
+          background: PANEL_BG, border: BORDER, borderRadius: 10,
+        }}>
+          <div style={{ color: '#94a3b8', fontSize: 11, fontWeight: 600, marginBottom: 8 }}>
+            <ThunderboltOutlined /> TAKTİK İSTİHBARAT
+          </div>
+          {overlayModel.hints.map((h) => (
+            <div
+              key={h.id}
+              onClick={() => h.layer && setOverlayLayers((prev) => new Set(prev).add(h.layer!))}
+              style={{
+                display: 'flex', gap: 7, alignItems: 'flex-start', marginBottom: 6,
+                cursor: h.layer ? 'pointer' : 'default',
+              }}
+            >
+              <span style={{
+                width: 7, height: 7, borderRadius: 7, marginTop: 3,
+                background: HINT_DOT[h.severity], flexShrink: 0,
+              }} />
+              <span style={{ color: '#cbd5e1', fontSize: 11, lineHeight: 1.4 }}>{h.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* selected-node detail */}
       {selected && (

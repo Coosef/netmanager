@@ -18,6 +18,10 @@ import { applyClusterView } from './clustering'
 import { createLayoutWorker, layoutDurationMs, positionClusterNodes } from './layout'
 import { createTrafficAnimator, type TrafficAnimator } from './traffic'
 import { cameraRatioToZoomTier, shouldShowLabel, type ZoomTier } from './rendering'
+import {
+  resolveNodeOverlay, resolveEdgeOverlay, NODE_TONE_COLOR, EDGE_TONE_COLOR,
+  type OverlayContext,
+} from './overlays/overlayStyle'
 
 export interface SelectedNode {
   id: string
@@ -31,19 +35,25 @@ interface SigmaCanvasProps {
   collapsed: Set<string>
   /** Bumped by the page on every in-place patch (poll / realtime event). */
   patchSignal: number
+  /** Operational-intelligence overlay (T5) — applied in the reducers. */
+  overlay?: OverlayContext
   onExpandCluster: (clusterId: string) => void
   onSelectNode: (node: SelectedNode | null) => void
   onZoomTier?: (tier: ZoomTier) => void
 }
 
 export default function SigmaCanvas({
-  model, collapsed, patchSignal, onExpandCluster, onSelectNode, onZoomTier,
+  model, collapsed, patchSignal, overlay, onExpandCluster, onSelectNode, onZoomTier,
 }: SigmaCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
   const trafficRef = useRef<TrafficAnimator | null>(null)
   const zoomTierRef = useRef<ZoomTier>(1)
   const hoveredRef = useRef<string | null>(null)
+  // overlay consulted by the reducers — kept in a ref so a layer toggle
+  // never remounts Sigma.
+  const overlayRef = useRef<OverlayContext | undefined>(overlay)
+  overlayRef.current = overlay
 
   // ── mount: Sigma + layout worker + traffic animator ───────────────────────
   useEffect(() => {
@@ -69,7 +79,38 @@ export default function SigmaCanvas({
           attr.nodeKind === 'cluster' ||
           node === hoveredRef.current ||
           shouldShowLabel(attr.labelPriority ?? 3, attr.minZoomLevel ?? 1, tier)
-        return { ...data, label: show ? data.label : '' }
+        const out: Record<string, unknown> = { ...data, label: show ? data.label : '' }
+        const ov = overlayRef.current
+        if (ov && attr.nodeKind !== 'cluster') {
+          const res = resolveNodeOverlay(node, ov.model, ov.layers, ov.focus)
+          if (res.tone === 'dim') {
+            out.color = NODE_TONE_COLOR.dim
+            out.zIndex = 0
+            out.label = ''
+          } else if (res.tone !== 'normal' && NODE_TONE_COLOR[res.tone]) {
+            out.color = NODE_TONE_COLOR[res.tone]
+            out.size = (data.size ?? 4) * (1 + res.emphasis * 0.45)
+            out.zIndex = res.tone === 'threat' ? 3 : 2
+          }
+        }
+        return out
+      },
+      edgeReducer: (edge, data) => {
+        const ov = overlayRef.current
+        if (!ov) return data
+        const res = resolveEdgeOverlay(edge, ov.model, ov.layers, ov.focus)
+        if (res.tone === 'dim') {
+          return { ...data, color: EDGE_TONE_COLOR.dim, zIndex: 0 }
+        }
+        if (res.tone !== 'normal' && EDGE_TONE_COLOR[res.tone]) {
+          return {
+            ...data,
+            color: EDGE_TONE_COLOR[res.tone],
+            size: (data.size ?? 1) * (1 + res.emphasis * 0.8),
+            zIndex: 2,
+          }
+        }
+        return data
       },
     })
     sigmaRef.current = renderer
@@ -123,6 +164,11 @@ export default function SigmaCanvas({
     positionClusterNodes(model)
     sigmaRef.current.refresh()
   }, [collapsed, model])
+
+  // ── overlay layer toggle / incident focus — repaint via the reducers ──────
+  useEffect(() => {
+    sigmaRef.current?.refresh()
+  }, [overlay])
 
   // ── in-place patch (poll / realtime) — no remount ─────────────────────────
   useEffect(() => {
