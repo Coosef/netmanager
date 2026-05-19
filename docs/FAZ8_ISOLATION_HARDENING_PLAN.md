@@ -1,10 +1,10 @@
 # Faz 8 — Organization / Location Isolation Hardening
 
-> **Status:** Plan for review — **no code changes until this plan is approved.**
+> **Status:** Approved — architecture decision folded in; execution starts at
+> **Phase A**. **Branch:** `feature/faz8-isolation-hardening`.
 > **Driver:** [ISOLATION_AUDIT.md](ISOLATION_AUDIT.md) — the real product behavior
 > does not match the intended `Organization → Location → …` model.
-> **Branch:** a new branch off the current head; topology work (T0–T7) pauses
-> until Faz 8 lands.
+> Topology work (T0–T7) is paused until Faz 8 lands.
 
 ## Context
 
@@ -20,6 +20,54 @@ layer (DB, API, worker, WebSocket, cache, agent, frontend).
 **Completion rule:** no phase — and not Faz 8 — is "done" until isolation is
 verified at **DB, API, worker, WebSocket, cache, agent and frontend** levels.
 "Code written" ≠ "isolation enforced."
+
+---
+
+## Product architecture decision — Organization is a hidden tenant boundary
+
+Organization is a **hidden customer / account / license boundary**, not a daily
+operational object. **Normal users never see or switch organizations.**
+**Location** is the **visible operational boundary** users work in.
+
+### Organization (super-admin domain)
+Carries account / licensing metadata — not operational data:
+- license plan · package / feature flags
+- quotas: max users, max devices, max agents, max locations
+- subscription status
+- usage counters: current users / devices / agents / locations
+- billing / support metadata
+
+### Operational hierarchy
+- **Organization** — hidden customer / account / license boundary
+- **Location** — visible operational boundary
+- **Agent** — bound to exactly one organization + one location
+- **Device** — bound to exactly one organization + one location
+- All telemetry / logs / metrics / topology / alerts / discovery belong under
+  **organization + location**.
+
+### Roles
+- **SUPER_ADMIN** — manages organizations; the only role that sees orgs.
+- **ORG_ADMIN** — manages every location inside its own organization: create
+  locations, add users, assign users to locations, assign per-location roles,
+  register agents, manage devices in any of its locations.
+- **LOCATION_ADMIN** — manages only the locations granted via `user_locations`.
+- **VIEWER** — sees only its assigned locations.
+
+### Authorization model (definitive)
+- `user.organization_id` = the hidden tenant boundary (the RLS org scope).
+- `user_locations` = **the source of truth** for which locations a user may
+  access. Phase E wires it into deps / context / RBAC / frontend.
+- LOCATION_ADMIN and VIEWER location access is enforced through
+  `user_locations`. ORG_ADMIN implicitly covers every location in its org.
+
+### Frontend
+- Normal users see **only a location selector** — no organization selector.
+- SUPER_ADMIN has an **organization management area** showing per-org usage
+  (users / locations / devices / agents counts), license plan, package limits
+  and subscription status.
+
+This decision governs Phases **E** (access model), **F** (frontend) and **H**
+(organization management model); Phases A–D are unchanged by it.
 
 ---
 
@@ -123,34 +171,52 @@ API level and, where applicable, the worker/DB level.
 
 ## Phase E — Location access model
 
-**Objective:** decide and enforce how users are scoped to locations.
+**Objective:** make `user_locations` the enforced source of truth for location
+access (per the product architecture decision above).
 
-1. **Decide:** is `user_locations` the source of truth for location access?
-   - **If yes:** wire it into `deps.py` / `context.py` / the RBAC engine and
-     the frontend — `LOCATION_ADMIN` and location visibility must consult a
-     real `user_locations` grant for the active location.
-   - **If no:** remove `user_locations` (+ `user_location_perms` if redundant)
-     and simplify to org-scope + role.
-2. Document the decision and the resulting access model.
+1. **`user_locations` is the source of truth.** Wire it into `deps.py` /
+   `context.py` / the RBAC engine:
+   - The set of locations a non-super, non-ORG_ADMIN user may access = its
+     `user_locations` rows. The `X-Location-Id` header is validated against
+     that set; an ungranted location is rejected.
+   - **LOCATION_ADMIN** — admin rights only for locations it holds a
+     `user_locations` grant for; reject location-admin actions on other
+     locations.
+   - **VIEWER** — read-only, and only its granted locations.
+   - **ORG_ADMIN** — implicitly every location in its `organization_id`;
+     `user_locations` rows not required.
+   - **SUPER_ADMIN** — unaffected (org-management scope).
+2. `GET /context/locations` returns the user's accessible locations from
+   `user_locations` (ORG_ADMIN → all org locations).
+3. Reconcile `user_location_perms` — keep only if it adds per-location
+   permission-set granularity beyond `loc_role`; otherwise remove it.
+4. Document the final access model.
 
 **Critical files:** `app/core/deps.py`, `app/api/v1/endpoints/context.py`,
-`app/services/rbac/*`, `app/models/user_location.py`, frontend context.
+`app/services/rbac/*`, `app/models/user_location.py`, `endpoints/users.py`
+(location-assignment endpoints), `endpoints/locations.py`.
 
-**Verification gate:** a `location_admin` without a grant for the active
-location is denied (if yes-path); or `user_locations` is fully removed with no
-dangling references (if no-path). Documented.
+**Verification gate:** a LOCATION_ADMIN / VIEWER without a `user_locations`
+grant for the requested location is denied at the API level and sees zero rows
+at the DB level; an ORG_ADMIN reaches every location in its org; a granted user
+reaches exactly its granted locations; `/context/locations` matches.
 
 ---
 
 ## Phase F — Frontend context correction
 
-**Objective:** every page consumes the active organization + location by ID.
+**Objective:** every page consumes the active location by ID; the organization
+stays hidden from normal users.
 
 1. **Location selector** uses `location_id` (integer), not the `site` name
-   string — `SiteContext` + the top-bar component.
-2. **Incidents, Agents, and all Dashboard widgets** consume the active
-   org/location context (React Query keys + request params).
-3. Remove dual `site`-name filtering wherever a `location_id` path exists.
+   string — `SiteContext` + the top-bar component. Its options come from the
+   user's accessible locations (Phase E `/context/locations`).
+2. **No organization selector for normal users.** The organization stays the
+   hidden tenant boundary — only the super-admin org-management area (Phase H)
+   exposes organizations.
+3. **Incidents, Agents, and all Dashboard widgets** consume the active location
+   context (React Query keys + request params).
+4. Remove dual `site`-name filtering wherever a `location_id` path exists.
 
 **Critical files:** `frontend/src/contexts/SiteContext.tsx`,
 `components/Layout/Header.tsx`, `pages/Incidents`, `pages/Agents`,
@@ -159,7 +225,8 @@ classic `pages/Topology`, and their `api/*` modules.
 
 **Verification gate:** switching location refetches and narrows every listed
 page; no page filters by `site` name string where `location_id` is available;
-no page shows org-wide data while a location is selected.
+no page shows org-wide data while a location is selected; no organization
+selector is reachable by a non-super-admin.
 
 ---
 
@@ -182,13 +249,42 @@ re-stamps/archives all child rows and no stale-location rows remain; audited.
 
 ---
 
+## Phase H — Organization management model
+
+**Objective:** make Organization the hidden tenant / account / license boundary
+with a super-admin-only management surface (per the architecture decision).
+
+1. **Schema** — extend `organizations` with account/licensing fields: license
+   plan / package / feature flags, quotas (`max_users`, `max_devices`,
+   `max_agents`, `max_locations`), `subscription_status`, billing / support
+   metadata. (Some may already exist — `plan_id`, `trial_ends_at`,
+   `subscription_ends_at`; reconcile, don't duplicate.) Migration + model.
+2. **Usage counters** — a super-admin endpoint returning per-org usage:
+   current users / locations / devices / agents counts vs. the plan limits.
+3. **Quota enforcement** — creation of a user / location / device / agent
+   checks the org's limit and rejects past quota (clear error).
+4. **Super-admin organization-management area** — frontend: list orgs, view
+   usage + license + subscription; create / edit orgs. Not reachable by
+   non-super-admins.
+5. Normal users have **no organization UI** anywhere.
+
+**Critical files:** `app/models/shared/organization.py` + migration,
+`app/api/v1/endpoints/super_admin.py` / a new `organizations` endpoint,
+creation endpoints (quota checks), `frontend/src/pages/SuperAdmin/*`.
+
+**Verification gate:** super-admin sees per-org usage vs. limits; a creation
+past quota is rejected; no organization endpoint or UI is reachable by a
+non-super-admin; org remains absent from every normal-user surface.
+
+---
+
 ## Sequencing & gates
 
-A → B → C → D → E → F → G. Phase A first (it stops live leaks). Each phase is a
-**clean committed gate** — tests green, RLS reality check clean, no regressions
-— before the next begins. After all phases: a full cross-layer verification
-(DB, API, worker, WebSocket, cache, agent, frontend) re-run before Faz 8 is
-declared complete.
+A → B → C → D → E → F → G → H. Phase A first (it stops live leaks); H last (it
+is a management surface, not a leak). Each phase is a **clean committed gate** —
+tests green, RLS reality check clean, no regressions — before the next begins.
+After all phases: a full cross-layer verification (DB, API, worker, WebSocket,
+cache, agent, frontend) re-run before Faz 8 is declared complete.
 
 ## Out of scope / parallel
 
