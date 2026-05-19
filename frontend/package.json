@@ -5,12 +5,16 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.1",
     "@dagrejs/dagre": "^1.1.4",
     "@tanstack/react-query": "^5.62.0",
+    "graphology": "^0.26.0",
+    "graphology-layout-forceatlas2": "^0.10.1",
+    "sigma": "^3.0.3",
     "@types/leaflet": "^1.9.21",
     "@types/three": "^0.184.0",
     "@xterm/addon-fit": "^0.11.0",
@@ -40,9 +44,11 @@
     "@types/react": "^18.3.13",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^29.1.1",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",
-    "vite-plugin-pwa": "^0.21.2"
+    "vite-plugin-pwa": "^0.21.2",
+    "vitest": "^4.1.6"
   },
   "overrides": {
     "cross-spawn": "7.0.6",

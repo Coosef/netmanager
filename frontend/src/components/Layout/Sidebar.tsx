@@ -19,6 +19,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { featureFlags } from '@/config/featureFlags'
 import type { UserRole } from '@/types'
 
 const { Sider } = Layout
@@ -155,6 +156,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       items: [
         { key: '/', icon: <DashboardOutlined />, label: t('nav.dashboard') },
         { key: '/topology', icon: <ApartmentOutlined />, label: t('nav.topology') },
+        ...(featureFlags.topologyV2
+          ? [{ key: '/topology-next', icon: <ThunderboltOutlined />, label: 'Topology · Gold' }]
+          : []),
         { key: '/devices', icon: <LaptopOutlined />, label: t('nav.devices') },
       ],
     },
