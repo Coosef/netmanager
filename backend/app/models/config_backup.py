@@ -31,7 +31,7 @@ class ConfigBackup(Base):
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     location_id: Mapped[int] = mapped_column(
-        ForeignKey("locations.id", ondelete="SET NULL"), nullable=False, index=True
+        ForeignKey("locations.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True

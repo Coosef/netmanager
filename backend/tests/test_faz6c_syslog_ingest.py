@@ -50,12 +50,20 @@ class TestParseDt:
 # 2. persist_and_correlate
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _mock_db(device_id=None):
-    """AsyncSession mock: add_all sync, commit async, execute → scalar_one_or_none."""
+def _mock_db(device_id=None, agent_scope=(("a", 1, 7),)):
+    """AsyncSession mock: add_all sync, commit async, execute → result.
+
+    Faz 8 phase C — persist_and_correlate first resolves each agent to
+    (organization_id, location_id) via a `.all()` query, then resolves the
+    syslog source_ip to a device via `.scalar_one_or_none()`. The single
+    result mock answers both: `.all()` yields the agent-scope rows
+    (agent_id, org_id, loc_id), `.scalar_one_or_none()` yields the device.
+    """
     db = MagicMock()
     db.add_all = MagicMock()
     db.commit = AsyncMock()
     result = MagicMock()
+    result.all.return_value = list(agent_scope)
     result.scalar_one_or_none.return_value = device_id
     db.execute = AsyncMock(return_value=result)
     return db

@@ -24,3 +24,9 @@ class DiscoveryResult(Base):
     organization_id = Column(
         Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    # Faz 8 phase C — location scope, resolved from the originating
+    # agent's location. Nullable only as a historical review bucket;
+    # the discovery writer stamps it explicitly.
+    location_id = Column(
+        Integer, ForeignKey("locations.id", ondelete="RESTRICT"), nullable=True, index=True
+    )

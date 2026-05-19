@@ -841,7 +841,7 @@ async def trigger_discovery(
     if not current_user.has_permission("device:read"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    await _get_agent_scoped(agent_id, db, tenant_filter)
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
 
@@ -851,10 +851,13 @@ async def trigger_discovery(
 
     result_data = await agent_manager.trigger_discovery(agent_id, subnet, body.get("ports"))
 
-    # Persist result
+    # Persist result — Faz 8 phase C: org + location stamped explicitly
+    # from the agent (an agent is bound to exactly one org + location).
     from app.models.discovery_result import DiscoveryResult
     dr = DiscoveryResult(
         agent_id=agent_id,
+        organization_id=agent.organization_id,
+        location_id=agent.location_id,
         subnet=subnet,
         completed_at=datetime.now(timezone.utc),
         status="completed" if result_data.get("success") else "failed",

@@ -27,5 +27,5 @@ class AgentDeviceLatency(Base):
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     location_id: Mapped[int] = mapped_column(
-        ForeignKey("locations.id", ondelete="SET NULL"), nullable=False, index=True
+        ForeignKey("locations.id", ondelete="RESTRICT"), nullable=False, index=True
     )

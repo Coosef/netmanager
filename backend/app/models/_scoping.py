@@ -126,17 +126,27 @@ def _stamp_scoping(_mapper, connection, target) -> None:
                 target.location_id = row[1]
                 needs_loc = False
 
-    # 2. Inherit organization_id from another known parent row.
+    # 2. Inherit organization_id from another known parent row. An agent
+    #    parent also carries a location, so an agent-bound row (e.g.
+    #    discovery_results, syslog_events) inherits location_id too.
     if needs_org:
         for col, parent in _PARENT_ORG_FK:
             val = getattr(target, col, None)
             if val is None:
                 continue
-            row = _lookup(connection, parent, val, "organization_id")
-            if row is not None and row[0] is not None:
-                target.organization_id = row[0]
-                needs_org = False
-                break
+            is_agent = parent == "agents"
+            row = _lookup(
+                connection, parent, val,
+                "organization_id, location_id" if is_agent else "organization_id",
+            )
+            if row is None or row[0] is None:
+                continue
+            target.organization_id = row[0]
+            needs_org = False
+            if is_agent and needs_loc and len(row) > 1 and row[1] is not None:
+                target.location_id = row[1]
+                needs_loc = False
+            break
 
     # 3. Fall back to the request/task context. ContextVars do not always
     #    cross into SQLAlchemy's async flush greenlet, so when they read

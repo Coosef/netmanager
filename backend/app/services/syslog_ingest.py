@@ -54,20 +54,48 @@ async def persist_and_correlate(db, payloads: list[dict], sync_redis) -> int:
     if not payloads:
         return 0
 
+    from sqlalchemy import select
+
     from app.models.syslog_event import SyslogEvent
+    from app.models.agent import Agent
     from app.services.syslog_normalizer import AVAILABILITY_EVENT_TYPES, normalize
 
-    rows = [
-        SyslogEvent(
+    # Faz 8 phase C — resolve organization + location from the originating
+    # agent. A payload whose agent is unknown cannot be scoped (org is
+    # NOT NULL) → it is dropped and logged, never silently misattributed.
+    agent_ids = {p.get("agent_id") for p in payloads if p.get("agent_id")}
+    scope: dict = {}
+    if agent_ids:
+        for aid, oid, lid in (await db.execute(
+            select(Agent.id, Agent.organization_id, Agent.location_id)
+            .where(Agent.id.in_(agent_ids))
+        )).all():
+            scope[aid] = (oid, lid)
+
+    rows = []
+    dropped = 0
+    for p in payloads:
+        sc = scope.get(p.get("agent_id"))
+        if sc is None:
+            dropped += 1
+            continue
+        rows.append(SyslogEvent(
             agent_id=p.get("agent_id"),
             source_ip=p.get("source_ip", ""),
             facility=p.get("facility", 0),
             severity=p.get("severity", 7),
             message=p.get("message", ""),
             received_at=_parse_dt(p.get("received_at")),
+            organization_id=sc[0],
+            location_id=sc[1],
+        ))
+    if dropped:
+        log.warning(
+            "syslog_ingest: dropped %d event(s) — unknown/unscopable agent", dropped,
+            extra={"dropped": dropped, "reason": "agent not resolvable to org/location"},
         )
-        for p in payloads
-    ]
+    if not rows:
+        return 0
     db.add_all(rows)
     await db.commit()
 
