@@ -5,12 +5,21 @@
  *   - `device` / `ghost` — leaf nodes (one per contract node)
  *   - `cluster`          — location / layer / rack hierarchy nodes
  * plus the contract's device↔device / device↔ghost edges. Cluster
- * meta-edges are derived at view time (see clustering.ts), not stored
- * here. This module is pure data — no Sigma, no DOM — so it is unit
- * testable.
+ * meta-edges are derived at view time (see clustering.ts).
+ *
+ * The attribute builders (`deviceNodeAttrs`, `clusterNodeAttrs`,
+ * `edgeAttrs`) and `buildClusterIndex` are shared with the realtime
+ * patch engine (patch.ts) so a freshly fetched contract and an
+ * incremental event produce identical graph state. Pure data — no
+ * Sigma, no DOM — unit testable.
  */
 import Graph from 'graphology'
-import type { TopologyGraphV2, TopologyCluster } from './contract'
+import type {
+  TopologyGraphV2, TopologyCluster, TopologyNode, TopologyEdge,
+} from './contract'
+import {
+  nodeColor, nodeSize, clusterColor, clusterSize, edgeColor, edgeSize,
+} from './rendering'
 
 export type NodeKind = 'device' | 'ghost' | 'cluster'
 
@@ -39,7 +48,7 @@ const CLUSTER_DEPTH: Record<TopologyCluster['cluster_type'], number> = {
 }
 
 /** Deterministic scatter — gives FA2 a stable, non-degenerate seed. */
-function seedPosition(key: string): { x: number; y: number } {
+export function seedPosition(key: string): { x: number; y: number } {
   let h = 0
   for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0
   const a = (h % 1000) / 1000
@@ -64,10 +73,14 @@ export function clusterPath(
   return path
 }
 
-export function buildTopologyModel(contract: TopologyGraphV2): TopologyModel {
-  const graph = new Graph({ multi: true, type: 'undirected' })
-
-  // ── 1. cluster registry ─────────────────────────────────────────────────
+/**
+ * Build the cluster registry (hierarchy + recursive device membership)
+ * from a contract. Shared by `buildTopologyModel` and the patch engine.
+ */
+export function buildClusterIndex(contract: TopologyGraphV2): {
+  clusters: Map<string, ClusterInfo>
+  rootClusterIds: string[]
+} {
   const clusters = new Map<string, ClusterInfo>()
   for (const c of contract.clusters) {
     clusters.set(c.cluster_id, {
@@ -84,89 +97,124 @@ export function buildTopologyModel(contract: TopologyGraphV2): TopologyModel {
       clusters.get(c.parentId)!.childClusterIds.push(c.id)
     }
   }
+  for (const n of contract.nodes) {
+    for (const cid of clusterPath(n.data.cluster_id ?? null, clusters)) {
+      clusters.get(cid)?.memberDeviceKeys.push(n.id)
+    }
+  }
   const rootClusterIds = [...clusters.values()]
     .filter((c) => !c.parentId || !clusters.has(c.parentId))
     .map((c) => c.id)
+  return { clusters, rootClusterIds }
+}
 
-  // ── 2. cluster nodes ────────────────────────────────────────────────────
+/** graphology attributes for a device/ghost node. */
+export function deviceNodeAttrs(
+  n: TopologyNode,
+  clusters: Map<string, ClusterInfo>,
+): Record<string, unknown> {
+  const d = n.data
+  return {
+    nodeKind: n.kind as NodeKind,
+    label: d.label,
+    clusterId: d.cluster_id ?? null,
+    clusterPath: clusterPath(d.cluster_id ?? null, clusters),
+    status: d.status ?? 'unknown',
+    layer: d.layer ?? 'unknown',
+    criticality: d.criticality,
+    importanceScore: d.importance_score ?? 0.3,
+    labelPriority: d.label_priority ?? 3,
+    minZoomLevel: d.min_zoom_level ?? 1,
+    lodTier: d.lod_tier ?? 'detail',
+    renderClass: d.render_class ?? 'unknown',
+    hidden: false,
+    raw: n,
+  }
+}
+
+/** graphology attributes for a cluster node. */
+export function clusterNodeAttrs(c: TopologyCluster): Record<string, unknown> {
+  return {
+    nodeKind: 'cluster' as NodeKind,
+    clusterType: c.cluster_type,
+    parentClusterId: c.parent_cluster_id,
+    depth: CLUSTER_DEPTH[c.cluster_type] ?? 0,
+    label: c.label,
+    collapsedCount: c.collapsed_count,
+    health: c.health,
+    traffic: c.traffic,
+    hidden: true,
+  }
+}
+
+/** graphology attributes for a contract edge. */
+export function edgeAttrs(e: TopologyEdge): Record<string, unknown> {
+  return {
+    edgeKind: 'link',
+    linkType: e.link_type,
+    utilization: e.utilization,
+    trafficClass: e.traffic_class,
+    anomalyState: e.anomaly_state,
+    latencyMs: e.latency_ms,
+    hidden: false,
+    raw: e,
+  }
+}
+
+export function buildTopologyModel(contract: TopologyGraphV2): TopologyModel {
+  const graph = new Graph({ multi: true, type: 'undirected' })
+  const { clusters, rootClusterIds } = buildClusterIndex(contract)
+
   for (const c of contract.clusters) {
     const pos = seedPosition(c.cluster_id)
-    graph.addNode(c.cluster_id, {
-      x: pos.x,
-      y: pos.y,
-      nodeKind: 'cluster' as NodeKind,
-      clusterType: c.cluster_type,
-      parentClusterId: c.parent_cluster_id,
-      depth: CLUSTER_DEPTH[c.cluster_type] ?? 0,
-      label: c.label,
-      collapsedCount: c.collapsed_count,
-      health: c.health,
-      traffic: c.traffic,
-      size: 8,
-      color: '#64748b',
-      hidden: true, // clustering.ts decides visibility
-    })
+    graph.addNode(c.cluster_id, { x: pos.x, y: pos.y, ...clusterNodeAttrs(c) })
   }
 
-  // ── 3. device / ghost nodes ─────────────────────────────────────────────
   let deviceCount = 0
   let ghostCount = 0
   for (const n of contract.nodes) {
-    const pos = seedPosition(n.id)
-    const d = n.data
-    const path = clusterPath(d.cluster_id ?? null, clusters)
-    // register membership on every ancestor cluster
-    for (const cid of path) clusters.get(cid)?.memberDeviceKeys.push(n.id)
-
     if (n.kind === 'device') deviceCount++
     else ghostCount++
-
-    graph.addNode(n.id, {
-      x: pos.x,
-      y: pos.y,
-      nodeKind: n.kind as NodeKind,
-      label: d.label,
-      clusterId: d.cluster_id ?? null,
-      clusterPath: path,
-      status: d.status ?? 'unknown',
-      layer: d.layer ?? 'unknown',
-      criticality: d.criticality,
-      importanceScore: d.importance_score ?? 0.3,
-      labelPriority: d.label_priority ?? 3,
-      minZoomLevel: d.min_zoom_level ?? 1,
-      lodTier: d.lod_tier ?? 'detail',
-      renderClass: d.render_class ?? 'unknown',
-      size: 4,
-      color: '#94a3b8',
-      hidden: false,
-      raw: n,
-    })
+    const pos = seedPosition(n.id)
+    graph.addNode(n.id, { x: pos.x, y: pos.y, ...deviceNodeAttrs(n, clusters) })
   }
 
-  // ── 4. contract edges (device↔device / device↔ghost) ────────────────────
   for (const e of contract.edges) {
     if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) continue
     if (graph.hasEdge(e.id)) continue
-    graph.addEdgeWithKey(e.id, e.source, e.target, {
-      edgeKind: 'link',
-      linkType: e.link_type,
-      utilization: e.utilization,
-      trafficClass: e.traffic_class,
-      anomalyState: e.anomaly_state,
-      latencyMs: e.latency_ms,
-      size: 1,
-      color: '#475569',
-      hidden: false,
-      raw: e,
-    })
+    graph.addEdgeWithKey(e.id, e.source, e.target, edgeAttrs(e))
   }
 
   return {
-    graph,
-    clusters,
-    rootClusterIds,
-    deviceCount,
-    ghostCount,
+    graph, clusters, rootClusterIds, deviceCount, ghostCount,
     graphVersion: contract.graph_version,
   }
+}
+
+/** Apply static Sigma display attributes (colour / size / label) to every
+ *  node + edge. Cheap, idempotent — re-run after a patch. */
+export function styleGraph(model: TopologyModel): void {
+  const { graph } = model
+  graph.forEachNode((key, attr) => {
+    if (attr.nodeKind === 'cluster') {
+      graph.mergeNodeAttributes(key, {
+        color: clusterColor(attr.clusterType),
+        size: clusterSize(attr.collapsedCount || 1),
+        label: `${attr.label} · ${attr.collapsedCount}`,
+      })
+    } else {
+      graph.mergeNodeAttributes(key, {
+        color: nodeColor({ kind: attr.nodeKind, status: attr.status, layer: attr.layer }),
+        size: nodeSize(attr.importanceScore || 0.3),
+        label: attr.label,
+      })
+    }
+  })
+  graph.forEachEdge((key, attr) => {
+    if (attr.edgeKind === 'meta') return
+    graph.mergeEdgeAttributes(key, {
+      color: edgeColor(attr.anomalyState, attr.trafficClass),
+      size: edgeSize(attr.utilization ?? null),
+    })
+  })
 }

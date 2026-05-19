@@ -3,34 +3,37 @@
  *
  * Parallel route `/topology-next`, feature-flagged; the classic
  * `/topology` page is untouched. Topology-first: a full-bleed WebGL
- * canvas with floating NOC-style control overlays — not a dashboard.
+ * canvas with floating NOC-style control overlays.
+ *
+ * T3 — realtime: the graph model is built once per location and then
+ * patched IN PLACE (poll diff + `topology_*` events); Sigma never
+ * remounts except on a location change. graph_version reconciliation
+ * drops stale events and triggers a controlled refetch on a gap.
  *
  * Data: v2 contract only (`GET /topology/graph?v=2`), org/location scoped
  * server-side by RLS.
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Button, Segmented, Spin, Tag, Tooltip } from 'antd'
+import { Alert, Button, Segmented, Spin, Tag, Tooltip, Badge } from 'antd'
 import {
   ReloadOutlined, FullscreenOutlined, AppstoreOutlined,
-  ThunderboltOutlined, CloseOutlined,
+  ThunderboltOutlined, CloseOutlined, WarningOutlined,
 } from '@ant-design/icons'
-import { useQueryClient } from '@tanstack/react-query'
+import { useSite } from '@/contexts/SiteContext'
 import { useTopologyGraphV2 } from './api'
-import { buildTopologyModel } from './graphModel'
+import { buildTopologyModel, type TopologyModel } from './graphModel'
+import { diffAndPatch, applyTopologyEvent, ingestStrategy, type TopologyEvent } from './patch'
+import { useTopologyRealtime } from './realtime'
 import { collapsedSetForTier, expandCluster, type ClusterTier } from './clustering'
 import SigmaCanvas, { type SelectedNode } from './SigmaCanvas'
 import type { ZoomTier } from './rendering'
 
 const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
 const BORDER = '1px solid rgba(148, 163, 184, 0.18)'
+const REFETCH_DEBOUNCE_MS = 800
 
-const TIER_BY_ZOOM: Record<ZoomTier, ClusterTier> = {
-  0: 'location',
-  1: 'layer',
-  2: 'device',
-}
-
+const TIER_BY_ZOOM: Record<ZoomTier, ClusterTier> = { 0: 'location', 1: 'layer', 2: 'device' }
 const LAYER_LEGEND: [string, string][] = [
   ['Core', '#3b82f6'], ['Distribution', '#06b6d4'], ['Access', '#22c55e'],
   ['Edge', '#a855f7'], ['Wireless', '#ec4899'],
@@ -39,47 +42,95 @@ const TRAFFIC_LEGEND: [string, string][] = [
   ['Idle', '#334155'], ['Normal', '#22c55e'], ['High', '#f59e0b'], ['Saturated', '#ef4444'],
 ]
 
-export default function TopologyV2Page() {
-  const { data, isLoading, isError, error, isFetching } = useTopologyGraphV2()
-  const queryClient = useQueryClient()
-  const rootRef = useRef<HTMLDivElement>(null)
+interface Engine { model: TopologyModel; locationId: number | null }
 
-  // Rebuild the graph model only when the graph actually changed (a no-op
-  // 60s poll keeps the same model ⇒ no canvas remount). T3 swaps the poll
-  // for realtime incremental patching.
-  const model = useMemo(
-    () => (data ? buildTopologyModel(data) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [data?.graph_version, data?.stats?.total_nodes, data?.stats?.total_edges],
-  )
+export default function TopologyV2Page() {
+  const { activeLocationId } = useSite()
+  const { data, isLoading, isError, error, refetch } = useTopologyGraphV2()
+
+  const [engine, setEngine] = useState<Engine | null>(null)
+  const [patchSignal, setPatchSignal] = useState(0)
+  const [drift, setDrift] = useState(false)
+  const expectedVersion = useRef(0)
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const rootRef = useRef<HTMLDivElement>(null)
 
   const [tier, setTier] = useState<ClusterTier>('layer')
   const [autoMode, setAutoMode] = useState(true)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [selected, setSelected] = useState<SelectedNode | null>(null)
 
-  // Reset the cluster view whenever the model or tier changes.
+  // ── ingest contract data — build once per location, else patch in place ──
   useEffect(() => {
-    if (model) setCollapsed(collapsedSetForTier(model, tier))
-  }, [model, tier])
+    if (!data) return
+    setEngine((prev) => {
+      const strategy = ingestStrategy(
+        prev ? { locationId: prev.locationId, graphVersion: prev.model.graphVersion } : null,
+        data, activeLocationId,
+      )
+      if (strategy === 'skip') return prev
+      if (strategy === 'rebuild') {
+        // first load, or the active location changed — clean reset
+        expectedVersion.current = data.graph_version
+        setDrift(false)
+        setPatchSignal(0)
+        return { model: buildTopologyModel(data), locationId: activeLocationId }
+      }
+      // 'patch' — same location, newer version: diff in place, no remount
+      diffAndPatch(prev!.model, data)
+      expectedVersion.current = data.graph_version
+      setPatchSignal((v) => v + 1)
+      return prev
+    })
+  }, [data, activeLocationId])
+
+  // ── controlled, debounced refetch (gap / bulk event / reconnect) ─────────
+  const scheduleRefetch = useCallback(() => {
+    if (refetchTimer.current) clearTimeout(refetchTimer.current)
+    refetchTimer.current = setTimeout(() => { void refetch() }, REFETCH_DEBOUNCE_MS)
+  }, [refetch])
+
+  useEffect(() => () => { if (refetchTimer.current) clearTimeout(refetchTimer.current) }, [])
+
+  // ── realtime topology events ─────────────────────────────────────────────
+  const handleEvent = useCallback((event: TopologyEvent) => {
+    setEngine((prev) => {
+      if (!prev) return prev
+      const outcome = applyTopologyEvent(prev.model, event, expectedVersion.current)
+      expectedVersion.current = outcome.version
+      if (outcome.status === 'applied') setPatchSignal((v) => v + 1)
+      else if (outcome.status === 'drift') setDrift(true)
+      else if (outcome.status === 'refetch') scheduleRefetch()
+      // 'stale' → ignored
+      return prev
+    })
+  }, [scheduleRefetch])
+
+  const { status: rtStatus } = useTopologyRealtime({
+    enabled: !!engine,
+    locationId: activeLocationId,
+    onEvent: handleEvent,
+    onReconnect: scheduleRefetch, // missed events ⇒ resync by graph_version
+  })
+
+  // ── cluster view ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (engine) setCollapsed(collapsedSetForTier(engine.model, tier))
+  }, [engine, tier])
 
   const handleExpandCluster = (clusterId: string) => {
-    if (!model) return
+    if (!engine) return
     setAutoMode(false)
-    setCollapsed((prev) => expandCluster(model, prev, clusterId))
+    setCollapsed((prev) => expandCluster(engine.model, prev, clusterId))
   }
-
-  const handleZoomTier = (zt: ZoomTier) => {
-    if (autoMode) setTier(TIER_BY_ZOOM[zt])
-  }
-
-  const handleTier = (t: ClusterTier) => {
-    setAutoMode(false)
-    setTier(t)
-  }
-
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ['topology-graph-v2'] })
+  const handleZoomTier = (zt: ZoomTier) => { if (autoMode) setTier(TIER_BY_ZOOM[zt]) }
+  const handleTier = (t: ClusterTier) => { setAutoMode(false); setTier(t) }
   const goFullscreen = () => rootRef.current?.requestFullscreen?.()
+
+  const rtBadge = useMemo(() => {
+    const map = { open: 'success', connecting: 'processing', closed: 'default' } as const
+    return map[rtStatus]
+  }, [rtStatus])
 
   return (
     <div
@@ -89,19 +140,18 @@ export default function TopologyV2Page() {
         background: 'radial-gradient(ellipse at 50% 35%, #0b1424 0%, #060b16 70%, #03070f 100%)',
       }}
     >
-      {/* ── WebGL canvas ─────────────────────────────────────────────── */}
-      {model && (
+      {engine && (
         <SigmaCanvas
-          key={model.graphVersion + ':' + model.deviceCount}
-          model={model}
+          key={`loc:${engine.locationId}`}
+          model={engine.model}
           collapsed={collapsed}
+          patchSignal={patchSignal}
           onExpandCluster={handleExpandCluster}
           onSelectNode={setSelected}
           onZoomTier={handleZoomTier}
         />
       )}
 
-      {/* ── loading / error ──────────────────────────────────────────── */}
       {isLoading && (
         <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
           <Spin size="large" tip="Topoloji yükleniyor…" />
@@ -109,15 +159,24 @@ export default function TopologyV2Page() {
       )}
       {isError && (
         <div style={{ position: 'absolute', top: 80, left: '50%', transform: 'translateX(-50%)' }}>
+          <Alert type="error" showIcon message="Topoloji yüklenemedi"
+            description={(error as Error)?.message} />
+        </div>
+      )}
+
+      {/* drift banner */}
+      {drift && (
+        <div style={{ position: 'absolute', top: 16, left: '50%', transform: 'translateX(-50%)' }}>
           <Alert
-            type="error" showIcon
-            message="Topoloji yüklenemedi"
-            description={(error as Error)?.message}
+            type="warning" showIcon icon={<WarningOutlined />}
+            message="Topoloji drift tespit edildi — altın referanstan sapma"
+            action={<Button size="small" onClick={() => { setDrift(false); void refetch() }}>Yenile</Button>}
+            closable onClose={() => setDrift(false)}
           />
         </div>
       )}
 
-      {/* ── title / classic-view link ────────────────────────────────── */}
+      {/* title / classic-view link */}
       <div style={{
         position: 'absolute', top: 16, left: 16, padding: '8px 14px',
         background: PANEL_BG, border: BORDER, borderRadius: 10,
@@ -129,7 +188,8 @@ export default function TopologyV2Page() {
             Topology · Gold Engine
           </div>
           <div style={{ color: '#64748b', fontSize: 11 }}>
-            Sigma WebGL · v2 contract{isFetching ? ' · senkronize ediliyor…' : ''}
+            <Badge status={rtBadge} />
+            Sigma WebGL · v2 · realtime {rtStatus === 'open' ? 'bağlı' : rtStatus}
           </div>
         </div>
         <Link to="/topology" style={{ fontSize: 11, color: '#94a3b8', marginLeft: 8 }}>
@@ -137,7 +197,7 @@ export default function TopologyV2Page() {
         </Link>
       </div>
 
-      {/* ── control panel ────────────────────────────────────────────── */}
+      {/* control panel */}
       <div style={{
         position: 'absolute', top: 16, right: 16, padding: 12, width: 232,
         background: PANEL_BG, border: BORDER, borderRadius: 10,
@@ -147,8 +207,7 @@ export default function TopologyV2Page() {
           <AppstoreOutlined /> KÜMELEME
         </div>
         <Segmented
-          size="small" block
-          value={tier}
+          size="small" block value={tier}
           onChange={(v) => handleTier(v as ClusterTier)}
           options={[
             { label: 'Lokasyon', value: 'location' },
@@ -158,38 +217,35 @@ export default function TopologyV2Page() {
           ]}
         />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button
-            size="small" type={autoMode ? 'primary' : 'default'}
-            onClick={() => setAutoMode((m) => !m)}
-          >
+          <Button size="small" type={autoMode ? 'primary' : 'default'}
+            onClick={() => setAutoMode((m) => !m)}>
             Semantik zoom {autoMode ? 'açık' : 'kapalı'}
           </Button>
           <Tooltip title="Yenile">
-            <Button size="small" icon={<ReloadOutlined />} onClick={refresh} />
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => void refetch()} />
           </Tooltip>
           <Tooltip title="Tam ekran (NOC)">
             <Button size="small" icon={<FullscreenOutlined />} onClick={goFullscreen} />
           </Tooltip>
         </div>
-        {model && (
+        {engine && (
           <div style={{ color: '#64748b', fontSize: 11, lineHeight: 1.7 }}>
-            <div>{model.deviceCount} cihaz · {model.ghostCount} ghost</div>
-            <div>{model.clusters.size} küme · graph v{model.graphVersion}</div>
+            <div>{engine.model.deviceCount} cihaz · {engine.model.ghostCount} ghost</div>
+            <div>{engine.model.clusters.size} küme · graph v{engine.model.graphVersion}</div>
           </div>
         )}
       </div>
 
-      {/* ── legend ───────────────────────────────────────────────────── */}
+      {/* legend */}
       <div style={{
         position: 'absolute', bottom: 16, left: 16, padding: 12,
-        background: PANEL_BG, border: BORDER, borderRadius: 10,
-        display: 'flex', gap: 20,
+        background: PANEL_BG, border: BORDER, borderRadius: 10, display: 'flex', gap: 20,
       }}>
         <Legend title="Katman" items={LAYER_LEGEND} />
         <Legend title="Trafik" items={TRAFFIC_LEGEND} />
       </div>
 
-      {/* ── selected-node detail ─────────────────────────────────────── */}
+      {/* selected-node detail */}
       {selected && (
         <div style={{
           position: 'absolute', top: 16, right: 264, width: 250, padding: 14,
@@ -197,10 +253,8 @@ export default function TopologyV2Page() {
         }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{selected.label}</span>
-            <CloseOutlined
-              style={{ color: '#64748b', cursor: 'pointer' }}
-              onClick={() => setSelected(null)}
-            />
+            <CloseOutlined style={{ color: '#64748b', cursor: 'pointer' }}
+              onClick={() => setSelected(null)} />
           </div>
           <Tag color={selected.kind === 'ghost' ? 'default' : 'blue'} style={{ marginTop: 8 }}>
             {selected.kind}
