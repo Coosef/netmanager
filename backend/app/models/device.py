@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, JSON, String, Text  # noqa: F401
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Index, Integer, JSON, String, Text  # noqa: F401
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -90,9 +90,21 @@ class DeviceGroup(Base):
 class Device(Base):
     __tablename__ = "devices"
 
+    # Faz 8 Phase G — a device IP is unique only WITHIN a location, not
+    # across the fleet: two locations may legitimately use overlapping
+    # private IP ranges. (Migration f8a3deviceip drops the old global
+    # unique index on ip_address and adds this composite one.)
+    __table_args__ = (
+        Index(
+            "uq_devices_org_loc_ip",
+            "organization_id", "location_id", "ip_address",
+            unique=True,
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     hostname: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    ip_address: Mapped[str] = mapped_column(String(45), nullable=False, unique=True, index=True)
+    ip_address: Mapped[str] = mapped_column(String(45), nullable=False, index=True)
     device_type: Mapped[str] = mapped_column(String(32), default=DeviceType.SWITCH)
     vendor: Mapped[str] = mapped_column(String(32), default=VendorType.OTHER)
     os_type: Mapped[str] = mapped_column(String(64), default=OSType.CISCO_IOS)

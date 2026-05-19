@@ -91,6 +91,13 @@ class DeviceUpdate(BaseModel):
     credential_profile_id: Optional[int] = None
 
 
+class DeviceMoveRequest(BaseModel):
+    """Faz 8 Phase G — payload for the audited device move endpoint.
+    Device location ownership changes ONLY through this request."""
+    target_location_id: int
+    reason: Optional[str] = None
+
+
 class BulkUpdateAgent(BaseModel):
     device_ids: list[int]
     agent_id: Optional[str] = None

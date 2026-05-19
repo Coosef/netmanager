@@ -1,3 +1,4 @@
+import logging
 import re
 
 import csv
@@ -9,23 +10,27 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
+from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter, RequestContext
+from app.core.request_context import require_active_location
 from app.core.security import encrypt_credential
 from app.models.user import UserRole
 from app.models.tenant import Tenant
 from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
 from app.models.device import Device, DeviceGroup
+from app.models.location import Location
 from app.models.topology import TopologyLink
 from app.schemas.device import (
     BulkUpdateAgent, BulkUpdateCredentials, DeviceCreate, DeviceGroupCreate, DeviceGroupResponse,
-    DeviceResponse, DeviceTestResult, DeviceUpdate,
+    DeviceMoveRequest, DeviceResponse, DeviceTestResult, DeviceUpdate,
 )
 from app.schemas.task import ConfigBackupResponse
 from app.services.audit_service import log_action
+from app.services.device_ownership import forbidden_ownership_fields, relocate_device_data
 from app.services.ssh_manager import ssh_manager
 
 router = APIRouter()
+log = logging.getLogger("netmanager.devices")
 
 # ── CLI Safety Rules ────────────────────────────────────────────────────────
 # Commands that are always blocked regardless of device mode.
@@ -409,6 +414,7 @@ async def create_device(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    ctx: RequestContext = None,
 ):
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
@@ -437,19 +443,18 @@ async def create_device(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Device with this IP already exists")
 
-    # Faz 8 phase B — explicit organization/location ownership. A device
-    # belongs to exactly one org + one location; both are resolved here,
-    # not left to the scoping hook's (now removed) default fallback.
-    from app.core.org_context import get_current_org_id, get_current_location_id
-    org_id = get_current_org_id()
-    location_id = get_current_location_id()
-    if org_id is None:
+    # Faz 8 phase B/G — explicit organization/location ownership. A device
+    # belongs to exactly one org + one location, resolved from the
+    # request's validated context. require_active_location fails closed:
+    # an org-wide user in "all locations" mode (no concrete active
+    # location) is rejected, as is a user with no location access. The
+    # active location is already validated against user_locations by the
+    # Phase E resolver, so a device can only land in a location the user
+    # may actually use — no default-org / default-location fallback.
+    if ctx is None or ctx.organization_id is None:
         raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
-    if location_id is None:
-        raise HTTPException(
-            status_code=400,
-            detail="Cihaz oluşturmak için etkin bir lokasyon seçili olmalı (All Locations modunda cihaz eklenemez)",
-        )
+    org_id = ctx.organization_id
+    location_id = require_active_location(ctx)
 
     device = Device(
         organization_id=org_id,
@@ -852,6 +857,34 @@ async def update_device(
     if not current_user.has_permission("device:edit"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+    # Faz 8 Phase G — device location ownership is IMMUTABLE through the
+    # generic update path. A payload that tries to set location_id /
+    # organization_id is rejected loudly (not silently dropped) so an
+    # accidental ownership change can never slip through; a deliberate
+    # move must go through the audited POST /devices/{id}/move-location.
+    try:
+        _raw_body = await request.json()
+    except Exception:
+        _raw_body = {}
+    _forbidden = forbidden_ownership_fields(_raw_body)
+    if _forbidden:
+        log.warning(
+            "device update rejected — ownership-field change attempt",
+            extra={
+                "event": "device_update_location_rejected",
+                "device_id": device_id,
+                "actor_user_id": getattr(current_user, "id", None),
+                "fields": _forbidden,
+            },
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Device location/organization cannot be changed via update. "
+                "Use POST /devices/{device_id}/move-location."
+            ),
+        )
+
     device = await _get_device_scoped(db, device_id, current_user)
     data = payload.model_dump(exclude_unset=True)
 
@@ -881,6 +914,112 @@ async def update_device(
     await log_action(
         db, current_user, "device_updated", "device", device_id, device.hostname,
         request=request, before_state=before_state, after_state=after_state,
+    )
+    return device
+
+
+def _reject_move(device_id, user, source, target, reason, code=403):
+    """Structured audit of a refused device move, then raise the HTTP error."""
+    log.warning(
+        "device move rejected — %s", reason,
+        extra={
+            "event": "device_move_rejected",
+            "device_id": device_id,
+            "actor_user_id": getattr(user, "id", None),
+            "source_location_id": source,
+            "target_location_id": target,
+            "reason": reason,
+        },
+    )
+    raise HTTPException(status_code=code, detail=reason)
+
+
+@router.post("/{device_id}/move-location", response_model=DeviceResponse)
+async def move_device_location(
+    device_id: int,
+    payload: DeviceMoveRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+    ctx: RequestContext = None,
+):
+    """Faz 8 Phase G — the ONLY path that changes a device's location
+    ownership.
+
+    Requires the ``device:move`` capability AND access (via
+    user_locations) to BOTH the source and the target location. A
+    cross-organization move is impossible; a deleted/archived location
+    cannot be a target. The move is fully audited and the device's
+    device-bound child data (config backups, events, incidents, topology
+    edges, metrics, …) is relocated with it so nothing is orphaned at
+    the old location.
+    """
+    if not current_user.has_permission("device:move"):
+        raise HTTPException(
+            status_code=403,
+            detail="Insufficient permissions — device:move required",
+        )
+
+    device = await _get_device_scoped(db, device_id, current_user)
+    source_location_id = device.location_id
+    target_location_id = payload.target_location_id
+
+    if target_location_id == source_location_id:
+        raise HTTPException(status_code=400, detail="Device is already in this location")
+
+    # Source authorization — the caller must hold the device's CURRENT
+    # location (super-admin is unconstrained; org-admin holds the whole org).
+    if not (ctx and ctx.is_super_admin) and source_location_id not in (
+        ctx.allowed_location_ids if ctx else ()
+    ):
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "You are not authorized to move this device from its current location.")
+
+    # Target location — fetched under the caller's RLS context, so a
+    # cross-organization location is simply invisible (None).
+    target_loc = await db.get(Location, target_location_id)
+    if target_loc is None:
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "Target location not found.", code=400)
+    if target_loc.deleted_at is not None:
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "Target location is archived and cannot receive devices.", code=400)
+    if target_loc.organization_id != device.organization_id:
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "Cross-organization device move is not allowed.")
+
+    # Target authorization — the caller must also hold the TARGET location.
+    if not (ctx and ctx.is_super_admin) and target_location_id not in (
+        ctx.allowed_location_ids if ctx else ()
+    ):
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "You are not authorized to move a device into the target location.")
+
+    # ── Perform the move — device + its device-bound child data ──────────────
+    device.location_id = target_location_id
+    relocated = await relocate_device_data(db, device_id, target_location_id)
+
+    details = {
+        "device_id": device_id,
+        "previous_location_id": source_location_id,
+        "new_location_id": target_location_id,
+        "organization_id": device.organization_id,
+        "actor_user_id": getattr(current_user, "id", None),
+        "reason": payload.reason,
+        "relocated_rows": relocated,
+    }
+    await log_action(
+        db, current_user, "device_moved", "device", device_id, device.hostname,
+        request=request,
+        before_state={"location_id": source_location_id},
+        after_state={"location_id": target_location_id},
+        details=details,
+    )
+    await db.commit()
+    await db.refresh(device)
+    log.info(
+        "device moved location",
+        extra={"event": "device_moved", **details},
     )
     return device
 

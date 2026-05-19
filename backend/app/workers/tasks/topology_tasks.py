@@ -335,6 +335,18 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
                             db.add(real_device)
                             await db.commit()
                             await db.refresh(real_device)
+                            # Faz 8 Phase G — discovery is RLS-scoped: the
+                            # `existing` lookup above only ever matched a
+                            # device in the SOURCE's org+location, so this
+                            # IP was created as a NEW location-scoped device
+                            # and no other device was reassigned. If the
+                            # same IP also exists in another location
+                            # (legitimate — overlapping private ranges),
+                            # surface it as a structured conflict event.
+                            from app.services.device_ownership import detect_ip_location_conflict
+                            await detect_ip_location_conflict(
+                                ip, source.organization_id, source.location_id,
+                            )
                             # Refresh lookup maps after adding a new device
                             all_devices_new = (await db.execute(
                                 select(Device).where(Device.is_active == True)

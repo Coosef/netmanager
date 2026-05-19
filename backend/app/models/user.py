@@ -27,7 +27,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
     UserRole.SUPER_ADMIN: ["*"],
     UserRole.ADMIN: [
         "device:view", "device:create", "device:edit", "device:delete",
-        "device:connect",
+        "device:connect", "device:move",
         "config:view", "config:push", "config:backup", "config:restore",
         "task:view", "task:create", "task:cancel",
         "user:view",
@@ -40,7 +40,7 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "device:view", "config:view", "task:view", "audit:view", "monitor:view",
     ],
     UserRole.LOCATION_MANAGER: [
-        "device:view", "device:create", "device:edit",
+        "device:view", "device:create", "device:edit", "device:move",
         "config:view", "config:push", "config:backup", "config:restore",
         "task:view", "task:create", "audit:view", "monitor:view", "approval:view",
     ],

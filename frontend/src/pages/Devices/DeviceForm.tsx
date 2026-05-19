@@ -181,9 +181,21 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         <Input placeholder="DC-A / Raf-3" />
       </Form.Item>
 
-      <Form.Item label="Lokasyon" name="site" tooltip="Header'daki lokasyon seçiciyle eşleşir">
+      {/* Faz 8 Phase G — device location ownership is immutable through
+          the edit form. When editing an existing device the location is
+          read-only; it changes ONLY through the audited "Lokasyona Taşı"
+          (move) action. On create, the device is placed in the active
+          location (the header location selector). */}
+      <Form.Item
+        label="Lokasyon"
+        name="site"
+        tooltip={device
+          ? 'Lokasyon değiştirmek için cihaz listesindeki "Lokasyona Taşı" işlemini kullanın'
+          : 'Cihaz, üstteki etkin lokasyona oluşturulur'}
+      >
         <Select
           allowClear
+          disabled={!!device}
           placeholder="Lokasyon seçin"
           options={[
             ...(locationsData?.items ?? []).map((l) => ({
