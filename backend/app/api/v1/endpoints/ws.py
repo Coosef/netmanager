@@ -82,6 +82,36 @@ async def task_progress_ws(
 ):
     if not await _authenticate_ws(websocket, token):
         return
+
+    # Faz 8 phase A — scope the task stream to the caller's organization.
+    # `tasks` is RLS-scoped; a task invisible under the caller's org context
+    # means it belongs to another org → reject (was a cross-org leak).
+    org_id, is_super = await _resolve_ws_scope(token or "")
+    if org_id is None and not is_super:
+        await websocket.close(code=4003)
+        return
+    from app.core.database import AsyncSessionLocal
+    from app.core.org_context import set_org_context, clear_org_context, superadmin_context
+    from app.core.rls import apply_rls_context
+    from app.models.task import Task
+    async with AsyncSessionLocal() as db:
+        if is_super:
+            with superadmin_context():
+                await apply_rls_context(db)
+                owned = (await db.execute(
+                    select(Task.id).where(Task.id == task_id))).scalar_one_or_none()
+        else:
+            set_org_context(org_id, None, False)
+            await apply_rls_context(db)
+            try:
+                owned = (await db.execute(
+                    select(Task.id).where(Task.id == task_id))).scalar_one_or_none()
+            finally:
+                clear_org_context()
+    if not owned:
+        await websocket.close(code=4003)  # absent or cross-org → not yours
+        return
+
     await websocket.accept()
     r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
     pubsub = r.pubsub()

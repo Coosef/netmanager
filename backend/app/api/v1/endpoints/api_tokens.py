@@ -69,6 +69,8 @@ async def create_token(
         token_hash=token_hash,
         prefix=prefix,
         expires_at=expires_at,
+        # Faz 8 phase A — bind every token to the creator's organization.
+        organization_id=user.organization_id,
     )
     db.add(token)
     await db.commit()

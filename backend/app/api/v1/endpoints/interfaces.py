@@ -38,6 +38,13 @@ def _cache_set(key: str, value: dict, ttl: int):
         pass
 
 
+def _scoped_cache_key(device_id: int, suffix: str) -> str:
+    """Faz 8 phase A — namespace the per-device cache by organization so a
+    key can never be shared across tenants."""
+    from app.core.org_context import get_current_org_id
+    return f"cache:device:o={get_current_org_id()}:{device_id}:{suffix}"
+
+
 def _iface_cmd(os_type: str) -> str:
     if os_type in ("aruba_osswitch", "hp_procurve"):
         return "show interfaces brief"
@@ -312,7 +319,7 @@ async def get_interfaces(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    cache_key = f"cache:device:{device_id}:interfaces"
+    cache_key = _scoped_cache_key(device_id, "interfaces")
     if not force:
         cached = _cache_get(cache_key)
         if cached:
@@ -385,7 +392,7 @@ async def get_vlans(
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
-    cache_key = f"cache:device:{device_id}:vlans"
+    cache_key = _scoped_cache_key(device_id, "vlans")
     if not force:
         cached = _cache_get(cache_key)
         if cached:

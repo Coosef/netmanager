@@ -480,9 +480,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_network_events_created_sev ON network_events(created_at, severity)"
         ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_snmp_poll_results_device_polled ON snmp_poll_results(device_id, polled_at)"
-        ))
+        # Faz 8: snmp_poll_results is a security-barrier view post-migration;
+        # index the underlying base table (snmp_poll_results_raw) whichever
+        # name currently is the BASE TABLE.
+        await conn.execute(text("""
+            DO $idx$
+            DECLARE ht text := (
+              SELECT table_name FROM information_schema.tables
+              WHERE table_name IN ('snmp_poll_results_raw','snmp_poll_results')
+                AND table_type = 'BASE TABLE' LIMIT 1);
+            BEGIN
+              IF ht IS NOT NULL THEN
+                EXECUTE format('CREATE INDEX IF NOT EXISTS '
+                  || 'ix_snmp_poll_results_device_polled ON %I(device_id, polled_at)', ht);
+              END IF;
+            END $idx$;
+        """))
         # Composite indexes for config_backups — speeds up latest-per-device subquery in config_search
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_config_backups_device_created ON config_backups(device_id, created_at DESC)"
@@ -637,8 +650,16 @@ async def lifespan(app: FastAPI):
         # Each DO block is idempotent: converts only if not already a hypertable.
         # PK is changed to (id, time_col) because TimescaleDB requires the
         # partition column to be part of any UNIQUE / PRIMARY KEY constraint.
+        # Faz 8: resolve the snmp hypertable's real name — `snmp_poll_results`
+        # is a security-barrier view post-migration; the base table is
+        # `snmp_poll_results_raw`.
+        _snmp_ht = (await conn.execute(text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_name IN ('snmp_poll_results_raw','snmp_poll_results') "
+            "AND table_type = 'BASE TABLE' LIMIT 1"
+        ))).scalar() or "snmp_poll_results"
         for _tbl, _time_col, _interval in [
-            ("snmp_poll_results",             "polled_at",   "1 week"),
+            (_snmp_ht,                        "polled_at",   "1 week"),
             ("device_availability_snapshots", "ts",          "1 month"),
             ("agent_peer_latencies",          "measured_at", "1 week"),
             ("synthetic_probe_results",       "measured_at", "1 week"),
@@ -662,21 +683,28 @@ async def lifespan(app: FastAPI):
                 END $do$;
             """))
 
-        # Compression for snmp_poll_results (highest volume table)
+        # Compression for snmp_poll_results (highest volume table).
+        # Faz 8: the hypertable is `snmp_poll_results_raw` — `snmp_poll_results`
+        # is a security-barrier view over it (migration f8a1snmpview). The
+        # COALESCE handles both pre- and post-migration table names.
         await conn.execute(text("""
             DO $do$
+            DECLARE ht text := (
+              SELECT table_name FROM information_schema.tables
+              WHERE table_name IN ('snmp_poll_results_raw','snmp_poll_results')
+                AND table_type = 'BASE TABLE'
+              LIMIT 1
+            );
             BEGIN
-              IF NOT EXISTS (
+              IF ht IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM timescaledb_information.compression_settings
-                WHERE hypertable_name = 'snmp_poll_results'
+                WHERE hypertable_name = ht
               ) THEN
-                ALTER TABLE snmp_poll_results SET (
-                  timescaledb.compress,
-                  timescaledb.compress_segmentby = 'device_id',
-                  timescaledb.compress_orderby = 'polled_at DESC'
-                );
-                PERFORM add_compression_policy('snmp_poll_results',
-                  INTERVAL '7 days', if_not_exists => true);
+                EXECUTE format('ALTER TABLE %I SET ('
+                  || 'timescaledb.compress, '
+                  || 'timescaledb.compress_segmentby = ''device_id'', '
+                  || 'timescaledb.compress_orderby = ''polled_at DESC'')', ht);
+                PERFORM add_compression_policy(ht, INTERVAL '7 days', if_not_exists => true);
               END IF;
             END $do$;
         """))
@@ -717,7 +745,7 @@ async def lifespan(app: FastAPI):
         # TimescaleDB retention policies — drop old chunks automatically.
         # These replace the manual DELETE approach in retention_tasks.py.
         for _tbl, _interval in [
-            ("snmp_poll_results",             "30 days"),
+            (_snmp_ht,                        "30 days"),
             ("syslog_events",                 "30 days"),
             ("device_availability_snapshots", "90 days"),
             ("agent_peer_latencies",          "90 days"),
