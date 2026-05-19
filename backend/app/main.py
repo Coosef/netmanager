@@ -1248,12 +1248,28 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+# Faz 8 Phase E — a cross-location / no-location-access request raises
+# LocationAccessError from anywhere in the request; map it to its HTTP
+# status (403 cross-location, 400 missing) with a clear message.
+from app.core.request_context import LocationAccessError as _LocationAccessError
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+@app.exception_handler(_LocationAccessError)
+async def _location_access_error_handler(request: Request, exc: _LocationAccessError):
+    return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Accept"],
+    allow_headers=[
+        "Authorization", "Content-Type", "X-Request-ID", "Accept",
+        "X-Location-Id", "X-Org-Id",
+    ],
 )
 
 

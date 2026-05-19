@@ -7,6 +7,11 @@ from sqlalchemy import select
 
 from app.core.database import get_db
 from app.core.org_context import set_org_context
+from app.core.request_context import (
+    LocationContext,
+    is_super_admin as _is_super_admin,
+    resolve_location_context,
+)
 from app.core.security import decode_access_token
 from app.models.user import User, UserRole, SystemRole
 
@@ -14,14 +19,18 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
 # ---------------------------------------------------------------------------
-# Core auth dependencies (unchanged)
+# Core auth dependencies
 # ---------------------------------------------------------------------------
 
-def _is_super_admin(user: User) -> bool:
-    return (
-        user.system_role == SystemRole.SUPER_ADMIN
-        or user.role == UserRole.SUPER_ADMIN
-    )
+
+def _parse_int_header(request: Request, name: str) -> Optional[int]:
+    raw = request.headers.get(name)
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_current_user(
@@ -47,31 +56,22 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
 
-    # Faz 7 — publish the full RLS context for this request. The
-    # before_insert hook stamps new rows from it; the RLS session hook
-    # (app/core/rls.py) scopes every query to it.
-    is_super = _is_super_admin(user)
-    org_id = user.organization_id
-    # A super-admin may scope to one org via X-Org-Id (else they bypass RLS).
-    x_org = request.headers.get("X-Org-Id")
-    if is_super and x_org:
-        try:
-            org_id = int(x_org)
-            is_super = False
-        except (TypeError, ValueError):
-            pass
-    # Active location (X-Location-Id) — empty ⇒ all locations in the org.
-    # A foreign location_id is harmless: RLS still requires the org to
-    # match, so it simply yields no rows.
-    location_id: Optional[int] = None
-    x_loc = request.headers.get("X-Location-Id")
-    if x_loc:
-        try:
-            location_id = int(x_loc)
-        except (TypeError, ValueError):
-            location_id = None
+    # Faz 8 Phase E — resolve the request's location scope from
+    # user_locations (the source of truth). The X-Location-Id header is
+    # validated against the user's accessible locations, never trusted as
+    # given; a rejected/stale value fails closed. The resolved context is
+    # stashed on request.state for the RequestContext dependency.
+    ctx = await resolve_location_context(
+        db, user,
+        x_org_id=_parse_int_header(request, "X-Org-Id"),
+        x_location_id=_parse_int_header(request, "X-Location-Id"),
+        channel="http",
+    )
+    request.state.location_context = ctx
 
-    set_org_context(org_id, location_id, is_super)
+    # Publish the validated RLS context: the before_insert hook stamps new
+    # rows from it; the rls.py session hook scopes every query to it.
+    set_org_context(ctx.organization_id, ctx.active_location_id, ctx.is_super_admin)
     # Attribute org/location transitions to this user (tenant-audit hook).
     from app.core.org_context import set_current_user_id, set_current_username
     set_current_user_id(user.id)
@@ -158,29 +158,81 @@ async def get_scoped_db(
 ScopedDb = Annotated[AsyncSession, Depends(get_scoped_db)]
 
 
+# ── Faz 8 Phase E — request location context ──────────────────────────────────
+
+async def get_request_context(
+    request: Request,
+    _user: Annotated[User, Depends(get_current_active_user)],
+) -> LocationContext:
+    """The validated location scope of this request — user_locations is
+    the source of truth (see app.core.request_context). get_current_user
+    resolves it and stashes it on request.state; this exposes it to
+    endpoints and to the RBAC / location-enforcement dependencies."""
+    ctx = getattr(request.state, "location_context", None)
+    if ctx is None:  # defensive — get_current_active_user always runs first
+        raise HTTPException(status_code=401, detail="Unresolved request context")
+    return ctx
+
+
+RequestContext = Annotated[LocationContext, Depends(get_request_context)]
+
+
+def require_location_access():
+    """Dependency — fail closed when a location-scoped user has no usable
+    location (HTTP 403). Use on endpoints that read/write location-scoped
+    data so an un-located user is rejected explicitly, not served an empty
+    list that looks like 'no data'."""
+    async def _checker(ctx: RequestContext) -> LocationContext:
+        if not ctx.has_location_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You have no accessible location. Contact an administrator.",
+            )
+        return ctx
+    return _checker
+
+
+LocationScoped = Annotated[LocationContext, Depends(require_location_access())]
+
+
 # ---------------------------------------------------------------------------
 # New RBAC dependencies
 # ---------------------------------------------------------------------------
 
 async def get_current_user_rbac(
+    request: Request,
     token: Annotated[str, Depends(oauth2_scheme)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """Like get_current_user but loads org_id into context for new RBAC system."""
-    return await get_current_user(token, db)
+    return await get_current_user(request, token, db)
 
 
 def require_permission(module: str, action: str):
     """
     Dependency factory that checks module.action permission via PermissionEngine.
     Usage: Depends(require_permission("devices", "edit"))
+
+    Faz 8 Phase E — the check is evaluated against the request's *active
+    location* (request_context), so a location-scoped grant cannot
+    accidentally pass under another location. A location-scoped user with
+    no usable location is rejected before the permission lookup.
     """
     async def _checker(
+        ctx: RequestContext,
         user: Annotated[User, Depends(get_current_active_user)],
         db: Annotated[AsyncSession, Depends(get_db)],
     ) -> User:
         from app.services.rbac.engine import permission_engine
-        allowed = await permission_engine.resolve(db, user, module, action)
+        if not ctx.has_location_access:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You have no accessible location. Contact an administrator.",
+            )
+        active_loc = ctx.active_location_id if not ctx.is_org_wide else None
+        allowed = await permission_engine.resolve(
+            db, user, module, action, location_id=active_loc,
+        )
         if not allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

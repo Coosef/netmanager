@@ -54,13 +54,16 @@ def on_task_prerun(task_id: str, task, **kwargs):
     _task_starts.__dict__[task_id] = time.monotonic()
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(celery_task_id=task_id, task_name=task.name)
-    # Faz 7 — Celery tasks are trusted internal system code: beat jobs are
-    # fleet-wide, and user-triggered tasks act on IDs the RLS-scoped API
-    # endpoint already validated. Run RLS-bypassed; row WRITES are still
-    # org-stamped per row by the before_insert hook (device/agent-derived).
-    from app.core.org_context import set_org_context
-    set_org_context(None, None, is_super_admin=True)
-    log.info("task_started", task_name=task.name)
+    # Faz 8 Phase E — a task enqueued with enqueue_scoped() carries the
+    # validated (organization_id, location_id) of the user action that
+    # created it; the worker runs under exactly that scope (RLS-enforced).
+    # A task with no scope envelope is system-owned — beat jobs and
+    # fleet-wide sweeps — and keeps the super-admin context; its row
+    # writes are still org-stamped per row by the before_insert hook.
+    from app.workers.task_scope import apply_task_scope, scope_from_request
+    scope = scope_from_request(getattr(task, "request", None))
+    scoped = apply_task_scope(scope)
+    log.info("task_started", task_name=task.name, scoped=scoped)
 
 
 @task_postrun.connect

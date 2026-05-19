@@ -15,8 +15,10 @@ client.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
-  // Faz 7 — tenant scope header. Empty/absent ⇒ all locations in the org.
-  // The backend validates it and RLS enforces isolation regardless.
+  // Faz 8 Phase E — active-location header. The backend validates it
+  // against user_locations on every request (never trusts it as given)
+  // and RLS enforces isolation regardless; a stale/forged value fails
+  // closed server-side. Absent ⇒ the backend resolves a default.
   const loc = localStorage.getItem(ACTIVE_LOCATION_KEY)
   if (loc) {
     config.headers['X-Location-Id'] = loc
