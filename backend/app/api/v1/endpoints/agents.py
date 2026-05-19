@@ -127,6 +127,26 @@ async def _get_agent_scoped(agent_id: str, db: AsyncSession, tenant_filter) -> A
     return agent
 
 
+def _assert_agent_device_scope(agent: Agent, device, operation: str) -> None:
+    """Faz 8 Phase D — reject an agent operation whose target device is
+    outside the agent's organization+location sandbox.
+
+    The endpoint resolves the agent and the device independently (URL
+    agent_id + body device_id). RLS scopes each to the *user* — but a
+    multi-location user could still pass an agent in location A and a
+    device in location B, both of which they can see. This check closes
+    that tunnel: the device must be in the *agent's* own org+location.
+    """
+    from app.services.agent_scope import (
+        AgentScope, AgentScopeError, assert_device_in_scope,
+    )
+    scope = AgentScope(agent.id, agent.organization_id, agent.location_id)
+    try:
+        assert_device_in_scope(scope, device, operation)
+    except AgentScopeError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+
+
 @router.get("/", response_model=list[dict])
 async def list_agents(db: AsyncSession = Depends(get_db), _: CurrentUser = None, tenant_filter: TenantFilter = None):
     q = select(Agent).where(Agent.is_active == True)
@@ -779,6 +799,7 @@ async def snmp_get_via_agent(
     body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Run SNMP GET for specific OIDs via agent. body: {device_id, oids: [str]}"""
     if not current_user.has_permission("device:read"):
@@ -792,9 +813,11 @@ async def snmp_get_via_agent(
         raise HTTPException(status_code=400, detail="device_id and oids are required")
 
     from app.models.device import Device
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
     device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    _assert_agent_device_scope(agent, device, "snmp_get")
 
     result = await agent_manager.execute_snmp_get(agent_id, device, oids)
     return result
@@ -806,6 +829,7 @@ async def snmp_walk_via_agent(
     body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Run SNMP WALK for an OID subtree via agent. body: {device_id, oid_prefix}"""
     if not current_user.has_permission("device:read"):
@@ -819,9 +843,11 @@ async def snmp_walk_via_agent(
         raise HTTPException(status_code=400, detail="device_id and oid_prefix are required")
 
     from app.models.device import Device
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
     device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    _assert_agent_device_scope(agent, device, "snmp_walk")
 
     result = await agent_manager.execute_snmp_walk(agent_id, device, oid_prefix)
     return result
@@ -965,6 +991,7 @@ async def start_stream_command(
     body: dict,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    tenant_filter: TenantFilter = None,
 ):
     """Start a streaming SSH command. Returns request_id for SSE subscription."""
     if not current_user.has_permission("device:update"):
@@ -979,9 +1006,11 @@ async def start_stream_command(
         raise HTTPException(status_code=400, detail="device_id and command are required")
 
     from app.models.device import Device
+    agent = await _get_agent_scoped(agent_id, db, tenant_filter)
     device = (await db.execute(select(Device).where(Device.id == device_id))).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
+    _assert_agent_device_scope(agent, device, "stream_command")
 
     rid, _ = await agent_manager.execute_ssh_command_stream(agent_id, device, command)
     return {"request_id": rid, "stream_url": f"/api/v1/stream/{rid}"}
@@ -1137,7 +1166,14 @@ async def agent_websocket(
     # Load security config into cache
     agent_manager.set_security_config(agent_id, agent.command_mode, agent.allowed_commands)
 
-    meta = {}
+    # Faz 8 Phase D — bind the agent's organization+location into the WS
+    # session. The agent token authenticated above thereby fixes the
+    # agent's sandbox; every command dispatched on this connection is
+    # validated against it (agent_manager._enforce_device_scope).
+    meta = {
+        "organization_id": agent.organization_id,
+        "location_id": agent.location_id,
+    }
     await agent_manager.connect(agent_id, websocket, meta)
 
     # Send initial security config to agent

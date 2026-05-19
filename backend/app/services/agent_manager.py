@@ -326,44 +326,69 @@ class AgentManager:
                 if not fut.done():
                     fut.set_result({"success": success, "output": output, "type": "ssh_result"})
 
-    # ── Agent ingest scope enforcement (Faz 7 phase6e) ────────────────────────
+    # ── Agent ingest scope enforcement (Faz 7 phase6e, Faz 8 Phase D) ─────────
 
-    async def _devices_in_agent_scope(self, db, agent_id: str, device_ids) -> set:
+    async def _devices_in_agent_scope(
+        self, db, agent_id: str, device_ids, operation: str = "ingest"
+    ) -> set:
         """Of `device_ids`, return the subset whose organization + location
         match the agent's. An agent is bound to exactly one org+location;
-        a report referencing a device outside that scope is a cross-scope
-        write — dropped here with a logged warning so the agent cannot
-        mutate another location's devices."""
-        from sqlalchemy import select
-        from app.models.agent import Agent
-        from app.models.device import Device
+        a report referencing a device outside that sandbox is a cross-scope
+        write — dropped here with a structured log so the agent cannot
+        mutate another location's devices.
 
-        agent = await db.get(Agent, agent_id)
-        if agent is None or agent.organization_id is None:
-            log.warning("agent_manager: agent %s has no org/location — "
-                        "ingest dropped", agent_id)
+        Faz 8 Phase D: delegates to the central app.services.agent_scope
+        enforcement module — one implementation shared by the API,
+        runtime-handler and command-dispatch layers."""
+        from app.services.agent_scope import (
+            AgentScopeError, filter_device_ids_in_scope, resolve_agent_scope,
+        )
+        try:
+            scope = await resolve_agent_scope(db, agent_id)
+        except AgentScopeError as exc:
+            log.warning("agent_manager: %s — %s dropped", exc, operation)
             return set()
+        return await filter_device_ids_in_scope(db, scope, device_ids, operation)
 
-        ids = [d for d in set(device_ids) if d is not None]
-        if not ids:
-            return set()
-        rows = (await db.execute(
-            select(Device.id, Device.organization_id, Device.location_id)
-            .where(Device.id.in_(ids))
-        )).all()
+    # ── Agent command-dispatch scope enforcement (Faz 8 Phase D) ──────────────
 
-        allowed: set = set()
-        for did, d_org, d_loc in rows:
-            if d_org == agent.organization_id and d_loc == agent.location_id:
-                allowed.add(did)
-            else:
-                log.warning(
-                    "agent_manager: agent %s (org=%s,loc=%s) ingest for "
-                    "device %s (org=%s,loc=%s) rejected — cross-scope write",
-                    agent_id, agent.organization_id, agent.location_id,
-                    did, d_org, d_loc,
-                )
-        return allowed
+    def _session_scope(self, agent_id: str) -> tuple | None:
+        """The (organization_id, location_id) bound to this agent's WS
+        session, captured from the agent row at authentication time. The
+        agent token thereby fixes the agent's org+location for the life of
+        the connection. None when the session predates Phase D."""
+        meta = self._meta.get(agent_id) or {}
+        org = meta.get("organization_id")
+        loc = meta.get("location_id")
+        if org is None or loc is None:
+            return None
+        return (org, loc)
+
+    def _enforce_device_scope(self, agent_id: str, device, operation: str) -> None:
+        """Defense-in-depth at the command-dispatch layer: reject a command
+        whose target device is outside the agent's session org+location
+        sandbox. The API layer is authoritative; this catches any path
+        that reaches dispatch unchecked. A scopeless device proxy (the
+        internal SSH relay) or a pre-Phase-D session is left to the API
+        layer — it cannot be cross-checked here."""
+        scope = self._session_scope(agent_id)
+        d_org = getattr(device, "organization_id", None)
+        d_loc = getattr(device, "location_id", None)
+        if scope is None or d_org is None or d_loc is None:
+            return
+        if (d_org, d_loc) != scope:
+            from app.services.agent_scope import AgentScopeError, log_scope_rejection
+            log_scope_rejection(
+                agent_id=agent_id, device_id=getattr(device, "id", None),
+                organization_id=scope[0], location_id=scope[1],
+                operation=operation,
+                reason=(f"device org/location ({d_org}/{d_loc}) outside "
+                        f"agent session sandbox ({scope[0]}/{scope[1]})"),
+            )
+            raise AgentScopeError(
+                f"Cross-location {operation} rejected for device "
+                f"{getattr(device, 'id', None)} — not in the agent's location."
+            )
 
     # ── Device status reporting ───────────────────────────────────────────────
 
@@ -386,7 +411,8 @@ class AgentManager:
                 # Faz 7 — drop reports for devices outside the agent's
                 # organization + location before any write.
                 allowed_ids = await self._devices_in_agent_scope(
-                    db, agent_id, [r.get("device_id") for r in results]
+                    db, agent_id, [r.get("device_id") for r in results],
+                    "device_status_report",
                 )
                 results = [r for r in results if r.get("device_id") in allowed_ids]
                 if not results:
@@ -587,7 +613,7 @@ class AgentManager:
                 # agent's own org+location; otherwise drop the device link.
                 if device_id is not None:
                     if device_id not in await self._devices_in_agent_scope(
-                        db, agent_id, [device_id]
+                        db, agent_id, [device_id], "snmp_trap"
                     ):
                         device_id = None
 
@@ -801,6 +827,7 @@ class AgentManager:
     async def execute_ssh_command(self, agent_id: str, device, command: str) -> dict:
         from app.core.security import decrypt_credential
 
+        self._enforce_device_scope(agent_id, device, "ssh_command")
         sec = self.get_security_config(agent_id)
         allowed, reason = _is_command_allowed(command, sec["command_mode"], sec["allowed_commands"])
         if not allowed:
@@ -855,6 +882,7 @@ class AgentManager:
     async def execute_ssh_config(self, agent_id: str, device, commands: list[str]) -> dict:
         from app.core.security import decrypt_credential
 
+        self._enforce_device_scope(agent_id, device, "ssh_config")
         sec = self.get_security_config(agent_id)
         if sec["command_mode"] != "all":
             for cmd in commands:
@@ -1116,6 +1144,7 @@ class AgentManager:
     # ── Feature 4: SNMP routing ───────────────────────────────────────────────
 
     async def execute_snmp_get(self, agent_id: str, device, oids: list[str]) -> dict:
+        self._enforce_device_scope(agent_id, device, "snmp_get")
         rid = uuid.uuid4().hex
         payload = {
             "type": "snmp_get",
@@ -1129,6 +1158,7 @@ class AgentManager:
         return await self._send_request(agent_id, payload, timeout=15)
 
     async def execute_snmp_walk(self, agent_id: str, device, oid_prefix: str) -> dict:
+        self._enforce_device_scope(agent_id, device, "snmp_walk")
         rid = uuid.uuid4().hex
         payload = {
             "type": "snmp_walk",
@@ -1189,6 +1219,7 @@ class AgentManager:
         """Start a streaming SSH command. Returns (request_id, future_for_full_result)."""
         from app.core.security import decrypt_credential
 
+        self._enforce_device_scope(agent_id, device, "stream_command")
         rid = uuid.uuid4().hex
         meta = self._meta.get(agent_id, {})
         if meta.get("vault_active"):

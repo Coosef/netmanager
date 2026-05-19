@@ -112,9 +112,21 @@ async def persist_and_correlate(db, payloads: list[dict], sync_redis) -> int:
         )
         if not normalized or normalized.event_type not in AVAILABILITY_EVENT_TYPES:
             continue
-        device_id = (await db.execute(
-            select(Device.id).where(Device.ip_address == p.get("source_ip", ""))
-        )).scalar_one_or_none()
+        # Faz 8 Phase D — the correlated device must be in the originating
+        # agent's own org (+ location): two locations may legitimately use
+        # the same source_ip, so an unscoped ip match could correlate a
+        # foreign location's device. A payload with no resolvable agent
+        # scope was already dropped from `rows` above.
+        sc = scope.get(p.get("agent_id"))
+        if sc is None:
+            continue
+        device_q = select(Device.id).where(
+            Device.ip_address == p.get("source_ip", ""),
+            Device.organization_id == sc[0],
+        )
+        if sc[1] is not None:
+            device_q = device_q.where(Device.location_id == sc[1])
+        device_id = (await db.execute(device_q)).scalar_one_or_none()
         if not device_id:
             continue
         try:
