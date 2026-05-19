@@ -21,7 +21,7 @@ import { devicesApi } from '@/api/devices'
 import type { NetworkEvent } from '@/api/monitor'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
-import { buildWsUrl } from '@/utils/ws'
+import { useEventStream } from '@/hooks/useEventStream'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -704,7 +704,6 @@ export default function MonitorPage() {
   const { activeSite } = useSite()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const wsRef = useRef<WebSocket | null>(null)
   const [liveCount, setLiveCount] = useState(0)
   const [viewMode, setViewMode] = useState<'table' | 'timeline'>('timeline')
   const [newIds, setNewIds] = useState<Set<number>>(new Set())
@@ -745,23 +744,15 @@ export default function MonitorPage() {
     queryFn: () => devicesApi.list({ limit: 2000 }),
   })
 
-  // Live WebSocket — count new events
-  useEffect(() => {
-    const url = buildWsUrl('/api/v1/ws/events')
-
-    const connect = () => {
-      const ws = new WebSocket(url)
-      wsRef.current = ws
-      ws.onmessage = () => {
-        setLiveCount((n) => n + 1)
-        refetch()
-      }
-      ws.onclose = () => setTimeout(connect, 5000)
-      ws.onerror = () => ws.close()
-    }
-    connect()
-    return () => wsRef.current?.close()
-  }, [])
+  // Live events — bound to the active location (Faz 8 Phase F). The
+  // stream rebinds on a location switch, so the count + refetch only
+  // ever reflect the active location.
+  useEventStream({
+    onEvent: () => {
+      setLiveCount((n) => n + 1)
+      refetch()
+    },
+  })
 
   const handleAck = async (id: number) => {
     await monitorApi.acknowledge(id)

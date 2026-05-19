@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import AppHeader from './Header'
 import GlobalSearchModal from './GlobalSearchModal'
+import LocationGate from './LocationGate'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAlarmWatcher } from '@/hooks/useAlarmWatcher'
 import { useIsMobile } from '@/hooks/useIsMobile'
@@ -83,7 +84,12 @@ export default function AppLayout() {
           backgroundSize: isDark ? '28px 28px' : undefined,
         }}>
           <div key={location.pathname} style={{ animation: 'pageEnterFade 0.28s ease both' }}>
-            <Outlet />
+            {/* Faz 8 Phase F — gate every page on a resolved location
+                context: a spinner while resolving, an explicit no-access
+                state for an un-located user, the page otherwise. */}
+            <LocationGate>
+              <Outlet />
+            </LocationGate>
           </div>
         </Content>
       </Layout>

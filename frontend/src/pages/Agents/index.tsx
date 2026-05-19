@@ -8,6 +8,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer,
 } from 'recharts'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useSite } from '@/contexts/SiteContext'
 import { useTranslation } from 'react-i18next'
 import {
   PlusOutlined, DeleteOutlined, DownloadOutlined, ReloadOutlined,
@@ -1797,6 +1798,9 @@ export default function AgentsPage() {
   const { message } = App.useApp()
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  // Faz 8 Phase F — agents are location-bound; key the list by the active
+  // location so a switch never serves another location's agents.
+  const { activeLocationId } = useSite()
   const [createOpen, setCreateOpen] = useState(false)
   const [createdAgent, setCreatedAgent] = useState<(Agent & { agent_key: string }) | null>(null)
   const [detailAgent, setDetailAgent] = useState<Agent | null>(null)
@@ -1819,7 +1823,7 @@ export default function AgentsPage() {
   })
 
   const { data: agents = [], isLoading } = useQuery({
-    queryKey: ['agents'],
+    queryKey: ['agents', activeLocationId],
     queryFn: agentsApi.list,
     refetchInterval: 10000,
   })

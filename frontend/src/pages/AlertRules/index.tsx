@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import {
   Button, Drawer, Form, Input, InputNumber, Select, Switch, Table, Tag, Tooltip,
   Popconfirm, message, Space, Badge, Segmented, Progress, Tabs, Collapse, notification,
@@ -18,7 +18,7 @@ import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import { devicesApi } from '@/api/devices'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
-import { buildWsUrl } from '@/utils/ws'
+import { useEventStream } from '@/hooks/useEventStream'
 import dayjs from 'dayjs'
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -119,42 +119,26 @@ export default function AlertRulesPage() {
   const C = mkC(isDark)
   const qc = useQueryClient()
 
-  // ── WebSocket live events ──────────────────────────────────────────────────
-  const wsRef = useRef<WebSocket | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
+  // ── WebSocket live events — bound to the active location (Faz 8 Phase F) ────
   const [lastWsEvent, setLastWsEvent] = useState<NetworkEvent | null>(null)
   const [wsNewCount, setWsNewCount] = useState(0)
 
-  useEffect(() => {
-    const url = buildWsUrl('/api/v1/ws/events')
-
-    const connect = () => {
-      const ws = new WebSocket(url)
-      wsRef.current = ws
-      ws.onopen = () => setWsConnected(true)
-      ws.onclose = () => { setWsConnected(false); setTimeout(connect, 5000) }
-      ws.onerror = () => ws.close()
-      ws.onmessage = (e) => {
-        try {
-          const evt: NetworkEvent = JSON.parse(e.data)
-          setLastWsEvent(evt)
-          setWsNewCount((n) => n + 1)
-          qc.invalidateQueries({ queryKey: ['live-events'] })
-          if (evt.severity === 'critical') {
-            const info = EVENT_INFO[evt.event_type]
-            notification.error({
-              message: `${info?.icon ?? '⚠️'} ${info?.label ?? evt.event_type}`,
-              description: `${evt.device_hostname ?? '—'}: ${evt.title}`,
-              duration: 8,
-              placement: 'bottomRight',
-            })
-          }
-        } catch { /* ignore parse errors */ }
+  const { connected: wsConnected } = useEventStream({
+    onEvent: (evt: NetworkEvent) => {
+      setLastWsEvent(evt)
+      setWsNewCount((n) => n + 1)
+      qc.invalidateQueries({ queryKey: ['live-events'] })
+      if (evt.severity === 'critical') {
+        const info = EVENT_INFO[evt.event_type]
+        notification.error({
+          message: `${info?.icon ?? '⚠️'} ${info?.label ?? evt.event_type}`,
+          description: `${evt.device_hostname ?? '—'}: ${evt.title}`,
+          duration: 8,
+          placement: 'bottomRight',
+        })
       }
-    }
-    connect()
-    return () => wsRef.current?.close()
-  }, [])
+    },
+  })
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data: rules = [], isLoading: rulesLoading } = useQuery({
