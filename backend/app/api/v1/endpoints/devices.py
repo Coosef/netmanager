@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter, RequestContext
-from app.core.request_context import require_active_location
+from app.core.request_context import is_super_admin, require_active_location
 from app.core.security import encrypt_credential
 from app.models.user import UserRole
 from app.models.tenant import Tenant
@@ -19,6 +19,7 @@ from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
 from app.models.device import Device, DeviceGroup
 from app.models.location import Location
+from app.models.shared.organization import Organization
 from app.models.topology import TopologyLink
 from app.schemas.device import (
     BulkUpdateAgent, BulkUpdateCredentials, DeviceCreate, DeviceGroupCreate, DeviceGroupResponse,
@@ -27,6 +28,7 @@ from app.schemas.device import (
 from app.schemas.task import ConfigBackupResponse
 from app.services.audit_service import log_action
 from app.services.device_ownership import forbidden_ownership_fields, relocate_device_data
+from app.services.org_management import enforce_org_can_create
 from app.services.ssh_manager import ssh_manager
 
 router = APIRouter()
@@ -455,6 +457,16 @@ async def create_device(
         raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
     org_id = ctx.organization_id
     location_id = require_active_location(ctx)
+
+    # Faz 8 Phase H — organization quota + lifecycle: refuse a new device
+    # when the org is suspended/archived or its device quota is reached.
+    # A platform super-admin may override (the override is audit-logged).
+    org_obj = await db.get(Organization, org_id)
+    await enforce_org_can_create(
+        db, org_obj, "devices",
+        actor_user_id=current_user.id,
+        is_super_admin=is_super_admin(current_user),
+    )
 
     device = Device(
         organization_id=org_id,

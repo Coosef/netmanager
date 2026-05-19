@@ -308,6 +308,17 @@ async def create_agent(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
+    # Faz 8 Phase H — organization quota + lifecycle gate for new agents.
+    from app.models.shared.organization import Organization
+    from app.core.request_context import is_super_admin
+    from app.services.org_management import enforce_org_can_create
+    _org = await db.get(Organization, loc.organization_id)
+    await enforce_org_can_create(
+        db, _org, "agents",
+        actor_user_id=current_user.id,
+        is_super_admin=is_super_admin(current_user),
+    )
+
     agent_id = _gen_id()
     raw_key = _gen_key()
 

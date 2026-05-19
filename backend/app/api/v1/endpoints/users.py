@@ -95,6 +95,21 @@ async def create_user(
                     detail=f"Kullanıcı limiti doldu ({current_count}/{tenant.max_users}). Plan yükseltmeniz gerekiyor.",
                 )
 
+    # Faz 8 Phase H — organization quota + lifecycle: a new user is
+    # created in the acting admin's organization; refuse once the org's
+    # user quota is reached (a platform super-admin may override).
+    org_id = current_user.organization_id
+    if org_id is not None:
+        from app.models.shared.organization import Organization
+        from app.core.request_context import is_super_admin as _is_super
+        from app.services.org_management import enforce_org_can_create
+        _org = await db.get(Organization, org_id)
+        await enforce_org_can_create(
+            db, _org, "users",
+            actor_user_id=current_user.id,
+            is_super_admin=_is_super(current_user),
+        )
+
     existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")
@@ -107,6 +122,7 @@ async def create_user(
         role=payload.role,
         notes=payload.notes,
         tenant_id=tenant_id,
+        organization_id=org_id,
     )
     db.add(user)
     await db.commit()

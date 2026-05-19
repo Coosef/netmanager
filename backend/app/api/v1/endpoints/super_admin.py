@@ -4,7 +4,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, EmailStr
 from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +17,14 @@ from app.models.device import Device
 from app.models.invite_token import InviteToken
 from app.models.location import Location
 from app.models.network_event import NetworkEvent
-from app.models.shared.organization import Organization
+from app.models.shared.organization import Organization, OrgStatus
 from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
 from app.models.shared.plan import Plan
 from app.models.task import Task
 from app.models.tenant import Tenant
 from app.models.user import User, SystemRole
+from app.services.audit_service import log_action
+from app.services.org_management import get_org_usage
 
 router = APIRouter(prefix="/super-admin", tags=["super-admin"])
 
@@ -78,6 +80,15 @@ class OrgUpdate(BaseModel):
     plan_id: Optional[int] = None
     is_active: Optional[bool] = None
     subscription_ends_at: Optional[datetime] = None
+    # Faz 8 Phase H — lifecycle status, licence window, per-org quota.
+    status: Optional[str] = None
+    license_started_at: Optional[datetime] = None
+    license_expires_at: Optional[datetime] = None
+    max_locations: Optional[int] = None
+    max_devices: Optional[int] = None
+    max_agents: Optional[int] = None
+    max_users: Optional[int] = None
+    max_retention_days: Optional[int] = None
 
 
 class GlobalPermSetCreate(BaseModel):
@@ -214,6 +225,17 @@ async def create_org(
     db.add(org)
     await db.flush()  # get org.id
 
+    # Faz 8 Phase H — seed the per-organization quota from the chosen
+    # plan (the licence tier); orgs with no plan keep the model defaults.
+    org.license_started_at = datetime.now(timezone.utc)
+    if payload.plan_id:
+        plan = await db.get(Plan, payload.plan_id)
+        if plan:
+            org.max_locations = plan.max_locations
+            org.max_devices = plan.max_devices
+            org.max_agents = plan.max_agents
+            org.max_users = plan.max_users
+
     # Provision schema + role
     from app.services.rbac.provisioner import tenant_provisioner
     await tenant_provisioner.provision(db, org)
@@ -248,24 +270,89 @@ async def create_org(
         raise HTTPException(500, "İç hata: organizasyon yöneticisi org'a bağlanamadı")
     await db.commit()
     await db.refresh(org)
+
+    await log_action(
+        db, current_user, "organization_created", "organization", org.id, org.name,
+        details={"organization_id": org.id, "operation": "organization_created",
+                 "actor_user_id": current_user.id, "slug": org.slug,
+                 "plan_id": org.plan_id},
+    )
+    await db.commit()
     return _org_dict(org)
+
+
+def _json_safe(d: dict) -> dict:
+    """Make a before/after-state dict JSON-serialisable for the audit row."""
+    out: dict = {}
+    for k, v in d.items():
+        out[k] = v.isoformat() if isinstance(v, datetime) else v
+    return out
 
 
 @router.patch("/orgs/{org_id}")
 async def update_org(
     org_id: int,
     payload: OrgUpdate,
-    _: SuperAdminOnly,
+    request: Request,
+    current_user: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
 ):
+    """Faz 8 Phase H — update an organization's status / licence / quota.
+
+    Super-admin only. Every change is captured in a structured audit row
+    (before → after). Setting `status` keeps the legacy is_active /
+    deleted_at flags consistent with the lifecycle.
+    """
     org = await db.get(Organization, org_id)
     if not org:
         raise HTTPException(404, "Organizasyon bulunamadı")
-    for field, val in payload.model_dump(exclude_unset=True).items():
+
+    data = payload.model_dump(exclude_unset=True)
+    if "status" in data and data["status"] not in {s.value for s in OrgStatus}:
+        raise HTTPException(400, "Geçersiz organizasyon durumu")
+
+    before = _json_safe({
+        k: getattr(org, k, None) for k in data if hasattr(org, k)
+    })
+    for field, val in data.items():
         setattr(org, field, val)
+
+    # Keep the legacy flags consistent with the authoritative status.
+    if "status" in data:
+        org.is_active = org.status == OrgStatus.ACTIVE.value
+        if org.status == OrgStatus.ARCHIVED.value and org.deleted_at is None:
+            org.deleted_at = datetime.now(timezone.utc)
+        elif org.status != OrgStatus.ARCHIVED.value:
+            org.deleted_at = None
+
     await db.commit()
     await db.refresh(org)
+
+    await log_action(
+        db, current_user, "organization_updated", "organization", org.id, org.name,
+        request=request,
+        before_state=before,
+        after_state=_json_safe(data),
+        details={"organization_id": org.id, "operation": "organization_updated",
+                 "actor_user_id": current_user.id},
+    )
+    await db.commit()
     return _org_dict(org)
+
+
+@router.get("/orgs/{org_id}/usage")
+async def get_org_usage_endpoint(
+    org_id: int,
+    _: SuperAdminOnly,
+    db: AsyncSession = Depends(get_db),
+):
+    """Faz 8 Phase H — per-organization usage vs. quota (super-admin only).
+    Every figure is org-scoped — counted with an explicit organization_id
+    filter, so it never reflects another tenant's data."""
+    org = await db.get(Organization, org_id)
+    if not org:
+        raise HTTPException(404, "Organizasyon bulunamadı")
+    return await get_org_usage(db, org)
 
 
 @router.post("/orgs/{org_id}/invite")
@@ -406,6 +493,21 @@ def _org_dict(o: Organization) -> dict:
         "trial_ends_at": o.trial_ends_at.isoformat() if o.trial_ends_at else None,
         "subscription_ends_at": o.subscription_ends_at.isoformat() if o.subscription_ends_at else None,
         "created_at": o.created_at.isoformat(),
+        # Faz 8 Phase H — lifecycle status, licence window, per-org quota.
+        "status": getattr(o, "status", "active"),
+        "license_started_at": (
+            o.license_started_at.isoformat() if getattr(o, "license_started_at", None) else None
+        ),
+        "license_expires_at": (
+            o.license_expires_at.isoformat() if getattr(o, "license_expires_at", None) else None
+        ),
+        "quota": {
+            "max_locations": getattr(o, "max_locations", None),
+            "max_devices": getattr(o, "max_devices", None),
+            "max_agents": getattr(o, "max_agents", None),
+            "max_users": getattr(o, "max_users", None),
+            "max_retention_days": getattr(o, "max_retention_days", None),
+        },
     }
 
 

@@ -140,6 +140,17 @@ async def create_location(
             detail="Lokasyon oluşturmak için etkin bir organizasyon bağlamı gerekli",
         )
 
+    # Faz 8 Phase H — organization quota + lifecycle gate.
+    from app.models.shared.organization import Organization
+    from app.core.request_context import is_super_admin
+    from app.services.org_management import enforce_org_can_create
+    _org = await db.get(Organization, org_id)
+    await enforce_org_can_create(
+        db, _org, "locations",
+        actor_user_id=current_user.id,
+        is_super_admin=is_super_admin(current_user),
+    )
+
     loc = Location(
         organization_id=org_id,
         name=payload.name,

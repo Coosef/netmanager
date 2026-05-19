@@ -80,6 +80,28 @@ async def get_current_user(
     # the after_begin hook fired before the org was known — re-apply now.
     from app.core.rls import apply_rls_context
     await apply_rls_context(db)
+
+    # Faz 8 Phase H — organization lifecycle gate. A suspended org is
+    # read-only; an archived org is fully closed. A platform super-admin
+    # bypasses this entirely (they manage org lifecycle).
+    if ctx.organization_id is not None and not _is_super_admin(user):
+        from app.models.shared.organization import Organization
+        from app.services.org_management import org_status_block
+        org = await db.get(Organization, ctx.organization_id)
+        blocked = org_status_block(org, request.method)
+        if blocked:
+            import logging
+            logging.getLogger("netmanager.org_management").warning(
+                "organization access blocked",
+                extra={
+                    "event": "org_access_blocked",
+                    "organization_id": ctx.organization_id,
+                    "user_id": user.id,
+                    "method": request.method,
+                    "org_status": getattr(org, "status", None),
+                },
+            )
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=blocked)
     return user
 
 
