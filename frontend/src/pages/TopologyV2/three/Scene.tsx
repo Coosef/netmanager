@@ -9,7 +9,7 @@
 import { useMemo } from 'react'
 import type { TopologyModel } from '../graphModel'
 import { buildSceneData } from './sceneData'
-import type { LayoutMode } from './layout3d'
+import { computeLayout, type LayoutMode } from './layout3d'
 import NodesLayer from './NodesLayer'
 import EdgesLayer from './EdgesLayer'
 import Atmosphere from './Atmosphere'
@@ -28,10 +28,20 @@ interface SceneProps {
 export default function Scene({
   model, collapsed, patchSignal, mode, cameraMode, focusNodeId, onSelect,
 }: SceneProps) {
-  const data = useMemo(
-    () => buildSceneData(model, collapsed, mode),
+  // 3D positions are deterministic — recompute only when the graph
+  // structure (node count) or the layout mode changes, NOT on every
+  // realtime status patch.
+  const layout = useMemo(
+    () => computeLayout(model, mode),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [model, collapsed, mode, patchSignal],
+    [model, mode, model.graph.order],
+  )
+
+  // Re-bucket instances + repack edges on each patch; cheap, reuses layout.
+  const data = useMemo(
+    () => buildSceneData(model, collapsed, layout),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [model, collapsed, layout, patchSignal],
   )
 
   const focus = focusNodeId ? data.layout.get(focusNodeId) ?? null : null

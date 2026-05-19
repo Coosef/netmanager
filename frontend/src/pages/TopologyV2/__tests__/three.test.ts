@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildTopologyModel } from '../graphModel'
 import { collapsedSetForTier } from '../clustering'
+import { applyTopologyEvent, type TopologyEvent } from '../patch'
 import { computeLayout } from '../three/layout3d'
 import { classifyNode, statusTint, NODE_CLASS_STYLE } from '../three/nodeClasses'
 import { lodForDistance, labelVisibleAt, atmosphericFade, lodScale } from '../three/lod'
@@ -84,7 +85,8 @@ describe('lod', () => {
 describe('buildSceneData', () => {
   it('device tier — buckets nodes by class and packs every edge', () => {
     const model = buildTopologyModel(makeFixture())
-    const data = buildSceneData(model, collapsedSetForTier(model, 'device'), 'orbit')
+    const layout = computeLayout(model, 'orbit')
+    const data = buildSceneData(model, collapsedSetForTier(model, 'device'), layout)
     expect(data.nodes.core).toHaveLength(1)   // core-sw
     expect(data.nodes.access).toHaveLength(2) // acc-sw1, acc-sw2
     expect(data.nodes.ghost).toHaveLength(1)
@@ -97,7 +99,8 @@ describe('buildSceneData', () => {
 
   it('layer tier — substitutes clusters for hidden devices', () => {
     const model = buildTopologyModel(makeFixture())
-    const data = buildSceneData(model, collapsedSetForTier(model, 'layer'), 'cluster')
+    const layout = computeLayout(model, 'cluster')
+    const data = buildSceneData(model, collapsedSetForTier(model, 'layer'), layout)
     const deviceInstances = Object.values(data.nodes).reduce((s, a) => s + a.length, 0)
     expect(deviceInstances).toBe(0)        // all devices folded away
     expect(data.clusters.length).toBeGreaterThan(0) // cluster super-nodes shown
@@ -105,7 +108,33 @@ describe('buildSceneData', () => {
 
   it('exposes a layout position for every visible node (camera focus)', () => {
     const model = buildTopologyModel(makeFixture())
-    const data = buildSceneData(model, collapsedSetForTier(model, 'device'), 'orbit')
+    const layout = computeLayout(model, 'orbit')
+    const data = buildSceneData(model, collapsedSetForTier(model, 'device'), layout)
     expect(finiteVec(data.layout.get('d-1'))).toBe(true)
+  })
+})
+
+// ── T4b — realtime integration ──────────────────────────────────────────────
+describe('3D realtime integration', () => {
+  it('a node_updated patch is reflected in the scene; layout is reused', () => {
+    const model = buildTopologyModel(makeFixture())
+    const layout = computeLayout(model, 'orbit') // computed once, reused
+    const collapsed = collapsedSetForTier(model, 'device')
+
+    const before = buildSceneData(model, collapsed, layout)
+    const d3before = before.nodes.access.find((r) => r.id === 'd-3')!
+    expect(d3before.color).toBe('#ef4444') // fixture: d-3 offline
+
+    // realtime status patch — d-3 comes back online
+    const event: TopologyEvent = {
+      event_type: 'topology_node_updated', graph_version: 8,
+      node_id: 'd-3', changes: { status: 'online' },
+    }
+    expect(applyTopologyEvent(model, event, 7).status).toBe('applied')
+
+    const after = buildSceneData(model, collapsed, layout)
+    const d3after = after.nodes.access.find((r) => r.id === 'd-3')!
+    expect(d3after.color).toBe('#22c55e')                  // online → access colour
+    expect(after.layout.get('d-3')).toEqual(layout.get('d-3')) // position unchanged
   })
 })

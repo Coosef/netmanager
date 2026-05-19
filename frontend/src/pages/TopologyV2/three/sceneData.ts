@@ -8,7 +8,7 @@ import * as THREE from 'three'
 import type { TopologyModel } from '../graphModel'
 import { applyClusterView } from '../clustering'
 import { edgeColor } from '../rendering'
-import { computeLayout, type LayoutMode, type Vec3 } from './layout3d'
+import type { Vec3 } from './layout3d'
 import {
   classifyNode, statusTint, NODE_CLASS_STYLE, type NodeClass,
 } from './nodeClasses'
@@ -45,16 +45,18 @@ function hashSeed(s: string): number {
 
 /**
  * Build the renderable scene from the model. Applies the cluster view
- * (collapse/expand) and the chosen 3D layout, then packs instances +
- * the edge vertex buffer.
+ * (collapse/expand) and packs instances + the edge vertex buffer.
+ *
+ * `layout` is supplied by the caller (memoised on the graph structure,
+ * not the patch signal) so a realtime status patch re-buckets instances
+ * without recomputing every 3D position.
  */
 export function buildSceneData(
   model: TopologyModel,
   collapsed: Set<string>,
-  mode: LayoutMode,
+  layout: Map<string, Vec3>,
 ): SceneData {
   applyClusterView(model, collapsed)
-  const layout = computeLayout(model, mode)
   const graph = model.graph
 
   const nodes: Record<NodeClass, InstanceRec[]> = {
