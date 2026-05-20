@@ -552,13 +552,18 @@ async def system_stats(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
 ):
-    """Platform-wide aggregated stats for the super_admin dashboard."""
+    """Platform-wide aggregated stats for the super_admin dashboard.
+
+    M6-B3 — sourced from `Organization` (was `Tenant`). The response JSON
+    keys (`tenants`, `top_tenants_by_devices`) are kept verbatim as a
+    deprecated alias so the existing frontend renders unchanged; they
+    are renamed in the M6 final drop."""
     since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
 
-    total_tenants  = (await db.execute(select(func.count()).select_from(Tenant))).scalar() or 0
-    active_tenants = (await db.execute(select(func.count()).select_from(Tenant).where(Tenant.is_active == True))).scalar() or 0
-    total_users    = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
-    total_devices  = (await db.execute(select(func.count()).select_from(Device).where(Device.is_active == True))).scalar() or 0
+    total_orgs    = (await db.execute(select(func.count()).select_from(Organization).where(Organization.deleted_at.is_(None)))).scalar() or 0
+    active_orgs   = (await db.execute(select(func.count()).select_from(Organization).where(Organization.status == "active"))).scalar() or 0
+    total_users   = (await db.execute(select(func.count()).select_from(User))).scalar() or 0
+    total_devices = (await db.execute(select(func.count()).select_from(Device).where(Device.is_active == True))).scalar() or 0
     total_locations= (await db.execute(select(func.count()).select_from(Location))).scalar() or 0
     online_devices = (await db.execute(select(func.count()).select_from(Device).where(Device.is_active == True, Device.status == "online"))).scalar() or 0
     offline_devices= (await db.execute(select(func.count()).select_from(Device).where(Device.is_active == True, Device.status == "offline"))).scalar() or 0
@@ -566,33 +571,53 @@ async def system_stats(
     critical_24h   = (await db.execute(select(func.count()).select_from(NetworkEvent).where(NetworkEvent.created_at >= since_24h, NetworkEvent.severity == "critical"))).scalar() or 0
     tasks_running  = (await db.execute(select(func.count()).select_from(Task).where(Task.status == "running"))).scalar() or 0
 
-    plan_rows = (await db.execute(select(Tenant.plan_tier, func.count()).group_by(Tenant.plan_tier))).fetchall()
-    plan_counts = {row[0]: row[1] for row in plan_rows}
+    plan_rows = (await db.execute(
+        select(Plan.slug, func.count(Organization.id))
+        .outerjoin(Organization, Organization.plan_id == Plan.id)
+        .where(Organization.deleted_at.is_(None))
+        .group_by(Plan.slug)
+    )).fetchall()
+    plan_counts = {row[0] or "no_plan": row[1] for row in plan_rows}
 
-    tenant_device_rows = (await db.execute(
-        select(Tenant.id, Tenant.name, Tenant.plan_tier, func.count(Device.id).label("cnt"))
-        .outerjoin(Device, Device.tenant_id == Tenant.id)
-        .where(Device.is_active == True)
-        .group_by(Tenant.id, Tenant.name, Tenant.plan_tier)
+    top_org_rows = (await db.execute(
+        select(Organization.id, Organization.name, Plan.slug, func.count(Device.id).label("cnt"))
+        .outerjoin(Plan, Plan.id == Organization.plan_id)
+        .outerjoin(Device, (Device.organization_id == Organization.id) & (Device.is_active == True))
+        .where(Organization.deleted_at.is_(None))
+        .group_by(Organization.id, Organization.name, Plan.slug)
         .order_by(func.count(Device.id).desc())
         .limit(10)
     )).fetchall()
-    top_tenants = [{"id": r[0], "name": r[1], "plan_tier": r[2], "device_count": r[3]} for r in tenant_device_rows]
+    top_orgs = [{"id": r[0], "name": r[1], "plan_tier": r[2] or "no_plan", "device_count": r[3]} for r in top_org_rows]
 
     return {
-        "tenants": {"total": total_tenants, "active": active_tenants, "by_plan": plan_counts},
+        # Legacy alias `tenants` is now the organization count.
+        "tenants": {"total": total_orgs, "active": active_orgs, "by_plan": plan_counts},
+        "organizations": {"total": total_orgs, "active": active_orgs, "by_plan": plan_counts},
         "users": {"total": total_users},
         "devices": {"total": total_devices, "online": online_devices, "offline": offline_devices},
         "locations": {"total": total_locations},
         "events_24h": {"total": events_24h, "critical": critical_24h},
         "tasks": {"running": tasks_running},
-        "top_tenants_by_devices": top_tenants,
+        # Legacy alias name; the underlying data is org-sourced now.
+        "top_tenants_by_devices": top_orgs,
+        "top_organizations_by_devices": top_orgs,
     }
 
 
 # ---------------------------------------------------------------------------
-# Tenant (legacy) management
+# Tenant (legacy) management — DEPRECATED
 # ---------------------------------------------------------------------------
+# M6-B3 — these two endpoints write to the legacy `tenants` table and are
+# superseded by the Phase H Organization endpoints (PATCH /orgs/{id} for
+# plan/quota/status). They stay functional until the M6 final drop so
+# any external script that still calls them keeps working, but every
+# call emits a deprecation warning and frontend code should target the
+# org endpoints.
+
+import logging as _logging
+_legacy_log = _logging.getLogger("netmanager.super_admin.legacy")
+
 
 @router.patch("/tenants/{tenant_id}/plan")
 async def update_tenant_plan(
@@ -603,6 +628,12 @@ async def update_tenant_plan(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
 ):
+    _legacy_log.warning(
+        "deprecated endpoint hit: PATCH /super-admin/tenants/%s/plan — "
+        "use PATCH /super-admin/orgs/{org_id} (M6-B3)", tenant_id,
+        extra={"event": "legacy_tenant_endpoint", "endpoint": "update_tenant_plan",
+               "tenant_id": tenant_id},
+    )
     tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
     if not tenant:
         raise HTTPException(404, "Tenant bulunamadı")
@@ -619,6 +650,12 @@ async def toggle_tenant_active(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
 ):
+    _legacy_log.warning(
+        "deprecated endpoint hit: PATCH /super-admin/tenants/%s/toggle-active "
+        "— use PATCH /super-admin/orgs/{org_id} with status (M6-B3)", tenant_id,
+        extra={"event": "legacy_tenant_endpoint", "endpoint": "toggle_tenant_active",
+               "tenant_id": tenant_id},
+    )
     tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
     if not tenant:
         raise HTTPException(404, "Tenant bulunamadı")

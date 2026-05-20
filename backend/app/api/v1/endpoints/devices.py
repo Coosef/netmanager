@@ -427,19 +427,9 @@ async def create_device(
         if sites is not None and payload.site not in sites:
             raise HTTPException(status_code=403, detail="Bu lokasyonda cihaz oluşturma yetkiniz yok")
 
-    # SaaS quota: check tenant device limit
-    if current_user.tenant_id:
-        tenant = (await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))).scalar_one_or_none()
-        if tenant:
-            current_count = (await db.execute(
-                select(func.count()).select_from(Device)
-                .where(Device.tenant_id == current_user.tenant_id, Device.is_active == True)
-            )).scalar() or 0
-            if current_count >= tenant.max_devices:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Cihaz limiti doldu ({current_count}/{tenant.max_devices}). Plan yükseltmeniz gerekiyor.",
-                )
+    # M6-B3 — legacy SaaS Tenant.max_devices quota removed. The
+    # per-org quota is enforced below via enforce_org_can_create
+    # (Faz 8 Phase H), which is the single source of truth.
 
     existing = await db.execute(select(Device).where(Device.ip_address == payload.ip_address))
     if existing.scalar_one_or_none():
