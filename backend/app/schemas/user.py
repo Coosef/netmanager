@@ -10,6 +10,10 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     role: str = "viewer"
     notes: Optional[str] = None
+    # M6-B1 — `organization_id` is the authoritative field; `tenant_id`
+    # is a deprecated alias kept so older clients (and Faz 7 lockfiles)
+    # do not 422. Server-side `tenant_id` is ignored at create time.
+    organization_id: Optional[int] = None
     tenant_id: Optional[int] = None
 
 
@@ -19,6 +23,8 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
+    # M6-B1 — see UserCreate; `tenant_id` accepted-and-ignored for back-compat.
+    organization_id: Optional[int] = None
     tenant_id: Optional[int] = None
 
 
@@ -47,7 +53,13 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     notes: Optional[str]
-    tenant_id: Optional[int]
+    # M6-B1 — organisation is now authoritative. `tenant_id`/`tenant_name`
+    # stay as deprecated aliases (populated server-side from the user's
+    # organization so the existing frontend keeps rendering); both are
+    # removed in the M6 final drop.
+    organization_id: Optional[int] = None
+    organization_name: Optional[str] = None
+    tenant_id: Optional[int] = None
     tenant_name: Optional[str] = None
     last_login: Optional[datetime]
     created_at: datetime
