@@ -114,6 +114,38 @@ run build` still emits a deployable bundle.
 behind a `// @ts-expect-error` until TopologyV2 ships). Independent of
 M6.
 
+## 6. `agent_bridge` startup-race noise
+
+**Files:**
+  * [backend/app/main.py:712-718](backend/app/main.py#L712-L718)
+  * [backend/app/services/agent_bridge.py](backend/app/services/agent_bridge.py)
+
+Lifespan startup eagerly tries `agent_bridge_listener.start(...)` with
+the Redis client. If Redis is not yet resolvable at that moment, the
+try/except swallows the failure as
+`"startup: agent_bridge failed to start (non-fatal)"` with full
+`exc_info`. The bridge then stays stopped for the lifetime of that
+backend process — Celery→agent command relay does not work until the
+next restart.
+
+**Why mostly harmless today:** in Docker Compose where Redis usually
+starts before backend, this rarely fires; the M6 deploy-verification
+turn caught it because Redis was deliberately stopped while we were
+testing other paths and got started later. After the restart with
+Redis up, the listener started cleanly:
+`bridge: listener started, pattern=agent:bridge:cmd:*`. So the warning
+is a startup-race symptom, not a persistent bug.
+
+**Cleanup:** either
+  * add explicit `depends_on: { redis: { condition: service_healthy } }`
+    to the `backend` service in `docker-compose.yml` (clean for the
+    common case), AND/OR
+  * make `agent_bridge_listener.start` retry-on-failure with exponential
+    backoff so a transient Redis unavailability at startup doesn't
+    silently disable command relay for the rest of the process lifetime.
+
+Added 2026-05-20 from the M6 production-readiness check.
+
 ---
 
 ## Suggested ordering for Faz 9
@@ -124,7 +156,9 @@ M6.
    regressions stand out.
 3. **§1 + §2 deps.py shims + endpoint sweep** — purely server-side,
    ~25 site sweep, can be batched across 2-3 PRs.
-4. **§4 cache warmer loop** — small, do alongside other Redis work.
+4. **§6 agent_bridge startup race** — tiny `depends_on` + retry change;
+   bundle with any other compose/lifespan work.
+5. **§4 cache warmer loop** — small, do alongside other Redis work.
 
-None of these block production deploy. All of them remove ~250-400 LOC
+None of these block production deploy. All of them remove ~250-450 LOC
 of legacy plumbing once done.
