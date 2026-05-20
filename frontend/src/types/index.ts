@@ -1,7 +1,7 @@
-// M6 final drop — `Tenant` interface removed. The platform has fully
-// consolidated on `Organization` (see below). Legacy super-admin
-// response fields like `tenants` and `top_tenants_by_devices` are still
-// aliased to org data for one release.
+// `Tenant` interface removed in M6 final drop; the platform consolidates
+// on `Organization` (defined below + `api/superadmin.ts`). The legacy
+// super-admin response aliases (`tenants`, `top_tenants_by_devices`,
+// `tenant_id`, `tenant_name`) were dropped in Faz 9 item #1.
 
 export type UserRole =
   | 'super_admin'

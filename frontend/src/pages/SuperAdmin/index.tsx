@@ -10,21 +10,21 @@ import {
   GlobalOutlined, SwapOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { superadminApi, type SystemStats, type ResourceDevice, type ResourceAgent } from '@/api/superadmin'
-import { tenantsApi, type Tenant } from '@/api/tenants'
+import {
+  superadminApi,
+  type SystemStats,
+  type ResourceDevice,
+  type ResourceAgent,
+  type OrganizationWithCounts,
+} from '@/api/superadmin'
 import { useTheme } from '@/contexts/ThemeContext'
 
 const { Text, Title } = Typography
 
 const PLAN_COLOR: Record<string, string> = {
   free: '#64748b', starter: '#3b82f6', pro: '#8b5cf6', enterprise: '#f97316',
+  no_plan: '#475569',
 }
-const PLAN_OPTIONS = [
-  { label: 'Free', value: 'free' },
-  { label: 'Starter', value: 'starter' },
-  { label: 'Pro', value: 'pro' },
-  { label: 'Enterprise', value: 'enterprise' },
-]
 
 function StatCard({
   icon, label, value, sub, color,
@@ -80,7 +80,7 @@ function AssignModal({
   onClose,
   resourceType,
   selectedIds,
-  tenants,
+  orgs,
   onAssign,
   loading,
 }: {
@@ -88,19 +88,19 @@ function AssignModal({
   onClose: () => void
   resourceType: 'device' | 'agent'
   selectedIds: (number | string)[]
-  tenants: Tenant[]
-  onAssign: (tenantId: number) => void
+  orgs: OrganizationWithCounts[]
+  onAssign: (orgId: number) => void
   loading: boolean
 }) {
-  const [targetTenantId, setTargetTenantId] = useState<number | null>(null)
+  const [targetOrgId, setTargetOrgId] = useState<number | null>(null)
   return (
     <Modal
       open={open}
-      onCancel={() => { setTargetTenantId(null); onClose() }}
-      onOk={() => { if (targetTenantId) onAssign(targetTenantId) }}
+      onCancel={() => { setTargetOrgId(null); onClose() }}
+      onOk={() => { if (targetOrgId) onAssign(targetOrgId) }}
       okText="Taşı"
       cancelText="İptal"
-      okButtonProps={{ disabled: !targetTenantId, loading }}
+      okButtonProps={{ disabled: !targetOrgId, loading }}
       title={
         <Space>
           <SwapOutlined style={{ color: '#3b82f6' }} />
@@ -108,7 +108,7 @@ function AssignModal({
         </Space>
       }
       width={420}
-      afterClose={() => setTargetTenantId(null)}
+      afterClose={() => setTargetOrgId(null)}
     >
       <div style={{ marginTop: 16 }}>
         <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
@@ -117,13 +117,13 @@ function AssignModal({
         <Select
           placeholder="Hedef organizasyonu seçin..."
           style={{ width: '100%' }}
-          value={targetTenantId}
-          onChange={setTargetTenantId}
+          value={targetOrgId}
+          onChange={setTargetOrgId}
           showSearch
           optionFilterProp="label"
-          options={tenants.map((t) => ({
-            label: `${t.name} (${t.slug})`,
-            value: t.id,
+          options={orgs.map((o) => ({
+            label: `${o.name} (${o.slug})`,
+            value: o.id,
           }))}
         />
       </div>
@@ -133,7 +133,7 @@ function AssignModal({
 
 // ── Resource Assignment Tab ───────────────────────────────────────────────────
 
-function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
+function ResourceAssignTab({ orgs }: { orgs: OrganizationWithCounts[] }) {
   const { isDark } = useTheme()
   const { message } = App.useApp()
   const qc = useQueryClient()
@@ -141,7 +141,7 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
   const border = isDark ? '#1a3458' : '#e2e8f0'
 
   const [resourceType, setResourceType] = useState<'device' | 'agent'>('device')
-  const [filterTenantId, setFilterTenantId] = useState<number | null>(null)
+  const [filterOrgId, setFilterOrgId] = useState<number | null>(null)
   const [showUnassigned, setShowUnassigned] = useState(false)
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<number[]>([])
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([])
@@ -149,9 +149,9 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
   const [singleAssignId, setSingleAssignId] = useState<number | string | null>(null)
 
   const { data: devData, isLoading: devLoading, refetch: refetchDevices } = useQuery({
-    queryKey: ['sa-devices', filterTenantId, showUnassigned],
+    queryKey: ['sa-devices', filterOrgId, showUnassigned],
     queryFn: () => superadminApi.listDevices({
-      tenant_id: filterTenantId ?? undefined,
+      org_id: filterOrgId ?? undefined,
       unassigned: showUnassigned || undefined,
       limit: 500,
     }),
@@ -165,17 +165,17 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
   })
 
   const assignMut = useMutation({
-    mutationFn: ({ ids, tenantId }: { ids: (number | string)[]; tenantId: number }) =>
-      superadminApi.assignResources(resourceType, ids, tenantId),
+    mutationFn: ({ ids, orgId }: { ids: (number | string)[]; orgId: number }) =>
+      superadminApi.assignResources(resourceType, ids, orgId),
     onSuccess: (res) => {
-      message.success(`${res.assigned} kaynak "${res.tenant_name}" organizasyonuna taşındı`)
+      message.success(`${res.assigned} kaynak "${res.org_name}" organizasyonuna taşındı`)
       setAssignOpen(false)
       setSingleAssignId(null)
       setSelectedDeviceIds([])
       setSelectedAgentIds([])
       qc.invalidateQueries({ queryKey: ['sa-devices'] })
       qc.invalidateQueries({ queryKey: ['sa-agents'] })
-      qc.invalidateQueries({ queryKey: ['tenants'] })
+      qc.invalidateQueries({ queryKey: ['orgs-with-counts'] })
       qc.invalidateQueries({ queryKey: ['superadmin-stats'] })
     },
     onError: () => message.error('Taşıma başarısız'),
@@ -188,9 +188,9 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
   const openBulkAssign = () => { setSingleAssignId(null); setAssignOpen(true) }
   const openSingleAssign = (id: number | string) => { setSingleAssignId(id); setAssignOpen(true) }
 
-  const tenantTag = (tenantName: string | null) =>
-    tenantName
-      ? <Tag color="blue" style={{ fontSize: 11 }}>{tenantName}</Tag>
+  const orgTag = (orgName: string | null) =>
+    orgName
+      ? <Tag color="blue" style={{ fontSize: 11 }}>{orgName}</Tag>
       : <Tag color="warning" style={{ fontSize: 11 }}>Atanmamış</Tag>
 
   const deviceCols = [
@@ -200,8 +200,8 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
     { title: 'Durum', dataIndex: 'status', key: 'status', width: 90,
       render: (s: string) => <Tag color={s === 'online' ? 'success' : 'default'} style={{ fontSize: 11 }}>{s}</Tag>,
     },
-    { title: 'Organizasyon', key: 'tenant', width: 160,
-      render: (_: unknown, r: ResourceDevice) => tenantTag(r.tenant_name),
+    { title: 'Organizasyon', key: 'org', width: 160,
+      render: (_: unknown, r: ResourceDevice) => orgTag(r.org_name),
     },
     { title: '', key: 'action', width: 70,
       render: (_: unknown, r: ResourceDevice) => (
@@ -219,8 +219,8 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
     { title: 'Durum', dataIndex: 'status', key: 'status', width: 90,
       render: (s: string) => <Tag color={s === 'online' ? 'success' : 'default'} style={{ fontSize: 11 }}>{s}</Tag>,
     },
-    { title: 'Organizasyon', key: 'tenant', width: 160,
-      render: (_: unknown, r: ResourceAgent) => tenantTag(r.tenant_name),
+    { title: 'Organizasyon', key: 'org', width: 160,
+      render: (_: unknown, r: ResourceAgent) => orgTag(r.org_name),
     },
     { title: '', key: 'action', width: 70,
       render: (_: unknown, r: ResourceAgent) => (
@@ -249,11 +249,11 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
             allowClear
             placeholder="Organizasyona göre filtrele..."
             style={{ width: 220 }}
-            value={filterTenantId}
-            onChange={setFilterTenantId}
+            value={filterOrgId}
+            onChange={setFilterOrgId}
             showSearch
             optionFilterProp="label"
-            options={tenants.map((t) => ({ label: t.name, value: t.id }))}
+            options={orgs.map((o) => ({ label: o.name, value: o.id }))}
           />
         )}
         <Button
@@ -322,8 +322,8 @@ function ResourceAssignTab({ tenants }: { tenants: Tenant[] }) {
         onClose={() => { setAssignOpen(false); setSingleAssignId(null) }}
         resourceType={resourceType}
         selectedIds={activeIds}
-        tenants={tenants}
-        onAssign={(tenantId) => assignMut.mutate({ ids: activeIds, tenantId })}
+        orgs={orgs}
+        onAssign={(orgId) => assignMut.mutate({ ids: activeIds, orgId })}
         loading={assignMut.isPending}
       />
     </div>
@@ -336,8 +336,8 @@ export default function SuperAdminPage() {
   const { isDark } = useTheme()
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState<'overview' | 'assign'>('overview')
-  const [planModal, setPlanModal] = useState<Tenant | null>(null)
-  const [planForm] = Form.useForm()
+  const [quotaModal, setQuotaModal] = useState<OrganizationWithCounts | null>(null)
+  const [quotaForm] = Form.useForm()
 
   const cardBg = isDark ? '#0e1e38' : '#ffffff'
   const border = isDark ? '#1a3458' : '#e2e8f0'
@@ -349,39 +349,43 @@ export default function SuperAdminPage() {
     refetchInterval: 60000,
   })
 
-  const { data: tenants, isLoading: tenantsLoading, refetch: refetchTenants } = useQuery<Tenant[]>({
-    queryKey: ['tenants'],
-    queryFn: tenantsApi.list,
+  const { data: orgsData, isLoading: orgsLoading, refetch: refetchOrgs } = useQuery({
+    queryKey: ['orgs-with-counts'],
+    queryFn: () => superadminApi.listOrgsWithCounts({ per_page: 500 }),
     refetchInterval: 60000,
   })
 
-  const toggleActiveMutation = useMutation({
-    mutationFn: (id: number) => superadminApi.toggleTenantActive(id),
+  const orgs: OrganizationWithCounts[] = orgsData?.orgs ?? []
+
+  const updateOrgMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: Parameters<typeof superadminApi.updateOrg>[1] }) =>
+      superadminApi.updateOrg(id, payload),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tenants'] })
+      qc.invalidateQueries({ queryKey: ['orgs-with-counts'] })
       qc.invalidateQueries({ queryKey: ['superadmin-stats'] })
+      setQuotaModal(null)
     },
   })
 
-  const updatePlanMutation = useMutation({
-    mutationFn: ({ id, plan_tier, max_devices, max_users }: { id: number; plan_tier: string; max_devices: number; max_users: number }) =>
-      superadminApi.updateTenantPlan(id, plan_tier, max_devices, max_users),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['tenants'] })
-      qc.invalidateQueries({ queryKey: ['superadmin-stats'] })
-      setPlanModal(null)
-    },
-  })
-
-  const openPlanModal = (t: Tenant) => {
-    setPlanModal(t)
-    planForm.setFieldsValue({ plan_tier: t.plan_tier, max_devices: t.max_devices, max_users: t.max_users })
+  const toggleOrgStatus = (org: OrganizationWithCounts) => {
+    const next = org.status === 'active' ? 'suspended' : 'active'
+    updateOrgMutation.mutate({ id: org.id, payload: { status: next } })
   }
 
-  const handlePlanSave = async () => {
-    const vals = await planForm.validateFields()
-    if (!planModal) return
-    updatePlanMutation.mutate({ id: planModal.id, ...vals })
+  const openQuotaModal = (o: OrganizationWithCounts) => {
+    setQuotaModal(o)
+    quotaForm.setFieldsValue({
+      max_devices: o.quota.max_devices,
+      max_users: o.quota.max_users,
+      max_locations: o.quota.max_locations,
+      max_agents: o.quota.max_agents,
+    })
+  }
+
+  const handleQuotaSave = async () => {
+    const vals = await quotaForm.validateFields()
+    if (!quotaModal) return
+    updateOrgMutation.mutate({ id: quotaModal.id, payload: vals })
   }
 
   const columns = [
@@ -389,7 +393,7 @@ export default function SuperAdminPage() {
       title: 'Organizasyon',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string, rec: Tenant) => (
+      render: (name: string, rec: OrganizationWithCounts) => (
         <div>
           <Text strong style={{ fontSize: 13 }}>{name}</Text>
           <div style={{ fontSize: 11, color: textSub }}>
@@ -402,67 +406,74 @@ export default function SuperAdminPage() {
     {
       title: 'Plan',
       key: 'plan',
-      width: 100,
-      render: (_: unknown, rec: Tenant) => (
-        <Tag
-          icon={<CrownOutlined />}
-          style={{ fontSize: 11, color: PLAN_COLOR[rec.plan_tier], borderColor: PLAN_COLOR[rec.plan_tier] + '50', background: PLAN_COLOR[rec.plan_tier] + '18' }}
-        >
-          {rec.plan_tier.toUpperCase()}
-        </Tag>
-      ),
+      width: 110,
+      render: (_: unknown, rec: OrganizationWithCounts) => {
+        const color = PLAN_COLOR[rec.plan_tier] ?? PLAN_COLOR.no_plan
+        return (
+          <Tag
+            icon={<CrownOutlined />}
+            style={{ fontSize: 11, color, borderColor: color + '50', background: color + '18' }}
+          >
+            {rec.plan_tier.toUpperCase()}
+          </Tag>
+        )
+      },
     },
     {
       title: 'Cihaz',
       key: 'devices',
       width: 130,
-      render: (_: unknown, rec: Tenant) => (
-        <UsageBar used={rec.device_count} max={rec.max_devices} color="#3b82f6" />
+      render: (_: unknown, rec: OrganizationWithCounts) => (
+        <UsageBar used={rec.device_count} max={rec.quota.max_devices} color="#3b82f6" />
       ),
     },
     {
       title: 'Kullanıcı',
       key: 'users',
       width: 110,
-      render: (_: unknown, rec: Tenant) => (
-        <UsageBar used={rec.user_count} max={rec.max_users} color="#22c55e" />
+      render: (_: unknown, rec: OrganizationWithCounts) => (
+        <UsageBar used={rec.user_count} max={rec.quota.max_users} color="#22c55e" />
       ),
     },
     {
       title: 'Lokasyon',
-      dataIndex: 'location_count',
       key: 'loc',
-      width: 80,
-      render: (n: number) => <Tag icon={<EnvironmentOutlined />} color="default">{n}</Tag>,
+      width: 100,
+      render: (_: unknown, rec: OrganizationWithCounts) => (
+        <Space size={4}>
+          <EnvironmentOutlined />
+          <span>{rec.location_count}/{rec.quota.max_locations}</span>
+        </Space>
+      ),
     },
     {
       title: 'Durum',
       key: 'status',
-      width: 80,
-      render: (_: unknown, rec: Tenant) => rec.is_active
+      width: 100,
+      render: (_: unknown, rec: OrganizationWithCounts) => rec.status === 'active'
         ? <Tag icon={<CheckCircleOutlined />} color="success">Aktif</Tag>
-        : <Tag icon={<CloseCircleOutlined />} color="error">Pasif</Tag>,
+        : <Tag icon={<CloseCircleOutlined />} color={rec.status === 'suspended' ? 'error' : 'default'}>{rec.status}</Tag>,
     },
     {
       title: '',
       key: 'actions',
       width: 90,
-      render: (_: unknown, rec: Tenant) => (
+      render: (_: unknown, rec: OrganizationWithCounts) => (
         <Space size={4}>
-          <Tooltip title="Planı Düzenle">
-            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openPlanModal(rec)} />
+          <Tooltip title="Kotayı Düzenle">
+            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openQuotaModal(rec)} />
           </Tooltip>
           <Popconfirm
-            title={rec.is_active ? 'Organizasyonu pasife al?' : 'Organizasyonu aktif et?'}
-            onConfirm={() => toggleActiveMutation.mutate(rec.id)}
-            okButtonProps={{ danger: !rec.is_active }}
+            title={rec.status === 'active' ? 'Organizasyonu askıya al?' : 'Organizasyonu aktif et?'}
+            onConfirm={() => toggleOrgStatus(rec)}
+            okButtonProps={{ danger: rec.status === 'active' }}
           >
-            <Tooltip title={rec.is_active ? 'Pasife Al' : 'Aktif Et'}>
+            <Tooltip title={rec.status === 'active' ? 'Askıya Al' : 'Aktif Et'}>
               <Button
                 size="small" type="text"
-                danger={rec.is_active}
+                danger={rec.status === 'active'}
                 icon={<PoweroffOutlined />}
-                loading={toggleActiveMutation.isPending}
+                loading={updateOrgMutation.isPending}
               />
             </Tooltip>
           </Popconfirm>
@@ -498,7 +509,7 @@ export default function SuperAdminPage() {
           {activeTab === 'overview' && (
             <Button
               icon={<ReloadOutlined />}
-              onClick={() => { refetchStats(); refetchTenants() }}
+              onClick={() => { refetchStats(); refetchOrgs() }}
             >
               Yenile
             </Button>
@@ -515,7 +526,7 @@ export default function SuperAdminPage() {
             <>
               <Row gutter={[14, 14]} style={{ marginBottom: 20 }}>
                 <Col xs={12} sm={8} lg={4}>
-                  <StatCard icon={<CrownOutlined />} label="Organizasyonlar" value={s.tenants.total} sub={`${s.tenants.active} aktif`} color="#f97316" />
+                  <StatCard icon={<CrownOutlined />} label="Organizasyonlar" value={s.organizations.total} sub={`${s.organizations.active} aktif`} color="#f97316" />
                 </Col>
                 <Col xs={12} sm={8} lg={4}>
                   <StatCard icon={<TeamOutlined />} label="Toplam Kullanıcı" value={s.users.total} color="#8b5cf6" />
@@ -539,15 +550,18 @@ export default function SuperAdminPage() {
                   <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 16 }}>
                     <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>Plan Dağılımı</Text>
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      {Object.entries(s.tenants.by_plan).map(([plan, count]) => (
-                        <div key={plan} style={{
-                          background: PLAN_COLOR[plan] + '18', border: `1px solid ${PLAN_COLOR[plan]}40`,
-                          borderRadius: 8, padding: '10px 16px', textAlign: 'center',
-                        }}>
-                          <div style={{ fontSize: 22, fontWeight: 800, color: PLAN_COLOR[plan] }}>{count}</div>
-                          <div style={{ fontSize: 11, color: PLAN_COLOR[plan], fontWeight: 600, textTransform: 'uppercase' }}>{plan}</div>
-                        </div>
-                      ))}
+                      {Object.entries(s.organizations.by_plan).map(([plan, count]) => {
+                        const color = PLAN_COLOR[plan] ?? PLAN_COLOR.no_plan
+                        return (
+                          <div key={plan} style={{
+                            background: color + '18', border: `1px solid ${color}40`,
+                            borderRadius: 8, padding: '10px 16px', textAlign: 'center',
+                          }}>
+                            <div style={{ fontSize: 22, fontWeight: 800, color }}>{count}</div>
+                            <div style={{ fontSize: 11, color, fontWeight: 600, textTransform: 'uppercase' }}>{plan}</div>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 </Col>
@@ -555,15 +569,18 @@ export default function SuperAdminPage() {
                   <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, padding: 16 }}>
                     <Text strong style={{ fontSize: 13, display: 'block', marginBottom: 12 }}>En Fazla Cihaza Sahip Organizasyonlar</Text>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                      {s.top_tenants_by_devices.slice(0, 6).map((t) => (
-                        <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Tag style={{ fontSize: 10, color: PLAN_COLOR[t.plan_tier], borderColor: PLAN_COLOR[t.plan_tier] + '40', background: PLAN_COLOR[t.plan_tier] + '15', margin: 0 }}>
-                            {t.plan_tier}
-                          </Tag>
-                          <Text style={{ flex: 1, fontSize: 13 }}>{t.name}</Text>
-                          <Tag icon={<LaptopOutlined />} color="blue">{t.device_count}</Tag>
-                        </div>
-                      ))}
+                      {s.top_organizations_by_devices.slice(0, 6).map((t) => {
+                        const color = PLAN_COLOR[t.plan_tier] ?? PLAN_COLOR.no_plan
+                        return (
+                          <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <Tag style={{ fontSize: 10, color, borderColor: color + '40', background: color + '15', margin: 0 }}>
+                              {t.plan_tier}
+                            </Tag>
+                            <Text style={{ flex: 1, fontSize: 13 }}>{t.name}</Text>
+                            <Tag icon={<LaptopOutlined />} color="blue">{t.device_count}</Tag>
+                          </div>
+                        )
+                      })}
                     </div>
                   </div>
                 </Col>
@@ -571,17 +588,17 @@ export default function SuperAdminPage() {
             </>
           )}
 
-          {/* Tenants table */}
+          {/* Organizations table */}
           <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
             <div style={{ padding: '14px 18px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
               <Text strong>Tüm Organizasyonlar</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>{tenants?.length ?? 0} toplam</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>{orgs.length} toplam</Text>
             </div>
             <Table
               columns={columns}
-              dataSource={tenants ?? []}
+              dataSource={orgs}
               rowKey="id"
-              loading={tenantsLoading}
+              loading={orgsLoading}
               pagination={false}
               size="small"
               locale={{ emptyText: 'Organizasyon bulunamadı' }}
@@ -589,33 +606,40 @@ export default function SuperAdminPage() {
           </div>
         </>
       ) : (
-        <ResourceAssignTab tenants={tenants ?? []} />
+        <ResourceAssignTab orgs={orgs} />
       )}
 
-      {/* Plan edit modal */}
+      {/* Quota edit modal */}
       <Modal
-        title={`Plan Düzenle — ${planModal?.name}`}
-        open={!!planModal}
-        onOk={handlePlanSave}
-        onCancel={() => setPlanModal(null)}
+        title={`Kotayı Düzenle — ${quotaModal?.name ?? ''}`}
+        open={!!quotaModal}
+        onOk={handleQuotaSave}
+        onCancel={() => setQuotaModal(null)}
         okText="Kaydet"
         cancelText="İptal"
-        confirmLoading={updatePlanMutation.isPending}
-        width={380}
+        confirmLoading={updateOrgMutation.isPending}
+        width={420}
       >
-        <Form form={planForm} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item label="Plan" name="plan_tier" rules={[{ required: true }]}>
-            <Select options={PLAN_OPTIONS} />
-          </Form.Item>
+        <Form form={quotaForm} layout="vertical" style={{ marginTop: 16 }}>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item label="Maks. Cihaz" name="max_devices" rules={[{ required: true }]}>
-                <InputNumber min={1} style={{ width: '100%' }} />
+                <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
             <Col span={12}>
               <Form.Item label="Maks. Kullanıcı" name="max_users" rules={[{ required: true }]}>
-                <InputNumber min={1} style={{ width: '100%' }} />
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Maks. Lokasyon" name="max_locations" rules={[{ required: true }]}>
+                <InputNumber min={0} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Maks. Agent" name="max_agents" rules={[{ required: true }]}>
+                <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
             </Col>
           </Row>
