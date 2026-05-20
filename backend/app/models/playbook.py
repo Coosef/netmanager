@@ -34,8 +34,9 @@ class Playbook(Base):
     pre_run_backup: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -74,6 +75,11 @@ class PlaybookRun(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     playbook: Mapped["Playbook"] = relationship("Playbook", back_populates="runs")

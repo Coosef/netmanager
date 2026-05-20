@@ -26,6 +26,12 @@ export const devicesApi = {
   update: (id: number, data: Record<string, unknown>) =>
     client.patch<Device>(`/devices/${id}`, data).then((r) => r.data),
 
+  // Faz 8 Phase G — device location ownership changes ONLY through this
+  // audited endpoint; the generic update path rejects location changes.
+  moveLocation: (id: number, target_location_id: number, reason?: string) =>
+    client.post<Device>(`/devices/${id}/move-location`, { target_location_id, reason })
+      .then((r) => r.data),
+
   delete: (id: number) =>
     client.delete(`/devices/${id}`),
 

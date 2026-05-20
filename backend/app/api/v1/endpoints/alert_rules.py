@@ -67,7 +67,6 @@ async def create_rule(
         cooldown_minutes=int(body.get("cooldown_minutes", 60)),
         enabled=bool(body.get("enabled", True)),
         created_by=current_user.id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(rule)
     await db.commit()

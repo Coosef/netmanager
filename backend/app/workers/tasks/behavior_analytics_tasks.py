@@ -32,75 +32,88 @@ async def _do_check_topology_drift():
     """
     Altın topoloji baseline ile mevcut topology_links tablosunu karşılaştırır.
     Eklenen veya kaybolan bağlantılar varsa topology_drift event'i yazar.
+
+    Faz 7 / topology T0 — runs PER ORGANIZATION: each org has its own
+    golden snapshot, its own links and its own drift event on its own
+    realtime channel. Without the per-org loop a single org's golden
+    snapshot would be compared against (or hide) every other org's links.
     """
     from sqlalchemy import select
     from app.core.database import make_worker_session
+    from app.core.org_context import org_context
+    from app.core.rls import apply_rls_context
+    from app.core.event_publish import publish_network_event
     from app.models.topology import TopologyLink
     from app.models.topology_snapshot import TopologySnapshot
     from app.models.network_event import NetworkEvent
+    from app.models.shared.organization import Organization
 
     def _link_key(link: dict) -> str:
         return f"{link.get('device_id')}:{link.get('local_port')}:{link.get('neighbor_hostname')}"
 
     async with make_worker_session()() as db:
-        golden = (await db.execute(
-            select(TopologySnapshot).where(TopologySnapshot.is_golden == True)
-        )).scalar_one_or_none()
+        # Enumerate organizations under the worker's super-admin context.
+        org_ids = (await db.execute(
+            select(Organization.id).where(Organization.is_active == True)
+        )).scalars().all()
 
-        if not golden:
-            log.debug("topology_twin: no golden baseline, skipping drift check")
-            return
+        for org_id in org_ids:
+            # Scope every query + the drift event below to this org.
+            with org_context(org_id, None):
+                await apply_rls_context(db)
 
-        golden_keys = {_link_key(lnk) for lnk in (golden.links or [])}
+                golden = (await db.execute(
+                    select(TopologySnapshot).where(TopologySnapshot.is_golden == True)
+                )).scalars().first()
+                if not golden:
+                    continue
 
-        current_rows = (await db.execute(select(TopologyLink))).scalars().all()
-        current_links = {
-            f"{r.device_id}:{r.local_port}:{r.neighbor_hostname}"
-            for r in current_rows
-        }
+                golden_keys = {_link_key(lnk) for lnk in (golden.links or [])}
+                current_rows = (await db.execute(select(TopologyLink))).scalars().all()
+                current_links = {
+                    f"{r.device_id}:{r.local_port}:{r.neighbor_hostname}"
+                    for r in current_rows
+                }
+                added_count = len(current_links - golden_keys)
+                removed_count = len(golden_keys - current_links)
+                if added_count == 0 and removed_count == 0:
+                    continue
+                if _is_dup(0, "topology_drift",
+                           f"{org_id}_{added_count}_{removed_count}", ttl=3600 * 6):
+                    continue
 
-        added_count = len(current_links - golden_keys)
-        removed_count = len(golden_keys - current_links)
+                evt = NetworkEvent(
+                    device_id=None,
+                    device_hostname=None,
+                    event_type="topology_drift",
+                    severity="warning",
+                    title="Topoloji Drift Tespiti",
+                    message=(
+                        f"{added_count} yeni bağlantı eklendi, "
+                        f"{removed_count} bağlantı kayboldu (altın baseline: '{golden.name}')"
+                    ),
+                    details={
+                        "added_count": added_count,
+                        "removed_count": removed_count,
+                        "golden_id": golden.id,
+                        "golden_name": golden.name,
+                    },
+                )
+                db.add(evt)  # _scoping stamps organization_id from context
+                await db.commit()
 
-        if added_count == 0 and removed_count == 0:
-            log.debug("topology_twin: no drift detected")
-            return
-
-        if _is_dup(0, "topology_drift", f"{added_count}_{removed_count}", ttl=3600 * 6):
-            return
-
-        evt = NetworkEvent(
-            device_id=None,
-            device_hostname=None,
-            event_type="topology_drift",
-            severity="warning",
-            title="Topoloji Drift Tespiti",
-            message=(
-                f"{added_count} yeni bağlantı eklendi, "
-                f"{removed_count} bağlantı kayboldu (altın baseline: '{golden.name}')"
-            ),
-            details={
-                "added_count": added_count,
-                "removed_count": removed_count,
-                "golden_id": golden.id,
-                "golden_name": golden.name,
-            },
-        )
-        db.add(evt)
-        await db.commit()
-        payload = {
-            "device_id": None,
-            "device_hostname": None,
-            "event_type": "topology_drift",
-            "severity": "warning",
-            "title": "Topoloji Drift Tespiti",
-            "message": evt.message,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-        _redis.publish("network:events", json.dumps(payload))
-        _redis.lpush("network:events:recent", json.dumps(payload))
-        _redis.ltrim("network:events:recent", 0, 499)
-        log.info("topology_twin: drift event fired", extra={"added": added_count, "removed": removed_count})
+                publish_network_event({
+                    "device_id": None,
+                    "device_hostname": None,
+                    "event_type": "topology_drift",
+                    "severity": "warning",
+                    "title": "Topoloji Drift Tespiti",
+                    "message": evt.message,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                }, _redis, organization_id=org_id)
+                log.info("topology_twin: drift event fired",
+                         extra={"org": org_id, "added": added_count,
+                                "removed": removed_count})
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -429,9 +442,8 @@ async def _do_detect_anomalies():
 
         if fired:
             await db.commit()
+            from app.core.event_publish import publish_network_event
             for p in notify_queue:
-                _redis.publish("network:events", json.dumps(p))
-                _redis.lpush("network:events:recent", json.dumps(p))
-            _redis.ltrim("network:events:recent", 0, 499)
+                publish_network_event(p, _redis)
 
         log.info("behavior: anomaly scan done, fired=%d", fired)

@@ -30,6 +30,11 @@ class NotificationChannel(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
 
 class NotificationLog(Base):
     """Tracks sent notifications to prevent duplicate sends."""
@@ -49,4 +54,9 @@ class NotificationLog(Base):
     error: Mapped[Optional[str]] = mapped_column(Text)
     sent_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
+    )
+
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )

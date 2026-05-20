@@ -41,6 +41,14 @@ class TopologyLink(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True
     )
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[int] = mapped_column(
+        ForeignKey("locations.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+
     __table_args__ = (
         UniqueConstraint("device_id", "local_port", "neighbor_hostname", name="uq_topology_link"),
     )

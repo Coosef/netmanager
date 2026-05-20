@@ -28,3 +28,6 @@ class AgentPeerLatency(Base):
         default=lambda: datetime.now(timezone.utc),
         index=True,
     )
+
+    # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
+    organization_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)

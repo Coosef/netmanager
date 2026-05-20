@@ -67,7 +67,7 @@ def backup_device_task(device_id: int, created_by: int | None = None):
             _inv_redis = _redis_lib.from_url(
                 settings.REDIS_URL, decode_responses=True, socket_timeout=2,
             )
-            invalidate_device_risk(_inv_redis, device_id, tenant_id=device.tenant_id)
+            invalidate_device_risk(_inv_redis, device_id)
         except Exception:
             pass  # invalidation is best-effort; never block backup completion
 

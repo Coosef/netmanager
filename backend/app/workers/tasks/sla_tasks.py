@@ -120,6 +120,5 @@ async def _run():
             "message": message,
             "ts": now.isoformat(),
         })
-        _redis.publish("network:events", payload)
-        _redis.lpush("network:events:recent", payload)
-        _redis.ltrim("network:events:recent", 0, 499)
+        from app.core.event_publish import publish_network_event
+        publish_network_event(payload, _redis)

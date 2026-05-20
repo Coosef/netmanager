@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, JSON
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String
 from app.core.database import Base
 
 
@@ -19,3 +19,14 @@ class DiscoveryResult(Base):
     total_discovered = Column(Integer, nullable=False, default=0)
     scanned_count = Column(Integer, nullable=False, default=0)
     results = Column(JSON, nullable=False, default=list)
+
+    # Faz 7 — multi-tenant isolation
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Faz 8 phase C — location scope, resolved from the originating
+    # agent's location. Nullable only as a historical review bucket;
+    # the discovery writer stamps it explicitly.
+    location_id = Column(
+        Integer, ForeignKey("locations.id", ondelete="RESTRICT"), nullable=True, index=True
+    )

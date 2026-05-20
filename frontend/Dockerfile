@@ -2,7 +2,11 @@ FROM node:20-alpine AS development
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --legacy-peer-deps
+# TD-1 — strict, lockfile-pinned install (matches the production builder).
+# The lockfile is regenerated from package.json with peer deps respected;
+# the previous `--legacy-peer-deps` install pulled an incompatible @types
+# tree and produced ~150 phantom TopologyV2 tsc errors.
+RUN npm ci
 COPY . .
 EXPOSE 3000
 CMD ["npm", "run", "dev"]

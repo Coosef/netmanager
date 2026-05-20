@@ -10,7 +10,9 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     role: str = "viewer"
     notes: Optional[str] = None
-    tenant_id: Optional[int] = None
+    # M6 — `organization_id` is authoritative; the legacy `tenant_id`
+    # field is gone with the column.
+    organization_id: Optional[int] = None
 
 
 class UserUpdate(BaseModel):
@@ -19,7 +21,7 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     notes: Optional[str] = None
-    tenant_id: Optional[int] = None
+    organization_id: Optional[int] = None
 
 
 class UserPasswordChange(BaseModel):
@@ -47,8 +49,10 @@ class UserResponse(BaseModel):
     role: str
     is_active: bool
     notes: Optional[str]
-    tenant_id: Optional[int]
-    tenant_name: Optional[str] = None
+    # M6 — `organization_id` is authoritative; `tenant_id` / `tenant_name`
+    # are gone with the legacy column.
+    organization_id: Optional[int] = None
+    organization_name: Optional[str] = None
     last_login: Optional[datetime]
     created_at: datetime
     locations: list[UserLocationItem] = []

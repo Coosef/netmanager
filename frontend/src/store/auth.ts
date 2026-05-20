@@ -7,7 +7,6 @@ type AuthUser = {
   username: string
   role: UserRole
   system_role: SystemRole
-  tenant_id?: number | null
   org_id?: number | null
 }
 

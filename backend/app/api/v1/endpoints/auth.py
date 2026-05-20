@@ -32,10 +32,13 @@ async def _build_token_response(db: AsyncSession, user: User) -> TokenResponse:
         access_token=create_access_token({"sub": str(user.id)}),
         user_id=user.id,
         username=user.username,
-        role=user.role,
+        # M6 final drop — legacy `role` column gone; surface `system_role`
+        # as `role` for the frontend (which expects the field). The new
+        # `system_role` field still carries the same value for callers
+        # that have already migrated to it.
+        role=user.system_role,
         system_role=user.system_role,
-        tenant_id=user.tenant_id,
-        org_id=user.org_id,
+        org_id=user.organization_id,
         permissions=permissions,
     )
 
@@ -119,24 +122,24 @@ async def accept_invite(
     if existing_email.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Bu e-posta adresi zaten kayıtlı")
 
+    # M6-B2 — invitee inherits the invite's organization (the legacy
+    # `tenant_id` column stays nullable in the DB until the M6 final
+    # drop; we no longer write to it).
     user = User(
         username=payload.username,
         email=invite.email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name or invite.full_name,
         is_active=True,
-        # Legacy compat
-        role="viewer",
-        tenant_id=invite.tenant_id,
-        # New RBAC
+        role="viewer",   # legacy column, retired in B4
         system_role=invite.system_role,
-        org_id=invite.org_id,
+        organization_id=invite.organization_id,
     )
     db.add(user)
     await db.flush()  # get user.id
 
     # Assign permission set if specified in invite
-    if invite.permission_set_id and invite.org_id:
+    if invite.permission_set_id and invite.organization_id:
         from app.models.shared.user_location_perm import UserLocationPerm
         ulp = UserLocationPerm(
             user_id=user.id,

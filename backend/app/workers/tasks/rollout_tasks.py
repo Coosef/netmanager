@@ -110,7 +110,6 @@ def execute_rollout_task(self, rollout_id: int):
                             config_hash=cfg_hash,
                             size_bytes=len(before_config),
                             notes=f"Pre-rollout backup — rollout #{rollout_id}",
-                            tenant_id=device.tenant_id,
                         )
                         db.add(backup)
                         await db.commit()
@@ -242,9 +241,8 @@ async def _notify_rollout_failure(db, rollout, rollout_id: int, final_status: st
             "message": message,
             "ts": datetime.now(timezone.utc).isoformat(),
         })
-        _redis.publish("network:events", payload)
-        _redis.lpush("network:events:recent", payload)
-        _redis.ltrim("network:events:recent", 0, 499)
+        from app.core.event_publish import publish_network_event
+        publish_network_event(payload, _redis)
     except Exception:
         pass
 

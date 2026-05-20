@@ -65,7 +65,7 @@ def run_security_audit(self, task_id: int, device_ids: list[int]):
                 else:
                     success_count += 1
                     # Faz 6B G4: compliance score changed → invalidate device risk cache
-                    invalidate_device_risk(_inv_redis, device.id, tenant_id=device.tenant_id)
+                    invalidate_device_risk(_inv_redis, device.id)
 
             final_status = (
                 TaskStatus.SUCCESS if failed_count == 0
@@ -131,7 +131,7 @@ def scheduled_compliance_scan():
 
                     # Faz 6B G4: compliance score changed → invalidate device risk cache
                     if not error:
-                        invalidate_device_risk(_redis, device.id, tenant_id=device.tenant_id)
+                        invalidate_device_risk(_redis, device.id)
 
                     if not error and score < 50:
                         critical.append({
@@ -191,8 +191,7 @@ def scheduled_compliance_scan():
                 "message": message,
                 "ts": now.isoformat(),
             })
-            _redis.publish("network:events", payload)
-            _redis.lpush("network:events:recent", payload)
-            _redis.ltrim("network:events:recent", 0, 499)
+            from app.core.event_publish import publish_network_event
+            publish_network_event(payload, _redis)
 
     _run_async(_run())

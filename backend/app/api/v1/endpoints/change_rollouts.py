@@ -136,7 +136,6 @@ async def create_rollout(
         device_ids=payload.device_ids,
         total_devices=len(payload.device_ids),
         created_by=current_user.username,
-        tenant_id=current_user.tenant_id,
     )
     db.add(r)
     await db.commit()

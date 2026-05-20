@@ -44,6 +44,14 @@ class SyntheticProbe(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
 
 class SyntheticProbeResult(Base):
     __tablename__ = "synthetic_probe_results"
@@ -61,3 +69,6 @@ class SyntheticProbeResult(Base):
     measured_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, index=True
     )
+
+    # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
+    organization_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)

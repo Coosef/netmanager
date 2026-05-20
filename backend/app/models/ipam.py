@@ -19,8 +19,9 @@ class IpamSubnet(Base):
     gateway: Mapped[Optional[str]] = mapped_column(String(45))
     dns_servers: Mapped[Optional[str]] = mapped_column(String(255))  # comma-separated
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -47,6 +48,13 @@ class IpamAddress(Base):
     status: Mapped[str] = mapped_column(String(16), default="dynamic", index=True)
     device_id: Mapped[Optional[int]] = mapped_column(ForeignKey("devices.id", ondelete="SET NULL"))
     last_seen: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

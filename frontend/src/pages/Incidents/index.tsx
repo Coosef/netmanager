@@ -9,6 +9,7 @@ import {
   PrinterOutlined,
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSite } from '@/contexts/SiteContext'
 import {
   incidentsApi,
   type IncidentSummary, type IncidentRCA,
@@ -382,6 +383,9 @@ ${rca.topology_neighbors.map(n =>
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function IncidentsPage() {
   const qc = useQueryClient()
+  // Faz 8 Phase F — incidents are location-scoped; key the list by the
+  // active location so a switch cannot serve another location's incidents.
+  const { activeLocationId } = useSite()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [filterState, setFilterState] = useState<string | undefined>()
   const [filterSev, setFilterSev] = useState<string | undefined>()
@@ -390,7 +394,7 @@ export default function IncidentsPage() {
   const limit = 20
 
   const { data, isLoading } = useQuery({
-    queryKey: ['incidents', filterState, filterSev, filterHours, page],
+    queryKey: ['incidents', activeLocationId, filterState, filterSev, filterHours, page],
     queryFn: () => incidentsApi.list({
       state: filterState as IncidentState | undefined,
       severity: filterSev as IncidentSeverity | undefined,

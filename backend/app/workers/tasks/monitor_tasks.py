@@ -165,9 +165,8 @@ def _save_event(db, device, event_type: str, severity: str, title: str,
         "message": message,
         "ts": event.created_at.isoformat(),
     }
-    _redis.publish("network:events", json.dumps(payload))
-    _redis.lpush("network:events:recent", json.dumps(payload))
-    _redis.ltrim("network:events:recent", 0, 499)
+    from app.core.event_publish import publish_network_event
+    publish_network_event(payload, _redis)
 
     # Invalidate cached risk score when status-affecting events fire
     if event_type in ("device_offline", "device_online", "device_flapping",
@@ -486,10 +485,11 @@ def check_stp_anomalies(device_ids: list[int]):
                                          dedup_ttl=1800)
                         if ev:
                             found.append(ev.id)
-                            _redis.publish("anomalies", json.dumps({
+                            from app.core.event_publish import publish_anomaly
+                            publish_anomaly({
                                 "device_id": device.id, "hostname": device.hostname,
                                 "type": "stp", "patterns": [pattern],
-                                "ts": datetime.now(timezone.utc).isoformat()}))
+                                "ts": datetime.now(timezone.utc).isoformat()}, _redis)
                         break
             except Exception:
                 pass
@@ -521,10 +521,11 @@ def check_loop_detection(device_ids: list[int]):
                                          dedup_ttl=1800)
                         if ev:
                             found.append(ev.id)
-                            _redis.publish("anomalies", json.dumps({
+                            from app.core.event_publish import publish_anomaly
+                            publish_anomaly({
                                 "device_id": device.id, "hostname": device.hostname,
                                 "type": "loop", "patterns": [pattern],
-                                "ts": datetime.now(timezone.utc).isoformat()}))
+                                "ts": datetime.now(timezone.utc).isoformat()}, _redis)
                         break
             except Exception:
                 pass

@@ -54,6 +54,14 @@ class Incident(Base):
     # Audit trail: [{"ts":"...","state":"OPEN","reason":"..."}, ...]
     timeline:    Mapped[Optional[dict]] = mapped_column(JSON, default=list)
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("locations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     device = relationship("Device", foreign_keys=[device_id], lazy="select")
 
     __table_args__ = (

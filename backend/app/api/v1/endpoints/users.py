@@ -1,35 +1,50 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy import select, func, delete
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, require_roles
+from app.core.deps import CurrentUser, require_system_role
 from app.core.security import hash_password, verify_password
 from app.models.location import Location
-from app.models.tenant import Tenant
-from app.models.user import User, UserRole
+from app.models.shared.organization import Organization
+from app.models.user import SystemRole, User
 from app.models.user_location import UserLocation
 from app.schemas.user import AdminPasswordReset, UserCreate, UserPasswordChange, UserResponse, UserUpdate
 from app.services.audit_service import log_action
 
+# M6-B4 — privileged-role values, as strings. UserCreate / UserUpdate
+# carry `role` as a plain str, so the privilege guards compare against
+# the union of new (SystemRole) and legacy (UserRole) string values for
+# back-compat until the legacy `users.role` column drops in the final M6.
+_PRIVILEGED_ROLES = {"super_admin", "admin", "org_admin"}
+
 router = APIRouter()
 
-AdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN))
+AdminRequired = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN))
 
 
 def _is_platform_admin(user: User) -> bool:
-    """True for SUPER_ADMIN or ADMIN with no tenant — both have unrestricted access."""
-    return user.role == UserRole.SUPER_ADMIN or (user.role == UserRole.ADMIN and not user.tenant_id)
+    """True for SUPER_ADMIN, or for an ORG_ADMIN not bound to an
+    organization — both have unrestricted access. (M6-B4: now keyed off
+    `system_role`; the legacy `role` column is no longer consulted.)"""
+    return user.system_role == SystemRole.SUPER_ADMIN or (
+        user.system_role == SystemRole.ORG_ADMIN and not user.organization_id
+    )
 
 
-async def _with_tenant_name(db, user: User) -> dict:
-    tenant_name = None
-    if user.tenant_id:
-        t = (await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))).scalar_one_or_none()
-        if t:
-            tenant_name = t.name
+async def _with_org_dict(db, user: User) -> dict:
+    """Build the UserResponse dict, joining the user's organization for
+    its name (was the legacy Tenant — M6-B1: `tenant_name` is kept as a
+    deprecated alias of `organization_name` so the frontend can migrate
+    without coordination)."""
+    org_name = None
+    if user.organization_id:
+        o = (await db.execute(
+            select(Organization).where(Organization.id == user.organization_id)
+        )).scalar_one_or_none()
+        if o:
+            org_name = o.name
 
-    # Load location assignments
     loc_rows = (await db.execute(
         select(UserLocation, Location)
         .join(Location, Location.id == UserLocation.location_id)
@@ -43,7 +58,7 @@ async def _with_tenant_name(db, user: User) -> dict:
 
     return {
         **UserResponse.model_validate(user).model_dump(),
-        "tenant_name": tenant_name,
+        "organization_name": org_name,
         "locations": locations,
     }
 
@@ -56,13 +71,13 @@ async def list_users(
     limit: int = 100,
 ):
     q = select(User)
-    # SUPER_ADMIN and tenant-less ADMIN are platform admins — see all users
-    if not (current_user.role == UserRole.SUPER_ADMIN or
-            (current_user.role == UserRole.ADMIN and not current_user.tenant_id)):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+    # M6-B1 — platform admins (SUPER_ADMIN / org-less ADMIN) see all users;
+    # everyone else is scoped to their own organization.
+    if not _is_platform_admin(current_user):
+        q = q.where(User.organization_id == current_user.organization_id)
     result = await db.execute(q.offset(skip).limit(limit))
     users = result.scalars().all()
-    return [await _with_tenant_name(db, u) for u in users]
+    return [await _with_org_dict(db, u) for u in users]
 
 
 @router.post("/", response_model=UserResponse, status_code=201)
@@ -70,30 +85,29 @@ async def create_user(
     payload: UserCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
+    # M6-B1 — pick the new user's organization. Platform admins may
+    # target any org via `payload.organization_id`; an org-scoped ADMIN
+    # always creates in their own org and cannot escalate to ADMIN/SA.
     if _is_platform_admin(current_user):
-        # SA or tenant-less ADMIN: can create anyone, pick tenant from payload
-        tenant_id = payload.tenant_id
+        org_id = payload.organization_id
     else:
-        # Tenant-scoped ADMIN: cannot create ADMIN/SA and always creates in own tenant
-        if payload.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+        if payload.role in _PRIVILEGED_ROLES:
             raise HTTPException(status_code=403, detail="ADMIN cannot create ADMIN or SUPER_ADMIN users")
-        tenant_id = current_user.tenant_id
+        org_id = current_user.organization_id
 
-    # SaaS quota: check tenant user limit
-    if tenant_id:
-        tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
-        if tenant:
-            current_count = (await db.execute(
-                select(func.count()).select_from(User)
-                .where(User.tenant_id == tenant_id, User.is_active == True)
-            )).scalar() or 0
-            if current_count >= tenant.max_users:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Kullanıcı limiti doldu ({current_count}/{tenant.max_users}). Plan yükseltmeniz gerekiyor.",
-                )
+    # Faz 8 Phase H — organization quota + lifecycle: refuse once the
+    # org's user quota is reached (a platform super-admin may override).
+    if org_id is not None:
+        from app.core.request_context import is_super_admin as _is_super
+        from app.services.org_management import enforce_org_can_create
+        _org = await db.get(Organization, org_id)
+        await enforce_org_can_create(
+            db, _org, "users",
+            actor_user_id=current_user.id,
+            is_super_admin=_is_super(current_user),
+        )
 
     existing = await db.execute(select(User).where(User.username == payload.username))
     if existing.scalar_one_or_none():
@@ -106,13 +120,13 @@ async def create_user(
         full_name=payload.full_name,
         role=payload.role,
         notes=payload.notes,
-        tenant_id=tenant_id,
+        organization_id=org_id,
     )
     db.add(user)
     await db.commit()
     await db.refresh(user)
     await log_action(db, current_user, "user_created", "user", user.id, user.username, request=request)
-    return await _with_tenant_name(db, user)
+    return await _with_org_dict(db, user)
 
 
 @router.get("/{user_id}", response_model=UserResponse)
@@ -123,11 +137,11 @@ async def get_user(
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+        q = q.where(User.organization_id == current_user.organization_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return await _with_tenant_name(db, user)
+    return await _with_org_dict(db, user)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
@@ -136,21 +150,24 @@ async def update_user(
     payload: UserUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+        q = q.where(User.organization_id == current_user.organization_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
     data = payload.model_dump(exclude_unset=True)
 
-    if current_user.role == UserRole.ADMIN and current_user.tenant_id:
-        # Tenant-scoped admin: cannot change tenant or escalate to SA
+    if not _is_platform_admin(current_user):
+        # Org-scoped admin: cannot reassign organization or escalate to SA.
+        # `tenant_id` is silently dropped (legacy alias) so an old client
+        # cannot accidentally move a user across orgs through the back door.
+        data.pop("organization_id", None)
         data.pop("tenant_id", None)
-        if data.get("role") == UserRole.SUPER_ADMIN:
+        if data.get("role") in ("super_admin",):
             raise HTTPException(status_code=403, detail="Cannot elevate to SUPER_ADMIN")
 
     for field, value in data.items():
@@ -159,7 +176,7 @@ async def update_user(
     await db.commit()
     await db.refresh(user)
     await log_action(db, current_user, "user_updated", "user", user_id, user.username, request=request)
-    return await _with_tenant_name(db, user)
+    return await _with_org_dict(db, user)
 
 
 @router.delete("/{user_id}", status_code=204)
@@ -167,18 +184,18 @@ async def delete_user(
     user_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+        q = q.where(User.organization_id == current_user.organization_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
-    # Tenant-scoped ADMIN cannot delete ADMIN or SA users
-    if current_user.role == UserRole.ADMIN and current_user.tenant_id and user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+    # Org-scoped ADMIN cannot delete ADMIN or SA users
+    if not _is_platform_admin(current_user) and user.system_role in (SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN):
         raise HTTPException(status_code=403, detail="ADMIN cannot delete ADMIN or SUPER_ADMIN users")
 
     await db.execute(delete(UserLocation).where(UserLocation.user_id == user.id))
@@ -193,15 +210,15 @@ async def admin_reset_password(
     payload: AdminPasswordReset,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+        q = q.where(User.organization_id == current_user.organization_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if current_user.role == UserRole.ADMIN and current_user.tenant_id and user.role == UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user) and user.system_role == SystemRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Cannot reset SUPER_ADMIN password")
 
     user.hashed_password = hash_password(payload.new_password)
@@ -236,7 +253,7 @@ async def get_user_locations(
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+        q = q.where(User.organization_id == current_user.organization_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -270,7 +287,7 @@ async def set_user_locations(
     """Replace all location assignments for a user at once."""
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
-        q = q.where(User.tenant_id == current_user.tenant_id)
+        q = q.where(User.organization_id == current_user.organization_id)
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
@@ -278,11 +295,14 @@ async def set_user_locations(
     # Delete all existing assignments
     await db.execute(delete(UserLocation).where(UserLocation.user_id == user_id))
 
-    # Collect valid location IDs scoped to the caller's tenant (platform admins unrestricted)
-    if not _is_platform_admin(current_user) and current_user.tenant_id:
+    # M6-B1 — collect valid location IDs scoped to the caller's
+    # organization (platform admins unrestricted).
+    if not _is_platform_admin(current_user) and current_user.organization_id:
         allowed_locs = set(
             (await db.execute(
-                select(Location.id).where(Location.tenant_id == current_user.tenant_id)
+                select(Location.id).where(
+                    Location.organization_id == current_user.organization_id
+                )
             )).scalars().all()
         )
     else:

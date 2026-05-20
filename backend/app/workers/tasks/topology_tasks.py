@@ -164,6 +164,13 @@ def discover_topology(self, task_id: int, device_ids: list[int]):
             for key in _redis.keys("topology:graph:*"):
                 _redis.delete(key)
 
+            # Topology T0 — notify each affected org's realtime stream so
+            # the topology UI patches instead of waiting for the 60s poll.
+            from app.core.event_publish import publish_topology_event
+            for _org in {d.organization_id for d in devices if d.organization_id}:
+                publish_topology_event("topology_links_updated", _org, _redis,
+                                       completed=completed, failed=failed)
+
             await ssh.close_all()
 
     _run_async(_run())
@@ -197,6 +204,15 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
                 ))
                 await db.commit()
                 return
+
+            # Faz 7 / topology T0 — scope the rest of the cascade to the
+            # source device's organization + location. Without this the
+            # task inherits the worker's super-admin context and would
+            # match ghost neighbours against EVERY org's inventory.
+            from app.core.org_context import set_org_context
+            from app.core.rls import apply_rls_context
+            set_org_context(source.organization_id, source.location_id, is_super_admin=False)
+            await apply_rls_context(db)
 
             ssh_username = source.ssh_username
             ssh_password = decrypt_credential(source.ssh_password_enc)
@@ -295,6 +311,11 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
                             await db.refresh(existing)
                         else:
                             real_device = Device(
+                                # Faz 8 phase B — explicit ownership: a
+                                # hop-discovered device inherits the source
+                                # device's org + location.
+                                organization_id=source.organization_id,
+                                location_id=source.location_id,
                                 hostname=device_info.get("hostname") or ip,
                                 ip_address=ip,
                                 vendor=source.vendor,
@@ -314,6 +335,18 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
                             db.add(real_device)
                             await db.commit()
                             await db.refresh(real_device)
+                            # Faz 8 Phase G — discovery is RLS-scoped: the
+                            # `existing` lookup above only ever matched a
+                            # device in the SOURCE's org+location, so this
+                            # IP was created as a NEW location-scoped device
+                            # and no other device was reassigned. If the
+                            # same IP also exists in another location
+                            # (legitimate — overlapping private ranges),
+                            # surface it as a structured conflict event.
+                            from app.services.device_ownership import detect_ip_location_conflict
+                            await detect_ip_location_conflict(
+                                ip, source.organization_id, source.location_id,
+                            )
                             # Refresh lookup maps after adding a new device
                             all_devices_new = (await db.execute(
                                 select(Device).where(Device.is_active == True)
@@ -378,6 +411,15 @@ def hop_discover_task(self, task_id: int, source_device_id: int, target_ips: lis
             for key in _redis.keys("topology:graph:*"):
                 _redis.delete(key)
 
+            # Topology T0 — per-org realtime notification (hop discovery is
+            # scoped to the source device's org/location, set above).
+            from app.core.event_publish import publish_topology_event
+            publish_topology_event(
+                "topology_links_updated", source.organization_id, _redis,
+                location_id=source.location_id,
+                completed=completed, failed=failed, discovered=len(discovered_new),
+            )
+
     _run_async(_run())
 
 
@@ -404,6 +446,9 @@ def scheduled_topology_discovery():
                 device_ids=device_ids,
                 total_devices=len(device_ids),
                 created_by=1,
+                # Fleet-wide scheduled task — no request context; stamp
+                # the org from the devices it operates on (Faz 7).
+                organization_id=devices[0].organization_id,
             )
             db.add(task)
             await db.commit()

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from app.core.database import Base
 
 
@@ -16,3 +16,8 @@ class AgentCredentialBundle(Base):
         default=lambda: datetime.now(timezone.utc),
     )
     device_count = Column(Integer, nullable=False, default=0)
+
+    # Faz 7 — multi-tenant isolation
+    organization_id = Column(
+        Integer, ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )

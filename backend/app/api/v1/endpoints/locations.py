@@ -7,15 +7,15 @@ from sqlalchemy import func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, require_roles
+from app.core.deps import CurrentUser, require_system_role
 from app.models.device import Device
 from app.models.location import Location
-from app.models.user import User, UserRole
+from app.models.user import SystemRole, User
 from app.models.user_location import UserLocation
 
 router = APIRouter()
 
-AdminOrAbove = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN))
+AdminOrAbove = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN))
 
 
 class LocationCreate(BaseModel):
@@ -26,7 +26,8 @@ class LocationCreate(BaseModel):
     city: Optional[str] = None
     country: Optional[str] = None
     timezone: Optional[str] = None
-    tenant_id: Optional[int] = None
+    # M6 final drop — legacy `tenant_id` removed; organization is
+    # resolved server-side from the request context.
 
 
 class LocationUpdate(BaseModel):
@@ -54,7 +55,7 @@ def _serialize(loc: Location, device_count: int = 0, user_count: int = 0) -> dic
         "city": loc.city,
         "country": loc.country,
         "timezone": loc.timezone,
-        "tenant_id": loc.tenant_id,
+        "organization_id": loc.organization_id,
         "device_count": device_count,
         "user_count": user_count,
         "created_at": loc.created_at.isoformat(),
@@ -72,17 +73,22 @@ async def list_locations(
 ):
     query = select(Location)
 
-    if current_user.role == UserRole.SUPER_ADMIN:
-        if tenant_id:
-            query = query.where(Location.tenant_id == tenant_id)
-    elif current_user.role == UserRole.ADMIN:
-        if current_user.tenant_id:
-            query = query.where(Location.tenant_id == current_user.tenant_id)
-    elif current_user.role == UserRole.ORG_VIEWER:
-        if not current_user.tenant_id:
+    # M6-B4 — org-level filtering now goes through `organization_id`; for
+    # non-super-admins RLS already scopes Location queries to the caller's
+    # org, so the explicit filter is belt-and-suspenders. Location-scoped
+    # users (LOCATION_ADMIN) see only their user_locations assignments.
+    if current_user.system_role == SystemRole.SUPER_ADMIN:
+        if tenant_id is not None:
+            # legacy `tenant_id` query param kept as deprecated alias for
+            # `organization_id` until S2 retires it on the frontend.
+            query = query.where(Location.organization_id == tenant_id)
+    elif current_user.system_role in (SystemRole.ORG_ADMIN, SystemRole.VIEWER):
+        if not current_user.organization_id:
             return {"items": [], "total": 0}
-        query = query.where(Location.tenant_id == current_user.tenant_id)
+        query = query.where(Location.organization_id == current_user.organization_id)
     else:
+        # LOCATION_ADMIN (and any other location-scoped role) — only the
+        # locations assigned via user_locations.
         assigned = (await db.execute(
             select(UserLocation.location_id).where(UserLocation.user_id == current_user.id)
         )).scalars().all()
@@ -125,11 +131,35 @@ async def create_location(
     if existing:
         raise HTTPException(status_code=409, detail="Bu isimde bir lokasyon zaten var")
 
-    tenant_id = payload.tenant_id
-    if current_user.role == UserRole.ADMIN:
-        tenant_id = current_user.tenant_id
+    # M6-B4 — legacy `tenant_id` propagation removed. The new location
+    # is bound by `organization_id` from the request context (see below);
+    # the `tenant_id` column stays nullable in DB until the final M6 drop
+    # and is no longer set on new rows.
+
+    # Faz 8 phase B — explicit organization ownership. The location is
+    # created in the caller's effective organization (a super-admin's
+    # X-Org-Id resolves the same way); no default-org fallback.
+    from app.core.org_context import get_current_org_id
+    org_id = get_current_org_id()
+    if org_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Lokasyon oluşturmak için etkin bir organizasyon bağlamı gerekli",
+        )
+
+    # Faz 8 Phase H — organization quota + lifecycle gate.
+    from app.models.shared.organization import Organization
+    from app.core.request_context import is_super_admin
+    from app.services.org_management import enforce_org_can_create
+    _org = await db.get(Organization, org_id)
+    await enforce_org_can_create(
+        db, _org, "locations",
+        actor_user_id=current_user.id,
+        is_super_admin=is_super_admin(current_user),
+    )
 
     loc = Location(
+        organization_id=org_id,
         name=payload.name,
         description=payload.description,
         address=payload.address,
@@ -137,7 +167,6 @@ async def create_location(
         city=payload.city,
         country=payload.country,
         timezone=payload.timezone,
-        tenant_id=tenant_id,
     )
     db.add(loc)
     await db.commit()
@@ -157,7 +186,11 @@ async def get_location(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
-    if current_user.role not in (UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.ORG_VIEWER):
+    # M6-B4 — org-wide users (SA / ORG_ADMIN / VIEWER) see the whole org;
+    # location-scoped users (LOCATION_ADMIN) must hold this location.
+    if current_user.system_role not in (
+        SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN, SystemRole.VIEWER,
+    ):
         assigned = (await db.execute(
             select(UserLocation).where(
                 UserLocation.user_id == current_user.id,
@@ -190,7 +223,7 @@ async def update_location(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
-    if current_user.role == UserRole.ADMIN and loc.tenant_id != current_user.tenant_id:
+    if current_user.system_role == SystemRole.ORG_ADMIN and loc.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Bu lokasyona erişim yetkiniz yok")
 
     old_name = loc.name
@@ -236,7 +269,7 @@ async def delete_location(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
-    if current_user.role == UserRole.ADMIN and loc.tenant_id != current_user.tenant_id:
+    if current_user.system_role == SystemRole.ORG_ADMIN and loc.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Bu lokasyona erişim yetkiniz yok")
 
     if unassign:
@@ -244,8 +277,15 @@ async def delete_location(
             update(Device).where(Device.site == loc.name).values(site=None)
         )
 
-    await db.delete(loc)
-    await db.commit()
+    # Faz 7 — soft delete: RLS hides the location afterward; reversible.
+    # archived_visible() keeps the post-update row valid mid-statement.
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        loc.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
 
 
 # ── User-Location assignment endpoints ──────────────────────────────────────
@@ -262,7 +302,7 @@ async def list_location_users(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
-    if current_user.role == UserRole.ADMIN and loc.tenant_id != current_user.tenant_id:
+    if current_user.system_role == SystemRole.ORG_ADMIN and loc.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Erişim reddedildi")
 
     rows = (await db.execute(
@@ -299,7 +339,7 @@ async def assign_user_to_location(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
-    if current_user.role == UserRole.ADMIN and loc.tenant_id != current_user.tenant_id:
+    if current_user.system_role == SystemRole.ORG_ADMIN and loc.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Erişim reddedildi")
 
     target_user = (await db.execute(
@@ -307,7 +347,7 @@ async def assign_user_to_location(
     )).scalar_one_or_none()
     if not target_user:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
-    if current_user.role == UserRole.ADMIN and target_user.tenant_id != current_user.tenant_id:
+    if current_user.system_role == SystemRole.ORG_ADMIN and target_user.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Bu kullanıcıya erişim yetkiniz yok")
 
     valid_loc_roles = {"location_manager", "location_operator", "location_viewer"}
@@ -349,7 +389,7 @@ async def remove_user_from_location(
     if not loc:
         raise HTTPException(status_code=404, detail="Lokasyon bulunamadı")
 
-    if current_user.role == UserRole.ADMIN and loc.tenant_id != current_user.tenant_id:
+    if current_user.system_role == SystemRole.ORG_ADMIN and loc.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Erişim reddedildi")
 
     await db.execute(

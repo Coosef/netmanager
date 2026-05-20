@@ -54,7 +54,16 @@ def on_task_prerun(task_id: str, task, **kwargs):
     _task_starts.__dict__[task_id] = time.monotonic()
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(celery_task_id=task_id, task_name=task.name)
-    log.info("task_started", task_name=task.name)
+    # Faz 8 Phase E — a task enqueued with enqueue_scoped() carries the
+    # validated (organization_id, location_id) of the user action that
+    # created it; the worker runs under exactly that scope (RLS-enforced).
+    # A task with no scope envelope is system-owned — beat jobs and
+    # fleet-wide sweeps — and keeps the super-admin context; its row
+    # writes are still org-stamped per row by the before_insert hook.
+    from app.workers.task_scope import apply_task_scope, scope_from_request
+    scope = scope_from_request(getattr(task, "request", None))
+    scoped = apply_task_scope(scope)
+    log.info("task_started", task_name=task.name, scoped=scoped)
 
 
 @task_postrun.connect
@@ -64,6 +73,8 @@ def on_task_postrun(task_id: str, task, state: str, **kwargs):
     queue = _get_queue(task.name)
     CELERY_TASK_DURATION_SECONDS.labels(task_name=task.name, queue=queue).observe(duration)
     CELERY_TASK_TOTAL.labels(task_name=task.name, queue=queue, status="success").inc()
+    from app.core.org_context import clear_org_context
+    clear_org_context()
     log.info("task_completed", task_name=task.name, duration_s=round(duration, 3), state=state)
 
 

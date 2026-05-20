@@ -54,20 +54,48 @@ async def persist_and_correlate(db, payloads: list[dict], sync_redis) -> int:
     if not payloads:
         return 0
 
+    from sqlalchemy import select
+
     from app.models.syslog_event import SyslogEvent
+    from app.models.agent import Agent
     from app.services.syslog_normalizer import AVAILABILITY_EVENT_TYPES, normalize
 
-    rows = [
-        SyslogEvent(
+    # Faz 8 phase C — resolve organization + location from the originating
+    # agent. A payload whose agent is unknown cannot be scoped (org is
+    # NOT NULL) → it is dropped and logged, never silently misattributed.
+    agent_ids = {p.get("agent_id") for p in payloads if p.get("agent_id")}
+    scope: dict = {}
+    if agent_ids:
+        for aid, oid, lid in (await db.execute(
+            select(Agent.id, Agent.organization_id, Agent.location_id)
+            .where(Agent.id.in_(agent_ids))
+        )).all():
+            scope[aid] = (oid, lid)
+
+    rows = []
+    dropped = 0
+    for p in payloads:
+        sc = scope.get(p.get("agent_id"))
+        if sc is None:
+            dropped += 1
+            continue
+        rows.append(SyslogEvent(
             agent_id=p.get("agent_id"),
             source_ip=p.get("source_ip", ""),
             facility=p.get("facility", 0),
             severity=p.get("severity", 7),
             message=p.get("message", ""),
             received_at=_parse_dt(p.get("received_at")),
+            organization_id=sc[0],
+            location_id=sc[1],
+        ))
+    if dropped:
+        log.warning(
+            "syslog_ingest: dropped %d event(s) — unknown/unscopable agent", dropped,
+            extra={"dropped": dropped, "reason": "agent not resolvable to org/location"},
         )
-        for p in payloads
-    ]
+    if not rows:
+        return 0
     db.add_all(rows)
     await db.commit()
 
@@ -84,9 +112,21 @@ async def persist_and_correlate(db, payloads: list[dict], sync_redis) -> int:
         )
         if not normalized or normalized.event_type not in AVAILABILITY_EVENT_TYPES:
             continue
-        device_id = (await db.execute(
-            select(Device.id).where(Device.ip_address == p.get("source_ip", ""))
-        )).scalar_one_or_none()
+        # Faz 8 Phase D — the correlated device must be in the originating
+        # agent's own org (+ location): two locations may legitimately use
+        # the same source_ip, so an unscoped ip match could correlate a
+        # foreign location's device. A payload with no resolvable agent
+        # scope was already dropped from `rows` above.
+        sc = scope.get(p.get("agent_id"))
+        if sc is None:
+            continue
+        device_q = select(Device.id).where(
+            Device.ip_address == p.get("source_ip", ""),
+            Device.organization_id == sc[0],
+        )
+        if sc[1] is not None:
+            device_q = device_q.where(Device.location_id == sc[1])
+        device_id = (await db.execute(device_q)).scalar_one_or_none()
         if not device_id:
             continue
         try:

@@ -41,7 +41,10 @@ class ApprovalRequest(Base):
     )
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
     executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    location_id: Mapped[int] = mapped_column(
+        ForeignKey("locations.id", ondelete="RESTRICT"), nullable=False, index=True
     )

@@ -393,9 +393,8 @@ async def _dispatch_alert(rule, device, if_name: str, value: float, count: int):
                 "message": body,
                 "ts": datetime.now(timezone.utc).isoformat(),
             })
-            _redis.publish("network:events", payload)
-            _redis.lpush("network:events:recent", payload)
-            _redis.ltrim("network:events:recent", 0, 499)
+            from app.core.event_publish import publish_network_event
+            publish_network_event(payload, _redis)
     except Exception:
         pass
 

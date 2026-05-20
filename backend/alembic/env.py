@@ -26,11 +26,15 @@ target_metadata = Base.metadata
 
 def get_url() -> str:
     """
-    Use SYNC_DATABASE_URL (psycopg2) for Alembic.
-    asyncpg URLs are not compatible with synchronous migration runs.
-    Falls back to DATABASE_URL with driver swap if SYNC_DATABASE_URL is absent.
+    Connection URL for Alembic (psycopg2 / synchronous).
+
+    Faz 7: migrations need the SUPERUSER role — they run DDL, create
+    roles, and must not be row-filtered by RLS. The application connects
+    with a non-superuser role (netmgr_app) via SYNC_DATABASE_URL, so
+    Alembic uses MIGRATION_DATABASE_URL when set (the superuser). Falls
+    back to SYNC_DATABASE_URL / DATABASE_URL for dev convenience.
     """
-    url = settings.SYNC_DATABASE_URL
+    url = os.environ.get("MIGRATION_DATABASE_URL") or settings.SYNC_DATABASE_URL
     if not url:
         url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg2")
     return url
@@ -85,6 +89,10 @@ def run_migrations_online() -> None:
 
         with context.begin_transaction():
             context.run_migrations()
+        # Faz 7 — RLS note: migration DDL is never row-filtered by a
+        # policy. A future *data*-touching revision that runs after M5
+        # must bypass RLS itself, e.g. at the top of its upgrade():
+        #     op.execute("SET LOCAL app.is_super_admin = 'on'")
 
 
 if context.is_offline_mode():

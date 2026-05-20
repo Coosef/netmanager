@@ -64,6 +64,13 @@ def _asyncio_timeout(seconds: float):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Faz 7 — the whole startup bootstrap (schema, seeding, default org)
+    # runs RLS-bypassed; it is platform-level work that spans every org.
+    # Cleared before `yield` so request handlers start from a clean
+    # context (each request re-establishes its own via get_current_user).
+    from app.core.org_context import set_org_context, clear_org_context
+    set_org_context(None, None, is_super_admin=True)
+
     # ── DB startup with timeout ───────────────────────────────────────────────
     try:
         async with _asyncio_timeout(30):
@@ -72,7 +79,19 @@ async def lifespan(app: FastAPI):
     except asyncio.TimeoutError:
         raise RuntimeError("Startup: DB bağlantısı 30s içinde kurulamadı")
 
-    async with async_engine.begin() as conn:
+    # Faz 7 — the runtime engine connects with the non-superuser netmgr_app
+    # role (so RLS applies). Schema bootstrap below is owner-only DDL, so it
+    # runs on a short-lived SUPERUSER engine built from MIGRATION_DATABASE_URL.
+    from sqlalchemy.ext.asyncio import create_async_engine as _create_async_engine
+    from sqlalchemy.pool import NullPool as _NullPool
+    _mig_url = os.environ.get("MIGRATION_DATABASE_URL", "")
+    _ddl_url = (
+        _mig_url.replace("+psycopg2", "+asyncpg")
+        if _mig_url else str(async_engine.url)
+    )
+    _ddl_engine = _create_async_engine(_ddl_url, poolclass=_NullPool)
+
+    async with _ddl_engine.begin() as conn:
         # ── DEPRECATED: create_all + ALTER TABLE pattern ──────────────────────
         # Faz 5A (2026-05-13): Alembic is now the authoritative schema manager.
         # DO NOT add new ALTER TABLE, CREATE TABLE, or CREATE INDEX statements
@@ -229,62 +248,10 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE devices ADD COLUMN IF NOT EXISTS rack_height INTEGER NOT NULL DEFAULT 1"
         ))
         # rack_items table is created via create_all
-        # Multi-tenant: tenant_id on core tables
-        await conn.execute(text(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE devices ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE playbooks ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE alert_rules ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE ipam_subnets ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_users_tenant_id ON users(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_devices_tenant_id ON devices(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_playbooks_tenant_id ON playbooks(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_tasks_tenant_id ON tasks(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_alert_rules_tenant_id ON alert_rules(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_ipam_subnets_tenant_id ON ipam_subnets(tenant_id)"
-        ))
-        # Secondary resource tenant isolation
-        await conn.execute(text(
-            "ALTER TABLE approval_requests ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE config_backups ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_approval_requests_tenant_id ON approval_requests(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_change_rollouts_tenant_id ON change_rollouts(tenant_id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_config_backups_tenant_id ON config_backups(tenant_id)"
-        ))
+        # M6 final drop — legacy `tenant_id` ALTER TABLE bootstrap removed
+        # (every tenant_id column + the tenants table itself were dropped
+        # in migration f8a5_drop_legacy_tenant; running these ALTERs would
+        # re-create columns referencing a non-existent table).
 
         # Agent security & health columns
         await conn.execute(text(
@@ -370,22 +337,9 @@ async def lifespan(app: FastAPI):
             "'gemini-2.0-flash-exp')"
         ))
 
-        # Org/Location/RBAC enhancements
-        await conn.execute(text(
-            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_tier VARCHAR(32) NOT NULL DEFAULT 'free'"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_devices INTEGER NOT NULL DEFAULT 50"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_users INTEGER NOT NULL DEFAULT 5"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS contact_email VARCHAR(255)"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE locations ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE"
-        ))
+        # M6 final drop — `tenants` table + every `tenant_id` column gone.
+        # The legacy ALTERs that re-added them on each startup have been
+        # removed; Organization owns location/agent/quota state now.
         await conn.execute(text(
             "ALTER TABLE locations ADD COLUMN IF NOT EXISTS city VARCHAR(128)"
         ))
@@ -394,9 +348,6 @@ async def lifespan(app: FastAPI):
         ))
         await conn.execute(text(
             "ALTER TABLE locations ADD COLUMN IF NOT EXISTS timezone VARCHAR(64)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_locations_tenant_id ON locations(tenant_id)"
         ))
         await conn.execute(text(
             "CREATE TABLE IF NOT EXISTS user_locations ("
@@ -416,12 +367,14 @@ async def lifespan(app: FastAPI):
             "CREATE INDEX IF NOT EXISTS ix_user_locations_location_id ON user_locations(location_id)"
         ))
         await conn.execute(text(
+            # M6 — invite_tokens no longer has tenant_id; organization_id
+            # is the authoritative owner. Existing rows keep their
+            # organization_id from Faz 7 M2.
             "CREATE TABLE IF NOT EXISTS invite_tokens ("
             "id SERIAL PRIMARY KEY, "
             "token VARCHAR(64) NOT NULL UNIQUE, "
             "email VARCHAR(255) NOT NULL, "
             "role VARCHAR(32) NOT NULL DEFAULT 'viewer', "
-            "tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE, "
             "created_by INTEGER REFERENCES users(id) ON DELETE SET NULL, "
             "expires_at TIMESTAMPTZ NOT NULL, "
             "used_at TIMESTAMPTZ, "
@@ -439,16 +392,16 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE users ADD COLUMN IF NOT EXISTS system_role VARCHAR(32) NOT NULL DEFAULT 'member'"
         ))
         await conn.execute(text(
-            "ALTER TABLE users ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL"
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE SET NULL"
         ))
         await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_users_org_id ON users(org_id)"
+            "CREATE INDEX IF NOT EXISTS ix_users_organization_id ON users(organization_id)"
         ))
         await conn.execute(text(
             "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS system_role VARCHAR(32) NOT NULL DEFAULT 'member'"
         ))
         await conn.execute(text(
-            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS org_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE"
+            "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) ON DELETE CASCADE"
         ))
         await conn.execute(text(
             "ALTER TABLE invite_tokens ADD COLUMN IF NOT EXISTS permission_set_id INTEGER REFERENCES permission_sets(id) ON DELETE SET NULL"
@@ -461,9 +414,22 @@ async def lifespan(app: FastAPI):
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_network_events_created_sev ON network_events(created_at, severity)"
         ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_snmp_poll_results_device_polled ON snmp_poll_results(device_id, polled_at)"
-        ))
+        # Faz 8: snmp_poll_results is a security-barrier view post-migration;
+        # index the underlying base table (snmp_poll_results_raw) whichever
+        # name currently is the BASE TABLE.
+        await conn.execute(text("""
+            DO $idx$
+            DECLARE ht text := (
+              SELECT table_name FROM information_schema.tables
+              WHERE table_name IN ('snmp_poll_results_raw','snmp_poll_results')
+                AND table_type = 'BASE TABLE' LIMIT 1);
+            BEGIN
+              IF ht IS NOT NULL THEN
+                EXECUTE format('CREATE INDEX IF NOT EXISTS '
+                  || 'ix_snmp_poll_results_device_polled ON %I(device_id, polled_at)', ht);
+              END IF;
+            END $idx$;
+        """))
         # Composite indexes for config_backups — speeds up latest-per-device subquery in config_search
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_config_backups_device_created ON config_backups(device_id, created_at DESC)"
@@ -506,13 +472,8 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE change_rollouts ADD COLUMN IF NOT EXISTS rolled_back_devices INTEGER NOT NULL DEFAULT 0"
         ))
 
-        # Agent tenant isolation
-        await conn.execute(text(
-            "ALTER TABLE agents ADD COLUMN IF NOT EXISTS tenant_id INTEGER REFERENCES tenants(id) ON DELETE SET NULL"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_agents_tenant_id ON agents(tenant_id)"
-        ))
+        # M6 final drop — agents.tenant_id removed; organization_id +
+        # location_id are the authoritative scope.
 
         # MAC/ARP composite indexes (non-unique, always safe)
         await conn.execute(text(
@@ -618,8 +579,16 @@ async def lifespan(app: FastAPI):
         # Each DO block is idempotent: converts only if not already a hypertable.
         # PK is changed to (id, time_col) because TimescaleDB requires the
         # partition column to be part of any UNIQUE / PRIMARY KEY constraint.
+        # Faz 8: resolve the snmp hypertable's real name — `snmp_poll_results`
+        # is a security-barrier view post-migration; the base table is
+        # `snmp_poll_results_raw`.
+        _snmp_ht = (await conn.execute(text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_name IN ('snmp_poll_results_raw','snmp_poll_results') "
+            "AND table_type = 'BASE TABLE' LIMIT 1"
+        ))).scalar() or "snmp_poll_results"
         for _tbl, _time_col, _interval in [
-            ("snmp_poll_results",             "polled_at",   "1 week"),
+            (_snmp_ht,                        "polled_at",   "1 week"),
             ("device_availability_snapshots", "ts",          "1 month"),
             ("agent_peer_latencies",          "measured_at", "1 week"),
             ("synthetic_probe_results",       "measured_at", "1 week"),
@@ -643,21 +612,28 @@ async def lifespan(app: FastAPI):
                 END $do$;
             """))
 
-        # Compression for snmp_poll_results (highest volume table)
+        # Compression for snmp_poll_results (highest volume table).
+        # Faz 8: the hypertable is `snmp_poll_results_raw` — `snmp_poll_results`
+        # is a security-barrier view over it (migration f8a1snmpview). The
+        # COALESCE handles both pre- and post-migration table names.
         await conn.execute(text("""
             DO $do$
+            DECLARE ht text := (
+              SELECT table_name FROM information_schema.tables
+              WHERE table_name IN ('snmp_poll_results_raw','snmp_poll_results')
+                AND table_type = 'BASE TABLE'
+              LIMIT 1
+            );
             BEGIN
-              IF NOT EXISTS (
+              IF ht IS NOT NULL AND NOT EXISTS (
                 SELECT 1 FROM timescaledb_information.compression_settings
-                WHERE hypertable_name = 'snmp_poll_results'
+                WHERE hypertable_name = ht
               ) THEN
-                ALTER TABLE snmp_poll_results SET (
-                  timescaledb.compress,
-                  timescaledb.compress_segmentby = 'device_id',
-                  timescaledb.compress_orderby = 'polled_at DESC'
-                );
-                PERFORM add_compression_policy('snmp_poll_results',
-                  INTERVAL '7 days', if_not_exists => true);
+                EXECUTE format('ALTER TABLE %I SET ('
+                  || 'timescaledb.compress, '
+                  || 'timescaledb.compress_segmentby = ''device_id'', '
+                  || 'timescaledb.compress_orderby = ''polled_at DESC'')', ht);
+                PERFORM add_compression_policy(ht, INTERVAL '7 days', if_not_exists => true);
               END IF;
             END $do$;
         """))
@@ -698,7 +674,7 @@ async def lifespan(app: FastAPI):
         # TimescaleDB retention policies — drop old chunks automatically.
         # These replace the manual DELETE approach in retention_tasks.py.
         for _tbl, _interval in [
-            ("snmp_poll_results",             "30 days"),
+            (_snmp_ht,                        "30 days"),
             ("syslog_events",                 "30 days"),
             ("device_availability_snapshots", "90 days"),
             ("agent_peer_latencies",          "90 days"),
@@ -709,7 +685,12 @@ async def lifespan(app: FastAPI):
                 f" if_not_exists => true)"
             ))
 
-    await _create_default_tenant()
+    # Schema bootstrap done — drop the superuser engine; the rest of the
+    # lifespan (seeding) runs on the normal netmgr_app engine.
+    await _ddl_engine.dispose()
+
+    # M6 final drop — _create_default_tenant() removed; _ensure_default_org()
+    # is the only seed path now.
     await _create_default_admin()
     await _ensure_default_org()
     await _seed_builtin_templates()
@@ -736,12 +717,17 @@ async def lifespan(app: FastAPI):
     except Exception:
         _startup_log.exception("startup: agent_bridge failed to start (non-fatal)")
 
-    # Background tasks — tracked for graceful shutdown cancellation
+    # Background tasks — tracked for graceful shutdown cancellation.
+    # Created while the super-admin context is still active so each loop
+    # task inherits it (they are fleet-wide — span every organization).
     _bg_tasks = [
         asyncio.create_task(_backfill_mac_oui(),         name="bg:mac_oui"),
         asyncio.create_task(_agent_device_status_loop(), name="bg:device_status"),
         asyncio.create_task(_ab_peer_latency_loop(),     name="bg:peer_latency"),
     ]
+
+    # Bootstrap done — drop the super-admin context before serving requests.
+    clear_org_context()
 
     yield
 
@@ -956,39 +942,9 @@ async def _seed_builtin_templates():
         await db.commit()
 
 
-async def _create_default_tenant():
-    """Ensure a default tenant exists and assign unassigned resources to it."""
-    from sqlalchemy import select, update as _upd
-    from app.core.database import AsyncSessionLocal
-    from app.models.tenant import Tenant
-    from app.models.user import User
-    from app.models.device import Device
-    from app.models.playbook import Playbook
-    from app.models.task import Task
-    from app.models.alert_rule import AlertRule
-    from app.models.ipam import IpamSubnet
-    from app.models.approval import ApprovalRequest
-    from app.models.change_rollout import ChangeRollout
-    from app.models.config_backup import ConfigBackup
-
-    async with AsyncSessionLocal() as db:
-        tenant = (await db.execute(
-            select(Tenant).where(Tenant.slug == "default")
-        )).scalar_one_or_none()
-
-        if not tenant:
-            tenant = Tenant(name="Varsayılan Organizasyon", slug="default", description="Otomatik oluşturulan varsayılan kiracı")
-            db.add(tenant)
-            await db.flush()
-
-        tid = tenant.id
-        for model in (User, Device, Playbook, Task, AlertRule, IpamSubnet,
-                      ApprovalRequest, ChangeRollout, ConfigBackup):
-            await db.execute(
-                _upd(model).where(model.tenant_id.is_(None)).values(tenant_id=tid)
-            )
-        await db.commit()
-        print(f"[Tenant] Default tenant ensured (id={tid})")
+# M6 final drop — _create_default_tenant removed. The legacy `tenants`
+# table, every `tenant_id` column and the cross-table backfill are gone;
+# `_ensure_default_org` is the only remaining seed path.
 
 
 async def _seed_default_backup_schedule():
@@ -1034,83 +990,34 @@ async def _seed_driver_templates():
 
 
 async def _ensure_default_org():
-    """Create one Organization per Tenant and assign users to matching org."""
+    """Ensure at least one Organization exists and has its default
+    permission sets seeded. M6 final drop — the tenant→organization
+    mapping path is gone (Faz 7 migration M2 already moved the data,
+    Faz 8 Phase H made Organization authoritative); this function is
+    now a fresh-DB safety net only."""
     import copy
-    from sqlalchemy import select, func as _func, update as _upd
+    from sqlalchemy import select, func as _func
     from app.core.database import AsyncSessionLocal
     from app.models.shared.organization import Organization
     from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
-    from app.models.user import User
-    from app.models.tenant import Tenant
 
     async with AsyncSessionLocal() as db:
-        # Migrate legacy role → system_role
-        from app.models.user import UserRole
-        await db.execute(
-            _upd(User)
-            .where(User.role == UserRole.SUPER_ADMIN, User.system_role == 'member')
-            .values(system_role='super_admin')
-        )
-        await db.execute(
-            _upd(User)
-            .where(User.role == UserRole.ADMIN, User.system_role == 'member')
-            .values(system_role='org_admin')
-        )
-
-        # Create one Organization per Tenant (idempotent by slug)
-        tenants = (await db.execute(select(Tenant))).scalars().all()
-        tenant_to_org_id: dict[int, int] = {}
-
-        for tenant in tenants:
-            org = (await db.execute(
-                select(Organization).where(Organization.slug == tenant.slug)
-            )).scalar_one_or_none()
-
-            if not org:
-                org = Organization(
-                    name=tenant.name,
-                    slug=tenant.slug,
-                    description=getattr(tenant, 'description', None),
-                    contact_email=getattr(tenant, 'contact_email', None),
-                    is_active=tenant.is_active,
-                )
-                db.add(org)
-                await db.flush()
-                print(f"[Org] Created org '{org.name}' for tenant {tenant.id}")
-
-            tenant_to_org_id[tenant.id] = org.id
-
-        # Fallback default org if no tenants exist
-        if not tenant_to_org_id:
-            fallback = (await db.execute(
-                select(Organization).where(Organization.slug == "default")
-            )).scalar_one_or_none()
-            if not fallback:
-                fallback = Organization(
-                    name="Varsayılan Organizasyon", slug="default",
-                    description="Sistem tarafından otomatik oluşturuldu",
-                )
-                db.add(fallback)
-                await db.flush()
-            tenant_to_org_id[0] = fallback.id  # sentinel
-
-        # Assign users to the org matching their tenant_id (re-runs are safe)
-        for t_id, o_id in tenant_to_org_id.items():
-            if t_id == 0:
-                # fallback: assign users with no tenant and no org
-                r = await db.execute(
-                    _upd(User).where(User.tenant_id.is_(None), User.org_id.is_(None)).values(org_id=o_id)
-                )
-            else:
-                r = await db.execute(
-                    _upd(User).where(User.tenant_id == t_id).values(org_id=o_id)
-                )
-            if r.rowcount:
-                print(f"[Org] {r.rowcount} user(s) → org_id={o_id} (tenant={t_id})")
-
-        # Use first org for permission set seeding
-        first_org_id = next(iter(tenant_to_org_id.values()))
-        org_id = first_org_id
+        # Ensure a default org exists (no-op when any org is already present).
+        default_org = (await db.execute(
+            select(Organization).where(Organization.slug == "default")
+        )).scalar_one_or_none()
+        any_org = (await db.execute(select(Organization).limit(1))).scalar_one_or_none()
+        if not any_org:
+            default_org = Organization(
+                name="Varsayılan Organizasyon", slug="default",
+                description="Sistem tarafından otomatik oluşturuldu",
+            )
+            db.add(default_org)
+            await db.flush()
+            print(f"[Org] Created default org id={default_org.id}")
+            org_id = default_org.id
+        else:
+            org_id = (default_org or any_org).id
 
         # Create default permission sets if none exist for this org
         existing_count = (await db.execute(
@@ -1160,18 +1067,16 @@ async def _create_default_admin():
     from sqlalchemy import select
     from app.core.database import AsyncSessionLocal
     from app.core.security import hash_password
-    from app.models.user import User, UserRole
+    from app.models.user import User, SystemRole
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(User).limit(1))
         if result.scalar_one_or_none() is None:
-            from app.models.user import SystemRole
             admin = User(
                 username="admin",
                 email="admin@netmanager.local",
                 hashed_password=hash_password("Admin@1234!"),
                 full_name="System Administrator",
-                role=UserRole.SUPER_ADMIN,
                 system_role=SystemRole.SUPER_ADMIN,
             )
             db.add(admin)
@@ -1190,12 +1095,28 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+
+# Faz 8 Phase E — a cross-location / no-location-access request raises
+# LocationAccessError from anywhere in the request; map it to its HTTP
+# status (403 cross-location, 400 missing) with a clear message.
+from app.core.request_context import LocationAccessError as _LocationAccessError
+from fastapi.responses import JSONResponse as _JSONResponse
+
+
+@app.exception_handler(_LocationAccessError)
+async def _location_access_error_handler(request: Request, exc: _LocationAccessError):
+    return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Accept"],
+    allow_headers=[
+        "Authorization", "Content-Type", "X-Request-ID", "Accept",
+        "X-Location-Id", "X-Org-Id",
+    ],
 )
 
 

@@ -12,11 +12,13 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user_id: int
     username: str
-    role: str           # legacy
-    system_role: str    # new RBAC
-    tenant_id: Optional[int] = None   # legacy
-    org_id: Optional[int] = None      # new RBAC
-    permissions: Optional[dict] = None  # full permissions dict for frontend
+    # M6 final drop — legacy `tenant_id` removed. `role` is kept (now
+    # carries the SystemRole value) so existing frontend code that
+    # reads `res.role` keeps working.
+    role: str
+    system_role: str
+    org_id: Optional[int] = None
+    permissions: Optional[dict] = None
 
 
 class InviteRequest(BaseModel):

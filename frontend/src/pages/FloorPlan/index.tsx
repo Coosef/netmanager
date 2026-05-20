@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   App, Button, Drawer, Empty, Input, Popconfirm, Select, Space,
   Tooltip, Upload, Tag, Spin,
@@ -16,7 +16,7 @@ import { racksApi } from '@/api/racks'
 import type { Device } from '@/types'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
-import { buildWsUrl } from '@/utils/ws'
+import { useEventStream } from '@/hooks/useEventStream'
 
 // ── Canvas constants ──────────────────────────────────────────────────────────
 const CANVAS_W = 1400
@@ -573,8 +573,6 @@ export default function FloorPlanPage() {
   const { message } = App.useApp()
 
   const [store, setStore] = useState<FpStore>(() => loadStore())
-  const wsRef = useRef<WebSocket | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
   const [liveStatus, setLiveStatus] = useState<Record<number, string>>({})
   const [activeId, setActiveId] = useState<string | null>(() => Object.keys(loadStore())[0] ?? null)
   const [mode, setMode] = useState<'place' | 'connect' | 'erase'>('place')
@@ -585,26 +583,17 @@ export default function FloorPlanPage() {
   const [gridView, setGridView] = useState(false)
   const [selectedRack, setSelectedRack] = useState<string | null>(null)
 
-  useEffect(() => {
-    const url = buildWsUrl('/api/v1/ws/events')
-    const connect = () => {
-      const ws = new WebSocket(url)
-      wsRef.current = ws
-      ws.onopen = () => setWsConnected(true)
-      ws.onclose = () => { setWsConnected(false); setTimeout(connect, 5000) }
-      ws.onerror = () => ws.close()
-      ws.onmessage = (e) => {
-        try {
-          const evt = JSON.parse(e.data as string)
-          if ((evt.event_type === 'device_offline' || evt.event_type === 'device_online') && evt.device_id) {
-            setLiveStatus((prev) => ({ ...prev, [evt.device_id as number]: evt.event_type === 'device_online' ? 'online' : 'offline' }))
-          }
-        } catch { /* ignore */ }
+  // Live device-status — bound to the active location (Faz 8 Phase F).
+  const { connected: wsConnected } = useEventStream({
+    onEvent: (evt) => {
+      if ((evt.event_type === 'device_offline' || evt.event_type === 'device_online') && evt.device_id) {
+        setLiveStatus((prev) => ({
+          ...prev,
+          [evt.device_id as number]: evt.event_type === 'device_online' ? 'online' : 'offline',
+        }))
       }
-    }
-    connect()
-    return () => wsRef.current?.close()
-  }, [])
+    },
+  })
 
   const { data: deviceData } = useQuery({
     queryKey: ['fp-devices', activeSite],

@@ -13,6 +13,7 @@ import {
   ApartmentOutlined, ShareAltOutlined, SafetyOutlined, WifiOutlined,
   CloudServerOutlined, DatabaseOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined,
   CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ConsoleSqlOutlined,
+  SwapOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
@@ -25,6 +26,7 @@ import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS } from '@/types'
 import { useTranslation } from 'react-i18next'
 import DeviceForm from './DeviceForm'
+import MoveDeviceModal from './MoveDeviceModal'
 import DeviceDetail from './DeviceDetail'
 import OnboardingWizard from './OnboardingWizard'
 import AutoGroupingModal from './AutoGroupingModal'
@@ -588,6 +590,14 @@ export default function DevicesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<Device | null>(null)
   const [detailDevice, setDetailDevice] = useState<Device | null>(null)
+  // Faz 8 Phase G — the device move action is shown only to roles that
+  // actually hold the device:move capability (admin / location_manager /
+  // super_admin). The backend re-checks regardless.
+  const moveRole = useAuthStore((s) => s.user?.role)
+  const canMoveDevice = ['super_admin', 'admin', 'location_manager'].includes(
+    moveRole ?? '',
+  )
+  const [moveDevice, setMoveDevice] = useState<Device | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkCredOpen, setBulkCredOpen] = useState(false)
   const [bulkAgentOpen, setBulkAgentOpen] = useState(false)
@@ -919,6 +929,11 @@ export default function DevicesPage() {
           <Tooltip title={t('common.edit')}>
             <Button size="small" type="text" icon={<EditOutlined style={{ color: '#1677ff' }} />} onClick={() => { setEditDevice(record); setDrawerOpen(true) }} />
           </Tooltip>
+          {canMoveDevice && (
+            <Tooltip title="Lokasyona Taşı">
+              <Button size="small" type="text" icon={<SwapOutlined style={{ color: '#a855f7' }} />} onClick={() => setMoveDevice(record)} />
+            </Tooltip>
+          )}
           <Popconfirm title={t('devices.delete_confirm')} description={t('devices.delete_confirm_desc')} onConfirm={() => deleteMutation.mutate(record.id)} okButtonProps={{ danger: true }}>
             <Button size="small" type="text" icon={<DeleteOutlined style={{ color: '#f5222d' }} />} />
           </Popconfirm>
@@ -1107,6 +1122,11 @@ export default function DevicesPage() {
       <Drawer title={editDevice ? t('devices.edit') : t('devices.add_new')} open={drawerOpen} onClose={() => setDrawerOpen(false)} width={520} destroyOnHidden>
         <DeviceForm device={editDevice} onSuccess={() => { setDrawerOpen(false); queryClient.invalidateQueries({ queryKey: ['devices'] }); queryClient.invalidateQueries({ queryKey: ['devices-stats'] }) }} />
       </Drawer>
+
+      {/* Faz 8 Phase G — audited device-location move */}
+      {moveDevice && (
+        <MoveDeviceModal device={moveDevice} onClose={() => setMoveDevice(null)} />
+      )}
 
       <OnboardingWizard
         open={wizardOpen}

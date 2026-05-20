@@ -1,5 +1,5 @@
-from app.models.tenant import Tenant
-from app.models.user import User, UserRole, SystemRole
+from app.models.user import User, SystemRole
+from app.models import _scoping  # noqa: F401 — registers the org-stamping insert hook
 from app.models.shared.plan import Plan
 from app.models.shared.organization import Organization
 from app.models.shared.permission_set import PermissionSet
@@ -50,8 +50,7 @@ from app.models.agent_peer_latency import AgentPeerLatency
 from app.models.escalation_rule import EscalationRule, EscalationNotificationLog
 
 __all__ = [
-    "Tenant",
-    "User", "UserRole", "SystemRole",
+    "User", "SystemRole",
     "Plan",
     "Organization",
     "PermissionSet",

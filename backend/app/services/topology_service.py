@@ -540,16 +540,18 @@ class TopologyService:
         group_id: int | None = None,
         site: str | None = None,
         sites: list[str] | None = None,
-        tenant_id: int | None = None,
     ) -> dict:
-        """Build React Flow compatible graph from topology_links."""
+        """Build React Flow compatible graph from topology_links.
+
+        Org/location isolation is enforced by PostgreSQL RLS on the
+        `devices` and `topology_links` tables — the legacy `tenant_id`
+        filter was removed in the topology T0 hardening pass.
+        """
         # Opportunistically re-link any ghost nodes that are now in inventory
         await self._rematch_ghost_links(db)
 
-        # Fetch all devices
+        # Fetch all devices (RLS-scoped to the caller's org + location)
         device_query = select(Device).where(Device.is_active == True)
-        if tenant_id is not None:
-            device_query = device_query.where(Device.tenant_id == tenant_id)
         if group_id:
             device_query = device_query.where(Device.group_id == group_id)
         if sites is not None:
@@ -735,3 +737,422 @@ class TopologyService:
                 "total_edges": len(edges),
             },
         }
+
+    async def build_graph_v2(
+        self,
+        db: AsyncSession,
+        group_id: int | None = None,
+        site: str | None = None,
+        sites: list[str] | None = None,
+    ) -> dict:
+        """Topology contract v2 — the stable backend graph contract that
+        feeds the Sigma.js 2D engine and the r3f 3D engine.
+
+        Adds, over v1: hierarchy metadata, a location→layer→rack cluster
+        tree, rich edge metadata, semantic-zoom / LOD render hints, and a
+        realtime-patch protocol block (graph_version + event schema).
+
+        Org/location isolation is enforced solely by PostgreSQL RLS on the
+        `devices` / `topology_links` tables — no manual tenant filtering.
+        """
+        from app.models.location import Location
+        from app.core.org_context import get_current_org_id, get_current_location_id
+        from app.core.event_publish import get_topology_graph_version
+
+        await self._rematch_ghost_links(db)
+
+        device_query = select(Device).where(Device.is_active == True)
+        if group_id:
+            device_query = device_query.where(Device.group_id == group_id)
+        if sites is not None:
+            device_query = device_query.where(Device.site.in_(sites))
+        elif site:
+            device_query = device_query.where(Device.site == site)
+        devices: list[Device] = (await db.execute(device_query)).scalars().all()
+        device_map: dict[int, Device] = {d.id: d for d in devices}
+
+        # Latest interface utilization per (device_id, normalized_port).
+        util_map: dict[tuple[int, str], dict] = {}
+        if device_map:
+            poll_rows = (await db.execute(
+                select(SnmpPollResult)
+                .where(SnmpPollResult.device_id.in_(list(device_map.keys())))
+                .order_by(SnmpPollResult.polled_at.desc())
+                .limit(15000)
+            )).scalars().all()
+            seen_util: set[tuple[int, int]] = set()
+            for row in poll_rows:
+                k = (row.device_id, row.if_index)
+                if k in seen_util:
+                    continue
+                seen_util.add(k)
+                norm = _normalize_port(row.if_name or "")
+                if norm:
+                    util_map[(row.device_id, norm)] = {
+                        "in_pct": row.in_utilization_pct,
+                        "out_pct": row.out_utilization_pct,
+                        "speed_mbps": row.speed_mbps,
+                    }
+
+        links: list[TopologyLink] = (await db.execute(select(TopologyLink))).scalars().all()
+
+        # Location id → name (RLS-scoped query).
+        loc_ids = {d.location_id for d in devices if d.location_id}
+        loc_names: dict[int, str] = {}
+        if loc_ids:
+            for lid, lname in (await db.execute(
+                select(Location.id, Location.name).where(Location.id.in_(loc_ids))
+            )).all():
+                loc_names[lid] = lname
+
+        now = datetime.now(timezone.utc)
+        stale_cutoff = now.timestamp() - 7 * 86400
+
+        # Directed adjacency — for asymmetric-link detection + node degree.
+        directed: set[tuple[int, int]] = set()
+        degree: dict[int, int] = {}
+        for lk in links:
+            degree[lk.device_id] = degree.get(lk.device_id, 0) + 1
+            if lk.neighbor_device_id:
+                directed.add((lk.device_id, lk.neighbor_device_id))
+                degree[lk.neighbor_device_id] = degree.get(lk.neighbor_device_id, 0) + 1
+
+        node_ids: set[int] = set()
+        ghost_nodes: dict[str, dict] = {}
+        edge_set: set[tuple] = set()
+        edges: list[dict] = []
+        device_last_discovery: dict[int, datetime] = {}
+        updated_at = None
+
+        for link in links:
+            node_ids.add(link.device_id)
+            if link.last_seen:
+                updated_at = link.last_seen if updated_at is None else max(updated_at, link.last_seen)
+                prev = device_last_discovery.get(link.device_id)
+                if prev is None or link.last_seen > prev:
+                    device_last_discovery[link.device_id] = link.last_seen
+
+            is_stale = bool(link.last_seen and link.last_seen.timestamp() < stale_cutoff)
+
+            if link.neighbor_device_id:
+                node_ids.add(link.neighbor_device_id)
+                a, b = sorted([link.device_id, link.neighbor_device_id])
+                pa = link.local_port if link.device_id == a else link.neighbor_port
+                pb = link.neighbor_port if link.device_id == a else link.local_port
+                key = (a, b, pa, pb)
+                if key in edge_set:
+                    continue
+                edge_set.add(key)
+                util_a = util_map.get((a, pa))
+                util_b = util_map.get((b, pb))
+                ins = [v for v in [util_a and util_a["in_pct"], util_b and util_b["in_pct"]] if v is not None]
+                outs = [v for v in [util_a and util_a["out_pct"], util_b and util_b["out_pct"]] if v is not None]
+                speeds = [v for v in [util_a and util_a["speed_mbps"], util_b and util_b["speed_mbps"]] if v is not None]
+                pct = max(ins + outs) if (ins or outs) else None
+                utilization = round(pct / 100.0, 4) if pct is not None else None
+                da, dbv = device_map.get(a), device_map.get(b)
+                symmetric = (a, b) in directed and (b, a) in directed
+                anomaly = "stale" if is_stale else ("asymmetric" if not symmetric else "none")
+                edges.append({
+                    "id": f"e-{a}-{b}-{pa}-{pb}",
+                    "source": f"d-{a}",
+                    "target": f"d-{b}",
+                    "link_type": _link_type(da.layer if da else None, dbv.layer if dbv else None),
+                    "utilization": utilization,
+                    "traffic_class": _traffic_class(utilization),
+                    "anomaly_state": anomaly,
+                    "latency_ms": None,  # per-link latency not collected (yet)
+                    "label": f"{pa} ↔ {pb}",
+                    "data": {
+                        "source_port": pa, "target_port": pb,
+                        "protocol": link.protocol,
+                        "last_seen": link.last_seen.isoformat() if link.last_seen else None,
+                        "speed_mbps": max(speeds) if speeds else None,
+                        "local_duplex": link.local_duplex,
+                        "local_port_mode": link.local_port_mode,
+                        "local_vlan": link.local_vlan,
+                        "local_poe_enabled": link.local_poe_enabled,
+                        "local_poe_mw": link.local_poe_mw,
+                    },
+                })
+            else:
+                gid = f"ghost-{link.neighbor_hostname}"
+                ntype = link.neighbor_type or detect_device_type(link.neighbor_platform, link.neighbor_hostname)
+                src = device_map.get(link.device_id)
+                ghost_nodes[gid] = {
+                    "id": gid,
+                    "kind": "ghost",
+                    "data": {
+                        "label": link.neighbor_hostname,
+                        "ip": link.neighbor_ip,
+                        "platform": link.neighbor_platform,
+                        "device_role": ntype,
+                        "ghost": True,
+                        "layer": "wireless" if ntype == "ap" else None,
+                        "source_device_id": link.device_id,
+                        "organization_id": src.organization_id if src else None,
+                        "location_id": src.location_id if src else None,
+                        "cluster_id": _cluster_id(src) if src else None,
+                        "criticality": "low",
+                        "importance_score": 0.15,
+                        "label_priority": 3,
+                        "render_class": "ghost",
+                        "min_zoom_level": 2,
+                        "lod_tier": "detail",
+                    },
+                }
+                key = (link.device_id, link.neighbor_hostname, link.local_port)
+                if key in edge_set:
+                    continue
+                edge_set.add(key)
+                ug = util_map.get((link.device_id, link.local_port))
+                pct = (ug["in_pct"] or ug["out_pct"]) if ug else None
+                utilization = round(pct / 100.0, 4) if pct is not None else None
+                edges.append({
+                    "id": f"eg-{link.device_id}-{link.neighbor_hostname}-{link.local_port}",
+                    "source": f"d-{link.device_id}",
+                    "target": gid,
+                    "link_type": "ghost",
+                    "utilization": utilization,
+                    "traffic_class": _traffic_class(utilization),
+                    "anomaly_state": "stale" if is_stale else "ghost",
+                    "latency_ms": None,
+                    "label": f"{link.local_port} ↔ {link.neighbor_port}",
+                    "data": {
+                        "source_port": link.local_port, "target_port": link.neighbor_port,
+                        "protocol": link.protocol,
+                        "last_seen": link.last_seen.isoformat() if link.last_seen else None,
+                    },
+                })
+
+        if not group_id:
+            node_ids.update(device_map.keys())
+
+        # ── Nodes + cluster accumulation ──────────────────────────────────────
+        clusters: dict[str, dict] = {}
+
+        def _ensure_cluster(cid, ctype, label, parent):
+            c = clusters.get(cid)
+            if c is None:
+                c = clusters[cid] = {
+                    "cluster_id": cid, "cluster_type": ctype, "label": label,
+                    "parent_cluster_id": parent, "collapsed_count": 0,
+                    "_status": {}, "_util": [],
+                }
+            return c
+
+        nodes: list[dict] = []
+        for did in node_ids:
+            d = device_map.get(did)
+            if not d:
+                continue
+            layer = (d.layer or "unknown")
+            loc_label = loc_names.get(d.location_id, f"location-{d.location_id}")
+            deg = degree.get(did, 0)
+            cid = _cluster_id(d)
+
+            # Register the location → layer → rack cluster chain.
+            loc_cid = f"loc:{d.location_id}"
+            layer_cid = f"loc:{d.location_id}|layer:{layer}"
+            _ensure_cluster(loc_cid, "location", loc_label, None)
+            _ensure_cluster(layer_cid, "layer", layer, loc_cid)
+            if d.rack_name:
+                rack_cid = f"{layer_cid}|rack:{d.rack_name}"
+                _ensure_cluster(rack_cid, "rack", d.rack_name, layer_cid)
+            # Accumulate health + traffic onto the device's own cluster and
+            # every ancestor.
+            for ancestor in (cid, layer_cid, loc_cid):
+                c = clusters.get(ancestor)
+                if c:
+                    c["collapsed_count"] += 1
+                    c["_status"][d.status] = c["_status"].get(d.status, 0) + 1
+
+            ld = device_last_discovery.get(did)
+            nodes.append({
+                "id": f"d-{did}",
+                "kind": "device",
+                "data": {
+                    "device_id": d.id,
+                    "label": d.hostname,
+                    "ip": d.ip_address,
+                    # ── hierarchy ──
+                    "organization_id": d.organization_id,
+                    "location_id": d.location_id,
+                    "location": loc_label,
+                    "layer": d.layer,
+                    "rack": d.rack_name,
+                    "zone": " / ".join([z for z in (d.building, d.floor) if z]) or None,
+                    "device_role": d.device_type,
+                    "vendor": d.vendor,
+                    "status": d.status,
+                    "criticality": _criticality(d.layer),
+                    # ── cluster ref ──
+                    "cluster_id": cid,
+                    # ── semantic-zoom / LOD render hints ──
+                    "importance_score": _importance(d.layer, deg),
+                    "label_priority": _label_priority(d.layer),
+                    "render_class": layer,
+                    "min_zoom_level": _min_zoom(d.layer),
+                    "lod_tier": _lod_tier(d.layer),
+                    "degree": deg,
+                    # ── misc ──
+                    "model": d.model,
+                    "os_type": d.os_type,
+                    "group_id": d.group_id,
+                    "site": d.site,
+                    "last_discovery": ld.isoformat() if ld else None,
+                },
+            })
+
+        nodes.extend(ghost_nodes.values())
+
+        # Per-edge utilization onto clusters (by the source device's cluster).
+        for e in edges:
+            if e["utilization"] is None:
+                continue
+            try:
+                sdid = int(e["source"].split("-")[1])
+            except (ValueError, IndexError):
+                continue
+            sd = device_map.get(sdid)
+            if not sd:
+                continue
+            for anc in (_cluster_id(sd), f"loc:{sd.location_id}|layer:{sd.layer or 'unknown'}",
+                        f"loc:{sd.location_id}"):
+                c = clusters.get(anc)
+                if c is not None:
+                    c["_util"].append(e["utilization"])
+
+        # Finalise cluster health + traffic summaries.
+        cluster_list: list[dict] = []
+        for c in clusters.values():
+            status = c.pop("_status")
+            util = c.pop("_util")
+            total = sum(status.values()) or 1
+            online = status.get("online", 0)
+            cluster_list.append({
+                **c,
+                "health": {
+                    "online": online,
+                    "offline": status.get("offline", 0),
+                    "unknown": status.get("unknown", 0) + status.get("unreachable", 0),
+                    "score": round(online / total, 3),
+                },
+                "traffic": {
+                    "avg_utilization": round(sum(util) / len(util), 4) if util else None,
+                    "max_utilization": round(max(util), 4) if util else None,
+                },
+            })
+
+        org_id = get_current_org_id()
+        loc_id = get_current_location_id()
+        return {
+            "contract_version": 2,
+            "graph_version": get_topology_graph_version(org_id) if org_id else 0,
+            "updated_at": (updated_at or now).isoformat(),
+            "scope": {
+                "organization_id": org_id,
+                "location_id": loc_id,
+            },
+            "nodes": nodes,
+            "edges": edges,
+            "clusters": cluster_list,
+            "stats": {
+                "total_nodes": len(nodes),
+                "device_nodes": len(node_ids),
+                "ghost_nodes": len(ghost_nodes),
+                "total_edges": len(edges),
+                "clusters": len(cluster_list),
+            },
+            "patch_protocol": {
+                "graph_version": get_topology_graph_version(org_id) if org_id else 0,
+                "channel": "network:events:org:{organization_id}",
+                "event_prefix": "topology_",
+                "node_events": ["topology_node_added", "topology_node_removed",
+                                "topology_node_updated"],
+                "edge_events": ["topology_edge_added", "topology_edge_removed",
+                                "topology_edge_updated"],
+                "bulk_events": ["topology_links_updated", "topology_drift"],
+            },
+        }
+
+
+# ── Topology contract v2 — derived-hint helpers ───────────────────────────────
+# Pure functions: map a device's inventory attributes onto the hierarchy /
+# semantic-zoom / traffic hints the v2 graph contract exposes.
+
+_LAYER_WEIGHT = {"core": 1.0, "distribution": 0.78, "access": 0.45,
+                 "edge": 0.32, "wireless": 0.28}
+_LAYER_CRITICALITY = {"core": "critical", "distribution": "high",
+                      "access": "normal", "edge": "normal", "wireless": "low"}
+_LAYER_MIN_ZOOM = {"core": 0, "distribution": 0, "access": 1,
+                   "edge": 2, "wireless": 2}
+
+
+def _criticality(layer: str | None) -> str:
+    return _LAYER_CRITICALITY.get((layer or "").lower(), "normal")
+
+
+def _importance(layer: str | None, degree: int) -> float:
+    """0..1 importance — layer weight plus a small connectivity boost."""
+    base = _LAYER_WEIGHT.get((layer or "").lower(), 0.35)
+    return round(min(1.0, base + min(degree, 20) / 100.0), 3)
+
+
+def _label_priority(layer: str | None) -> int:
+    """Lower = label drawn first / kept longest as the view zooms out."""
+    l = (layer or "").lower()
+    if l in ("core", "distribution"):
+        return 1
+    if l == "access":
+        return 2
+    return 3
+
+
+def _min_zoom(layer: str | None) -> int:
+    """Zoom tier at which the node stops being folded into its cluster."""
+    return _LAYER_MIN_ZOOM.get((layer or "").lower(), 1)
+
+
+def _lod_tier(layer: str | None) -> str:
+    l = (layer or "").lower()
+    if l in ("core", "distribution"):
+        return "primary"
+    if l == "access":
+        return "secondary"
+    return "detail"
+
+
+def _traffic_class(util: float | None) -> str:
+    """Bucket a 0..1 utilization ratio for edge colouring."""
+    if util is None:
+        return "unknown"
+    if util < 0.05:
+        return "idle"
+    if util < 0.25:
+        return "low"
+    if util < 0.60:
+        return "normal"
+    if util < 0.85:
+        return "high"
+    return "saturated"
+
+
+def _link_type(layer_a: str | None, layer_b: str | None) -> str:
+    s = {(layer_a or "").lower(), (layer_b or "").lower()}
+    if "core" in s and s <= {"core", "distribution"}:
+        return "backbone"
+    if (s & {"core", "distribution"}) and ("access" in s):
+        return "uplink"
+    if "access" in s:
+        return "access"
+    return "link"
+
+
+def _cluster_id(device) -> str:
+    """Most specific cluster a device belongs to: location → layer → rack."""
+    layer = device.layer or "unknown"
+    base = f"loc:{device.location_id}|layer:{layer}"
+    if device.rack_name:
+        return f"{base}|rack:{device.rack_name}"
+    return base

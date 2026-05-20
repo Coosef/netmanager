@@ -9,7 +9,7 @@ export interface Location {
   city: string | null
   country: string | null
   timezone: string | null
-  tenant_id: number | null
+  organization_id: number | null
   device_count: number
   user_count: number
   created_at: string
@@ -26,7 +26,7 @@ export interface LocationUser {
 }
 
 export const locationsApi = {
-  list: (params?: { search?: string; tenant_id?: number }) =>
+  list: (params?: { search?: string; organization_id?: number }) =>
     client.get<{ items: Location[]; total: number }>('/locations/', { params }).then((r) => r.data),
 
   get: (id: number) =>
@@ -40,7 +40,7 @@ export const locationsApi = {
     city?: string
     country?: string
     timezone?: string
-    tenant_id?: number
+    organization_id?: number
   }) => client.post<Location>('/locations/', data).then((r) => r.data),
 
   update: (id: number, data: {

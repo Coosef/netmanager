@@ -44,6 +44,11 @@ class EscalationRule(Base):
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
 
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+
     logs: Mapped[list["EscalationNotificationLog"]] = relationship(
         "EscalationNotificationLog", back_populates="rule", cascade="all, delete-orphan"
     )
@@ -68,6 +73,11 @@ class EscalationNotificationLog(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False,
         index=True,
+    )
+
+    # Faz 7 — multi-tenant isolation
+    organization_id: Mapped[int] = mapped_column(
+        ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True
     )
 
     rule: Mapped["EscalationRule"] = relationship("EscalationRule", back_populates="logs")

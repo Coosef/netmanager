@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Popover, Button, Tag, Empty, Spin, Select, Modal, Form } from 'antd'
+import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Popover, Button, Tag, Empty, Spin, Modal, Form } from 'antd'
 import {
   LogoutOutlined, KeyOutlined,
   BellOutlined, ReloadOutlined, SearchOutlined,
@@ -15,7 +15,7 @@ import { monitorApi } from '@/api/monitor'
 import { devicesApi } from '@/api/devices'
 import { usersApi } from '@/api/users'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useSite } from '@/contexts/SiteContext'
+import LocationSelector from './LocationSelector'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 
@@ -42,8 +42,6 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const { isDark, toggle } = useTheme()
-  const { activeSite, setSite, locations, sitesLoading } = useSite()
-  const activeLocation = locations.find((l) => l.name === activeSite)
   const { message } = App.useApp()
   const { t } = useTranslation()
   const isMobile = useIsMobile()
@@ -289,86 +287,10 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
 
       <div style={{ flex: 1 }} />
 
-      {/* Location selector — mobile compact dropdown */}
-      {isMobile && locations.length > 0 && (
-        <Dropdown
-          trigger={['click']}
-          placement="bottomLeft"
-          menu={{
-            selectedKeys: activeSite ? [activeSite] : ['__all__'],
-            items: [
-              {
-                key: '__all__',
-                label: 'Tüm Lokasyonlar',
-                onClick: () => { setSite(null); qc.invalidateQueries() },
-              },
-              ...locations.map((loc) => ({
-                key: loc.name,
-                label: (
-                  <Space size={6}>
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: loc.color || '#3b82f6', display: 'inline-block' }} />
-                    {loc.name}
-                  </Space>
-                ),
-                onClick: () => { setSite(loc.name); qc.invalidateQueries() },
-              })),
-            ],
-          }}
-        >
-          <Button type="text" style={{ padding: '0 6px' }}>
-            <Space size={4}>
-              <div style={{
-                width: 8, height: 8, borderRadius: '50%',
-                background: activeLocation?.color || (activeSite ? '#38bdf8' : iconColor),
-                flexShrink: 0,
-              }} />
-              {activeSite && (
-                <span style={{ fontSize: 11, color: '#38bdf8', maxWidth: 56, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {activeSite}
-                </span>
-              )}
-            </Space>
-          </Button>
-        </Dropdown>
-      )}
-
-      {/* Location selector — hidden on mobile */}
-      {!isMobile && (
-        <Space size={6}>
-          <div style={{
-            width: 10, height: 10, borderRadius: '50%',
-            background: activeLocation?.color || (activeSite ? '#38bdf8' : iconColor),
-            flexShrink: 0,
-          }} />
-          <Select
-            value={activeSite ?? '__all__'}
-            onChange={(v) => {
-              const next = v === '__all__' ? null : v
-              setSite(next)
-              qc.invalidateQueries()
-            }}
-            loading={sitesLoading}
-            size="small"
-            style={{
-              width: 160,
-              background: activeSite ? (isDark ? '#0c2040' : '#e0f0ff') : 'transparent',
-              borderRadius: 6,
-            }}
-            popupMatchSelectWidth={false}
-            variant="borderless"
-          >
-            <Select.Option value="__all__">Tüm Lokasyonlar</Select.Option>
-            {locations.map((loc) => (
-              <Select.Option key={loc.name} value={loc.name}>
-                <Space size={6}>
-                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: loc.color || '#3b82f6', flexShrink: 0, display: 'inline-block' }} />
-                  {loc.name}
-                </Space>
-              </Select.Option>
-            ))}
-          </Select>
-        </Space>
-      )}
+      {/* Faz 8 Phase F — active-location selector (backend-driven, from
+          user_locations). No organization selector: a normal user's org
+          is fixed server-side by their token and is never switchable. */}
+      <LocationSelector isMobile={isMobile} />
 
       {/* Search — mobile shows icon button only, desktop shows full input */}
       {isMobile ? (

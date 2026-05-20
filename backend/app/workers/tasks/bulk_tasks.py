@@ -162,7 +162,6 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
                         size_bytes=len(result.output.encode()),
                         created_by=created_by,
                         task_id=task_id,
-                        tenant_id=device.tenant_id,
                     )
                     db.add(backup)
                     db.execute(
@@ -172,7 +171,7 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
                     )
                     db.commit()
                     # Faz 6B G4: backup freshness changed → invalidate device risk
-                    invalidate_device_risk(_inv_redis, device.id, tenant_id=device.tenant_id)
+                    invalidate_device_risk(_inv_redis, device.id)
                     results[str(device.id)] = {"hostname": device.hostname, "success": True, "hash": config_hash}
                     completed += 1
                 else:
@@ -264,9 +263,8 @@ def _notify_backup_failures(db: Session, failed: int, completed: int, results: d
             "message": message,
             "ts": datetime.now(timezone.utc).isoformat(),
         })
-        _redis.publish("network:events", payload)
-        _redis.lpush("network:events:recent", payload)
-        _redis.ltrim("network:events:recent", 0, 499)
+        from app.core.event_publish import publish_network_event
+        publish_network_event(payload, _redis)
     except Exception:
         pass
 

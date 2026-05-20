@@ -3,7 +3,7 @@ from sqlalchemy import select, func, update as sql_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
+from app.core.deps import CurrentUser
 from app.core.redis_client import get_json, set_json
 from app.core.security import encrypt_credential, decrypt_credential
 from app.models.device import Device
@@ -22,7 +22,6 @@ async def trigger_discovery(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     device_ids: list[int] | None = Body(default=None),
 ):
     """Trigger LLDP/CDP topology discovery. If device_ids is empty, discovers all active devices."""
@@ -31,8 +30,6 @@ async def trigger_discovery(
 
     if not device_ids:
         dev_q = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
         result = await db.execute(dev_q)
         device_ids = result.scalars().all()
 
@@ -69,32 +66,44 @@ async def trigger_discovery(
 async def get_topology_graph(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     group_id: int = Query(None),
     site: str = Query(None),
     refresh: bool = Query(False),
-    location_filter: LocationNameFilter = None,
+    v: int = Query(1, ge=1, le=2, description="Contract version: 1 (legacy) | 2 (Final Gold Release)"),
 ):
-    """Return React Flow compatible graph. Cached in Redis for 5 minutes."""
-    effective_sites: list[str] | None = None
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return {"nodes": [], "edges": []}
-        effective_sites = eff
-        site = None
+    """Topology graph.
 
-    # Only use cache for unrestricted (SA) requests
-    cache_key = f"topology:graph:{group_id or 'all'}:{site or 'all'}"
-    if not refresh and tenant_filter is None and effective_sites is None:
+    `v=1` (default) — the legacy React Flow contract the current topology
+    page consumes; unchanged for backward compatibility until the
+    feature-flag cutover.
+    `v=2` — the Final Gold Release contract: hierarchy + cluster tree +
+    rich edges + semantic-zoom hints + realtime-patch protocol.
+
+    Org/location isolation is enforced by PostgreSQL RLS — the cache key
+    is additionally namespaced by org + location + contract version so no
+    org is ever served another's (or another version's) cached graph.
+    """
+    effective_sites: list[str] | None = None
+
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    _org = get_current_org_id()
+    _loc = get_current_location_id()
+    cache_key = (
+        f"topology:graph:o={_org}:l={_loc}:v={v}:"
+        f"{group_id or 'all'}:{site or 'all'}"
+    )
+    if not refresh and effective_sites is None:
         cached = await get_json(cache_key)
         if cached:
             return cached
 
     svc = TopologyService(ssh_manager)
-    graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites, tenant_id=tenant_filter)
+    if v == 2:
+        graph = await svc.build_graph_v2(db, group_id, site=site, sites=effective_sites)
+    else:
+        graph = await svc.build_graph(db, group_id, site=site, sites=effective_sites)
 
-    if tenant_filter is None and effective_sites is None:
+    if effective_sites is None:
         await set_json(cache_key, graph, ttl=300)
 
     # Always patch node statuses with live DB values so cached graph never shows stale online/offline
@@ -119,16 +128,12 @@ async def get_topology_graph(
 async def get_topology_links(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     device_id: int = Query(None),
     skip: int = 0,
     limit: int = 200,
 ):
     """Return raw topology links for a device or all devices."""
     query = select(TopologyLink)
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        query = query.where(TopologyLink.device_id.in_(tenant_dev_ids))
     if device_id:
         query = query.where(TopologyLink.device_id == device_id)
 
@@ -162,22 +167,17 @@ async def discover_single(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Run LLDP/CDP on one device synchronously and return neighbors with type detection."""
     if not current_user.has_permission("task:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     dev_q = select(Device).where(Device.id == device_id)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
     device = (await db.execute(dev_q)).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
 
     all_devs_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        all_devs_q = all_devs_q.where(Device.tenant_id == tenant_filter)
     all_devices = (await db.execute(all_devs_q)).scalars().all()
     hostname_map = {d.hostname.lower(): d.id for d in all_devices}
     ip_map = {d.ip_address: d.id for d in all_devices}
@@ -192,6 +192,14 @@ async def discover_single(
     r = _redis_mod.from_url(settings.REDIS_URL, decode_responses=True)
     for key in r.keys("topology:graph:*"):
         r.delete(key)
+
+    # Topology T0 — dedicated realtime event on the device's org channel.
+    from app.core.event_publish import publish_topology_event
+    publish_topology_event(
+        "topology_links_updated", device.organization_id, r,
+        location_id=device.location_id, device_id=device_id,
+        neighbor_count=len(neighbors),
+    )
 
     await log_action(db, current_user, "topology_single_discover", "device", device_id, device.hostname,
                      details={"neighbor_count": len(neighbors)}, request=request)
@@ -242,7 +250,6 @@ async def hop_discover(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """
     Cascade LLDP discovery: SSH into ghost-switch neighbors using inherited credentials,
@@ -261,8 +268,6 @@ async def hop_discover(
         raise HTTPException(status_code=400, detail="source_device_id and target_ips required")
 
     src_q = select(Device).where(Device.id == source_device_id)
-    if tenant_filter is not None:
-        src_q = src_q.where(Device.tenant_id == tenant_filter)
     source_device = (await db.execute(src_q)).scalar_one_or_none()
     if not source_device:
         raise HTTPException(status_code=404, detail="Source device not found")
@@ -312,13 +317,9 @@ async def hop_discover(
 async def get_ghost_switches(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Return ghost nodes that look like switches — candidates for hop discovery."""
     q = select(TopologyLink).where(TopologyLink.neighbor_device_id.is_(None)).where(TopologyLink.neighbor_type == "switch")
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(TopologyLink.device_id.in_(tenant_dev_ids))
     result = await db.execute(q)
     links = result.scalars().all()
 
@@ -343,20 +344,11 @@ async def get_ghost_switches(
 async def get_topology_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    tenant_cond = None
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        tenant_cond = TopologyLink.device_id.in_(tenant_dev_ids)
 
     total_q = select(func.count()).select_from(TopologyLink)
     matched_q = select(func.count()).select_from(TopologyLink).where(TopologyLink.neighbor_device_id.is_not(None))
     neighbors_q = select(func.count(func.distinct(TopologyLink.device_id)))
-    if tenant_cond is not None:
-        total_q = total_q.where(tenant_cond)
-        matched_q = matched_q.where(tenant_cond)
-        neighbors_q = neighbors_q.where(tenant_cond)
     total = (await db.execute(total_q)).scalar() or 0
     matched = (await db.execute(matched_q)).scalar() or 0
     with_neighbors = (await db.execute(neighbors_q)).scalar() or 0
@@ -373,7 +365,6 @@ async def discover_ghost(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """
     Attempt to SSH into a ghost switch node.
@@ -400,8 +391,6 @@ async def discover_ghost(
     source: Device | None = None
     if source_device_id:
         src_q = select(Device).where(Device.id == source_device_id)
-        if tenant_filter is not None:
-            src_q = src_q.where(Device.tenant_id == tenant_filter)
         source = (await db.execute(src_q)).scalar_one_or_none()
 
     target_vendor = source.vendor if source else "other"
@@ -421,8 +410,6 @@ async def discover_ghost(
     else:
         # Collect unique (username, password_enc, os_type) from same-vendor inventory devices
         vendor_q = select(Device).where(Device.vendor == target_vendor, Device.is_active == True)
-        if tenant_filter is not None:
-            vendor_q = vendor_q.where(Device.tenant_id == tenant_filter)
         same_vendor = (await db.execute(vendor_q)).scalars().all()
 
         seen: set[tuple] = set()
@@ -488,11 +475,21 @@ async def discover_ghost(
 
     # SSH succeeded — add to inventory if not already there (scoped to this tenant)
     exist_q = select(Device).where(Device.ip_address == ghost_ip)
-    if tenant_filter is not None:
-        exist_q = exist_q.where(Device.tenant_id == tenant_filter)
     existing = (await db.execute(exist_q)).scalar_one_or_none()
 
     real_hostname = fetched_info.get("hostname") or ghost_hostname or ghost_ip
+
+    # Faz 8 phase B — explicit ownership for a newly inventoried ghost
+    # device: inherit the source device's org + location, else the
+    # request context. No default-org fallback.
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    _ghost_org = source.organization_id if source else get_current_org_id()
+    _ghost_loc = source.location_id if source else get_current_location_id()
+    if not existing and (_ghost_org is None or _ghost_loc is None):
+        raise HTTPException(
+            status_code=400,
+            detail="Ghost cihazı envantere almak için kaynak cihaz ya da etkin lokasyon gerekli",
+        )
 
     if existing:
         new_device = existing
@@ -511,6 +508,8 @@ async def discover_ghost(
         await db.refresh(existing)
     else:
         new_device = Device(
+            organization_id=_ghost_org,
+            location_id=_ghost_loc,
             hostname=real_hostname,
             ip_address=ghost_ip,
             vendor=target_vendor,
@@ -526,7 +525,6 @@ async def discover_ghost(
             is_active=True,
             location=source.location if source else None,
             group_id=source.group_id if source else None,
-            tenant_id=current_user.tenant_id,
         )
         db.add(new_device)
         await db.commit()
@@ -535,8 +533,6 @@ async def discover_ghost(
 
     # Save LLDP links with the real device ID
     all_devs_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        all_devs_q = all_devs_q.where(Device.tenant_id == tenant_filter)
     all_devices = (await db.execute(all_devs_q)).scalars().all()
     hostname_map = {d.hostname.lower(): d.id for d in all_devices}
     ip_map = {d.ip_address: d.id for d in all_devices}
@@ -559,6 +555,14 @@ async def discover_ghost(
     _r = _redis_mod.from_url(_cfg.REDIS_URL, decode_responses=True)
     for key in _r.keys("topology:graph:*"):
         _r.delete(key)
+
+    # Topology T0 — dedicated realtime event on the new device's org channel.
+    from app.core.event_publish import publish_topology_event
+    publish_topology_event(
+        "topology_node_added", new_device.organization_id, _r,
+        location_id=new_device.location_id, device_id=new_device.id,
+        hostname=new_device.hostname,
+    )
 
     await log_action(db, current_user, "ghost_device_discovered", "device", new_device.id,
                      new_device.hostname, details={"is_new": is_new, "neighbor_count": len(neighbors)},
@@ -610,15 +614,11 @@ async def discover_ghost(
 async def get_lldp_inventory(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     device_type: str = Query(None),
     site: str = Query(None),
 ):
     """Return all ghost nodes (non-inventory neighbors) grouped by hostname, optionally filtered by device_type."""
     query = select(TopologyLink).where(TopologyLink.neighbor_device_id.is_(None))
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        query = query.where(TopologyLink.device_id.in_(tenant_dev_ids))
     if device_type:
         query = query.where(TopologyLink.neighbor_type == device_type)
     if site:

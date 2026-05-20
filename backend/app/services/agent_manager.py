@@ -170,6 +170,12 @@ class AgentManager:
         except Exception:
             return
 
+        # Faz 7 — agent message handling is trusted data-plane code; run
+        # it RLS-bypassed (this WS task is agent-scoped). Rows written
+        # here are org-stamped per row by the before_insert hook.
+        from app.core.org_context import set_org_context
+        set_org_context(None, None, is_super_admin=True)
+
         msg_type = msg.get("type")
 
         # Standard request/response results
@@ -320,6 +326,70 @@ class AgentManager:
                 if not fut.done():
                     fut.set_result({"success": success, "output": output, "type": "ssh_result"})
 
+    # ── Agent ingest scope enforcement (Faz 7 phase6e, Faz 8 Phase D) ─────────
+
+    async def _devices_in_agent_scope(
+        self, db, agent_id: str, device_ids, operation: str = "ingest"
+    ) -> set:
+        """Of `device_ids`, return the subset whose organization + location
+        match the agent's. An agent is bound to exactly one org+location;
+        a report referencing a device outside that sandbox is a cross-scope
+        write — dropped here with a structured log so the agent cannot
+        mutate another location's devices.
+
+        Faz 8 Phase D: delegates to the central app.services.agent_scope
+        enforcement module — one implementation shared by the API,
+        runtime-handler and command-dispatch layers."""
+        from app.services.agent_scope import (
+            AgentScopeError, filter_device_ids_in_scope, resolve_agent_scope,
+        )
+        try:
+            scope = await resolve_agent_scope(db, agent_id)
+        except AgentScopeError as exc:
+            log.warning("agent_manager: %s — %s dropped", exc, operation)
+            return set()
+        return await filter_device_ids_in_scope(db, scope, device_ids, operation)
+
+    # ── Agent command-dispatch scope enforcement (Faz 8 Phase D) ──────────────
+
+    def _session_scope(self, agent_id: str) -> tuple | None:
+        """The (organization_id, location_id) bound to this agent's WS
+        session, captured from the agent row at authentication time. The
+        agent token thereby fixes the agent's org+location for the life of
+        the connection. None when the session predates Phase D."""
+        meta = self._meta.get(agent_id) or {}
+        org = meta.get("organization_id")
+        loc = meta.get("location_id")
+        if org is None or loc is None:
+            return None
+        return (org, loc)
+
+    def _enforce_device_scope(self, agent_id: str, device, operation: str) -> None:
+        """Defense-in-depth at the command-dispatch layer: reject a command
+        whose target device is outside the agent's session org+location
+        sandbox. The API layer is authoritative; this catches any path
+        that reaches dispatch unchecked. A scopeless device proxy (the
+        internal SSH relay) or a pre-Phase-D session is left to the API
+        layer — it cannot be cross-checked here."""
+        scope = self._session_scope(agent_id)
+        d_org = getattr(device, "organization_id", None)
+        d_loc = getattr(device, "location_id", None)
+        if scope is None or d_org is None or d_loc is None:
+            return
+        if (d_org, d_loc) != scope:
+            from app.services.agent_scope import AgentScopeError, log_scope_rejection
+            log_scope_rejection(
+                agent_id=agent_id, device_id=getattr(device, "id", None),
+                organization_id=scope[0], location_id=scope[1],
+                operation=operation,
+                reason=(f"device org/location ({d_org}/{d_loc}) outside "
+                        f"agent session sandbox ({scope[0]}/{scope[1]})"),
+            )
+            raise AgentScopeError(
+                f"Cross-location {operation} rejected for device "
+                f"{getattr(device, 'id', None)} — not in the agent's location."
+            )
+
     # ── Device status reporting ───────────────────────────────────────────────
 
     async def _handle_device_status_report(self, agent_id: str, msg: dict):
@@ -338,6 +408,16 @@ class AgentManager:
             now_utc = datetime.now(timezone.utc)
 
             async with make_worker_session()() as db:
+                # Faz 7 — drop reports for devices outside the agent's
+                # organization + location before any write.
+                allowed_ids = await self._devices_in_agent_scope(
+                    db, agent_id, [r.get("device_id") for r in results],
+                    "device_status_report",
+                )
+                results = [r for r in results if r.get("device_id") in allowed_ids]
+                if not results:
+                    return
+
                 # Fetch active maintenance windows once for this batch
                 mw_rows = await db.execute(
                     select(MaintenanceWindow).where(
@@ -529,6 +609,14 @@ class AgentManager:
                 device_id = device_row[0] if device_row else None
                 hostname = device_row[1] if device_row else source_ip
 
+                # Faz 7 — a trap may only be attributed to a device in the
+                # agent's own org+location; otherwise drop the device link.
+                if device_id is not None:
+                    if device_id not in await self._devices_in_agent_scope(
+                        db, agent_id, [device_id], "snmp_trap"
+                    ):
+                        device_id = None
+
                 # Check maintenance window (suppress events during maintenance)
                 if device_id:
                     mw_rows = await db.execute(
@@ -608,17 +696,19 @@ class AgentManager:
                         # Correlation errors must never break trap ingest flow
                         log.warning(f"SNMP trap correlation error (non-fatal): {corr_err}")
 
-            # Publish to Redis event stream for real-time UI updates
+            # Publish to Redis event stream for real-time UI updates —
+            # org-scoped: derive org from the trap's device_id.
             try:
-                r = _get_sync_redis()
-                r.publish("network:events", _json.dumps({
+                from app.core.event_publish import publish_network_event
+                publish_network_event({
                     "event_type": f"snmp_trap_{trap_name}",
                     "severity": severity,
                     "title": title,
                     "message": message,
                     "source_ip": source_ip,
                     "agent_id": agent_id,
-                }))
+                    "device_id": device_id,
+                }, _get_sync_redis())
             except Exception:
                 pass
 
@@ -643,7 +733,12 @@ class AgentManager:
             details = msg.get("details", {})
             details["agent_id"] = agent_id
 
+            from app.models.agent import Agent
+
             async with make_worker_session()() as db:
+                # Device-less event — derive org/location from the agent
+                # (Faz 7: organization_id is NOT NULL).
+                agent = await db.get(Agent, agent_id)
                 evt = NetworkEvent(
                     device_id=None,
                     device_hostname=None,
@@ -652,20 +747,31 @@ class AgentManager:
                     title=title,
                     message=message,
                     details=details,
+                    organization_id=agent.organization_id if agent else None,
+                    location_id=agent.location_id if agent else None,
                 )
+                if evt.organization_id is None:
+                    log.warning(
+                        "agent_manager: local_anomaly from unknown agent %s — skipping",
+                        agent_id,
+                    )
+                    return
+                _evt_org = evt.organization_id
+                _evt_loc = evt.location_id
                 db.add(evt)
                 await db.commit()
 
-            # Publish to Redis event stream
-            r = _redis_sync.from_url(_settings.REDIS_URL, decode_responses=True)
-            r.publish("network:events", _json.dumps({
+            # Publish to Redis event stream — org-scoped to the agent's org.
+            from app.core.event_publish import publish_network_event
+            publish_network_event({
                 "event_type": "local_anomaly",
                 "severity": "warning",
                 "title": title,
                 "message": message,
                 "agent_id": agent_id,
                 "anomaly_type": anomaly_type,
-            }))
+            }, _redis_sync.from_url(_settings.REDIS_URL, decode_responses=True),
+               organization_id=_evt_org, location_id=_evt_loc)
             log.info(f"Agent {agent_id} local_anomaly: {anomaly_type} — {message}")
         except Exception as e:
             log.debug(f"Local anomaly handler error: {e}")
@@ -721,6 +827,7 @@ class AgentManager:
     async def execute_ssh_command(self, agent_id: str, device, command: str) -> dict:
         from app.core.security import decrypt_credential
 
+        self._enforce_device_scope(agent_id, device, "ssh_command")
         sec = self.get_security_config(agent_id)
         allowed, reason = _is_command_allowed(command, sec["command_mode"], sec["allowed_commands"])
         if not allowed:
@@ -775,6 +882,7 @@ class AgentManager:
     async def execute_ssh_config(self, agent_id: str, device, commands: list[str]) -> dict:
         from app.core.security import decrypt_credential
 
+        self._enforce_device_scope(agent_id, device, "ssh_config")
         sec = self.get_security_config(agent_id)
         if sec["command_mode"] != "all":
             for cmd in commands:
@@ -1036,6 +1144,7 @@ class AgentManager:
     # ── Feature 4: SNMP routing ───────────────────────────────────────────────
 
     async def execute_snmp_get(self, agent_id: str, device, oids: list[str]) -> dict:
+        self._enforce_device_scope(agent_id, device, "snmp_get")
         rid = uuid.uuid4().hex
         payload = {
             "type": "snmp_get",
@@ -1049,6 +1158,7 @@ class AgentManager:
         return await self._send_request(agent_id, payload, timeout=15)
 
     async def execute_snmp_walk(self, agent_id: str, device, oid_prefix: str) -> dict:
+        self._enforce_device_scope(agent_id, device, "snmp_walk")
         rid = uuid.uuid4().hex
         payload = {
             "type": "snmp_walk",
@@ -1109,6 +1219,7 @@ class AgentManager:
         """Start a streaming SSH command. Returns (request_id, future_for_full_result)."""
         from app.core.security import decrypt_credential
 
+        self._enforce_device_scope(agent_id, device, "stream_command")
         rid = uuid.uuid4().hex
         meta = self._meta.get(agent_id, {})
         if meta.get("vault_active"):

@@ -19,6 +19,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/hooks/useIsMobile'
+import { featureFlags } from '@/config/featureFlags'
 import type { UserRole } from '@/types'
 
 const { Sider } = Layout
@@ -155,6 +156,9 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       items: [
         { key: '/', icon: <DashboardOutlined />, label: t('nav.dashboard') },
         { key: '/topology', icon: <ApartmentOutlined />, label: t('nav.topology') },
+        ...(featureFlags.topologyV2
+          ? [{ key: '/topology-next', icon: <ThunderboltOutlined />, label: 'Topology · Gold' }]
+          : []),
         { key: '/devices', icon: <LaptopOutlined />, label: t('nav.devices') },
       ],
     },
@@ -201,7 +205,8 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       items: [
         ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as UserRole }] : []),
         ...(isOA && !isSA ? [{ key: '/org-admin', icon: <GlobalOutlined />, label: '⚙ Organizasyon Paneli', minRole: 'admin' as UserRole }] : []),
-        ...(isSA ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: t('nav.tenants'), minRole: 'super_admin' as UserRole }] : []),
+        // M6 final drop — the standalone `/tenants` page is gone. Org
+        // overview + assignment lives in the Platform Paneli above.
         { key: '/permissions', icon: <SafetyOutlined />, label: 'Yetki Yönetimi', minRole: 'admin' as UserRole },
         { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },

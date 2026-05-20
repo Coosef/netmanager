@@ -68,9 +68,9 @@ async def get_my_org(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    if not current_user.org_id:
+    if not current_user.organization_id:
         raise HTTPException(404, "Organizasyona bağlı değilsiniz")
-    org = await db.get(Organization, current_user.org_id)
+    org = await db.get(Organization, current_user.organization_id)
     if not org:
         raise HTTPException(404, "Organizasyon bulunamadı")
 
@@ -79,7 +79,7 @@ async def get_my_org(
     plan = await db.get(Plan, org.plan_id) if org.plan_id else None
 
     user_count = (await db.execute(
-        select(func.count()).select_from(User).where(User.org_id == org.id, User.is_active == True)
+        select(func.count()).select_from(User).where(User.organization_id == org.id, User.is_active == True)
     )).scalar()
 
     return {
@@ -119,10 +119,10 @@ async def list_users(
         # Super admin sees all users across all organizations
         where_clause = []
     else:
-        org_id = current_user.org_id
+        org_id = current_user.organization_id
         if not org_id:
             raise HTTPException(400, "Organizasyona bağlı değilsiniz")
-        where_clause = [User.org_id == org_id]
+        where_clause = [User.organization_id == org_id]
 
     total = (await db.execute(
         select(func.count()).select_from(User).where(*where_clause)
@@ -142,7 +142,7 @@ async def get_user(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    scope_org = None if _is_super(current_user) else current_user.org_id
+    scope_org = None if _is_super(current_user) else current_user.organization_id
     user = await _get_org_user(db, user_id, scope_org)
     perms = await _get_user_perm_assignments(db, user.id)
     d = _user_dict(user)
@@ -157,7 +157,7 @@ async def update_user(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    scope_org = None if _is_super(current_user) else current_user.org_id
+    scope_org = None if _is_super(current_user) else current_user.organization_id
     user = await _get_org_user(db, user_id, scope_org)
 
     # Org admin cannot promote to super_admin
@@ -177,13 +177,13 @@ async def remove_user(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    scope_org = None if _is_super(current_user) else current_user.org_id
+    scope_org = None if _is_super(current_user) else current_user.organization_id
     user = await _get_org_user(db, user_id, scope_org)
     if user.id == current_user.id:
         raise HTTPException(400, "Kendinizi silemezsiniz")
     # Soft-delete: deactivate instead of hard delete
     user.is_active = False
-    user.org_id = None
+    user.organization_id = None
     await db.commit()
 
 
@@ -197,7 +197,7 @@ async def invite_member(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    org_id = current_user.org_id
+    org_id = current_user.organization_id
     if not org_id:
         raise HTTPException(400, "Organizasyona bağlı değilsiniz")
 
@@ -209,7 +209,7 @@ async def invite_member(
         if plan:
             current_count = (await db.execute(
                 select(func.count()).select_from(User).where(
-                    User.org_id == org_id, User.is_active == True
+                    User.organization_id == org_id, User.is_active == True
                 )
             )).scalar()
             if current_count >= plan.max_users:
@@ -233,7 +233,7 @@ async def invite_member(
         role="viewer",
         tenant_id=None,
         system_role=payload.system_role,
-        org_id=org_id,
+        organization_id=org_id,
         permission_set_id=payload.permission_set_id,
         created_by=current_user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=payload.expires_hours),
@@ -256,7 +256,7 @@ async def list_permission_sets(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    org_id = current_user.org_id
+    org_id = current_user.organization_id
     rows = (await db.execute(
         select(PermissionSet).where(
             (PermissionSet.org_id == org_id) | (PermissionSet.org_id.is_(None))
@@ -271,7 +271,7 @@ async def create_permission_set(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    org_id = current_user.org_id
+    org_id = current_user.organization_id
     if not org_id:
         raise HTTPException(400, "Organizasyona bağlı değilsiniz")
 
@@ -309,7 +309,7 @@ async def update_permission_set(
     db: AsyncSession = Depends(get_db),
 ):
     ps = await db.get(PermissionSet, ps_id)
-    if not ps or ps.org_id != current_user.org_id:
+    if not ps or ps.org_id != current_user.organization_id:
         raise HTTPException(404, "Yetki seti bulunamadı")
 
     if payload.name is not None:
@@ -320,7 +320,7 @@ async def update_permission_set(
         if payload.is_default:
             await db.execute(
                 sa_update(PermissionSet)
-                .where(PermissionSet.org_id == current_user.org_id)
+                .where(PermissionSet.org_id == current_user.organization_id)
                 .values(is_default=False)
             )
         ps.is_default = payload.is_default
@@ -341,7 +341,7 @@ async def delete_permission_set(
     db: AsyncSession = Depends(get_db),
 ):
     ps = await db.get(PermissionSet, ps_id)
-    if not ps or ps.org_id != current_user.org_id:
+    if not ps or ps.org_id != current_user.organization_id:
         raise HTTPException(404, "Yetki seti bulunamadı")
     await db.delete(ps)
     await db.commit()
@@ -357,7 +357,7 @@ async def get_user_permissions(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    scope_org = None if _is_super(current_user) else current_user.org_id
+    scope_org = None if _is_super(current_user) else current_user.organization_id
     await _get_org_user(db, user_id, scope_org)
     assignments = await _get_user_perm_assignments(db, user_id)
     return {"user_id": user_id, "assignments": assignments}
@@ -371,12 +371,12 @@ async def assign_user_permission(
     db: AsyncSession = Depends(get_db),
 ):
     """Create or replace a permission assignment for (user, location)."""
-    scope_org = None if _is_super(current_user) else current_user.org_id
+    scope_org = None if _is_super(current_user) else current_user.organization_id
     await _get_org_user(db, user_id, scope_org)
 
     # Validate permission set
     ps = await db.get(PermissionSet, payload.permission_set_id)
-    if not ps or (ps.org_id is not None and ps.org_id != current_user.org_id):
+    if not ps or (ps.org_id is not None and ps.org_id != current_user.organization_id):
         raise HTTPException(400, "Geçersiz yetki seti")
 
     # Upsert
@@ -413,7 +413,7 @@ async def remove_user_permission(
     current_user: OrgAdminOrAbove,
     db: AsyncSession = Depends(get_db),
 ):
-    scope_org = None if _is_super(current_user) else current_user.org_id
+    scope_org = None if _is_super(current_user) else current_user.organization_id
     await _get_org_user(db, user_id, scope_org)
     ulp = await db.get(UserLocationPerm, ulp_id)
     if not ulp or ulp.user_id != user_id:
@@ -438,7 +438,7 @@ async def _get_org_user(db: AsyncSession, user_id: int, org_id: Optional[int]) -
     user = await db.get(User, user_id)
     if not user:
         raise HTTPException(404, "Kullanıcı bulunamadı")
-    if org_id is not None and user.org_id != org_id:
+    if org_id is not None and user.organization_id != org_id:
         raise HTTPException(404, "Kullanıcı bulunamadı")
     return user
 
@@ -466,7 +466,7 @@ def _user_dict(u: User) -> dict:
         "full_name": u.full_name,
         "is_active": u.is_active,
         "system_role": u.system_role,
-        "org_id": u.org_id,
+        "org_id": u.organization_id,
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat(),
     }

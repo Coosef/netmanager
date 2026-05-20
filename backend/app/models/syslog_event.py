@@ -19,6 +19,13 @@ class SyslogEvent(Base):
         index=True,
     )
 
+    # Faz 7 — multi-tenant isolation (HYPERTABLE — plain Integer, no FK)
+    organization_id = Column(Integer, nullable=False, index=True)
+    # Faz 8 phase C — location scope. Nullable: a syslog event whose
+    # source agent cannot be located is an explicit review bucket
+    # (location_id NULL), never a silent default.
+    location_id = Column(Integer, nullable=True, index=True)
+
     __table_args__ = (
         Index("ix_syslog_agent_received", "agent_id", "received_at"),
     )

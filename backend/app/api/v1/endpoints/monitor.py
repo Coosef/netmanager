@@ -17,7 +17,7 @@ from app.models.config_backup import ConfigBackup
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
 from app.models.topology import TopologyLink
-from app.models.user import UserRole
+# M6-B4 — UserRole no longer used in this module; system_role + RLS cover scoping.
 
 router = APIRouter()
 

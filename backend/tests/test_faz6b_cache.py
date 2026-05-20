@@ -133,10 +133,11 @@ class TestGetOrCompute:
             key="agg:test:1", compute=compute,
             fresh_secs=60, stale_secs=240, key_pattern="test",
         )
+        from app.services.cache import _org_scoped_key
         assert status == CacheStatus.MISS
         assert payload == {"value": 42}
         assert len(calls) == 1
-        assert "agg:test:1" in r.store
+        assert _org_scoped_key("agg:test:1") in r.store
 
     @pytest.mark.asyncio
     async def test_hit_fresh_skips_compute(self):
@@ -176,7 +177,8 @@ class TestGetOrCompute:
             "written_at": time.time() - 120,   # 120s old → past 60s fresh window
             "fresh_secs": 60,
         }
-        r.store["agg:test:3"] = json.dumps(envelope)
+        from app.services.cache import _org_scoped_key
+        r.store[_org_scoped_key("agg:test:3")] = json.dumps(envelope)
 
         compute_calls = []
 
@@ -193,7 +195,7 @@ class TestGetOrCompute:
         assert payload == {"value": "new"}
         assert len(compute_calls) == 1
         # Cache now holds the freshly computed value
-        new_envelope = json.loads(r.store["agg:test:3"])
+        new_envelope = json.loads(r.store[_org_scoped_key("agg:test:3")])
         assert new_envelope["payload"] == {"value": "new"}
 
     @pytest.mark.asyncio
@@ -205,7 +207,8 @@ class TestGetOrCompute:
             "written_at": time.time() - 120,
             "fresh_secs": 60,
         }
-        r.store["agg:test:3b"] = json.dumps(envelope)
+        from app.services.cache import _org_scoped_key
+        r.store[_org_scoped_key("agg:test:3b")] = json.dumps(envelope)
 
         async def failing_compute():
             raise RuntimeError("DB down")
@@ -348,11 +351,12 @@ class TestInvalidation:
 
     @pytest.mark.asyncio
     async def test_invalidate_removes_key(self):
+        from app.services.cache import _org_scoped_key
         cache, r = _cache_with_fake()
-        r.store["agg:foo"] = "anything"
+        r.store[_org_scoped_key("agg:foo")] = "anything"
         removed = await cache.invalidate("agg:foo", key_pattern="test")
         assert removed is True
-        assert "agg:foo" not in r.store
+        assert _org_scoped_key("agg:foo") not in r.store
 
     @pytest.mark.asyncio
     async def test_invalidate_missing_key_returns_false(self):

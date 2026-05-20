@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, tasks, tenants, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, tasks, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
 api_router.include_router(auth.router, prefix="/auth", tags=["Auth"])
+api_router.include_router(context.router, prefix="/context", tags=["Context"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(devices.router, prefix="/devices", tags=["Devices"])
 api_router.include_router(interfaces.router, prefix="/devices", tags=["Interfaces"])
@@ -35,7 +36,7 @@ api_router.include_router(synthetic.router, prefix="/synthetic-probes", tags=["S
 api_router.include_router(incidents.router, prefix="/incidents", tags=["Incidents"])
 api_router.include_router(api_tokens.router, prefix="/api-tokens", tags=["API Tokens"])
 api_router.include_router(racks.router, prefix="/racks", tags=["Racks"])
-api_router.include_router(tenants.router, prefix="/tenants", tags=["Tenants"])
+# M6 final drop — legacy /tenants router removed.
 api_router.include_router(locations.router, prefix="/locations", tags=["Locations"])
 api_router.include_router(backup_schedules.router, prefix="/backup-schedules", tags=["Backup Schedules"])
 api_router.include_router(driver_templates.router, prefix="/driver-templates", tags=["Driver Templates"])

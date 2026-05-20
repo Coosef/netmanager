@@ -22,3 +22,21 @@ os.environ.setdefault("CREDENTIAL_ENCRYPTION_KEY_OLD", "")
 os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("LOG_FORMAT", "console")
 os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", "")
+
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _default_org_context():
+    """
+    Faz 7: scoped tables now have NOT NULL organization_id / location_id.
+    Unit tests build ad-hoc rows without an org; give every test a default
+    org/location context so the before_insert hook can stamp them. Tests
+    that exercise org derivation explicitly (test_faz7_org_stamping.py)
+    manage their own context and are unaffected — parent-derived and
+    explicit values take precedence over this fallback.
+    """
+    from app.core.org_context import set_org_context, clear_org_context
+    set_org_context(1, 1)
+    yield
+    clear_org_context()

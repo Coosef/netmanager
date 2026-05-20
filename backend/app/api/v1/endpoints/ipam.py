@@ -162,7 +162,7 @@ async def create_subnet(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Subnet already exists")
 
-    subnet = IpamSubnet(**payload.model_dump(), tenant_id=current_user.tenant_id)
+    subnet = IpamSubnet(**payload.model_dump())
     db.add(subnet)
     await db.commit()
     await db.refresh(subnet)

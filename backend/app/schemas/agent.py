@@ -5,6 +5,9 @@ from pydantic import BaseModel
 
 class AgentCreate(BaseModel):
     name: str
+    # Faz 7 — the location this agent is bound to. Must belong to the
+    # creator's organization. Omitted ⇒ the creator's active location.
+    location_id: Optional[int] = None
 
 
 class AgentResponse(BaseModel):

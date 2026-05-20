@@ -1,3 +1,4 @@
+import logging
 import re
 
 import csv
@@ -9,23 +10,29 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
+from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter, RequestContext
+from app.core.request_context import is_super_admin, require_active_location
 from app.core.security import encrypt_credential
-from app.models.user import UserRole
-from app.models.tenant import Tenant
+# M6-B4 — UserRole no longer imported; system_role + RLS handle scoping.
+# M6 final drop — Tenant model removed.
 from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
 from app.models.device import Device, DeviceGroup
+from app.models.location import Location
+from app.models.shared.organization import Organization
 from app.models.topology import TopologyLink
 from app.schemas.device import (
     BulkUpdateAgent, BulkUpdateCredentials, DeviceCreate, DeviceGroupCreate, DeviceGroupResponse,
-    DeviceResponse, DeviceTestResult, DeviceUpdate,
+    DeviceMoveRequest, DeviceResponse, DeviceTestResult, DeviceUpdate,
 )
 from app.schemas.task import ConfigBackupResponse
 from app.services.audit_service import log_action
+from app.services.device_ownership import forbidden_ownership_fields, relocate_device_data
+from app.services.org_management import enforce_org_can_create
 from app.services.ssh_manager import ssh_manager
 
 router = APIRouter()
+log = logging.getLogger("netmanager.devices")
 
 # ── CLI Safety Rules ────────────────────────────────────────────────────────
 # Commands that are always blocked regardless of device mode.
@@ -291,41 +298,24 @@ async def apply_group_suggestions(
     return {"created": created, "total": len(created)}
 
 
-# ── Tenant-scoped device lookup ─────────────────────────────────────────────
-
-_LOCATION_SCOPED_ROLES = {
-    UserRole.LOCATION_MANAGER,
-    UserRole.LOCATION_OPERATOR,
-    UserRole.LOCATION_VIEWER,
-}
-
-
-async def _accessible_sites(db: AsyncSession, current_user) -> list[str] | None:
-    """Return list of site names the user can access, or None if unrestricted."""
-    if current_user.role not in _LOCATION_SCOPED_ROLES:
-        return None
-    from app.models.location import Location
-    from app.models.user_location import UserLocation
-    rows = (await db.execute(
-        select(Location.name)
-        .join(UserLocation, Location.id == UserLocation.location_id)
-        .where(UserLocation.user_id == current_user.id)
-    )).fetchall()
-    return [r[0] for r in rows]
+# ── Device lookup ──────────────────────────────────────────────────────────
+#
+# M6-B4 — the legacy `_LOCATION_SCOPED_ROLES` constant and `_accessible_sites`
+# site-name filter were removed: they keyed off the legacy UserRole values
+# (LOCATION_MANAGER / OPERATOR / VIEWER) which no production user holds,
+# and PostgreSQL RLS already scopes every `Device` query to the caller's
+# org + active location (Faz 7 M5 + Faz 8 Phase E). Tenant filtering is
+# likewise dead — the device's organization_id GUC controls visibility.
 
 
 async def _get_device_scoped(db: AsyncSession, device_id: int, current_user) -> Device:
-    """Fetch a device, enforcing tenant and location isolation."""
-    q = select(Device).where(Device.id == device_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
-        q = q.where(Device.tenant_id == current_user.tenant_id)
-    device = (await db.execute(q)).scalar_one_or_none()
+    """Fetch a device. Org / location isolation is enforced by RLS — a
+    device outside the caller's scope is simply invisible (404)."""
+    device = (await db.execute(
+        select(Device).where(Device.id == device_id)
+    )).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    if current_user.role in _LOCATION_SCOPED_ROLES:
-        sites = await _accessible_sites(db, current_user)
-        if sites is not None and device.site not in sites:
-            raise HTTPException(status_code=403, detail="Bu cihaza erişim yetkiniz yok")
     return device
 
 
@@ -409,35 +399,53 @@ async def create_device(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
+    ctx: RequestContext = None,
 ):
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    # Location-scoped roles can only create devices in their assigned sites
-    if current_user.role in _LOCATION_SCOPED_ROLES:
-        sites = await _accessible_sites(db, current_user)
-        if sites is not None and payload.site not in sites:
-            raise HTTPException(status_code=403, detail="Bu lokasyonda cihaz oluşturma yetkiniz yok")
+    # M6-B4 — the legacy `payload.site` location-scoped permission check
+    # is removed: site is a free-form label since Phase C, and the
+    # caller's accessible locations come from user_locations via the
+    # Phase E request context (active_location_id + allowed_location_ids).
+    # require_active_location() below refuses callers without a valid
+    # active location, and the new device inherits ctx.active_location_id —
+    # there is no legacy site-name match to spoof.
 
-    # SaaS quota: check tenant device limit
-    if current_user.tenant_id:
-        tenant = (await db.execute(select(Tenant).where(Tenant.id == current_user.tenant_id))).scalar_one_or_none()
-        if tenant:
-            current_count = (await db.execute(
-                select(func.count()).select_from(Device)
-                .where(Device.tenant_id == current_user.tenant_id, Device.is_active == True)
-            )).scalar() or 0
-            if current_count >= tenant.max_devices:
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Cihaz limiti doldu ({current_count}/{tenant.max_devices}). Plan yükseltmeniz gerekiyor.",
-                )
+    # M6-B3 — legacy SaaS Tenant.max_devices quota removed. The
+    # per-org quota is enforced below via enforce_org_can_create
+    # (Faz 8 Phase H), which is the single source of truth.
 
     existing = await db.execute(select(Device).where(Device.ip_address == payload.ip_address))
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Device with this IP already exists")
 
+    # Faz 8 phase B/G — explicit organization/location ownership. A device
+    # belongs to exactly one org + one location, resolved from the
+    # request's validated context. require_active_location fails closed:
+    # an org-wide user in "all locations" mode (no concrete active
+    # location) is rejected, as is a user with no location access. The
+    # active location is already validated against user_locations by the
+    # Phase E resolver, so a device can only land in a location the user
+    # may actually use — no default-org / default-location fallback.
+    if ctx is None or ctx.organization_id is None:
+        raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
+    org_id = ctx.organization_id
+    location_id = require_active_location(ctx)
+
+    # Faz 8 Phase H — organization quota + lifecycle: refuse a new device
+    # when the org is suspended/archived or its device quota is reached.
+    # A platform super-admin may override (the override is audit-logged).
+    org_obj = await db.get(Organization, org_id)
+    await enforce_org_can_create(
+        db, org_obj, "devices",
+        actor_user_id=current_user.id,
+        is_super_admin=is_super_admin(current_user),
+    )
+
     device = Device(
+        organization_id=org_id,
+        location_id=location_id,
         hostname=payload.hostname or payload.ip_address,
         ip_address=payload.ip_address,
         device_type=payload.device_type,
@@ -469,7 +477,6 @@ async def create_device(
         snmp_v3_priv_protocol=payload.snmp_v3_priv_protocol,
         snmp_v3_priv_passphrase=encrypt_credential(payload.snmp_v3_priv_passphrase) if payload.snmp_v3_priv_passphrase else None,
         credential_profile_id=payload.credential_profile_id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(device)
     await db.commit()
@@ -616,6 +623,19 @@ async def import_devices_csv(
     except UnicodeDecodeError:
         text = content.decode("latin-1")
 
+    # Faz 8 phase B — explicit ownership: every imported device lands in
+    # the caller's active organization + location; no default fallback.
+    from app.core.org_context import get_current_org_id, get_current_location_id
+    org_id = get_current_org_id()
+    location_id = get_current_location_id()
+    if org_id is None:
+        raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
+    if location_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cihaz içe aktarmak için etkin bir lokasyon seçili olmalı",
+        )
+
     reader = csv.DictReader(io.StringIO(text))
     required = {"ip_address", "ssh_username", "ssh_password"}
 
@@ -696,6 +716,8 @@ async def import_devices_csv(
             else:
                 hostname = row.get("hostname", "").strip() or ip
                 device = Device(
+                    organization_id=org_id,
+                    location_id=location_id,
                     hostname=hostname,
                     ip_address=ip,
                     device_type=device_type,
@@ -821,6 +843,34 @@ async def update_device(
     if not current_user.has_permission("device:edit"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
+    # Faz 8 Phase G — device location ownership is IMMUTABLE through the
+    # generic update path. A payload that tries to set location_id /
+    # organization_id is rejected loudly (not silently dropped) so an
+    # accidental ownership change can never slip through; a deliberate
+    # move must go through the audited POST /devices/{id}/move-location.
+    try:
+        _raw_body = await request.json()
+    except Exception:
+        _raw_body = {}
+    _forbidden = forbidden_ownership_fields(_raw_body)
+    if _forbidden:
+        log.warning(
+            "device update rejected — ownership-field change attempt",
+            extra={
+                "event": "device_update_location_rejected",
+                "device_id": device_id,
+                "actor_user_id": getattr(current_user, "id", None),
+                "fields": _forbidden,
+            },
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Device location/organization cannot be changed via update. "
+                "Use POST /devices/{device_id}/move-location."
+            ),
+        )
+
     device = await _get_device_scoped(db, device_id, current_user)
     data = payload.model_dump(exclude_unset=True)
 
@@ -850,6 +900,112 @@ async def update_device(
     await log_action(
         db, current_user, "device_updated", "device", device_id, device.hostname,
         request=request, before_state=before_state, after_state=after_state,
+    )
+    return device
+
+
+def _reject_move(device_id, user, source, target, reason, code=403):
+    """Structured audit of a refused device move, then raise the HTTP error."""
+    log.warning(
+        "device move rejected — %s", reason,
+        extra={
+            "event": "device_move_rejected",
+            "device_id": device_id,
+            "actor_user_id": getattr(user, "id", None),
+            "source_location_id": source,
+            "target_location_id": target,
+            "reason": reason,
+        },
+    )
+    raise HTTPException(status_code=code, detail=reason)
+
+
+@router.post("/{device_id}/move-location", response_model=DeviceResponse)
+async def move_device_location(
+    device_id: int,
+    payload: DeviceMoveRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+    ctx: RequestContext = None,
+):
+    """Faz 8 Phase G — the ONLY path that changes a device's location
+    ownership.
+
+    Requires the ``device:move`` capability AND access (via
+    user_locations) to BOTH the source and the target location. A
+    cross-organization move is impossible; a deleted/archived location
+    cannot be a target. The move is fully audited and the device's
+    device-bound child data (config backups, events, incidents, topology
+    edges, metrics, …) is relocated with it so nothing is orphaned at
+    the old location.
+    """
+    if not current_user.has_permission("device:move"):
+        raise HTTPException(
+            status_code=403,
+            detail="Insufficient permissions — device:move required",
+        )
+
+    device = await _get_device_scoped(db, device_id, current_user)
+    source_location_id = device.location_id
+    target_location_id = payload.target_location_id
+
+    if target_location_id == source_location_id:
+        raise HTTPException(status_code=400, detail="Device is already in this location")
+
+    # Source authorization — the caller must hold the device's CURRENT
+    # location (super-admin is unconstrained; org-admin holds the whole org).
+    if not (ctx and ctx.is_super_admin) and source_location_id not in (
+        ctx.allowed_location_ids if ctx else ()
+    ):
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "You are not authorized to move this device from its current location.")
+
+    # Target location — fetched under the caller's RLS context, so a
+    # cross-organization location is simply invisible (None).
+    target_loc = await db.get(Location, target_location_id)
+    if target_loc is None:
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "Target location not found.", code=400)
+    if target_loc.deleted_at is not None:
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "Target location is archived and cannot receive devices.", code=400)
+    if target_loc.organization_id != device.organization_id:
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "Cross-organization device move is not allowed.")
+
+    # Target authorization — the caller must also hold the TARGET location.
+    if not (ctx and ctx.is_super_admin) and target_location_id not in (
+        ctx.allowed_location_ids if ctx else ()
+    ):
+        _reject_move(device_id, current_user, source_location_id, target_location_id,
+                     "You are not authorized to move a device into the target location.")
+
+    # ── Perform the move — device + its device-bound child data ──────────────
+    device.location_id = target_location_id
+    relocated = await relocate_device_data(db, device_id, target_location_id)
+
+    details = {
+        "device_id": device_id,
+        "previous_location_id": source_location_id,
+        "new_location_id": target_location_id,
+        "organization_id": device.organization_id,
+        "actor_user_id": getattr(current_user, "id", None),
+        "reason": payload.reason,
+        "relocated_rows": relocated,
+    }
+    await log_action(
+        db, current_user, "device_moved", "device", device_id, device.hostname,
+        request=request,
+        before_state={"location_id": source_location_id},
+        after_state={"location_id": target_location_id},
+        details=details,
+    )
+    await db.commit()
+    await db.refresh(device)
+    log.info(
+        "device moved location",
+        extra={"event": "device_moved", **details},
     )
     return device
 
@@ -899,26 +1055,25 @@ async def bulk_delete_devices(
     if not device_ids:
         raise HTTPException(status_code=400, detail="No device IDs provided")
 
-    from app.models.user import UserRole
-    tenant_clause = (
-        [Device.id.in_(device_ids)]
-        if current_user.role == UserRole.SUPER_ADMIN
-        else [Device.id.in_(device_ids), Device.tenant_id == current_user.tenant_id]
-    )
-    result = await db.execute(select(Device).where(*tenant_clause))
+    # M6-B4 — org / location isolation enforced by RLS; no tenant clause.
+    result = await db.execute(select(Device).where(Device.id.in_(device_ids)))
     devices = result.scalars().all()
     if not devices:
         raise HTTPException(status_code=404, detail="No matching devices found")
 
+    # Faz 7 — soft delete: stamp deleted_at, RLS hides them afterward.
+    # archived_visible() keeps the post-update rows valid mid-statement.
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    _now = datetime.now(timezone.utc)
     for d in devices:
         await ssh_manager.close_device(d.id)
-
-    from app.models.topology import TopologyLink
-    await db.execute(_del(ConfigBackup).where(ConfigBackup.device_id.in_(device_ids)))
-    await db.execute(_del(TopologyLink).where(TopologyLink.neighbor_device_id.in_(device_ids)))
-    for d in devices:
-        await db.delete(d)
-    await db.commit()
+    with archived_visible():
+        await apply_rls_context(db)
+        for d in devices:
+            d.deleted_at = _now
+        await db.commit()
 
     await log_action(
         db, current_user, "devices_bulk_deleted", "device", None, None,
@@ -953,13 +1108,8 @@ async def bulk_tag_devices(
     if action not in ("add", "remove"):
         raise HTTPException(400, "action must be 'add' or 'remove'")
 
-    from app.models.user import UserRole
-    tenant_clause = (
-        [Device.id.in_(device_ids)]
-        if current_user.role == UserRole.SUPER_ADMIN
-        else [Device.id.in_(device_ids), Device.tenant_id == current_user.tenant_id]
-    )
-    devices = (await db.execute(select(Device).where(*tenant_clause))).scalars().all()
+    # M6-B4 — org / location isolation enforced by RLS; no tenant clause.
+    devices = (await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all()
     if not devices:
         raise HTTPException(404, "No matching devices found")
 
@@ -1296,6 +1446,55 @@ async def bulk_fetch_info_stream(
     )
 
 
+@router.get("/archived/list")
+async def list_archived_devices(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Faz 7 — soft-deleted devices, visible only via this admin flow
+    (RLS reveals them under app.include_archived)."""
+    if not current_user.has_permission("device:delete"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        rows = (await db.execute(
+            select(Device).where(Device.deleted_at.is_not(None))
+        )).scalars().all()
+        return [
+            {"id": d.id, "hostname": d.hostname, "ip_address": d.ip_address,
+             "deleted_at": d.deleted_at.isoformat()}
+            for d in rows
+        ]
+
+
+@router.post("/{device_id}/restore")
+async def restore_device(
+    device_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Faz 7 — admin restore: clear deleted_at so the device is live again."""
+    if not current_user.has_permission("device:delete"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
+    with archived_visible():
+        await apply_rls_context(db)
+        device = (await db.execute(
+            select(Device).where(Device.id == device_id)
+        )).scalar_one_or_none()
+        if not device or device.deleted_at is None:
+            raise HTTPException(status_code=404, detail="No archived device with that id")
+        device.deleted_at = None
+        await db.commit()
+        hostname = device.hostname
+    await log_action(db, current_user, "device_restored", "device", device_id, hostname, request=request)
+    return {"restored": device_id, "hostname": hostname}
+
+
 @router.delete("/{device_id}", status_code=204)
 async def delete_device(
     device_id: int,
@@ -1306,19 +1505,24 @@ async def delete_device(
     if not current_user.has_permission("device:delete"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    from app.models.config_backup import ConfigBackup
-    from sqlalchemy import delete as _del
+    from datetime import datetime, timezone
+    from app.core.org_context import archived_visible
+    from app.core.rls import apply_rls_context
 
     device = await _get_device_scoped(db, device_id, current_user)
+    hostname = device.hostname
 
-    from app.models.topology import TopologyLink
+    # Faz 7 — soft delete: stamp deleted_at; RLS hides the row from every
+    # query thereafter. Reversible via the admin restore flow. Live SSH
+    # sessions are still closed. The UPDATE itself runs under
+    # archived_visible() so the post-update (deleted_at != NULL) row still
+    # satisfies the RLS policy mid-statement.
     await ssh_manager.close_device(device_id)
-    await db.execute(_del(ConfigBackup).where(ConfigBackup.device_id == device_id))
-    # Clean up topology links where this device is the neighbor target (SET NULL FK won't remove the row)
-    await db.execute(_del(TopologyLink).where(TopologyLink.neighbor_device_id == device_id))
-    await db.delete(device)
-    await db.commit()
-    await log_action(db, current_user, "device_deleted", "device", device_id, device.hostname, request=request)
+    with archived_visible():
+        await apply_rls_context(db)
+        device.deleted_at = datetime.now(timezone.utc)
+        await db.commit()
+    await log_action(db, current_user, "device_deleted", "device", device_id, hostname, request=request)
 
 
 @router.post("/{device_id}/test", response_model=DeviceTestResult)
@@ -1569,7 +1773,6 @@ async def run_show_command(
                 risk_level=risk,
                 requester_id=current_user.id,
                 requester_username=current_user.username,
-                tenant_id=current_user.tenant_id,
             )
             db.add(req)
             await db.commit()
@@ -1848,7 +2051,6 @@ async def take_backup(
         config_hash=config_hash,
         size_bytes=len(config_text.encode()),
         created_by=current_user.id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(backup)
 
@@ -2321,12 +2523,10 @@ async def get_health_scores(
     since_24h = now - timedelta(hours=24)
     since_7d  = now - timedelta(days=7)
 
-    # All active devices
+    # All active devices — RLS (Faz 7) scopes by org/location at the DB; no
+    # application-level tenant filter needed. The `tenant_filter` shim
+    # (deps.get_tenant_context) returns None unconditionally now.
     q = select(Device).where(Device.is_active == True)
-    if tenant_filter:
-        q = q.where(Device.tenant_id == tenant_filter)
-    elif current_user.tenant_id:
-        q = q.where(Device.tenant_id == current_user.tenant_id)
     devices_list = (await db.execute(q)).scalars().all()
 
     if not devices_list:

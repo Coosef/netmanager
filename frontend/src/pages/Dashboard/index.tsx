@@ -29,7 +29,7 @@ import { servicesApi } from '@/api/services'
 import { useTranslation } from 'react-i18next'
 import type { NetworkEvent, MonitorStats } from '@/api/monitor'
 import type { Task } from '@/types'
-import { buildWsUrl } from '@/utils/ws'
+import { useEventStream } from '@/hooks/useEventStream'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -459,7 +459,6 @@ export default function DashboardPage() {
   const isMobile = useIsMobile()
   const C = isDark ? C_DARK : C_LIGHT
   const N = isDark ? N_DARK : N_LIGHT
-  const wsRef     = useRef<WebSocket | null>(null)
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
 
   const TASK_STATUS_COLOR: Record<string, string> = {
@@ -495,21 +494,11 @@ export default function DashboardPage() {
   const { data: anomalyData }  = useQuery({ queryKey: ['behavior-anomalies'],     queryFn: () => intelligenceApi.getAnomalies(24, 30), refetchInterval: 120000 })
   const { data: maintWindows } = useQuery({ queryKey: ['maintenance-windows-all'], queryFn: maintenanceWindowsApi.list, refetchInterval: 300000 })
 
-  // ── WebSocket ─────────────────────────────────────────────────────────────────
-  useEffect(() => {
-    const url = buildWsUrl('/api/v1/ws/events')
-    const connect = () => {
-      const ws = new WebSocket(url)
-      wsRef.current = ws
-      ws.onmessage = (e) => {
-        try { setLiveEvents((prev) => [JSON.parse(e.data), ...prev].slice(0, 30)) } catch { /* ignore */ }
-      }
-      ws.onclose = () => setTimeout(connect, 5000)
-      ws.onerror = () => ws.close()
-    }
-    connect()
-    return () => wsRef.current?.close()
-  }, [])
+  // ── Live events — bound to the active location (Faz 8 Phase F) ───────────────
+  // The stream rebinds on a location switch; old-location frames stop.
+  useEventStream({
+    onEvent: (ev) => setLiveEvents((prev) => [ev, ...prev].slice(0, 30)),
+  })
 
   const s            = stats
   const agents       = agentsData || []

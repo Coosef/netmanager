@@ -28,7 +28,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import { useTranslation } from 'react-i18next'
 import Topology3D, { type Topology3DHandle } from './Topology3D'
-import { buildWsUrl } from '@/utils/ws'
+import { useEventStream } from '@/hooks/useEventStream'
 
 const nodeTypes = { deviceNode: DeviceNode, ghostNode: GhostNode }
 const edgeTypes = { custom: CustomEdge }
@@ -508,8 +508,6 @@ function TopologyFlow() {
   const [ghostResult, setGhostResult] = useState<DiscoverGhostResult | null>(null)
   const [ghostResultModalOpen, setGhostResultModalOpen] = useState(false)
 
-  const wsRef = useRef<WebSocket | null>(null)
-  const [wsConnected, setWsConnected] = useState(false)
   const [wsEventLog, setWsEventLog] = useState<Array<{ type: string; hostname: string; time: number }>>([])
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -763,64 +761,42 @@ function TopologyFlow() {
     applyGraph(rawNodes, rawEdges)
   }, [graph, layout, isDark, filterLayer, filterSite, filterBuilding, filterFloor])
 
-  useEffect(() => {
-    const url = buildWsUrl('/api/v1/ws/events')
-    let destroyed = false
-    let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-    const connect = () => {
-      if (destroyed) return
-      const ws = new WebSocket(url)
-      wsRef.current = ws
-      ws.onopen = () => setWsConnected(true)
-      ws.onclose = () => {
-        setWsConnected(false)
-        if (!destroyed) reconnectTimer = setTimeout(connect, 5000)
-      }
-      ws.onerror = () => ws.close()
-      ws.onmessage = (e) => {
-        try {
-          const evt = JSON.parse(e.data as string)
-          if (evt.event_type === 'device_offline' || evt.event_type === 'device_online') {
-            const newStatus = evt.event_type === 'device_online' ? 'online' : 'offline'
-            const deviceId = evt.device_id as number | undefined
-            if (deviceId) {
-              // Update 2D React Flow nodes
-              ;(setNodes as any)((nds: any[]) => nds.map((n: any) =>
-                n.data?.device_id === deviceId
-                  ? { ...n, data: { ...n.data, status: newStatus } }
-                  : n
-              ))
-              // Update 3D graph cache so Topology3D also reflects the change immediately
-              queryClient.setQueriesData(
-                { queryKey: ['topology-graph'] },
-                (old: any) => {
-                  if (!old?.nodes) return old
-                  return {
-                    ...old,
-                    nodes: old.nodes.map((n: any) =>
-                      n.data?.device_id === deviceId
-                        ? { ...n, data: { ...n.data, status: newStatus } }
-                        : n
-                    ),
-                  }
-                }
-              )
-              setWsEventLog((prev) => [
-                { type: evt.event_type, hostname: evt.device_hostname || String(deviceId), time: Date.now() },
-                ...prev.slice(0, 4),
-              ])
-            }
+  // Live device-status events — bound to the active location (Faz 8
+  // Phase F). The stream rebinds on a location switch, so node/graph
+  // status updates never reflect another location's devices.
+  const { connected: wsConnected } = useEventStream({
+    onEvent: (evt) => {
+      if (evt.event_type !== 'device_offline' && evt.event_type !== 'device_online') return
+      const newStatus = evt.event_type === 'device_online' ? 'online' : 'offline'
+      const deviceId = evt.device_id as number | undefined
+      if (!deviceId) return
+      // Update 2D React Flow nodes
+      ;(setNodes as any)((nds: any[]) => nds.map((n: any) =>
+        n.data?.device_id === deviceId
+          ? { ...n, data: { ...n.data, status: newStatus } }
+          : n
+      ))
+      // Update 3D graph cache so Topology3D reflects the change immediately
+      queryClient.setQueriesData(
+        { queryKey: ['topology-graph'] },
+        (old: any) => {
+          if (!old?.nodes) return old
+          return {
+            ...old,
+            nodes: old.nodes.map((n: any) =>
+              n.data?.device_id === deviceId
+                ? { ...n, data: { ...n.data, status: newStatus } }
+                : n
+            ),
           }
-        } catch { /* ignore */ }
-      }
-    }
-    connect()
-    return () => {
-      destroyed = true
-      if (reconnectTimer) clearTimeout(reconnectTimer)
-      wsRef.current?.close()
-    }
-  }, [])
+        }
+      )
+      setWsEventLog((prev) => [
+        { type: evt.event_type, hostname: evt.device_hostname || String(deviceId), time: Date.now() },
+        ...prev.slice(0, 4),
+      ])
+    },
+  })
 
   const openDeviceById = useCallback(async (deviceId: number) => {
     try {

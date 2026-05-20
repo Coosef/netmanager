@@ -61,8 +61,11 @@ services:
       - "8000:8000"
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      # Faz 7 — Alembic connects with the SUPERUSER role (DDL + RLS bypass);
+      # the app URLs above use the non-superuser netmgr_app role so RLS bites.
+      - MIGRATION_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
       # Faz 6B G7: per-service subdir — no cross-container pid=1 collision
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/backend
@@ -100,8 +103,8 @@ services:
       - prom_multiproc:/tmp/prom_multiproc
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_worker
     depends_on:
@@ -137,8 +140,8 @@ services:
       - prom_multiproc:/tmp/prom_multiproc
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_agent_worker
     depends_on:
@@ -173,8 +176,8 @@ services:
       - prom_multiproc:/tmp/prom_multiproc
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_default_worker
     depends_on:
@@ -207,8 +210,8 @@ services:
       - prom_multiproc:/tmp/prom_multiproc
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/celery_beat
     depends_on:
@@ -246,8 +249,8 @@ services:
       - prom_multiproc:/tmp/prom_multiproc
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
       - PROMETHEUS_MULTIPROC_DIR=/tmp/prom_multiproc/event_consumer
     depends_on:
@@ -277,8 +280,8 @@ services:
       - "5555:5555"
     env_file: .env
     environment:
-      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
-      - SYNC_DATABASE_URL=postgresql+psycopg2://${POSTGRES_USER:-netmgr}:${POSTGRES_PASSWORD:-netmgr123}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
+      - SYNC_DATABASE_URL=postgresql+psycopg2://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - redis

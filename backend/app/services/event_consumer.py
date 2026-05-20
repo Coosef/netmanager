@@ -72,6 +72,7 @@ async def process_batch(bus, stream: str, entries, sync_redis, is_retry: bool) -
         a poison batch cannot cycle forever.
     """
     from app.core.database import make_worker_session
+    from app.core.org_context import superadmin_context
     from app.services.event_bus import GROUP_PERSIST
 
     if not entries:
@@ -82,8 +83,14 @@ async def process_batch(bus, stream: str, entries, sync_redis, is_retry: bool) -
     ids = [e.id for e in entries]
     t0 = time.monotonic()
     try:
-        async with make_worker_session()() as db:
-            persisted = await handler(db, payloads, sync_redis)
+        # Faz 7 — the event consumer is a fleet-wide data-plane processor:
+        # it drains a global stream and correlates across every org, so it
+        # runs RLS-bypassed. Row WRITES are still org-stamped per row by
+        # the before_insert hook (device/agent-derived; unknown agent →
+        # the hook's default-org safety net).
+        with superadmin_context():
+            async with make_worker_session()() as db:
+                persisted = await handler(db, payloads, sync_redis)
         await bus.ack(stream, GROUP_PERSIST, ids)
         # Metric failure must not undo a successful persist — own try/except.
         try:

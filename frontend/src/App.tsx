@@ -25,6 +25,7 @@ import UsersPage from '@/pages/Users'
 import AuditLogPage from '@/pages/AuditLog'
 import MonitorPage from '@/pages/Monitor'
 import TopologyPage from '@/pages/Topology'
+import TopologyV2Page from '@/pages/TopologyV2'
 import LldpInventoryPage from '@/pages/LldpInventory'
 import AgentsPage from '@/pages/Agents'
 import ReportsPage from '@/pages/Reports'
@@ -46,7 +47,6 @@ import ConfigDriftPage from '@/pages/ConfigDrift'
 import IntelligencePage from '@/pages/Intelligence'
 import ComplianceCheckPage from '@/pages/ComplianceCheck'
 import RacksPage from '@/pages/Racks'
-import TenantsPage from '@/pages/Tenants'
 import LocationsPage from '@/pages/Locations'
 import FloorPlanPage from '@/pages/FloorPlan'
 import AlertRulesPage from '@/pages/AlertRules'
@@ -224,6 +224,7 @@ function ThemedApp() {
               <Route path="devices" element={<DevicesPage />} />
               <Route path="tasks" element={<TasksPage />} />
               <Route path="topology" element={<TopologyPage />} />
+              <Route path="topology-next" element={<TopologyV2Page />} />
               <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
@@ -248,7 +249,7 @@ function ThemedApp() {
               <Route path="intelligence" element={<RoleRoute minRole="org_viewer"><IntelligencePage /></RoleRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_manager"><ComplianceCheckPage /></RoleRoute>} />
               <Route path="racks" element={<RoleRoute minRole="admin"><RacksPage /></RoleRoute>} />
-              <Route path="tenants" element={<RoleRoute minRole="super_admin"><TenantsPage /></RoleRoute>} />
+              {/* M6 final drop — the standalone `/tenants` page is gone. */}
               <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
               <Route path="floor-plan" element={<RoleRoute minRole="admin"><FloorPlanPage /></RoleRoute>} />
               <Route path="alert-rules" element={<RoleRoute minRole="admin"><AlertRulesPage /></RoleRoute>} />
