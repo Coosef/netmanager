@@ -7,15 +7,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, require_roles
+from app.core.deps import CurrentUser, require_system_role
 from app.core.security import hash_password
 from app.models.invite_token import InviteToken
-from app.models.user import User, UserRole
+from app.models.user import SystemRole, User
 from app.services.audit_service import log_action
 
 router = APIRouter()
 
-AdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN))
+AdminRequired = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN))
 
 
 class InviteCreate(BaseModel):
@@ -43,7 +43,7 @@ async def create_invite(
     # SUPER_ADMIN may create a global invite (no organization binding);
     # everyone else's invite is bound to their own org.
     org_id = (
-        current_user.organization_id if current_user.role != UserRole.SUPER_ADMIN else None
+        current_user.organization_id if current_user.system_role != SystemRole.SUPER_ADMIN else None
     )
 
     token = secrets.token_urlsafe(48)
@@ -74,7 +74,7 @@ async def list_invites(
     current_user: User = AdminRequired,
 ):
     q = select(InviteToken).order_by(InviteToken.created_at.desc())
-    if current_user.role != UserRole.SUPER_ADMIN:
+    if current_user.system_role != SystemRole.SUPER_ADMIN:
         # M6-B2 — list scoped to the caller's organization
         q = q.where(InviteToken.organization_id == current_user.organization_id)
     rows = (await db.execute(q)).scalars().all()
@@ -101,7 +101,7 @@ async def revoke_invite(
     invite = (await db.execute(select(InviteToken).where(InviteToken.id == invite_id))).scalar_one_or_none()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
-    if current_user.role != UserRole.SUPER_ADMIN and invite.organization_id != current_user.organization_id:
+    if current_user.system_role != SystemRole.SUPER_ADMIN and invite.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Access denied")
     await db.delete(invite)
     await db.commit()

@@ -117,19 +117,13 @@ class User(Base):
 
     # --- Legacy helpers (kept for backward compat) ---
     def has_permission(self, permission: str) -> bool:
+        # M6-B4 — `is_tenant_wide` and `is_location_scoped` (the two
+        # other legacy helpers) were dead code and have been removed.
+        # `has_permission` itself is still consulted by ~13 endpoints;
+        # it stays until the final M6 drop replaces the legacy `role`
+        # column + ROLE_PERMISSIONS map.
         perms = ROLE_PERMISSIONS.get(self.role, [])
         return "*" in perms or permission in perms
-
-    @property
-    def is_tenant_wide(self) -> bool:
-        return self.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.ORG_VIEWER)
-
-    @property
-    def is_location_scoped(self) -> bool:
-        return self.role in (
-            UserRole.LOCATION_MANAGER, UserRole.LOCATION_OPERATOR, UserRole.LOCATION_VIEWER,
-            UserRole.OPERATOR, UserRole.VIEWER,
-        )
 
     # --- New RBAC helpers ---
     @property

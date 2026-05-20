@@ -13,7 +13,7 @@ from app.core.database import get_db
 from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter, RequestContext
 from app.core.request_context import is_super_admin, require_active_location
 from app.core.security import encrypt_credential
-from app.models.user import UserRole
+# M6-B4 — UserRole no longer imported; system_role + RLS handle scoping.
 from app.models.tenant import Tenant
 from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
@@ -298,41 +298,24 @@ async def apply_group_suggestions(
     return {"created": created, "total": len(created)}
 
 
-# ── Tenant-scoped device lookup ─────────────────────────────────────────────
-
-_LOCATION_SCOPED_ROLES = {
-    UserRole.LOCATION_MANAGER,
-    UserRole.LOCATION_OPERATOR,
-    UserRole.LOCATION_VIEWER,
-}
-
-
-async def _accessible_sites(db: AsyncSession, current_user) -> list[str] | None:
-    """Return list of site names the user can access, or None if unrestricted."""
-    if current_user.role not in _LOCATION_SCOPED_ROLES:
-        return None
-    from app.models.location import Location
-    from app.models.user_location import UserLocation
-    rows = (await db.execute(
-        select(Location.name)
-        .join(UserLocation, Location.id == UserLocation.location_id)
-        .where(UserLocation.user_id == current_user.id)
-    )).fetchall()
-    return [r[0] for r in rows]
+# ── Device lookup ──────────────────────────────────────────────────────────
+#
+# M6-B4 — the legacy `_LOCATION_SCOPED_ROLES` constant and `_accessible_sites`
+# site-name filter were removed: they keyed off the legacy UserRole values
+# (LOCATION_MANAGER / OPERATOR / VIEWER) which no production user holds,
+# and PostgreSQL RLS already scopes every `Device` query to the caller's
+# org + active location (Faz 7 M5 + Faz 8 Phase E). Tenant filtering is
+# likewise dead — the device's organization_id GUC controls visibility.
 
 
 async def _get_device_scoped(db: AsyncSession, device_id: int, current_user) -> Device:
-    """Fetch a device, enforcing tenant and location isolation."""
-    q = select(Device).where(Device.id == device_id)
-    if current_user.role != UserRole.SUPER_ADMIN:
-        q = q.where(Device.tenant_id == current_user.tenant_id)
-    device = (await db.execute(q)).scalar_one_or_none()
+    """Fetch a device. Org / location isolation is enforced by RLS — a
+    device outside the caller's scope is simply invisible (404)."""
+    device = (await db.execute(
+        select(Device).where(Device.id == device_id)
+    )).scalar_one_or_none()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
-    if current_user.role in _LOCATION_SCOPED_ROLES:
-        sites = await _accessible_sites(db, current_user)
-        if sites is not None and device.site not in sites:
-            raise HTTPException(status_code=403, detail="Bu cihaza erişim yetkiniz yok")
     return device
 
 
@@ -421,11 +404,13 @@ async def create_device(
     if not current_user.has_permission("device:create"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    # Location-scoped roles can only create devices in their assigned sites
-    if current_user.role in _LOCATION_SCOPED_ROLES:
-        sites = await _accessible_sites(db, current_user)
-        if sites is not None and payload.site not in sites:
-            raise HTTPException(status_code=403, detail="Bu lokasyonda cihaz oluşturma yetkiniz yok")
+    # M6-B4 — the legacy `payload.site` location-scoped permission check
+    # is removed: site is a free-form label since Phase C, and the
+    # caller's accessible locations come from user_locations via the
+    # Phase E request context (active_location_id + allowed_location_ids).
+    # require_active_location() below refuses callers without a valid
+    # active location, and the new device inherits ctx.active_location_id —
+    # there is no legacy site-name match to spoof.
 
     # M6-B3 — legacy SaaS Tenant.max_devices quota removed. The
     # per-org quota is enforced below via enforce_org_can_create
@@ -1071,13 +1056,8 @@ async def bulk_delete_devices(
     if not device_ids:
         raise HTTPException(status_code=400, detail="No device IDs provided")
 
-    from app.models.user import UserRole
-    tenant_clause = (
-        [Device.id.in_(device_ids)]
-        if current_user.role == UserRole.SUPER_ADMIN
-        else [Device.id.in_(device_ids), Device.tenant_id == current_user.tenant_id]
-    )
-    result = await db.execute(select(Device).where(*tenant_clause))
+    # M6-B4 — org / location isolation enforced by RLS; no tenant clause.
+    result = await db.execute(select(Device).where(Device.id.in_(device_ids)))
     devices = result.scalars().all()
     if not devices:
         raise HTTPException(status_code=404, detail="No matching devices found")
@@ -1129,13 +1109,8 @@ async def bulk_tag_devices(
     if action not in ("add", "remove"):
         raise HTTPException(400, "action must be 'add' or 'remove'")
 
-    from app.models.user import UserRole
-    tenant_clause = (
-        [Device.id.in_(device_ids)]
-        if current_user.role == UserRole.SUPER_ADMIN
-        else [Device.id.in_(device_ids), Device.tenant_id == current_user.tenant_id]
-    )
-    devices = (await db.execute(select(Device).where(*tenant_clause))).scalars().all()
+    # M6-B4 — org / location isolation enforced by RLS; no tenant clause.
+    devices = (await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all()
     if not devices:
         raise HTTPException(404, "No matching devices found")
 

@@ -3,16 +3,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, require_roles
+from app.core.deps import CurrentUser, require_system_role
 from app.models.device import Device
 from app.models.tenant import Tenant
-from app.models.user import User, UserRole
+from app.models.user import SystemRole, User
 from app.schemas.tenant import TenantCreate, TenantResponse, TenantUpdate
 from app.services.audit_service import log_action
 
 router = APIRouter()
 
-SuperAdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN))
+SuperAdminRequired = Depends(require_system_role(SystemRole.SUPER_ADMIN))
 
 
 async def _enrich(db: AsyncSession, tenant: Tenant) -> dict:
@@ -37,9 +37,9 @@ async def _enrich(db: AsyncSession, tenant: Tenant) -> dict:
 @router.get("/", response_model=list[TenantResponse])
 async def list_tenants(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
-    if current_user.role == UserRole.SUPER_ADMIN:
+    if current_user.system_role == SystemRole.SUPER_ADMIN:
         tenants = (await db.execute(select(Tenant).order_by(Tenant.name))).scalars().all()
     else:
         tenants = (await db.execute(
@@ -75,9 +75,9 @@ async def create_tenant(
 async def get_tenant(
     tenant_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
-    if current_user.role != UserRole.SUPER_ADMIN and current_user.tenant_id != tenant_id:
+    if current_user.system_role != SystemRole.SUPER_ADMIN and current_user.organization_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
@@ -147,9 +147,9 @@ async def delete_tenant(
 async def list_tenant_users(
     tenant_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
-    if current_user.role != UserRole.SUPER_ADMIN and current_user.tenant_id != tenant_id:
+    if current_user.system_role != SystemRole.SUPER_ADMIN and current_user.organization_id != tenant_id:
         raise HTTPException(status_code=403, detail="Access denied")
 
     users = (await db.execute(

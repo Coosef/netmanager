@@ -3,26 +3,32 @@ from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, require_roles
+from app.core.deps import CurrentUser, require_system_role
 from app.core.security import hash_password, verify_password
 from app.models.location import Location
 from app.models.shared.organization import Organization
-from app.models.user import User, UserRole
+from app.models.user import SystemRole, User
 from app.models.user_location import UserLocation
 from app.schemas.user import AdminPasswordReset, UserCreate, UserPasswordChange, UserResponse, UserUpdate
 from app.services.audit_service import log_action
 
+# M6-B4 — privileged-role values, as strings. UserCreate / UserUpdate
+# carry `role` as a plain str, so the privilege guards compare against
+# the union of new (SystemRole) and legacy (UserRole) string values for
+# back-compat until the legacy `users.role` column drops in the final M6.
+_PRIVILEGED_ROLES = {"super_admin", "admin", "org_admin"}
+
 router = APIRouter()
 
-AdminRequired = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN))
+AdminRequired = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN))
 
 
 def _is_platform_admin(user: User) -> bool:
-    """True for SUPER_ADMIN, or for an ADMIN that is not bound to an
-    organization — both have unrestricted access. (M6-B1: was keyed off
-    `tenant_id`; user-org scoping now goes through `organization_id`.)"""
-    return user.role == UserRole.SUPER_ADMIN or (
-        user.role == UserRole.ADMIN and not user.organization_id
+    """True for SUPER_ADMIN, or for an ORG_ADMIN not bound to an
+    organization — both have unrestricted access. (M6-B4: now keyed off
+    `system_role`; the legacy `role` column is no longer consulted.)"""
+    return user.system_role == SystemRole.SUPER_ADMIN or (
+        user.system_role == SystemRole.ORG_ADMIN and not user.organization_id
     )
 
 
@@ -80,7 +86,7 @@ async def create_user(
     payload: UserCreate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     # M6-B1 — pick the new user's organization. Platform admins may
     # target any org via `payload.organization_id`; an org-scoped ADMIN
@@ -88,7 +94,7 @@ async def create_user(
     if _is_platform_admin(current_user):
         org_id = payload.organization_id
     else:
-        if payload.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+        if payload.role in _PRIVILEGED_ROLES:
             raise HTTPException(status_code=403, detail="ADMIN cannot create ADMIN or SUPER_ADMIN users")
         org_id = current_user.organization_id
 
@@ -145,7 +151,7 @@ async def update_user(
     payload: UserUpdate,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
@@ -162,7 +168,7 @@ async def update_user(
         # cannot accidentally move a user across orgs through the back door.
         data.pop("organization_id", None)
         data.pop("tenant_id", None)
-        if data.get("role") == UserRole.SUPER_ADMIN:
+        if data.get("role") in ("super_admin",):
             raise HTTPException(status_code=403, detail="Cannot elevate to SUPER_ADMIN")
 
     for field, value in data.items():
@@ -179,7 +185,7 @@ async def delete_user(
     user_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
@@ -190,7 +196,7 @@ async def delete_user(
     if user.id == current_user.id:
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
     # Org-scoped ADMIN cannot delete ADMIN or SA users
-    if not _is_platform_admin(current_user) and user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN):
+    if not _is_platform_admin(current_user) and user.system_role in (SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN):
         raise HTTPException(status_code=403, detail="ADMIN cannot delete ADMIN or SUPER_ADMIN users")
 
     await db.execute(delete(UserLocation).where(UserLocation.user_id == user.id))
@@ -205,7 +211,7 @@ async def admin_reset_password(
     payload: AdminPasswordReset,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)),
+    current_user: User = Depends(require_system_role(SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)),
 ):
     q = select(User).where(User.id == user_id)
     if not _is_platform_admin(current_user):
@@ -213,7 +219,7 @@ async def admin_reset_password(
     user = (await db.execute(q)).scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    if not _is_platform_admin(current_user) and user.role == UserRole.SUPER_ADMIN:
+    if not _is_platform_admin(current_user) and user.system_role == SystemRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Cannot reset SUPER_ADMIN password")
 
     user.hashed_password = hash_password(payload.new_password)
