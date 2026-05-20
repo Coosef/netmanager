@@ -1,18 +1,18 @@
 import client from './client'
 
 export interface SystemStats {
-  // M6 — backend keeps both `tenants` (legacy alias) and `organizations`
-  // keys for one release; both reflect the same org data. Reading either
-  // is fine for the transition; new code should prefer `organizations`.
-  tenants: { total: number; active: number; by_plan: Record<string, number> }
   organizations: { total: number; active: number; by_plan: Record<string, number> }
   users: { total: number }
   devices: { total: number; online: number; offline: number }
   locations: { total: number }
   events_24h: { total: number; critical: number }
   tasks: { running: number }
-  top_tenants_by_devices: { id: number; name: string; plan_tier: string; device_count: number }[]
-  top_organizations_by_devices: { id: number; name: string; plan_tier: string; device_count: number }[]
+  top_organizations_by_devices: {
+    id: number
+    name: string
+    plan_tier: string
+    device_count: number
+  }[]
 }
 
 export interface ResourceDevice {
@@ -23,10 +23,6 @@ export interface ResourceDevice {
   status: string
   org_id: number | null
   org_name: string | null
-  // M6 — back-compat aliases the backend still emits so the SuperAdmin
-  // page renders unchanged during the transition release.
-  tenant_id: number | null
-  tenant_name: string | null
 }
 
 export interface ResourceAgent {
@@ -37,8 +33,6 @@ export interface ResourceAgent {
   version: string | null
   org_id: number | null
   org_name: string | null
-  tenant_id: number | null
-  tenant_name: string | null
 }
 
 // ── Faz 8 Phase H — organization management ──────────────────────────────────
@@ -66,6 +60,19 @@ export interface Organization {
   license_expires_at: string | null
   quota: OrgQuota
   created_at: string
+}
+
+/**
+ * Organization row enriched with inline counts + plan slug. Returned by
+ * `/super-admin/orgs?with_counts=true` (added by `list_orgs` in M6 for the
+ * platform-admin dashboard so a single round-trip surfaces device / user /
+ * location usage per org).
+ */
+export interface OrganizationWithCounts extends Organization {
+  device_count: number
+  user_count: number
+  location_count: number
+  plan_tier: string
 }
 
 export interface OrgUsageResource {
@@ -102,28 +109,7 @@ export const superadminApi = {
   getSystemStats: () =>
     client.get<SystemStats>('/super-admin/system-stats').then((r) => r.data),
 
-  // M6 final drop — legacy `PATCH /super-admin/tenants/{id}/plan` and
-  // `…/toggle-active` endpoints are gone. These methods forward to the
-  // Phase H `updateOrg` (PATCH /super-admin/orgs/{id}) so the SuperAdmin
-  // dashboard keeps working during the transition release; remove once
-  // the page is reworked to use `updateOrg` directly.
-  updateTenantPlan: (
-    orgId: number,
-    _plan_tier: string,            // unused — Plan FK is set elsewhere; quota fields flow
-    max_devices: number,
-    max_users: number,
-  ) =>
-    client.patch(`/super-admin/orgs/${orgId}`, { max_devices, max_users })
-      .then((r) => r.data),
-
-  toggleTenantActive: async (orgId: number) => {
-    // The org's current `status` is fetched + flipped via PATCH /orgs/{id}.
-    const cur = await client.get<{ status?: string }>(`/super-admin/orgs/${orgId}`).then((r) => r.data)
-    const next = cur.status === 'active' ? 'suspended' : 'active'
-    return client.patch(`/super-admin/orgs/${orgId}`, { status: next }).then((r) => r.data)
-  },
-
-  listDevices: (params?: { org_id?: number; tenant_id?: number; unassigned?: boolean; skip?: number; limit?: number }) =>
+  listDevices: (params?: { org_id?: number; unassigned?: boolean; skip?: number; limit?: number }) =>
     client.get<{ total: number; devices: ResourceDevice[] }>('/super-admin/resources/devices', { params })
       .then((r) => r.data),
 
@@ -132,22 +118,26 @@ export const superadminApi = {
       .then((r) => r.data),
 
   assignResources: (resource_type: 'device' | 'agent', resource_ids: (number | string)[], org_id: number) =>
-    client.patch<{
-      ok: boolean
-      assigned: number
-      org_id: number
-      org_name: string
-      tenant_id: number       // legacy aliases the backend still emits
-      tenant_name: string
-    }>(
+    client.patch<{ ok: boolean; assigned: number; org_id: number; org_name: string }>(
       '/super-admin/resources/assign',
       { resource_type, resource_ids, org_id },
     ).then((r) => r.data),
 
   // ── Faz 8 Phase H — organization management (super-admin only) ─────────────
-  listOrgs: (params?: { page?: number; per_page?: number }) =>
+  /**
+   * List organizations. Pass `with_counts: true` to get the enriched
+   * `OrganizationWithCounts` shape used by the platform-admin dashboard.
+   * Without it, plain `Organization` rows are returned (counts omitted).
+   */
+  listOrgs: (params?: { page?: number; per_page?: number; with_counts?: boolean }) =>
     client.get<{ total: number; orgs: Organization[] }>('/super-admin/orgs', { params })
       .then((r) => r.data),
+
+  listOrgsWithCounts: (params?: { page?: number; per_page?: number }) =>
+    client.get<{ total: number; orgs: OrganizationWithCounts[] }>(
+      '/super-admin/orgs',
+      { params: { ...params, with_counts: true } },
+    ).then((r) => r.data),
 
   getOrg: (orgId: number) =>
     client.get<Organization>(`/super-admin/orgs/${orgId}`).then((r) => r.data),

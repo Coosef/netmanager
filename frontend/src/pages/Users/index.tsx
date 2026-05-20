@@ -12,7 +12,7 @@ import {
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersApi } from '@/api/users'
-import { tenantsApi } from '@/api/tenants'
+import { superadminApi } from '@/api/superadmin'
 import { locationsApi } from '@/api/locations'
 import { invitesApi, type Invite } from '@/api/invites'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -148,9 +148,11 @@ export default function UsersPage() {
     queryFn: usersApi.list,
   })
 
-  const { data: tenants } = useQuery({
-    queryKey: ['tenants'],
-    queryFn: tenantsApi.list,
+  // Org list — used in the per-user "Organisation" select (super-admin only).
+  // Sourced from /super-admin/orgs (no counts needed for the dropdown).
+  const { data: orgsData } = useQuery({
+    queryKey: ['users-page-orgs'],
+    queryFn: () => superadminApi.listOrgs({ per_page: 500 }),
     enabled: isSA,
   })
 
@@ -160,7 +162,7 @@ export default function UsersPage() {
     enabled: drawerOpen,
   })
 
-  const tenantOptions = (tenants || []).map((t) => ({ label: t.name, value: t.id }))
+  const tenantOptions = (orgsData?.orgs || []).map((o) => ({ label: o.name, value: o.id }))
   const locationOptions = (locationsData?.items || []).map((l) => ({ label: l.name, value: l.id }))
 
   const createMutation = useMutation({
@@ -368,7 +370,7 @@ export default function UsersPage() {
             },
             ...(isSA ? [{
               title: t('users.organization'),
-              dataIndex: 'tenant_name',
+              dataIndex: 'organization_name',
               width: 160,
               render: (v: string | null) => v
                 ? (

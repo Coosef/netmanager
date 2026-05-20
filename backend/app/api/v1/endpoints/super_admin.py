@@ -593,11 +593,7 @@ def _deep_merge(base: dict, override: dict) -> None:
 class AssignResourcesPayload(BaseModel):
     resource_type: str          # "device" | "agent"
     resource_ids: List[Union[int, str]]
-    # M6 final drop — accept both keys during the transition; `tenant_id`
-    # was the legacy field name, `org_id` is the canonical one. We keep
-    # the alias so older frontend builds keep working until cutover.
-    org_id: Optional[int] = None
-    tenant_id: Optional[int] = None
+    org_id: int
 
 
 # ---------------------------------------------------------------------------
@@ -611,10 +607,11 @@ async def system_stats(
 ):
     """Platform-wide aggregated stats for the super_admin dashboard.
 
-    M6-B3 — sourced from `Organization` (was `Tenant`). The response JSON
-    keys (`tenants`, `top_tenants_by_devices`) are kept verbatim as a
-    deprecated alias so the existing frontend renders unchanged; they
-    are renamed in the M6 final drop."""
+    Faz 9 #1 — sourced from `Organization` (the legacy `Tenant` model
+    was retired in M6 final drop). Response keys are `organizations` +
+    `top_organizations_by_devices`; the legacy `tenants` +
+    `top_tenants_by_devices` aliases were dropped after the frontend
+    cutover (commit at Faz 9 #1)."""
     since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
 
     total_orgs    = (await db.execute(select(func.count()).select_from(Organization).where(Organization.deleted_at.is_(None)))).scalar() or 0
@@ -648,16 +645,12 @@ async def system_stats(
     top_orgs = [{"id": r[0], "name": r[1], "plan_tier": r[2] or "no_plan", "device_count": r[3]} for r in top_org_rows]
 
     return {
-        # Legacy alias `tenants` is now the organization count.
-        "tenants": {"total": total_orgs, "active": active_orgs, "by_plan": plan_counts},
         "organizations": {"total": total_orgs, "active": active_orgs, "by_plan": plan_counts},
         "users": {"total": total_users},
         "devices": {"total": total_devices, "online": online_devices, "offline": offline_devices},
         "locations": {"total": total_locations},
         "events_24h": {"total": events_24h, "critical": critical_24h},
         "tasks": {"running": tasks_running},
-        # Legacy alias name; the underlying data is org-sourced now.
-        "top_tenants_by_devices": top_orgs,
         "top_organizations_by_devices": top_orgs,
     }
 
@@ -729,9 +722,6 @@ def _user_dict(u: User) -> dict:
         "system_role": u.system_role,
         "role": u.role,                              # back-compat property → system_role
         "org_id": u.organization_id,
-        # M6 final drop — legacy `tenant_id` alias kept on the response for
-        # one release so the frontend can migrate; column is gone.
-        "tenant_id": u.organization_id,
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
@@ -746,14 +736,10 @@ async def list_resources_devices(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
     org_id: Optional[int] = Query(None),
-    # M6 — legacy alias kept for one release while the frontend migrates
-    # from `tenant_id` to `org_id`. Prefer `org_id` when both are given.
-    tenant_id: Optional[int] = Query(None),
     unassigned: bool = Query(False),
     skip: int = Query(0),
     limit: int = Query(100, le=500),
 ):
-    target_org = org_id if org_id is not None else tenant_id
     q = (
         select(Device, Organization)
         .outerjoin(Organization, Organization.id == Device.organization_id)
@@ -761,16 +747,16 @@ async def list_resources_devices(
     )
     if unassigned:
         q = q.where(Device.organization_id.is_(None))
-    elif target_org is not None:
-        q = q.where(Device.organization_id == target_org)
+    elif org_id is not None:
+        q = q.where(Device.organization_id == org_id)
     q = q.order_by(Device.hostname).offset(skip).limit(limit)
     rows = (await db.execute(q)).all()
 
     cnt_q = select(func.count()).select_from(Device).where(Device.is_active == True)
     if unassigned:
         cnt_q = cnt_q.where(Device.organization_id.is_(None))
-    elif target_org is not None:
-        cnt_q = cnt_q.where(Device.organization_id == target_org)
+    elif org_id is not None:
+        cnt_q = cnt_q.where(Device.organization_id == org_id)
     total = (await db.execute(cnt_q)).scalar() or 0
 
     return {
@@ -784,9 +770,6 @@ async def list_resources_devices(
                 "status": d.status,
                 "org_id": d.organization_id,
                 "org_name": o.name if o else None,
-                # Legacy aliases for one release.
-                "tenant_id": d.organization_id,
-                "tenant_name": o.name if o else None,
             }
             for d, o in rows
         ],
@@ -817,8 +800,6 @@ async def list_resources_agents(
                 "version": a.version,
                 "org_id": a.organization_id,
                 "org_name": o.name if o else None,
-                "tenant_id": a.organization_id,
-                "tenant_name": o.name if o else None,
             }
             for a, o in rows
         ]
@@ -831,11 +812,7 @@ async def assign_resources(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
 ):
-    target_org_id = payload.org_id if payload.org_id is not None else payload.tenant_id
-    if target_org_id is None:
-        raise HTTPException(400, "org_id (or legacy tenant_id) required")
-
-    org = (await db.execute(select(Organization).where(Organization.id == target_org_id))).scalar_one_or_none()
+    org = (await db.execute(select(Organization).where(Organization.id == payload.org_id))).scalar_one_or_none()
     if not org:
         raise HTTPException(404, "Hedef organizasyon bulunamadı")
 
@@ -846,13 +823,13 @@ async def assign_resources(
         await db.execute(
             update(Device)
             .where(Device.id.in_(payload.resource_ids))
-            .values(organization_id=target_org_id)
+            .values(organization_id=payload.org_id)
         )
     elif payload.resource_type == "agent":
         await db.execute(
             update(Agent)
             .where(Agent.id.in_(payload.resource_ids))
-            .values(organization_id=target_org_id)
+            .values(organization_id=payload.org_id)
         )
     else:
         raise HTTPException(400, "resource_type 'device' veya 'agent' olmalı")
@@ -861,9 +838,6 @@ async def assign_resources(
     return {
         "ok": True,
         "assigned": len(payload.resource_ids),
-        "org_id": target_org_id,
+        "org_id": payload.org_id,
         "org_name": org.name,
-        # Legacy aliases for one release.
-        "tenant_id": target_org_id,
-        "tenant_name": org.name,
     }
