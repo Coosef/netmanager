@@ -39,15 +39,19 @@ async def create_invite(
     current_user: User = AdminRequired,
 ):
     """Generate an invite token. Returns the token (admin copies the link)."""
-    # Admins can only invite into their own tenant; super_admin can invite without a tenant
-    tenant_id = current_user.tenant_id if current_user.role != UserRole.SUPER_ADMIN else None
+    # M6-B2 — invites are scoped by `organization_id` (was `tenant_id`).
+    # SUPER_ADMIN may create a global invite (no organization binding);
+    # everyone else's invite is bound to their own org.
+    org_id = (
+        current_user.organization_id if current_user.role != UserRole.SUPER_ADMIN else None
+    )
 
     token = secrets.token_urlsafe(48)
     invite = InviteToken(
         token=token,
         email=payload.email,
         role=payload.role,
-        tenant_id=tenant_id,
+        organization_id=org_id,
         created_by=current_user.id,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=payload.expires_hours),
     )
@@ -71,7 +75,8 @@ async def list_invites(
 ):
     q = select(InviteToken).order_by(InviteToken.created_at.desc())
     if current_user.role != UserRole.SUPER_ADMIN:
-        q = q.where(InviteToken.tenant_id == current_user.tenant_id)
+        # M6-B2 — list scoped to the caller's organization
+        q = q.where(InviteToken.organization_id == current_user.organization_id)
     rows = (await db.execute(q)).scalars().all()
     return [
         {
@@ -96,7 +101,7 @@ async def revoke_invite(
     invite = (await db.execute(select(InviteToken).where(InviteToken.id == invite_id))).scalar_one_or_none()
     if not invite:
         raise HTTPException(status_code=404, detail="Invite not found")
-    if current_user.role != UserRole.SUPER_ADMIN and invite.tenant_id != current_user.tenant_id:
+    if current_user.role != UserRole.SUPER_ADMIN and invite.organization_id != current_user.organization_id:
         raise HTTPException(status_code=403, detail="Access denied")
     await db.delete(invite)
     await db.commit()
@@ -137,13 +142,14 @@ async def accept_invite(
     if existing:
         raise HTTPException(status_code=400, detail="Bu kullanıcı adı zaten kullanılıyor")
 
+    # M6-B2 — invitee inherits the invite's organization (was tenant).
     user = User(
         username=payload.username,
         email=invite.email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name or payload.username,
         role=invite.role,
-        tenant_id=invite.tenant_id,
+        organization_id=invite.organization_id,
     )
     db.add(user)
     await db.flush()

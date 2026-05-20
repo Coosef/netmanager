@@ -119,16 +119,16 @@ async def accept_invite(
     if existing_email.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Bu e-posta adresi zaten kayıtlı")
 
+    # M6-B2 — invitee inherits the invite's organization (the legacy
+    # `tenant_id` column stays nullable in the DB until the M6 final
+    # drop; we no longer write to it).
     user = User(
         username=payload.username,
         email=invite.email,
         hashed_password=hash_password(payload.password),
         full_name=payload.full_name or invite.full_name,
         is_active=True,
-        # Legacy compat
-        role="viewer",
-        tenant_id=invite.tenant_id,
-        # New RBAC
+        role="viewer",   # legacy column, retired in B4
         system_role=invite.system_role,
         organization_id=invite.organization_id,
     )
