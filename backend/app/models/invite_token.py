@@ -16,10 +16,6 @@ class InviteToken(Base):
 
     # Legacy fields
     role: Mapped[str] = mapped_column(String(32), nullable=False, default="viewer")
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-
     # New RBAC fields (Faz 7 — 4-role model: super_admin/org_admin/location_admin/viewer)
     system_role: Mapped[str] = mapped_column(String(32), nullable=False, default="viewer")
     organization_id: Mapped[Optional[int]] = mapped_column(

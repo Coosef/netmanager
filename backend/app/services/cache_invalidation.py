@@ -9,7 +9,7 @@ aggregation cache entries:
   agg:_version:risk_fleet      — INCR'd to invalidate ALL fleet risk keys
   agg:_version:sla_fleet       — INCR'd to invalidate ALL fleet SLA keys
   agg:dirty:device             — SET of device_ids needing rebuild
-  agg:dirty:tenant             — SET of tenant_ids needing rebuild (optional)
+  (M6 final drop — `agg:dirty:tenant` set + `tenant_id` kwarg removed)
 
 All operations:
   * are SYNC (called from Celery workers, never block an event loop here)
@@ -40,7 +40,7 @@ _RISK_DEVICE_KEY = "agg:risk:device:{device_id}"
 _SLA_FLEET_VERSION = "agg:_version:sla_fleet"
 _RISK_FLEET_VERSION = "agg:_version:risk_fleet"
 _DIRTY_DEVICE_SET = "agg:dirty:device"
-_DIRTY_TENANT_SET = "agg:dirty:tenant"
+# M6 final drop — `agg:dirty:tenant` set removed.
 
 # Safety net: dirty sets auto-expire so a stalled warmer doesn't accumulate
 # unbounded membership. Warmer runs every 60s (G5) so 10 min is plenty.
@@ -64,7 +64,6 @@ def invalidate_for_event(
     sync_redis,
     device_id: int,
     event_type: str,
-    tenant_id: Optional[int] = None,
 ) -> None:
     """
     Invalidate aggregation cache for a network event.
@@ -92,13 +91,12 @@ def invalidate_for_event(
     if affects_sla:
         _bump_fleet_version_debounced(sync_redis, _SLA_FLEET_VERSION)
 
-    _mark_dirty(sync_redis, device_id, tenant_id)
+    _mark_dirty(sync_redis, device_id)
 
 
 def invalidate_device_risk(
     sync_redis,
     device_id: int,
-    tenant_id: Optional[int] = None,
 ) -> None:
     """
     Invalidate ONLY the per-device risk cache + bump risk-fleet version.
@@ -111,7 +109,7 @@ def invalidate_device_risk(
     """
     _try_delete(sync_redis, _RISK_DEVICE_KEY.format(device_id=device_id))
     _bump_fleet_version_debounced(sync_redis, _RISK_FLEET_VERSION)
-    _mark_dirty(sync_redis, device_id, tenant_id)
+    _mark_dirty(sync_redis, device_id)
 
 
 def invalidate_all_fleet_caches(sync_redis) -> None:
@@ -133,10 +131,9 @@ def invalidate_for_event_types() -> frozenset[str]:
 
 # ── Internals ─────────────────────────────────────────────────────────────────
 
-def _mark_dirty(sync_redis, device_id: int, tenant_id: Optional[int]) -> None:
+def _mark_dirty(sync_redis, device_id: int) -> None:
+    # M6 final drop — `agg:dirty:tenant` set + `tenant_id` argument gone.
     _try_sadd_with_ttl(sync_redis, _DIRTY_DEVICE_SET, str(device_id))
-    if tenant_id is not None:
-        _try_sadd_with_ttl(sync_redis, _DIRTY_TENANT_SET, str(tenant_id))
 
 
 def _try_delete(sync_redis, key: str) -> None:

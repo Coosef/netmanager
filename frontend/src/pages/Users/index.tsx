@@ -221,7 +221,7 @@ export default function UsersPage() {
       // If the current user edited their own profile, refresh the auth store
       if (editUser && editUser.id === currentUser?.id && updatedUser) {
         const { setAuth, token } = useAuthStore.getState()
-        setAuth(token!, { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role as any, system_role: (updatedUser as any).system_role ?? 'member', tenant_id: updatedUser.tenant_id })
+        setAuth(token!, { id: updatedUser.id, username: updatedUser.username, role: updatedUser.role as any, system_role: (updatedUser as any).system_role ?? 'member', org_id: (updatedUser as any).org_id })
       }
       message.success(editUser ? t('users.updated') : t('users.created'))
       setDrawerOpen(false)
@@ -502,7 +502,7 @@ export default function UsersPage() {
         <Form
           layout="vertical"
           initialValues={editUser
-            ? { email: editUser.email, full_name: editUser.full_name, role: editUser.role, is_active: editUser.is_active, tenant_id: editUser.tenant_id }
+            ? { email: editUser.email, full_name: editUser.full_name, role: editUser.role, is_active: editUser.is_active, organization_id: editUser.org_id }
             : { role: 'viewer', is_active: true }
           }
           onFinish={onSubmit}
@@ -561,7 +561,7 @@ export default function UsersPage() {
                     {isSA && (
                       <>
                         <div style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>Organizasyon</div>
-                        <Form.Item name="tenant_id" style={{ marginBottom: 16 }}>
+                        <Form.Item name="organization_id" style={{ marginBottom: 16 }}>
                           <Select options={tenantOptions} allowClear placeholder={t('users.tenant_placeholder')} />
                         </Form.Item>
                         <Divider style={{ margin: '0 0 16px', borderColor: C.border }} />

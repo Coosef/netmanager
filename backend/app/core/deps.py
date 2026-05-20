@@ -13,7 +13,7 @@ from app.core.request_context import (
     resolve_location_context,
 )
 from app.core.security import decode_access_token
-from app.models.user import User, UserRole, SystemRole
+from app.models.user import SystemRole, User
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
@@ -117,15 +117,8 @@ async def get_current_active_user(
 # Legacy role-based deps (kept for backward compat)
 # ---------------------------------------------------------------------------
 
-def require_roles(*roles: UserRole):
-    async def _checker(user: Annotated[User, Depends(get_current_active_user)]) -> User:
-        if user.role not in roles:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Insufficient permissions",
-            )
-        return user
-    return _checker
+# M6 final drop — legacy `require_roles(*roles: UserRole)` removed; every
+# caller has been migrated to `require_system_role(...)` (Faz 7 / M6-B1–B4).
 
 
 async def get_tenant_context(
@@ -270,19 +263,13 @@ def require_system_role(*roles: SystemRole):
     (super_admin / org_admin / location_admin / viewer).
 
     A 'member' value (the pre-Faz-7 default, before migration M4 ran) is
-    treated as 'viewer'. The legacy `role` column is still consulted as a
-    fallback so an un-migrated user is never wrongly locked out.
-    """
+    treated as 'viewer'. (M6 final drop — the legacy `users.role` column
+    is gone; there is no longer a UserRole fallback.)"""
     async def _checker(user: Annotated[User, Depends(get_current_active_user)]) -> User:
         sr = user.system_role
         if sr == SystemRole.MEMBER:          # pre-M4 value
             sr = SystemRole.VIEWER
         if sr in roles:
-            return user
-        # Legacy fallback — un-migrated user whose system_role is stale.
-        if user.role == UserRole.SUPER_ADMIN and SystemRole.SUPER_ADMIN in roles:
-            return user
-        if user.role in (UserRole.SUPER_ADMIN, UserRole.ADMIN) and SystemRole.ORG_ADMIN in roles:
             return user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

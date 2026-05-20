@@ -162,7 +162,6 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
                         size_bytes=len(result.output.encode()),
                         created_by=created_by,
                         task_id=task_id,
-                        tenant_id=device.tenant_id,
                     )
                     db.add(backup)
                     db.execute(
@@ -172,7 +171,7 @@ def bulk_backup_configs(self, task_id: int, device_ids: list[int], created_by: i
                     )
                     db.commit()
                     # Faz 6B G4: backup freshness changed → invalidate device risk
-                    invalidate_device_risk(_inv_redis, device.id, tenant_id=device.tenant_id)
+                    invalidate_device_risk(_inv_redis, device.id)
                     results[str(device.id)] = {"hostname": device.hostname, "success": True, "hash": config_hash}
                     completed += 1
                 else:

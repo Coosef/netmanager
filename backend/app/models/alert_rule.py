@@ -39,9 +39,6 @@ class AlertRule(Base):
     created_by: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     # Faz 7 — multi-tenant isolation
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True

@@ -604,7 +604,6 @@ async def probe_device(
         total_devices=1,
         parameters={"device_id": device_id},
         created_by=current_user.id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(task)
     await db.commit()

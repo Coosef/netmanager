@@ -34,7 +34,7 @@ from app.core.request_context import (
     LocationAccessError, _NO_ACCESS, assert_location_allowed,
     require_active_location, resolve_location_context,
 )
-from app.models.user import SystemRole, UserRole
+from app.models.user import SystemRole
 
 
 # ── async SQLite harness ─────────────────────────────────────────────────────
@@ -92,11 +92,12 @@ async def _location(db, lid, org_id, name, deleted=False):
     return loc
 
 
-async def _user(db, uid, org_id, system_role=SystemRole.VIEWER, role=UserRole.VIEWER):
+async def _user(db, uid, org_id, system_role=SystemRole.VIEWER):
+    # M6 final drop — legacy `role` column gone; tests use `system_role` only.
     from app.models.user import User
     u = User(
         id=uid, username=f"u{uid}", email=f"u{uid}@x.io", hashed_password="h",
-        organization_id=org_id, system_role=system_role, role=role,
+        organization_id=org_id, system_role=system_role,
     )
     db.add(u)
     await db.flush()
@@ -233,8 +234,7 @@ async def test_super_admin_is_unconstrained():
     async with _adb() as db:
         await _org(db, 1, "alpha")
         await _location(db, 5, 1, "A")
-        u = await _user(db, 99, None, system_role=SystemRole.SUPER_ADMIN,
-                        role=UserRole.SUPER_ADMIN)
+        u = await _user(db, 99, None, system_role=SystemRole.SUPER_ADMIN)
         ctx = await resolve_location_context(db, u, x_location_id=None)
     assert ctx.is_super_admin is True
     assert ctx.allowed_location_ids == ()       # () = unconstrained
@@ -247,8 +247,7 @@ async def test_super_admin_x_org_scopes_into_one_org():
         await _org(db, 1, "alpha")
         await _org(db, 2, "bravo")
         await _location(db, 7, 2, "bravo-hq")
-        u = await _user(db, 99, None, system_role=SystemRole.SUPER_ADMIN,
-                        role=UserRole.SUPER_ADMIN)
+        u = await _user(db, 99, None, system_role=SystemRole.SUPER_ADMIN)
         ctx = await resolve_location_context(db, u, x_org_id=2, x_location_id=None)
     assert ctx.organization_id == 2
     assert ctx.is_super_admin is False          # dropped the bypass

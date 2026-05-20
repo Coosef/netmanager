@@ -120,17 +120,8 @@ class TestInvalidateForEvent:
         assert r.calls == []
         assert not r.counters
 
-    def test_tenant_id_optional(self):
-        from app.services.cache_invalidation import invalidate_for_event
-        r = FakeSyncRedis()
-        invalidate_for_event(r, device_id=5, event_type="device_offline", tenant_id=99)
-        assert "99" in r.sets["agg:dirty:tenant"]
-
-    def test_tenant_id_omitted_skips_tenant_set(self):
-        from app.services.cache_invalidation import invalidate_for_event
-        r = FakeSyncRedis()
-        invalidate_for_event(r, device_id=5, event_type="device_offline")
-        assert "agg:dirty:tenant" not in r.sets
+    # M6 final drop — the `tenant_id` kwarg + `agg:dirty:tenant` set
+    # are gone; the two tests that asserted them have been removed.
 
     def test_dirty_set_gets_ttl_on_every_sadd(self):
         from app.services.cache_invalidation import invalidate_for_event
@@ -210,9 +201,9 @@ class TestInvalidateDeviceRisk:
     def test_dirty_marker_set(self):
         from app.services.cache_invalidation import invalidate_device_risk
         r = FakeSyncRedis()
-        invalidate_device_risk(r, device_id=42, tenant_id=7)
+        invalidate_device_risk(r, device_id=42)
         assert "42" in r.sets["agg:dirty:device"]
-        assert "7" in r.sets["agg:dirty:tenant"]
+        # M6 final drop — `agg:dirty:tenant` set gone.
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -283,7 +274,7 @@ class TestCorrelationEngineHook:
 
         # Capture invalidation
         invalidation_calls = []
-        def stub_inv(redis_client, device_id, event_type, tenant_id=None):
+        def stub_inv(redis_client, device_id, event_type):
             invalidation_calls.append((device_id, event_type))
 
         # Inject our stub into the module's namespace BEFORE process_event imports it

@@ -47,7 +47,6 @@ import ConfigDriftPage from '@/pages/ConfigDrift'
 import IntelligencePage from '@/pages/Intelligence'
 import ComplianceCheckPage from '@/pages/ComplianceCheck'
 import RacksPage from '@/pages/Racks'
-import TenantsPage from '@/pages/Tenants'
 import LocationsPage from '@/pages/Locations'
 import FloorPlanPage from '@/pages/FloorPlan'
 import AlertRulesPage from '@/pages/AlertRules'
@@ -250,13 +249,7 @@ function ThemedApp() {
               <Route path="intelligence" element={<RoleRoute minRole="org_viewer"><IntelligencePage /></RoleRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_manager"><ComplianceCheckPage /></RoleRoute>} />
               <Route path="racks" element={<RoleRoute minRole="admin"><RacksPage /></RoleRoute>} />
-              {/* M6-S2 — legacy `/tenants` page is feature-flagged off
-                  by default. Set VITE_ENABLE_LEGACY_TENANTS_UI=true to
-                  expose it for migration tooling; the page (and its
-                  route + API client) is fully removed in S4. */}
-              {import.meta.env.VITE_ENABLE_LEGACY_TENANTS_UI === 'true' && (
-                <Route path="tenants" element={<RoleRoute minRole="super_admin"><TenantsPage /></RoleRoute>} />
-              )}
+              {/* M6 final drop — the standalone `/tenants` page is gone. */}
               <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
               <Route path="floor-plan" element={<RoleRoute minRole="admin"><FloorPlanPage /></RoleRoute>} />
               <Route path="alert-rules" element={<RoleRoute minRole="admin"><AlertRulesPage /></RoleRoute>} />

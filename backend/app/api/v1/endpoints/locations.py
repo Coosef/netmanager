@@ -26,7 +26,8 @@ class LocationCreate(BaseModel):
     city: Optional[str] = None
     country: Optional[str] = None
     timezone: Optional[str] = None
-    tenant_id: Optional[int] = None
+    # M6 final drop — legacy `tenant_id` removed; organization is
+    # resolved server-side from the request context.
 
 
 class LocationUpdate(BaseModel):
@@ -54,7 +55,7 @@ def _serialize(loc: Location, device_count: int = 0, user_count: int = 0) -> dic
         "city": loc.city,
         "country": loc.country,
         "timezone": loc.timezone,
-        "tenant_id": loc.tenant_id,
+        "organization_id": loc.organization_id,
         "device_count": device_count,
         "user_count": user_count,
         "created_at": loc.created_at.isoformat(),

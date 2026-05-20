@@ -30,7 +30,7 @@ from app.core.database import Base
 import app.models  # noqa: F401 — registers every model + the scoping hook
 from app.core.org_context import clear_org_context
 from app.core.request_context import LocationContext
-from app.models.user import SystemRole, UserRole
+from app.models.user import SystemRole
 from app.schemas.device import DeviceMoveRequest
 from app.services.device_ownership import (
     OWNERSHIP_FIELDS, forbidden_ownership_fields, relocate_device_data,
@@ -101,12 +101,12 @@ async def _location(db, lid, org_id, name, deleted=False):
     return loc
 
 
-async def _user(db, uid, org_id, role=UserRole.ADMIN):
+async def _user(db, uid, org_id, system_role=SystemRole.ORG_ADMIN):
+    # M6 final drop — legacy `role` / `tenant_id` columns gone.
     from app.models.user import User
     u = User(
         id=uid, username=f"u{uid}", email=f"u{uid}@x.io", hashed_password="h",
-        organization_id=org_id, role=role, system_role=SystemRole.ORG_ADMIN,
-        tenant_id=None,
+        organization_id=org_id, system_role=system_role,
     )
     db.add(u)
     await db.flush()
@@ -118,7 +118,7 @@ async def _device(db, dev_id, org_id, loc_id, ip="10.0.0.1"):
     d = Device(
         id=dev_id, hostname=f"sw-{dev_id}", ip_address=ip,
         ssh_username="admin", ssh_password_enc="enc",
-        organization_id=org_id, location_id=loc_id, tenant_id=None,
+        organization_id=org_id, location_id=loc_id,
     )
     db.add(d)
     await db.flush()
@@ -294,7 +294,7 @@ async def test_move_without_capability_rejected():
         await _org(db, 1, "alpha")
         await _location(db, 1, 1, "A")
         await _location(db, 2, 1, "B")
-        user = await _user(db, 1, 1, role=UserRole.VIEWER)  # no device:move
+        user = await _user(db, 1, 1, system_role=SystemRole.VIEWER)  # no device:move
         await _device(db, 10, 1, 1)
         await db.commit()
         with pytest.raises(HTTPException) as exc:
@@ -409,7 +409,7 @@ async def test_super_admin_move_is_unconstrained():
         await _org(db, 1, "alpha")
         await _location(db, 1, 1, "A")
         await _location(db, 2, 1, "B")
-        user = await _user(db, 1, 1, role=UserRole.SUPER_ADMIN)
+        user = await _user(db, 1, 1, system_role=SystemRole.SUPER_ADMIN)
         await _device(db, 10, 1, 1)
         await db.commit()
         result = await _move(

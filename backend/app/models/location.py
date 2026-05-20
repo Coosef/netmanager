@@ -17,10 +17,6 @@ class Location(Base):
     color: Mapped[Optional[str]] = mapped_column(String(16))
 
     # Multi-tenant: which org owns this location
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True, index=True
-    )
-
     # Faz 7 — multi-tenant isolation
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True

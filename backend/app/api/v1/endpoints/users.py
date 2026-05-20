@@ -59,7 +59,6 @@ async def _with_org_dict(db, user: User) -> dict:
     return {
         **UserResponse.model_validate(user).model_dump(),
         "organization_name": org_name,
-        "tenant_name": org_name,   # legacy alias — removed in M6 final drop
         "locations": locations,
     }
 

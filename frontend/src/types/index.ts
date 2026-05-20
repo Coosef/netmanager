@@ -1,13 +1,7 @@
-export interface Tenant {
-  id: number
-  name: string
-  slug: string
-  description?: string
-  is_active: boolean
-  created_at: string
-  device_count: number
-  user_count: number
-}
+// M6 final drop — `Tenant` interface removed. The platform has fully
+// consolidated on `Organization` (see below). Legacy super-admin
+// response fields like `tenants` and `top_tenants_by_devices` are still
+// aliased to org data for one release.
 
 export type UserRole =
   | 'super_admin'
@@ -63,13 +57,12 @@ export interface User {
   username: string
   email: string
   full_name?: string
-  role: UserRole           // legacy
-  system_role: SystemRole  // new RBAC
+  role: UserRole           // back-compat alias → system_role
+  system_role: SystemRole
   is_active: boolean
   notes?: string
-  tenant_id?: number | null   // legacy
-  org_id?: number | null      // new RBAC
-  tenant_name?: string | null
+  org_id?: number | null
+  organization_name?: string | null
   last_login?: string
   created_at: string
   locations?: UserLocationItem[]
@@ -82,7 +75,6 @@ export interface TokenResponse {
   username: string
   role: UserRole
   system_role: SystemRole
-  tenant_id?: number | null
   org_id?: number | null
   permissions?: Permissions
 }

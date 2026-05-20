@@ -110,7 +110,6 @@ def execute_rollout_task(self, rollout_id: int):
                             config_hash=cfg_hash,
                             size_bytes=len(before_config),
                             notes=f"Pre-rollout backup — rollout #{rollout_id}",
-                            tenant_id=device.tenant_id,
                         )
                         db.add(backup)
                         await db.commit()

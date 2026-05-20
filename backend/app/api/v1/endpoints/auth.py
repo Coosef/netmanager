@@ -32,9 +32,12 @@ async def _build_token_response(db: AsyncSession, user: User) -> TokenResponse:
         access_token=create_access_token({"sub": str(user.id)}),
         user_id=user.id,
         username=user.username,
-        role=user.role,
+        # M6 final drop — legacy `role` column gone; surface `system_role`
+        # as `role` for the frontend (which expects the field). The new
+        # `system_role` field still carries the same value for callers
+        # that have already migrated to it.
+        role=user.system_role,
         system_role=user.system_role,
-        tenant_id=user.tenant_id,
         org_id=user.organization_id,
         permissions=permissions,
     )

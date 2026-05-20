@@ -13,9 +13,6 @@ class Agent(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     agent_key_hash: Mapped[str] = mapped_column(Text, nullable=False)
-
-    tenant_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True)
-
     # Faz 7 — multi-tenant isolation
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True

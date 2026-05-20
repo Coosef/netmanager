@@ -24,7 +24,7 @@ from app.core.database import Base, SharedBase
 import app.models  # noqa: F401 — registers every model + the scoping hook
 from app.core.org_context import clear_org_context
 from app.models.shared.organization import OrgStatus
-from app.models.user import SystemRole, UserRole
+from app.models.user import SystemRole
 from app.services.org_management import (
     enforce_org_can_create, get_org_usage, org_status_block,
 )
@@ -99,22 +99,24 @@ async def _location(db, lid, org_id, name=None):
 
 
 async def _device(db, dev_id, org_id, loc_id, ip):
+    # M6 final drop — legacy `tenant_id` column gone.
     from app.models.device import Device
     d = Device(
         id=dev_id, hostname=f"sw-{dev_id}", ip_address=ip,
         ssh_username="a", ssh_password_enc="e",
-        organization_id=org_id, location_id=loc_id, tenant_id=None,
+        organization_id=org_id, location_id=loc_id,
     )
     db.add(d)
     await db.flush()
     return d
 
 
-async def _user(db, uid, org_id, role=UserRole.VIEWER, system_role=SystemRole.VIEWER):
+async def _user(db, uid, org_id, system_role=SystemRole.VIEWER):
+    # M6 final drop — legacy `role` / `tenant_id` columns gone.
     from app.models.user import User
     u = User(
         id=uid, username=f"u{uid}", email=f"u{uid}@x.io", hashed_password="h",
-        organization_id=org_id, role=role, system_role=system_role, tenant_id=None,
+        organization_id=org_id, system_role=system_role,
     )
     db.add(u)
     await db.flush()
@@ -306,8 +308,7 @@ async def test_super_admin_can_update_org_status_and_audit():
     from app.api.v1.endpoints.super_admin import update_org, OrgUpdate
     async with _adb() as db:
         await _org(db, 1, "alpha")
-        actor = await _user(db, 1, None, role=UserRole.SUPER_ADMIN,
-                            system_role=SystemRole.SUPER_ADMIN)
+        actor = await _user(db, 1, None, system_role=SystemRole.SUPER_ADMIN)
         await db.commit()
 
         result = await update_org(
@@ -335,8 +336,7 @@ async def test_super_admin_update_org_rejects_bad_status():
     from app.api.v1.endpoints.super_admin import update_org, OrgUpdate
     async with _adb() as db:
         await _org(db, 1, "alpha")
-        actor = await _user(db, 1, None, role=UserRole.SUPER_ADMIN,
-                            system_role=SystemRole.SUPER_ADMIN)
+        actor = await _user(db, 1, None, system_role=SystemRole.SUPER_ADMIN)
         await db.commit()
         with pytest.raises(HTTPException) as exc:
             await update_org(1, OrgUpdate(status="bogus"), _fake_request(),
@@ -354,8 +354,7 @@ async def test_org_usage_endpoint_is_org_scoped():
         await _location(db, 2, 2)
         await _device(db, 10, 1, 1, "10.0.0.1")
         await _device(db, 20, 2, 2, "10.0.0.1")          # org 2 — must not count for org 1
-        actor = await _user(db, 1, None, role=UserRole.SUPER_ADMIN,
-                            system_role=SystemRole.SUPER_ADMIN)
+        actor = await _user(db, 1, None, system_role=SystemRole.SUPER_ADMIN)
         await db.commit()
         usage = await get_org_usage_endpoint(1, actor, db=db)
     assert usage["organization_id"] == 1
@@ -371,7 +370,7 @@ async def test_normal_user_rejected_by_super_admin_guard():
     checker = require_system_role(SystemRole.SUPER_ADMIN)
 
     normal = type("U", (), {
-        "system_role": SystemRole.VIEWER, "role": UserRole.VIEWER, "id": 5,
+        "system_role": SystemRole.VIEWER, "id": 5,
     })()
     with pytest.raises(HTTPException) as exc:
         await checker(normal)
@@ -383,7 +382,7 @@ async def test_super_admin_passes_super_admin_guard():
     from app.core.deps import require_system_role
     checker = require_system_role(SystemRole.SUPER_ADMIN)
     sa = type("U", (), {
-        "system_role": SystemRole.SUPER_ADMIN, "role": UserRole.SUPER_ADMIN, "id": 1,
+        "system_role": SystemRole.SUPER_ADMIN, "id": 1,
     })()
     assert await checker(sa) is sa
 

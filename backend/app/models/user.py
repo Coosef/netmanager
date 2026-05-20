@@ -8,24 +8,29 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
 
 
-# ---------------------------------------------------------------------------
-# Legacy role system (kept for backward compat during RBAC migration)
-# ---------------------------------------------------------------------------
+class SystemRole(str, Enum):
+    """The consolidated 4-role system model (Faz 7 M4). Row visibility is
+    enforced by Postgres RLS; this is the coarse system role. Action-
+    level rights are governed by PermissionSet / PermissionEngine
+    (services.rbac.engine) — `has_permission` below is the simple
+    callsite-friendly entry point that wraps the role-default grants."""
+    SUPER_ADMIN = "super_admin"        # Platform-wide; bypasses RLS
+    ORG_ADMIN = "org_admin"            # Full access within their organization
+    LOCATION_ADMIN = "location_admin"  # Manage their assigned location(s)
+    VIEWER = "viewer"                  # Read-only, org/location scoped
 
-class UserRole(str, Enum):
-    SUPER_ADMIN = "super_admin"
-    ADMIN = "admin"
-    ORG_VIEWER = "org_viewer"
-    LOCATION_MANAGER = "location_manager"
-    LOCATION_OPERATOR = "location_operator"
-    LOCATION_VIEWER = "location_viewer"
-    OPERATOR = "operator"
-    VIEWER = "viewer"
+    # Deprecated alias — pre-Faz-7 value; M4 remaps existing rows to VIEWER.
+    MEMBER = "member"
 
 
-ROLE_PERMISSIONS: dict[str, list[str]] = {
-    UserRole.SUPER_ADMIN: ["*"],
-    UserRole.ADMIN: [
+# M6 final drop — system-role-keyed permission grants. The legacy
+# UserRole enum + ROLE_PERMISSIONS map are gone; `has_permission` now
+# reads `self.system_role`. This is the simple "does role X get verb Y"
+# default-grant table; per-user / per-location overrides are still
+# managed via `PermissionSet` rows (PermissionEngine).
+SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
+    SystemRole.SUPER_ADMIN: ["*"],
+    SystemRole.ORG_ADMIN: [
         "device:view", "device:create", "device:edit", "device:delete",
         "device:connect", "device:move",
         "config:view", "config:push", "config:backup", "config:restore",
@@ -36,48 +41,20 @@ ROLE_PERMISSIONS: dict[str, list[str]] = {
         "monitor:view",
         "approval:view", "approval:review",
     ],
-    UserRole.ORG_VIEWER: [
+    SystemRole.LOCATION_ADMIN: [
+        "device:view", "device:create", "device:edit", "device:connect",
+        "device:move",
+        "config:view", "config:push", "config:backup", "config:restore",
+        "task:view", "task:create",
+        "audit:view", "monitor:view", "approval:view",
+    ],
+    SystemRole.VIEWER: [
         "device:view", "config:view", "task:view", "audit:view", "monitor:view",
     ],
-    UserRole.LOCATION_MANAGER: [
-        "device:view", "device:create", "device:edit", "device:move",
-        "config:view", "config:push", "config:backup", "config:restore",
-        "task:view", "task:create", "audit:view", "monitor:view", "approval:view",
-    ],
-    UserRole.LOCATION_OPERATOR: [
-        "device:view", "device:connect",
-        "config:view", "config:push", "config:backup",
-        "task:view", "task:create", "monitor:view",
-    ],
-    UserRole.LOCATION_VIEWER: [
+    SystemRole.MEMBER: [
         "device:view", "config:view", "task:view", "monitor:view",
     ],
-    UserRole.OPERATOR: [
-        "device:view", "device:connect",
-        "config:view", "config:push", "config:backup",
-        "task:view", "task:create", "audit:view", "monitor:view", "approval:view",
-    ],
-    UserRole.VIEWER: [
-        "device:view", "config:view", "task:view", "audit:view", "monitor:view",
-    ],
 }
-
-
-# ---------------------------------------------------------------------------
-# New RBAC system roles
-# ---------------------------------------------------------------------------
-
-class SystemRole(str, Enum):
-    """Faz 7 — the consolidated 4-role system model. Row visibility is
-    enforced by RLS; this is the coarse system role. Action-level rights
-    remain governed by PermissionSet / PermissionEngine."""
-    SUPER_ADMIN = "super_admin"        # Platform-wide; bypasses RLS
-    ORG_ADMIN = "org_admin"           # Full access within their organization
-    LOCATION_ADMIN = "location_admin"  # Manage their assigned location(s)
-    VIEWER = "viewer"                  # Read-only, org/location scoped
-
-    # Deprecated alias — pre-Faz-7 value; M4 remaps existing rows to VIEWER.
-    MEMBER = "member"
 
 
 class User(Base):
@@ -91,13 +68,9 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text)
 
-    # --- Legacy role fields (kept during RBAC migration) ---
-    role: Mapped[str] = mapped_column(String(32), default=UserRole.VIEWER, nullable=False)
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
-    )
-
-    # --- New RBAC fields ---
+    # M6 final drop — the legacy `role` column + `tenant_id` FK are gone.
+    # `system_role` is the authoritative role; `organization_id` is the
+    # authoritative tenant key.
     system_role: Mapped[str] = mapped_column(
         String(32), default=SystemRole.VIEWER, nullable=False
     )
@@ -115,17 +88,23 @@ class User(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    # --- Legacy helpers (kept for backward compat) ---
     def has_permission(self, permission: str) -> bool:
-        # M6-B4 — `is_tenant_wide` and `is_location_scoped` (the two
-        # other legacy helpers) were dead code and have been removed.
-        # `has_permission` itself is still consulted by ~13 endpoints;
-        # it stays until the final M6 drop replaces the legacy `role`
-        # column + ROLE_PERMISSIONS map.
-        perms = ROLE_PERMISSIONS.get(self.role, [])
+        """Simple permission check driven by the user's system role.
+        Returns True if the role's default grants include `permission`
+        (or wildcard `*` for super-admin). For per-location / per-user
+        overrides, callers should use `PermissionEngine.resolve` directly."""
+        perms = SYSTEM_ROLE_PERMISSIONS.get(self.system_role, [])
         return "*" in perms or permission in perms
 
-    # --- New RBAC helpers ---
+    @property
+    def role(self) -> str:
+        """Back-compat shim — the legacy `role` column was dropped in
+        the M6 final drop; readers like UserResponse.from_attributes still
+        expect a `role` attribute. We surface the authoritative
+        `system_role` here so the frontend / token responses keep working
+        without coordination."""
+        return self.system_role
+
     @property
     def is_super_admin(self) -> bool:
         return self.system_role == SystemRole.SUPER_ADMIN

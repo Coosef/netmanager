@@ -34,9 +34,6 @@ class Playbook(Base):
     pre_run_backup: Mapped[bool] = mapped_column(Boolean, default=False)
 
     created_by: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     # Faz 7 — multi-tenant isolation
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True

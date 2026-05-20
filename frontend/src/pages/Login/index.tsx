@@ -73,7 +73,6 @@ export default function LoginPage() {
           username: res.username,
           role: res.role as any,
           system_role: (res.system_role as any) ?? 'member',
-          tenant_id: res.tenant_id,
           org_id: res.org_id,
         },
         res.permissions,

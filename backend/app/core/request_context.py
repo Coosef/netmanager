@@ -84,24 +84,17 @@ class LocationContext:
 # ── role helpers ─────────────────────────────────────────────────────────────
 
 def is_super_admin(user) -> bool:
-    from app.models.user import SystemRole, UserRole
-    return (
-        user.system_role == SystemRole.SUPER_ADMIN
-        or user.role == UserRole.SUPER_ADMIN
-    )
+    # M6 final drop — UserRole + legacy `role` column gone.
+    from app.models.user import SystemRole
+    return user.system_role == SystemRole.SUPER_ADMIN
 
 
 def is_org_wide(user) -> bool:
     """True for roles that operate across the whole organization and are
     therefore not constrained by individual user_locations rows —
     super-admin and org-admin. This is an explicit role property."""
-    from app.models.user import SystemRole, UserRole
-    if is_super_admin(user):
-        return True
-    if user.system_role == SystemRole.ORG_ADMIN:
-        return True
-    # Legacy fallback — an un-migrated org-level role.
-    return user.role in (UserRole.ADMIN, UserRole.ORG_VIEWER)
+    from app.models.user import SystemRole
+    return user.system_role in (SystemRole.SUPER_ADMIN, SystemRole.ORG_ADMIN)
 
 
 # ── resolution ───────────────────────────────────────────────────────────────

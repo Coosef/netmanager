@@ -19,9 +19,6 @@ class IpamSubnet(Base):
     gateway: Mapped[Optional[str]] = mapped_column(String(45))
     dns_servers: Mapped[Optional[str]] = mapped_column(String(255))  # comma-separated
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    tenant_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     # Faz 7 — multi-tenant isolation
     organization_id: Mapped[int] = mapped_column(
         ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False, index=True

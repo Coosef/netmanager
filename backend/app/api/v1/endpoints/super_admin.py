@@ -21,7 +21,7 @@ from app.models.shared.organization import Organization, OrgStatus
 from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
 from app.models.shared.plan import Plan
 from app.models.task import Task
-from app.models.tenant import Tenant
+# M6 final drop — Tenant model removed.
 from app.models.user import User, SystemRole
 from app.services.audit_service import log_action
 from app.services.org_management import get_org_usage
@@ -175,13 +175,67 @@ async def list_orgs(
     db: AsyncSession = Depends(get_db),
     page: int = 1,
     per_page: int = 50,
+    with_counts: bool = Query(False),
 ):
+    """List organizations. With `?with_counts=true`, each row carries
+    inline `device_count` / `user_count` / `location_count` + `plan_tier`
+    so the super-admin dashboard (frontend `tenantsApi.list` shim) can
+    render the org overview table in a single round trip.
+
+    Counts are computed via grouped subqueries (no N+1)."""
     offset = (page - 1) * per_page
     total = (await db.execute(select(func.count()).select_from(Organization))).scalar()
     rows = (await db.execute(
         select(Organization).order_by(Organization.id).offset(offset).limit(per_page)
     )).scalars().all()
-    return {"total": total, "orgs": [_org_dict(o) for o in rows]}
+
+    counts_by_org: dict[int, dict] = {}
+    plan_slug_by_org: dict[int, str] = {}
+    if with_counts and rows:
+        org_ids = [o.id for o in rows]
+
+        # Per-table grouped counts (3 small queries, scales with org count not row count).
+        dev_rows = (await db.execute(
+            select(Device.organization_id, func.count(Device.id))
+            .where(Device.organization_id.in_(org_ids), Device.is_active == True)
+            .group_by(Device.organization_id)
+        )).all()
+        usr_rows = (await db.execute(
+            select(User.organization_id, func.count(User.id))
+            .where(User.organization_id.in_(org_ids))
+            .group_by(User.organization_id)
+        )).all()
+        loc_rows = (await db.execute(
+            select(Location.organization_id, func.count(Location.id))
+            .where(Location.organization_id.in_(org_ids))
+            .group_by(Location.organization_id)
+        )).all()
+        plan_rows = (await db.execute(
+            select(Organization.id, Plan.slug)
+            .outerjoin(Plan, Plan.id == Organization.plan_id)
+            .where(Organization.id.in_(org_ids))
+        )).all()
+
+        for oid, n in dev_rows:
+            counts_by_org.setdefault(oid, {})["device_count"] = n
+        for oid, n in usr_rows:
+            counts_by_org.setdefault(oid, {})["user_count"] = n
+        for oid, n in loc_rows:
+            counts_by_org.setdefault(oid, {})["location_count"] = n
+        for oid, slug in plan_rows:
+            plan_slug_by_org[oid] = slug or "free"
+
+    def _row(o: Organization) -> dict:
+        d = _org_dict(o)
+        if with_counts:
+            c = counts_by_org.get(o.id, {})
+            d["device_count"] = c.get("device_count", 0)
+            d["user_count"] = c.get("user_count", 0)
+            d["location_count"] = c.get("location_count", 0)
+            d["plan_tier"] = plan_slug_by_org.get(o.id, "free")
+        return d
+
+    return {"total": total, "orgs": [_row(o) for o in rows]}
 
 
 @router.get("/orgs/{org_id}")
@@ -371,8 +425,7 @@ async def invite_to_org(
         token=token_str,
         email=payload.email,
         full_name=payload.full_name,
-        role="viewer",  # legacy
-        tenant_id=None,
+        role="viewer",  # legacy `role` column on invite_tokens kept until next drop
         system_role=payload.system_role,
         organization_id=org_id,
         permission_set_id=payload.permission_set_id,
@@ -540,7 +593,11 @@ def _deep_merge(base: dict, override: dict) -> None:
 class AssignResourcesPayload(BaseModel):
     resource_type: str          # "device" | "agent"
     resource_ids: List[Union[int, str]]
-    tenant_id: int              # target tenant
+    # M6 final drop — accept both keys during the transition; `tenant_id`
+    # was the legacy field name, `org_id` is the canonical one. We keep
+    # the alias so older frontend builds keep working until cutover.
+    org_id: Optional[int] = None
+    tenant_id: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -605,63 +662,9 @@ async def system_stats(
     }
 
 
-# ---------------------------------------------------------------------------
-# Tenant (legacy) management — DEPRECATED
-# ---------------------------------------------------------------------------
-# M6-B3 — these two endpoints write to the legacy `tenants` table and are
-# superseded by the Phase H Organization endpoints (PATCH /orgs/{id} for
-# plan/quota/status). They stay functional until the M6 final drop so
-# any external script that still calls them keeps working, but every
-# call emits a deprecation warning and frontend code should target the
-# org endpoints.
-
-import logging as _logging
-_legacy_log = _logging.getLogger("netmanager.super_admin.legacy")
-
-
-@router.patch("/tenants/{tenant_id}/plan")
-async def update_tenant_plan(
-    tenant_id: int,
-    plan_tier: str,
-    max_devices: int,
-    max_users: int,
-    _: SuperAdminOnly,
-    db: AsyncSession = Depends(get_db),
-):
-    _legacy_log.warning(
-        "deprecated endpoint hit: PATCH /super-admin/tenants/%s/plan — "
-        "use PATCH /super-admin/orgs/{org_id} (M6-B3)", tenant_id,
-        extra={"event": "legacy_tenant_endpoint", "endpoint": "update_tenant_plan",
-               "tenant_id": tenant_id},
-    )
-    tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(404, "Tenant bulunamadı")
-    tenant.plan_tier = plan_tier
-    tenant.max_devices = max_devices
-    tenant.max_users = max_users
-    await db.commit()
-    return {"ok": True}
-
-
-@router.patch("/tenants/{tenant_id}/toggle-active")
-async def toggle_tenant_active(
-    tenant_id: int,
-    _: SuperAdminOnly,
-    db: AsyncSession = Depends(get_db),
-):
-    _legacy_log.warning(
-        "deprecated endpoint hit: PATCH /super-admin/tenants/%s/toggle-active "
-        "— use PATCH /super-admin/orgs/{org_id} with status (M6-B3)", tenant_id,
-        extra={"event": "legacy_tenant_endpoint", "endpoint": "toggle_tenant_active",
-               "tenant_id": tenant_id},
-    )
-    tenant = (await db.execute(select(Tenant).where(Tenant.id == tenant_id))).scalar_one_or_none()
-    if not tenant:
-        raise HTTPException(404, "Tenant bulunamadı")
-    tenant.is_active = not tenant.is_active
-    await db.commit()
-    return {"is_active": tenant.is_active}
+# M6 final drop — legacy /super-admin/tenants/{id}/plan and /toggle-active
+# endpoints removed. Use PATCH /super-admin/orgs/{id} (Phase H) for plan,
+# status, quota and licence updates.
 
 
 # ---------------------------------------------------------------------------
@@ -724,9 +727,11 @@ def _user_dict(u: User) -> dict:
         "full_name": u.full_name,
         "is_active": u.is_active,
         "system_role": u.system_role,
-        "role": u.role,
+        "role": u.role,                              # back-compat property → system_role
         "org_id": u.organization_id,
-        "tenant_id": u.tenant_id,
+        # M6 final drop — legacy `tenant_id` alias kept on the response for
+        # one release so the frontend can migrate; column is gone.
+        "tenant_id": u.organization_id,
         "last_login": u.last_login.isoformat() if u.last_login else None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
     }
@@ -740,28 +745,32 @@ def _user_dict(u: User) -> dict:
 async def list_resources_devices(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
+    org_id: Optional[int] = Query(None),
+    # M6 — legacy alias kept for one release while the frontend migrates
+    # from `tenant_id` to `org_id`. Prefer `org_id` when both are given.
     tenant_id: Optional[int] = Query(None),
     unassigned: bool = Query(False),
     skip: int = Query(0),
     limit: int = Query(100, le=500),
 ):
+    target_org = org_id if org_id is not None else tenant_id
     q = (
-        select(Device, Tenant)
-        .outerjoin(Tenant, Tenant.id == Device.tenant_id)
+        select(Device, Organization)
+        .outerjoin(Organization, Organization.id == Device.organization_id)
         .where(Device.is_active == True)
     )
     if unassigned:
-        q = q.where(Device.tenant_id.is_(None))
-    elif tenant_id is not None:
-        q = q.where(Device.tenant_id == tenant_id)
+        q = q.where(Device.organization_id.is_(None))
+    elif target_org is not None:
+        q = q.where(Device.organization_id == target_org)
     q = q.order_by(Device.hostname).offset(skip).limit(limit)
     rows = (await db.execute(q)).all()
 
     cnt_q = select(func.count()).select_from(Device).where(Device.is_active == True)
     if unassigned:
-        cnt_q = cnt_q.where(Device.tenant_id.is_(None))
-    elif tenant_id is not None:
-        cnt_q = cnt_q.where(Device.tenant_id == tenant_id)
+        cnt_q = cnt_q.where(Device.organization_id.is_(None))
+    elif target_org is not None:
+        cnt_q = cnt_q.where(Device.organization_id == target_org)
     total = (await db.execute(cnt_q)).scalar() or 0
 
     return {
@@ -773,10 +782,13 @@ async def list_resources_devices(
                 "ip_address": d.ip_address,
                 "site": d.site,
                 "status": d.status,
-                "tenant_id": d.tenant_id,
-                "tenant_name": t.name if t else None,
+                "org_id": d.organization_id,
+                "org_name": o.name if o else None,
+                # Legacy aliases for one release.
+                "tenant_id": d.organization_id,
+                "tenant_name": o.name if o else None,
             }
-            for d, t in rows
+            for d, o in rows
         ],
     }
 
@@ -788,12 +800,12 @@ async def list_resources_agents(
     unassigned: bool = Query(False),
 ):
     q = (
-        select(Agent, Tenant)
-        .outerjoin(Tenant, Tenant.id == Agent.tenant_id)
+        select(Agent, Organization)
+        .outerjoin(Organization, Organization.id == Agent.organization_id)
         .where(Agent.is_active == True)
     )
     if unassigned:
-        q = q.where(Agent.tenant_id.is_(None))
+        q = q.where(Agent.organization_id.is_(None))
     rows = (await db.execute(q)).all()
     return {
         "agents": [
@@ -803,10 +815,12 @@ async def list_resources_agents(
                 "status": a.status,
                 "platform": a.platform,
                 "version": a.version,
-                "tenant_id": a.tenant_id,
-                "tenant_name": t.name if t else None,
+                "org_id": a.organization_id,
+                "org_name": o.name if o else None,
+                "tenant_id": a.organization_id,
+                "tenant_name": o.name if o else None,
             }
-            for a, t in rows
+            for a, o in rows
         ]
     }
 
@@ -817,8 +831,12 @@ async def assign_resources(
     _: SuperAdminOnly,
     db: AsyncSession = Depends(get_db),
 ):
-    tenant = (await db.execute(select(Tenant).where(Tenant.id == payload.tenant_id))).scalar_one_or_none()
-    if not tenant:
+    target_org_id = payload.org_id if payload.org_id is not None else payload.tenant_id
+    if target_org_id is None:
+        raise HTTPException(400, "org_id (or legacy tenant_id) required")
+
+    org = (await db.execute(select(Organization).where(Organization.id == target_org_id))).scalar_one_or_none()
+    if not org:
         raise HTTPException(404, "Hedef organizasyon bulunamadı")
 
     if not payload.resource_ids:
@@ -828,16 +846,24 @@ async def assign_resources(
         await db.execute(
             update(Device)
             .where(Device.id.in_(payload.resource_ids))
-            .values(tenant_id=payload.tenant_id)
+            .values(organization_id=target_org_id)
         )
     elif payload.resource_type == "agent":
         await db.execute(
             update(Agent)
             .where(Agent.id.in_(payload.resource_ids))
-            .values(tenant_id=payload.tenant_id)
+            .values(organization_id=target_org_id)
         )
     else:
         raise HTTPException(400, "resource_type 'device' veya 'agent' olmalı")
 
     await db.commit()
-    return {"ok": True, "assigned": len(payload.resource_ids), "tenant_id": payload.tenant_id, "tenant_name": tenant.name}
+    return {
+        "ok": True,
+        "assigned": len(payload.resource_ids),
+        "org_id": target_org_id,
+        "org_name": org.name,
+        # Legacy aliases for one release.
+        "tenant_id": target_org_id,
+        "tenant_name": org.name,
+    }

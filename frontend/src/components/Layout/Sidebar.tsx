@@ -205,10 +205,8 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       items: [
         ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as UserRole }] : []),
         ...(isOA && !isSA ? [{ key: '/org-admin', icon: <GlobalOutlined />, label: '⚙ Organizasyon Paneli', minRole: 'admin' as UserRole }] : []),
-        // M6-S2 — Tenants nav item shown only when the legacy UI flag is on.
-        ...(isSA && import.meta.env.VITE_ENABLE_LEGACY_TENANTS_UI === 'true'
-          ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: t('nav.tenants'), minRole: 'super_admin' as UserRole }]
-          : []),
+        // M6 final drop — the standalone `/tenants` page is gone. Org
+        // overview + assignment lives in the Platform Paneli above.
         { key: '/permissions', icon: <SafetyOutlined />, label: 'Yetki Yönetimi', minRole: 'admin' as UserRole },
         { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },

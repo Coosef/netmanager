@@ -14,7 +14,7 @@ from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter, Request
 from app.core.request_context import is_super_admin, require_active_location
 from app.core.security import encrypt_credential
 # M6-B4 — UserRole no longer imported; system_role + RLS handle scoping.
-from app.models.tenant import Tenant
+# M6 final drop — Tenant model removed.
 from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
 from app.models.device import Device, DeviceGroup
@@ -477,7 +477,6 @@ async def create_device(
         snmp_v3_priv_protocol=payload.snmp_v3_priv_protocol,
         snmp_v3_priv_passphrase=encrypt_credential(payload.snmp_v3_priv_passphrase) if payload.snmp_v3_priv_passphrase else None,
         credential_profile_id=payload.credential_profile_id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(device)
     await db.commit()
@@ -1774,7 +1773,6 @@ async def run_show_command(
                 risk_level=risk,
                 requester_id=current_user.id,
                 requester_username=current_user.username,
-                tenant_id=current_user.tenant_id,
             )
             db.add(req)
             await db.commit()
@@ -2053,7 +2051,6 @@ async def take_backup(
         config_hash=config_hash,
         size_bytes=len(config_text.encode()),
         created_by=current_user.id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(backup)
 
@@ -2526,12 +2523,10 @@ async def get_health_scores(
     since_24h = now - timedelta(hours=24)
     since_7d  = now - timedelta(days=7)
 
-    # All active devices
+    # All active devices — RLS (Faz 7) scopes by org/location at the DB; no
+    # application-level tenant filter needed. The `tenant_filter` shim
+    # (deps.get_tenant_context) returns None unconditionally now.
     q = select(Device).where(Device.is_active == True)
-    if tenant_filter:
-        q = q.where(Device.tenant_id == tenant_filter)
-    elif current_user.tenant_id:
-        q = q.where(Device.tenant_id == current_user.tenant_id)
     devices_list = (await db.execute(q)).scalars().all()
 
     if not devices_list:

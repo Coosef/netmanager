@@ -151,7 +151,6 @@ async def create_from_template(
         schedule_interval_hours=interval_hours,
         next_run_at=next_run,
         created_by=current_user.id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(pb)
     await db.commit()
@@ -208,7 +207,6 @@ async def create_playbook(
         trigger_event_type=body.get("trigger_event_type"),
         pre_run_backup=bool(body.get("pre_run_backup", False)),
         created_by=current_user.id,
-        tenant_id=current_user.tenant_id,
     )
     db.add(pb)
     await db.commit()
