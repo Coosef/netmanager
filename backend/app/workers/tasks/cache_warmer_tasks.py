@@ -1,31 +1,35 @@
 """
-Aggregation Cache Warmer — Faz 6B G5
+Aggregation Cache Warmer — Faz 6B G5 (Faz 9 #4 — tenant loop retired)
 
 Celery beat task (every 60s, `default` queue) that keeps the KI-1 hot
 aggregation caches warm:
 
-  - /sla/fleet-summary       (no-filter + per dirty-tenant)
-  - /intelligence/fleet/risk (no-filter + per dirty-tenant)
+  - /sla/fleet-summary
+  - /intelligence/fleet/risk
 
 How it works:
   1. AGG_CACHE_ENABLED=false → immediate no-op.
   2. Single-runner lock (SETNX agg:warmer:lock, 120s TTL) — overlapping
      beat ticks skip instead of double-running heavy aggregations.
-  3. Snapshot the dirty sets written by cache_invalidation (G4):
+  3. Snapshot the device-dirty set written by cache_invalidation (G4):
        agg:dirty:device  — devices whose data changed
-       agg:dirty:tenant  — tenants whose fleet caches need rebuild
-  4. Build a deduplicated target list: always no-filter sla+risk, plus
-     sla+risk for every dirty tenant.
-  5. Warm targets with asyncio.Semaphore(5) — bounds concurrent DB
-     aggregations so the warmer never stampedes Postgres.
-  6. Drain dirty markers with SREM (member-specific, NOT DEL) — markers
-     added *during* the run survive for the next cycle, and a tenant's
-     marker is only removed if BOTH its sla and risk warmed successfully.
+  4. Two warm targets per cycle: no-filter sla + no-filter risk. (The
+     per-tenant per-device variants were retired in M6 — RLS scopes
+     reads at the DB layer now, so there's a single fleet cache key
+     per kind and the warmer only needs to keep those two warm. The
+     legacy `agg:dirty:tenant` set was already drained at module-load
+     by `_cleanup_legacy_keys()` below and never written by anyone.)
+  5. Warm targets with asyncio.Semaphore(2) — only 2 targets exist so
+     a small bound is enough; protects Postgres from a pile-up if the
+     queries slow down.
+  6. Drain device markers with SREM (member-specific, NOT DEL) — markers
+     added *during* the run survive for the next cycle; they're cleared
+     only when both no-filter fleet caches were confirmed warm.
 
 Safety properties:
   * Redis errors → task returns a status dict, never raises (system stays up).
   * Per-target failure is isolated (asyncio.gather return_exceptions=True).
-  * Crash before drain → dirty markers survive → next run retries.
+  * Crash before drain → device markers survive → next run retries.
   * AggregationCache single-flight SETNX (G1) + warmer lock + target dedup
     → no duplicate warmup storm for the same key.
   * Runs on the `default` queue (task_default_queue) — never touches the
@@ -40,9 +44,13 @@ log = logging.getLogger(__name__)
 
 _WARMER_LOCK_KEY = "agg:warmer:lock"
 _WARMER_LOCK_TTL_SECS = 120          # must exceed worst-case warm duration
-_WARM_CONCURRENCY = 5                # Semaphore — concurrent DB aggregations
+_WARM_CONCURRENCY = 2                # Semaphore — only 2 targets, bounded
 _DIRTY_DEVICE_SET = "agg:dirty:device"
-_DIRTY_TENANT_SET = "agg:dirty:tenant"
+# Faz 9 #4 — legacy `agg:dirty:tenant` set retired. No publisher writes to
+# it (the SADD in cache_invalidation.py was removed in M6 final drop) and
+# we no longer iterate it. A best-effort one-time DEL runs on first warm
+# cycle in case any stale members from before M6 still linger.
+_LEGACY_DIRTY_TENANT_SET = "agg:dirty:tenant"
 
 # Defaults must match the endpoint Query() defaults so warmed keys are the
 # ones real requests hit.
@@ -52,24 +60,15 @@ _DEFAULT_RISK_LIMIT = 20             # /intelligence/fleet/risk
 
 # ── Pure helper — testable without Redis ──────────────────────────────────────
 
-def build_warm_targets(dirty_tenants) -> list[tuple[str, object]]:
-    """
-    Build the deduplicated list of (kind, tenant_id) warm targets.
+def build_warm_targets() -> list[str]:
+    """The two no-filter warm targets per cycle: sla + risk.
 
-    Always includes the two no-filter targets (tenant_id=None). For each
-    dirty tenant that parses as an int, adds its sla + risk targets.
-    Non-integer members are skipped.
+    Returns a stable 2-element list. Faz 9 #4 — the per-tenant variant
+    (previously expanded by `dirty_tenants`) is retired; with RLS scoping
+    reads at the DB layer there is exactly one fleet cache key per kind
+    and warming the no-filter variants is sufficient.
     """
-    targets: list[tuple[str, object]] = [("sla", None), ("risk", None)]
-    for raw in dirty_tenants:
-        try:
-            tid = int(raw)
-        except (TypeError, ValueError):
-            continue
-        targets.append(("sla", tid))
-        targets.append(("risk", tid))
-    # dict.fromkeys preserves insertion order while dropping duplicates
-    return list(dict.fromkeys(targets))
+    return ["sla", "risk"]
 
 
 # ── Celery task ───────────────────────────────────────────────────────────────
@@ -122,6 +121,7 @@ async def _warm() -> dict:
             return {"status": "locked", "warmed": 0}
 
         try:
+            await _cleanup_legacy_keys(redis)
             return await _run_warm(redis, cache, settings)
         finally:
             try:
@@ -135,48 +135,50 @@ async def _warm() -> dict:
             pass
 
 
+async def _cleanup_legacy_keys(redis) -> None:
+    """Faz 9 #4 — best-effort one-time DEL of the legacy `agg:dirty:tenant`
+    set. No producer writes to it post-M6, but a Redis instance that lived
+    through the M6 upgrade may still hold stale members. A DEL is cheap on
+    an empty/small set and idempotent across cycles. Never raises."""
+    try:
+        await redis.delete(_LEGACY_DIRTY_TENANT_SET)
+    except Exception as exc:
+        log.debug("warmer: legacy dirty-tenant DEL failed — %s", exc)
+
+
 async def _run_warm(redis, cache, settings) -> dict:
-    # Non-destructive snapshot of dirty sets.
+    # Non-destructive snapshot of the device-dirty set. Used downstream to
+    # decide whether to clear the markers after the no-filter warm succeeds.
     try:
         dirty_devices = set(await redis.smembers(_DIRTY_DEVICE_SET))
-        dirty_tenants = set(await redis.smembers(_DIRTY_TENANT_SET))
     except Exception as exc:
-        log.warning("warmer: failed to read dirty sets — %s", exc)
-        dirty_devices, dirty_tenants = set(), set()
+        log.warning("warmer: failed to read dirty set — %s", exc)
+        dirty_devices = set()
 
-    targets = build_warm_targets(dirty_tenants)
+    targets = build_warm_targets()
 
     sem = asyncio.Semaphore(_WARM_CONCURRENCY)
     results = await asyncio.gather(
-        *(_warm_target(kind, tid, sem, settings, cache) for kind, tid in targets),
+        *(_warm_target(kind, sem, settings, cache) for kind in targets),
         return_exceptions=True,
     )
 
     # Map each target to its success bool.
-    success: dict[tuple[str, object], bool] = {}
-    for (kind, tid), res in zip(targets, results):
-        success[(kind, tid)] = res is True
+    success: dict[str, bool] = {
+        kind: (res is True) for kind, res in zip(targets, results)
+    }
 
     warmed = sum(1 for ok in success.values() if ok)
     errors = len(success) - warmed
 
-    # Drain dirty markers — only members fully warmed this cycle.
-    no_filter_ok = success.get(("sla", None)) and success.get(("risk", None))
-    drained_tenants = 0
+    # Drain device markers — only when both no-filter caches confirmed warm.
+    # If either failed, keep the markers so the next cycle retries.
+    no_filter_ok = success.get("sla") and success.get("risk")
     try:
-        fully_warmed = [
-            raw for raw in dirty_tenants
-            if _tenant_fully_warmed(raw, success)
-        ]
-        if fully_warmed:
-            drained_tenants = await redis.srem(_DIRTY_TENANT_SET, *fully_warmed)
-        # Device markers only signal "fleet changed" — clear them once the
-        # no-filter fleet caches are confirmed warm. If that failed, keep
-        # them so the next cycle retries.
         if no_filter_ok and dirty_devices:
             await redis.srem(_DIRTY_DEVICE_SET, *dirty_devices)
     except Exception as exc:
-        log.warning("warmer: failed to drain dirty sets — %s", exc)
+        log.warning("warmer: failed to drain dirty set — %s", exc)
 
     stats = {
         "status": "ok",
@@ -184,25 +186,13 @@ async def _run_warm(redis, cache, settings) -> dict:
         "errors": errors,
         "targets": len(targets),
         "dirty_devices_seen": len(dirty_devices),
-        "dirty_tenants_drained": drained_tenants,
     }
     log.info("warmer: %s", stats)
     return stats
 
 
-def _tenant_fully_warmed(raw_tenant, success: dict) -> bool:
-    """A tenant marker is removable only if BOTH its sla and risk warmed."""
-    try:
-        tid = int(raw_tenant)
-    except (TypeError, ValueError):
-        # Unparseable marker — never produced a target; drop it so it can't
-        # accumulate forever.
-        return True
-    return bool(success.get(("sla", tid)) and success.get(("risk", tid)))
-
-
 async def _warm_target(
-    kind: str, tenant_id, sem: asyncio.Semaphore, settings, cache,
+    kind: str, sem: asyncio.Semaphore, settings, cache,
 ) -> bool:
     """
     Warm one fleet cache entry. Returns True on success, False on failure.
@@ -211,6 +201,11 @@ async def _warm_target(
     event loop — see _warm() docstring). Uses get_or_compute so:
       - an invalidated key (version bumped) → MISS → compute + write
       - a still-fresh key → cache hit, no redundant DB aggregation
+
+    Faz 9 #4 — `tenant_id` argument retired. The `fleet_summary_cache_key`
+    and `fleet_risk_cache_key` helpers still accept the legacy positional
+    args for back-compat; we pass `None` for both, matching what the
+    endpoints themselves do post Faz 9 #3.
     """
     from app.core.metrics import CACHE_OPS
 
@@ -227,12 +222,12 @@ async def _warm_target(
                     )
                     version = await cache.read_version(_SLA_FLEET_VERSION_KEY)
                     key = fleet_summary_cache_key(
-                        version, tenant_id, None, _DEFAULT_WINDOW_DAYS, None,
+                        version, None, None, _DEFAULT_WINDOW_DAYS, None,
                     )
 
                     async def _compute():
                         return await _compute_fleet_summary(
-                            db, _DEFAULT_WINDOW_DAYS, None, None, tenant_id,
+                            db, _DEFAULT_WINDOW_DAYS, None, None, None,
                         )
 
                     await cache.get_or_compute(
@@ -249,12 +244,12 @@ async def _warm_target(
                     )
                     version = await cache.read_version(_RISK_FLEET_VERSION_KEY)
                     key = fleet_risk_cache_key(
-                        version, tenant_id, None, _DEFAULT_RISK_LIMIT,
+                        version, None, None, _DEFAULT_RISK_LIMIT,
                     )
 
                     async def _compute():
                         return await _compute_fleet_risk(
-                            db, _DEFAULT_RISK_LIMIT, None, tenant_id,
+                            db, _DEFAULT_RISK_LIMIT, None, None,
                         )
 
                     await cache.get_or_compute(
@@ -267,7 +262,7 @@ async def _warm_target(
             _safe_metric(CACHE_OPS, kind, "ok")
             return True
         except Exception:
-            log.exception("warmer: failed to warm %s tenant=%s", kind, tenant_id)
+            log.exception("warmer: failed to warm %s", kind)
             _safe_metric(CACHE_OPS, kind, "error")
             return False
 

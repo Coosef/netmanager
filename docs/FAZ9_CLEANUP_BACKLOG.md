@@ -80,21 +80,52 @@ every super-admin response; cut over `frontend/src/api/tenants.ts` to
 delete the shim and have `frontend/src/pages/SuperAdmin/index.tsx`
 consume `superadminApi.listOrgs({ with_counts: true })` directly.
 
-## 4. Cache warmer dormant `agg:dirty:tenant` references
+## 4. Cache warmer dormant `agg:dirty:tenant` references  — ✅ closed 2026-05-21 (Faz 9 #4)
 
 **Files:**
   * [backend/app/workers/tasks/cache_warmer_tasks.py](backend/app/workers/tasks/cache_warmer_tasks.py)
-  * [backend/app/services/cache_invalidation.py](backend/app/services/cache_invalidation.py) (already cleaned in M6-S4)
+  * [backend/tests/test_faz6b_cache_warmer.py](backend/tests/test_faz6b_cache_warmer.py)
 
-The warmer still has a per-tenant `SCAN agg:dirty:tenant` loop, but the
-SADD source that fed it was removed in M6-S4. The set never grows, so
-the loop iterates zero members every 60 s. The constant string
-reference is in the warmer code path.
+Was: the warmer still snapshotted `agg:dirty:tenant` every cycle, ran
+through `build_warm_targets(dirty_tenants)` to spawn per-tenant
+sla/risk targets, and called `_tenant_fully_warmed()` to SREM members
+on success. The SADD source feeding this set was removed in M6 final
+drop, so the set was perpetually empty — the loop iterated zero
+members each 60 s but the code stayed.
 
-**Why harmless today:** dead Redis SCAN over an empty set is a no-op.
+**Closure (Faz 9 #4):**
 
-**Cleanup:** remove the per-tenant loop block + the `agg:dirty:tenant`
-constant; keep only the per-device dirty-set warming.
+  * `build_warm_targets()` is now a no-arg helper that returns the
+    stable `["sla", "risk"]` no-filter pair. The per-tenant expansion
+    (and `_tenant_fully_warmed`) are gone.
+  * `_warm_target()` lost its `tenant_id` parameter. Both call sites
+    pass `None` to the still-positional helpers
+    `fleet_summary_cache_key` / `fleet_risk_cache_key` (Faz 9 #3
+    keeps these signatures for code locality; matches what the
+    endpoints themselves do).
+  * `_run_warm()` no longer reads `agg:dirty:tenant` or SREMs from
+    it; it only snapshots `agg:dirty:device` and drains those markers
+    when both no-filter caches confirm warm.
+  * `_cleanup_legacy_keys()` runs a best-effort `DEL agg:dirty:tenant`
+    on every warm cycle — idempotent on empty/missing sets, cheap
+    enough to leave in indefinitely, and guarantees a Redis instance
+    that lived through the M6 upgrade clears any stragglers.
+  * Concurrency bound lowered from `Semaphore(5)` to `Semaphore(2)`
+    (only two targets exist now; the larger bound was sized for the
+    per-tenant fan-out).
+
+**Verification:**
+
+  * Warmer pytest: **15 / 15** (was 17 — removed 7 per-tenant tests,
+    added 5 no-filter + cleanup tests + 1 net helper test = 15)
+  * Full backend pytest: **600 / 600** (delta -2 from 602 is the net
+    test-count change above)
+  * Live cycle on the local stack with a seeded
+    `SADD agg:dirty:tenant 7 9 42`:
+      → warmer returned `status: ok, warmed: 2, errors: 0`
+      → `EXISTS agg:dirty:tenant` → `0` (drained)
+  * Cache warmer steady-state behaviour (no-dirty) is unchanged
+    apart from the structural code simplification.
 
 ## 5. TopologyV2 / vitest TS baseline  — ✅ closed 2026-05-21 (Faz 9 #2)
 
@@ -189,7 +220,11 @@ the next sweep.
    Retry-on-failure connector task replaces the one-shot startup; four
    redis-up / redis-down / mid-recovery / shutdown scenarios verified
    clean.
-5. **§4 cache warmer loop** — small, do alongside other Redis work. Next + last.
+5. ~~**§4 cache warmer loop**~~ — ✅ closed 2026-05-21 (Faz 9 #4). Per-
+   tenant warm path retired; warmer now keeps the two no-filter fleet
+   caches warm and best-effort drains the legacy `agg:dirty:tenant`
+   set each cycle. Live-verified on the local stack.
 
-Items #1, #2, #3, #6 closed. Only §4 (warmer dormancy) remains. None
-of these blocked production deploy.
+**All six Faz 9 cleanup items closed.** Total impact: ~700 LOC of
+legacy plumbing removed across 4 commits worth of cleanup, plus the
+TopologyV2 baseline + agent_bridge resilience improvements.

@@ -1,20 +1,24 @@
 """
-Faz 6B G5 — cache warmer tests.
+Cache warmer tests (Faz 6B G5, post Faz 9 #4).
 
 Coverage:
-  * build_warm_targets — pure: no-filter always present, per-tenant added,
-    deduplicated, non-integer tenant members skipped.
+  * build_warm_targets — pure: always the two no-filter kinds (sla, risk).
   * _warm() guards:
       - AGG_CACHE_ENABLED=false → status=disabled, no Redis touched
       - warmer lock already held → status=locked
       - Redis down on lock attempt → status=redis_down (no raise)
+  * _cleanup_legacy_keys — best-effort one-time DEL of agg:dirty:tenant.
   * _run_warm orchestration:
-      - dirty tenants drive extra targets
-      - SREM drains only fully-warmed tenants (failed tenant marker survives)
-      - dirty:device cleared only when no-filter warm succeeded
-      - drain uses SREM (member-specific), never DEL
+      - happy path warms both targets, drains dirty:device markers
+      - no-filter failure keeps dirty:device markers (next cycle retries)
+      - per-target exception is isolated (gather return_exceptions=True)
   * fleet cache key builders are drift-free (same key for same inputs).
   * warm_aggregation_cache task never raises (returns error dict on crash).
+
+Faz 9 #4 — the per-tenant warm path (agg:dirty:tenant set + per-tenant
+targets) was retired. RLS scopes reads at the DB layer; the warmer only
+needs to keep two no-filter fleet keys warm. Tests that exercised the
+per-tenant branch were removed.
 """
 import asyncio
 from unittest.mock import AsyncMock, MagicMock
@@ -45,6 +49,7 @@ class FakeAsyncRedis:
     async def delete(self, key):
         self.delete_calls.append(key)
         self.kv.pop(key, None)
+        self.sets.pop(key, None)
         return 1
 
     async def smembers(self, key):
@@ -72,34 +77,14 @@ class FakeAsyncRedis:
 
 class TestBuildWarmTargets:
 
-    def test_no_dirty_tenants_gives_two_no_filter_targets(self):
+    def test_returns_two_no_filter_targets(self):
         from app.workers.tasks.cache_warmer_tasks import build_warm_targets
-        targets = build_warm_targets(set())
-        assert targets == [("sla", None), ("risk", None)]
+        targets = build_warm_targets()
+        assert targets == ["sla", "risk"]
 
-    def test_dirty_tenants_add_per_tenant_targets(self):
+    def test_targets_stable_across_calls(self):
         from app.workers.tasks.cache_warmer_tasks import build_warm_targets
-        targets = build_warm_targets({"7", "9"})
-        assert ("sla", None) in targets
-        assert ("risk", None) in targets
-        assert ("sla", 7) in targets
-        assert ("risk", 7) in targets
-        assert ("sla", 9) in targets
-        assert ("risk", 9) in targets
-        assert len(targets) == 6
-
-    def test_non_integer_tenant_members_skipped(self):
-        from app.workers.tasks.cache_warmer_tasks import build_warm_targets
-        targets = build_warm_targets({"42", "garbage", "", None})
-        assert ("sla", 42) in targets
-        # only no-filter (2) + tenant 42 (2) = 4
-        assert len(targets) == 4
-
-    def test_targets_deduplicated(self):
-        from app.workers.tasks.cache_warmer_tasks import build_warm_targets
-        # Same tenant twice (set already dedups, but verify no dup output)
-        targets = build_warm_targets({"5"})
-        assert len(targets) == len(set(targets))
+        assert build_warm_targets() == build_warm_targets()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -151,59 +136,86 @@ class TestWarmGuards:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 3. _run_warm orchestration + dirty drain
+# 3. Legacy-key cleanup
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestLegacyCleanup:
+
+    @pytest.mark.asyncio
+    async def test_legacy_dirty_tenant_set_deleted_each_cycle(self):
+        """Faz 9 #4 — best-effort one-time DEL on every warm cycle (idempotent
+        on empty/missing sets; clears stragglers that survived the M6 upgrade)."""
+        from app.workers.tasks import cache_warmer_tasks
+
+        fake = FakeAsyncRedis()
+        fake.sets["agg:dirty:tenant"] = {"7", "9"}  # stale from before M6
+
+        await cache_warmer_tasks._cleanup_legacy_keys(fake)
+        assert "agg:dirty:tenant" in fake.delete_calls
+        assert "agg:dirty:tenant" not in fake.sets
+
+    @pytest.mark.asyncio
+    async def test_legacy_cleanup_never_raises_on_redis_error(self):
+        """Even if Redis throws, the cleanup must not propagate."""
+        from app.workers.tasks import cache_warmer_tasks
+
+        fake = FakeAsyncRedis()
+        fake.down = True  # any redis call raises
+        # _cleanup_legacy_keys catches errors; this must return normally
+        await cache_warmer_tasks._cleanup_legacy_keys(fake)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# 4. _run_warm orchestration + dirty-device drain
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestRunWarmOrchestration:
 
     @pytest.mark.asyncio
-    async def test_all_success_drains_dirty_tenants(self, monkeypatch):
+    async def test_happy_path_warms_both_and_drains_device_markers(self, monkeypatch):
         from app.workers.tasks import cache_warmer_tasks
 
         fake = FakeAsyncRedis()
-        fake.sets["agg:dirty:tenant"] = {"7"}
         fake.sets["agg:dirty:device"] = {"1", "2"}
 
-        # Every warm succeeds
-        async def stub_warm(kind, tid, sem, settings, cache):
-            return True
-        monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
-
-        settings = MagicMock()
-        out = await cache_warmer_tasks._run_warm(fake, MagicMock(), settings)
-
-        assert out["status"] == "ok"
-        assert out["warmed"] == 4   # no-filter sla+risk + tenant7 sla+risk
-        assert out["errors"] == 0
-        # Tenant 7 fully warmed → SREM'd
-        srem_keys = [c[0] for c in fake.srem_calls]
-        assert "agg:dirty:tenant" in srem_keys
-        assert "agg:dirty:device" in srem_keys
-        # Drain used SREM, never DELETE on the dirty sets
-        assert "agg:dirty:tenant" not in fake.delete_calls
-        assert "agg:dirty:device" not in fake.delete_calls
-
-    @pytest.mark.asyncio
-    async def test_failed_tenant_marker_survives(self, monkeypatch):
-        """If tenant 9's risk warm fails, its dirty marker must NOT be removed."""
-        from app.workers.tasks import cache_warmer_tasks
-
-        fake = FakeAsyncRedis()
-        fake.sets["agg:dirty:tenant"] = {"9"}
-
-        async def stub_warm(kind, tid, sem, settings, cache):
-            # tenant 9 risk fails; everything else ok
-            if kind == "risk" and tid == 9:
-                return False
+        async def stub_warm(kind, sem, settings, cache):
             return True
         monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
 
         out = await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
-        assert out["errors"] == 1
-        # tenant 9 NOT fully warmed → not in any SREM for the tenant set
-        tenant_srems = [c[1] for c in fake.srem_calls if c[0] == "agg:dirty:tenant"]
-        for members in tenant_srems:
-            assert "9" not in members
+
+        assert out["status"] == "ok"
+        assert out["warmed"] == 2          # no-filter sla + risk
+        assert out["errors"] == 0
+        assert out["targets"] == 2
+        assert out["dirty_devices_seen"] == 2
+
+        srem_keys = [c[0] for c in fake.srem_calls]
+        assert "agg:dirty:device" in srem_keys
+        # Drain uses SREM, never DELETE on the device set
+        assert "agg:dirty:device" not in fake.delete_calls
+
+    @pytest.mark.asyncio
+    async def test_no_dirty_devices_still_succeeds(self, monkeypatch):
+        """Common steady-state — no device changed since last cycle. Warmer
+        still hits both no-filter caches and returns ok."""
+        from app.workers.tasks import cache_warmer_tasks
+
+        fake = FakeAsyncRedis()
+        # No dirty markers anywhere
+
+        async def stub_warm(kind, sem, settings, cache):
+            return True
+        monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
+
+        out = await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
+
+        assert out["status"] == "ok"
+        assert out["warmed"] == 2
+        assert out["dirty_devices_seen"] == 0
+        # Nothing to SREM
+        device_srems = [c for c in fake.srem_calls if c[0] == "agg:dirty:device"]
+        assert device_srems == []
 
     @pytest.mark.asyncio
     async def test_no_filter_failure_keeps_device_markers(self, monkeypatch):
@@ -213,13 +225,14 @@ class TestRunWarmOrchestration:
         fake = FakeAsyncRedis()
         fake.sets["agg:dirty:device"] = {"1", "2", "3"}
 
-        async def stub_warm(kind, tid, sem, settings, cache):
-            if kind == "sla" and tid is None:
+        async def stub_warm(kind, sem, settings, cache):
+            if kind == "sla":
                 return False   # no-filter sla fails
             return True
         monkeypatch.setattr(cache_warmer_tasks, "_warm_target", stub_warm)
 
-        await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
+        out = await cache_warmer_tasks._run_warm(fake, MagicMock(), MagicMock())
+        assert out["errors"] == 1
         device_srems = [c for c in fake.srem_calls if c[0] == "agg:dirty:device"]
         assert device_srems == [], "device markers must survive a no-filter failure"
 
@@ -230,7 +243,7 @@ class TestRunWarmOrchestration:
 
         fake = FakeAsyncRedis()
 
-        async def stub_warm(kind, tid, sem, settings, cache):
+        async def stub_warm(kind, sem, settings, cache):
             if kind == "risk":
                 raise RuntimeError("boom")
             return True
@@ -244,7 +257,7 @@ class TestRunWarmOrchestration:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 4. Cache key builder drift guard
+# 5. Cache key builder drift guard
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestKeyBuilders:
@@ -263,16 +276,6 @@ class TestKeyBuilders:
         assert k1 == k2
         assert k1 == "agg:risk:fleet:v=5:t=_:loc=_:limit=20"
 
-    def test_sla_key_tenant_segment(self):
-        from app.api.v1.endpoints.sla import fleet_summary_cache_key
-        k = fleet_summary_cache_key(1, 42, None, 30, None)
-        assert ":t=42:" in k
-
-    def test_risk_key_tenant_segment(self):
-        from app.api.v1.endpoints.intelligence import fleet_risk_cache_key
-        k = fleet_risk_cache_key(1, 42, None, 20)
-        assert ":t=42:" in k
-
     def test_version_bump_changes_key(self):
         from app.api.v1.endpoints.sla import fleet_summary_cache_key
         assert (fleet_summary_cache_key(1, None, None, 30, None)
@@ -280,7 +283,7 @@ class TestKeyBuilders:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5. Task entry point never raises
+# 6. Task entry point never raises
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TestTaskEntryPoint:
