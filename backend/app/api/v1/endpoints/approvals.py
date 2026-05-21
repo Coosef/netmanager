@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.approval import ApprovalRequest
 from app.models.device import Device
 from app.services.audit_service import log_action
@@ -38,7 +38,6 @@ def _summary(r: ApprovalRequest) -> dict:
 async def list_approvals(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 100,
@@ -48,8 +47,6 @@ async def list_approvals(
 
     query = select(ApprovalRequest).order_by(ApprovalRequest.created_at.desc())
 
-    if tenant_filter is not None:
-        query = query.where(ApprovalRequest.tenant_id == tenant_filter)
 
     # Operators only see their own requests; admins see all
     if not current_user.has_permission("approval:review"):
@@ -67,15 +64,12 @@ async def list_approvals(
 async def pending_count(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Returns count of pending approvals. Admins see global count, operators see own."""
     if not current_user.has_permission("approval:view"):
         return {"count": 0}
 
     query = select(ApprovalRequest).where(ApprovalRequest.status == "pending")
-    if tenant_filter is not None:
-        query = query.where(ApprovalRequest.tenant_id == tenant_filter)
     if not current_user.has_permission("approval:review"):
         query = query.where(ApprovalRequest.requester_id == current_user.id)
 

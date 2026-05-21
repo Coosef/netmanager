@@ -3,7 +3,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
+from app.core.deps import CurrentUser
 from app.models.audit_log import AuditLog
 from app.models.device import Device
 from app.models.task import Task, TaskStatus, TaskType
@@ -23,33 +23,14 @@ router = APIRouter()
 async def list_tasks(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = 50,
     status: str = Query(None),
     type: str = Query(None),
 ):
     query = select(Task)
-    if tenant_filter is not None:
-        query = query.where(Task.tenant_id == tenant_filter)
 
     # Location RBAC: filter tasks whose device_ids overlap with accessible devices
-    if location_filter is not None:
-        if not location_filter:
-            return {"total": 0, "items": []}
-        accessible_ids = (await db.execute(
-            select(Device.id).where(Device.site.in_(location_filter), Device.is_active == True)
-        )).scalars().all()
-        if not accessible_ids:
-            return {"total": 0, "items": []}
-        # Keep tasks that have at least one accessible device_id in JSONB array
-        from sqlalchemy import text as _text
-        id_list = ",".join(str(i) for i in accessible_ids)
-        query = query.where(_text(
-            f"EXISTS (SELECT 1 FROM jsonb_array_elements(device_ids::jsonb) e "
-            f"WHERE (e::text)::int = ANY(ARRAY[{id_list}]))"
-        ))
 
     if status:
         query = query.where(Task.status == status)
@@ -221,11 +202,8 @@ async def get_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     q = select(Task).where(Task.id == task_id)
-    if tenant_filter is not None:
-        q = q.where(Task.tenant_id == tenant_filter)
     task = (await db.execute(q)).scalar_one_or_none()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")

@@ -6,7 +6,7 @@ from sqlalchemy import case, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
+from app.core.deps import CurrentUser
 from app.models.agent import Agent
 from app.models.audit_log import AuditLog
 from app.models.config_backup import ConfigBackup
@@ -20,8 +20,6 @@ router = APIRouter()
 async def dashboard_analytics(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
     site: Optional[str] = Query(None),
 ):
     """Operational intelligence for the smart dashboard."""
@@ -31,22 +29,16 @@ async def dashboard_analytics(
 
     # ── All active devices ───────────────────────────────────────────────────
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        dev_q = dev_q.where(Device.site.in_(eff)) if eff else dev_q.where(text("false"))
-        site = None
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
     total = len(devices)
     device_ids = [d.id for d in devices]
 
-    # When the query is scoped to a tenant/location, filter events by the accessible device ids.
-    # Using device_ids directly avoids a correlated subquery and handles the empty-tenant case.
-    scoped = tenant_filter is not None or location_filter is not None or site
-    if scoped:
+    # When a `site` query param narrows the dashboard, filter events by the
+    # accessible device ids. Org-scope is enforced one layer down by RLS, so
+    # the historical tenant_filter / location_filter guards are gone (Faz 9 #3).
+    if site:
         if device_ids:
             ev_device_filter = NetworkEvent.device_id.in_(device_ids)
         else:
@@ -70,7 +62,7 @@ async def dashboard_analytics(
     )
     if ev_device_filter is not None:
         top_q = top_q.where(ev_device_filter)
-    top_rows = (await db.execute(top_q)).fetchall() if (not scoped or device_ids) else []
+    top_rows = (await db.execute(top_q)).fetchall() if (not site or device_ids) else []
 
     top_problematic = [
         {
@@ -98,7 +90,7 @@ async def dashboard_analytics(
     )
     if ev_device_filter is not None:
         flap_q = flap_q.where(ev_device_filter)
-    flap_rows = (await db.execute(flap_q)).fetchall() if (not scoped or device_ids) else []
+    flap_rows = (await db.execute(flap_q)).fetchall() if (not site or device_ids) else []
 
     flapping = [
         {"device_id": r[0], "hostname": r[1], "flap_count": r[2]}
@@ -143,8 +135,6 @@ async def dashboard_analytics(
 
     # ── Agent Health ─────────────────────────────────────────────────────────
     agent_q = select(Agent).where(Agent.is_active == True)
-    if tenant_filter is not None:
-        agent_q = agent_q.where(Agent.tenant_id == tenant_filter)
     agents = (await db.execute(agent_q)).scalars().all()
 
     agent_health = []
@@ -168,12 +158,6 @@ async def dashboard_analytics(
 
     # ── Change Summary (last 24h audit log) ──────────────────────────────────
     audit_wheres = [AuditLog.created_at >= since_24h]
-    if tenant_filter is not None:
-        from app.models.user import User as _User
-        tenant_user_ids = (await db.execute(
-            select(_User.id).where(_User.tenant_id == tenant_filter)
-        )).scalars().all()
-        audit_wheres.append(AuditLog.user_id.in_(tenant_user_ids))
 
     change_rows = (await db.execute(
         select(AuditLog.action, AuditLog.username, AuditLog.resource_name, AuditLog.created_at)
@@ -242,8 +226,6 @@ async def dashboard_analytics(
     # ── Config Drift Summary ─────────────────────────────────────────────────
     # For each device that has a golden baseline, check if the latest backup differs
     golden_q = select(ConfigBackup.device_id, ConfigBackup.config_hash.label("golden_hash")).where(ConfigBackup.is_golden == True)
-    if tenant_filter is not None:
-        golden_q = golden_q.where(ConfigBackup.tenant_id == tenant_filter)
     golden_sub = (await db.execute(golden_q)).fetchall()
     golden_map = {r[0]: r[1] for r in golden_sub}
 
@@ -254,8 +236,6 @@ async def dashboard_analytics(
             .where(ConfigBackup.device_id.in_(list(golden_map.keys())))
             .order_by(ConfigBackup.device_id, ConfigBackup.created_at.desc())
         )
-        if tenant_filter is not None:
-            latest_q = latest_q.where(ConfigBackup.tenant_id == tenant_filter)
         latest_rows = (await db.execute(latest_q)).fetchall()
         seen: set[int] = set()
         for row in latest_rows:
@@ -310,41 +290,22 @@ async def dashboard_analytics(
 async def snmp_summary(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """SNMP fleet overview: enabled count, last poll, top interfaces, critical/warning counts."""
     dev_base = select(Device.id).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_base = dev_base.where(Device.tenant_id == tenant_filter)
     accessible_ids = (await db.execute(dev_base)).scalars().all()
 
     snmp_count_q = select(
         func.count(Device.id).label("total"),
         func.sum(case((Device.snmp_enabled == True, 1), else_=0)).label("enabled"),
     ).where(Device.is_active == True)
-    if tenant_filter is not None:
-        snmp_count_q = snmp_count_q.where(Device.tenant_id == tenant_filter)
     snmp_row = (await db.execute(snmp_count_q)).one()
 
-    # Build device_id IN clause for raw SQL when tenant is scoped
-    if tenant_filter is not None and not accessible_ids:
-        # Tenant has no devices — return empty SNMP data
-        return {
-            "snmp_enabled": 0,
-            "total_devices": 0,
-            "last_poll_at": None,
-            "critical_interfaces": 0,
-            "warning_interfaces": 0,
-            "total_interfaces": 0,
-            "total_in_bytes_24h": 0.0,
-            "total_out_bytes_24h": 0.0,
-            "top_interfaces": [],
-        }
-
-    snmp_id_clause = (
-        f"AND device_id IN ({','.join(str(i) for i in accessible_ids)})"
-        if tenant_filter is not None and accessible_ids else ""
-    )
+    # Faz 9 #3 — the historical "scoped to tenant ⇒ filter SNMP by accessible
+    # device ids" guard is dead now that org-scope lives entirely in RLS.
+    # The raw-SQL queries below stay un-narrowed; RLS scopes the underlying
+    # snmp_poll_results / devices rows to the active org.
+    snmp_id_clause = ""
 
     last_poll_row = (await db.execute(
         text(f"SELECT MAX(polled_at) AS last_poll FROM snmp_poll_results WHERE 1=1 {snmp_id_clause}")
@@ -435,23 +396,12 @@ async def snmp_summary(
 async def dashboard_sparklines(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
 ):
     """24-hour hourly event counts for sparkline charts."""
     ev_q = select(
         func.date_trunc("hour", NetworkEvent.created_at).label("hour"),
         func.count().label("cnt"),
     ).where(NetworkEvent.created_at >= datetime.now(timezone.utc) - timedelta(hours=24))
-    if tenant_filter is not None or location_filter is not None:
-        dev_q = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-        if location_filter is not None:
-            if not location_filter:
-                return {"events_24h": []}
-            dev_q = dev_q.where(Device.site.in_(location_filter))
-        ev_q = ev_q.where(NetworkEvent.device_id.in_(dev_q))
     rows = (await db.execute(ev_q.group_by(text("1")).order_by(text("1")))).mappings().all()
 
     now = datetime.now(timezone.utc)
@@ -471,17 +421,9 @@ async def dashboard_sparklines(
 async def snmp_chart(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Hourly average in/out utilization across all interfaces for the last 24 hours."""
     id_clause = ""
-    if tenant_filter is not None:
-        dev_ids = (await db.execute(
-            select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        )).scalars().all()
-        if not dev_ids:
-            return {"points": []}
-        id_clause = f"AND device_id IN ({','.join(str(i) for i in dev_ids)})"
 
     rows = (await db.execute(text(f"""
         SELECT

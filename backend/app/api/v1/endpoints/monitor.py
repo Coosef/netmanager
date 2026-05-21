@@ -12,7 +12,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
@@ -26,8 +26,6 @@ router = APIRouter()
 async def list_events(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = 100,
     severity: Optional[str] = Query(None),
@@ -40,24 +38,9 @@ async def list_events(
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
 
-    # Tenant + location RBAC enforcement
-    effective_sites: Optional[list[str]] = location_filter  # None = unrestricted
-    if tenant_filter is not None or effective_sites is not None:
-        dev_q = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-        if effective_sites is not None:
-            if site:
-                effective_sites = [s for s in effective_sites if s == site]
-                site = None
-            if not effective_sites:
-                return {"total": 0, "items": []}
-            dev_q = dev_q.where(Device.site.in_(effective_sites))
-        elif site:
-            dev_q = dev_q.where(Device.site == site)
-            site = None
-        q = q.where(NetworkEvent.device_id.in_(dev_q))
-    elif site:
+    # Faz 9 #3 — org-scope is enforced by RLS; only the `site` query param
+    # still narrows the dashboard at the application layer.
+    if site:
         site_ids_sq = select(Device.id).where(Device.site == site, Device.is_active == True)
         q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
         site = None
@@ -103,7 +86,6 @@ async def list_events(
 async def export_events_csv(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
     severity: Optional[str] = Query(None),
     event_type: Optional[str] = Query(None),
     device_id: Optional[int] = Query(None),
@@ -115,17 +97,8 @@ async def export_events_csv(
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
 
-    effective_sites: Optional[list[str]] = location_filter
-    if effective_sites is not None:
-        if site:
-            effective_sites = [s for s in effective_sites if s == site]
-            site = None
-        if not effective_sites:
-            q = q.where(NetworkEvent.id == -1)
-        else:
-            site_ids_sq = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
-            q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
-    elif site:
+    # Faz 9 #3 — only the `site` query param narrows here; org-scope is RLS-enforced.
+    if site:
         site_ids_sq = select(Device.id).where(Device.site == site, Device.is_active == True)
         q = q.where(NetworkEvent.device_id.in_(site_ids_sq))
 
@@ -168,14 +141,8 @@ async def acknowledge_event(
     event_id: int,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     q = update(NetworkEvent).where(NetworkEvent.id == event_id)
-    if tenant_filter is not None:
-        accessible_dev_ids = select(Device.id).where(
-            Device.tenant_id == tenant_filter, Device.is_active == True
-        )
-        q = q.where(NetworkEvent.device_id.in_(accessible_dev_ids))
     await db.execute(q.values(acknowledged=True))
     await db.commit()
     return {"ok": True}
@@ -185,20 +152,8 @@ async def acknowledge_event(
 async def acknowledge_all(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
 ):
     q = update(NetworkEvent).where(NetworkEvent.acknowledged == False)
-    if tenant_filter is not None or location_filter is not None:
-        # Restrict to devices visible to this user
-        dev_q = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-        if location_filter is not None:
-            if not location_filter:
-                return {"ok": True}
-            dev_q = dev_q.where(Device.site.in_(location_filter))
-        q = q.where(NetworkEvent.device_id.in_(dev_q))
     await db.execute(q)
     await db.commit()
     return {"ok": True}
@@ -208,7 +163,6 @@ async def acknowledge_all(
 async def purge_noise_events(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     older_than_hours: int = Query(1, description="Purge noisy events older than N hours"),
 ):
     """
@@ -222,9 +176,6 @@ async def purge_noise_events(
         NetworkEvent.event_type.in_(noisy_types),
         NetworkEvent.created_at < cutoff,
     )
-    if tenant_filter is not None:
-        dev_q = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(NetworkEvent.device_id.in_(dev_q))
     result = await db.execute(q)
     await db.commit()
     return {"deleted": result.rowcount, "event_types": list(noisy_types), "cutoff": cutoff.isoformat()}
@@ -234,51 +185,32 @@ async def purge_noise_events(
 async def monitor_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
     site: Optional[str] = Query(None),
 ):
     """Dashboard-level stats: health score, event counts, offline devices."""
     since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
     since_7d  = datetime.now(timezone.utc) - timedelta(days=7)
 
-    # Resolve effective sites for location RBAC
-    effective_sites: Optional[list[str]] = location_filter  # None = unrestricted
-    if effective_sites is not None and site:
-        effective_sites = [s for s in effective_sites if s == site]
-        site = None
-    elif effective_sites is None and site:
-        effective_sites = [site]
-        site = None
+    # Faz 9 #3 — org-scope is RLS-enforced. Only the optional `site` query
+    # param still narrows results at the application layer.
+    site_filter: list[str] | None = [site] if site else None
 
     # Device counts
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-    if effective_sites is not None:
-        if not effective_sites:
-            return {
-                "health_score": 100, "devices": {"total": 0, "online": 0, "offline": 0, "unknown": 0},
-                "events_24h": {"total": 0, "by_severity": {}, "by_type": {}, "unacknowledged": 0},
-                "backups": {"never": 0, "stale_7d": 0}, "topology": {"nodes": 0, "links": 0},
-                "fleet_experience_score": None, "fleet_availability_24h": None,
-            }
-        dev_q = dev_q.where(Device.site.in_(effective_sites))
+    if site_filter is not None:
+        dev_q = dev_q.where(Device.site.in_(site_filter))
     all_devices = (await db.execute(dev_q)).scalars().all()
     total = len(all_devices)
     online  = sum(1 for d in all_devices if d.status == "online")
     offline = sum(1 for d in all_devices if d.status == "offline")
     unknown = total - online - offline
 
-    # Build device id subquery for event filtering (tenant + location scoped)
+    # Device id subquery for event filtering — only built when `site` narrows.
     site_ids_sq: Any = None
-    if tenant_filter is not None or effective_sites is not None:
-        sq = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            sq = sq.where(Device.tenant_id == tenant_filter)
-        if effective_sites is not None:
-            sq = sq.where(Device.site.in_(effective_sites))
-        site_ids_sq = sq
+    if site_filter is not None:
+        site_ids_sq = select(Device.id).where(
+            Device.is_active == True, Device.site.in_(site_filter)
+        )
 
     ev_base_24h = select(NetworkEvent.severity, func.count()).where(NetworkEvent.created_at >= since_24h)
     if site_ids_sq is not None:
@@ -306,12 +238,10 @@ async def monitor_stats(
         if d.last_backup and d.last_backup < datetime.now(timezone.utc) - timedelta(days=7)
     )
 
-    # Topology — scoped to tenant/location
+    # Topology
     topo_q = select(func.count()).select_from(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        topo_q = topo_q.where(Device.tenant_id == tenant_filter)
-    if effective_sites is not None:
-        topo_q = topo_q.where(Device.site.in_(effective_sites))
+    if site_filter is not None:
+        topo_q = topo_q.where(Device.site.in_(site_filter))
     topo_nodes = (await db.execute(topo_q)).scalar()
 
     topo_link_q = select(func.count()).select_from(TopologyLink)
@@ -356,22 +286,11 @@ async def monitor_stats(
 async def events_timeline(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
     hours: int = Query(24),
 ):
     """Hourly event counts for charting (last N hours)."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     q = select(NetworkEvent.created_at, NetworkEvent.severity).where(NetworkEvent.created_at >= since)
-    if tenant_filter is not None or location_filter is not None:
-        dev_q = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-        if location_filter is not None:
-            if not location_filter:
-                return {"timeline": []}
-            dev_q = dev_q.where(Device.site.in_(location_filter))
-        q = q.where(NetworkEvent.device_id.in_(dev_q))
     result = await db.execute(q.order_by(NetworkEvent.created_at))
     rows = result.fetchall()
 
@@ -391,8 +310,6 @@ async def events_timeline(
 async def trigger_scan(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
 ):
     """Trigger an immediate full anomaly scan on accessible devices."""
     from app.workers.tasks.monitor_tasks import (
@@ -400,12 +317,6 @@ async def trigger_scan(
         check_port_status, check_lldp_changes,
     )
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-    if location_filter is not None:
-        if not location_filter:
-            return {"queued": False, "device_count": 0}
-        dev_q = dev_q.where(Device.site.in_(location_filter))
     devices = (await db.execute(dev_q)).scalars().all()
     ids = [d.id for d in devices]
 

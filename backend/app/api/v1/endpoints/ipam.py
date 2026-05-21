@@ -10,7 +10,7 @@ from sqlalchemy import func, select, delete as _del
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
+from app.core.deps import CurrentUser
 from app.models.ipam import IpamAddress, IpamSubnet
 from app.models.mac_arp import ArpEntry, MacAddressEntry
 from app.services.audit_service import log_action
@@ -78,22 +78,12 @@ def _net_total_hosts(network: str) -> int:
 async def list_subnets(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
     search: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
     vlan_id: Optional[int] = Query(None),
 ):
     query = select(IpamSubnet).where(IpamSubnet.is_active == True)
-    if tenant_filter is not None:
-        query = query.where(IpamSubnet.tenant_id == tenant_filter)
     # Location RBAC
-    if location_filter is not None:
-        effective = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not effective:
-            return {"total": 0, "items": []}
-        query = query.where(IpamSubnet.site.in_(effective))
-        site = None
     if search:
         query = query.where(
             IpamSubnet.network.ilike(f"%{search}%") |
@@ -177,14 +167,11 @@ async def update_subnet(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:edit"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     q = select(IpamSubnet).where(IpamSubnet.id == subnet_id)
-    if tenant_filter is not None:
-        q = q.where(IpamSubnet.tenant_id == tenant_filter)
     subnet = (await db.execute(q)).scalar_one_or_none()
     if not subnet:
         raise HTTPException(status_code=404, detail="Subnet not found")
@@ -204,14 +191,11 @@ async def delete_subnet(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:delete"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     q = select(IpamSubnet).where(IpamSubnet.id == subnet_id)
-    if tenant_filter is not None:
-        q = q.where(IpamSubnet.tenant_id == tenant_filter)
     subnet = (await db.execute(q)).scalar_one_or_none()
     if not subnet:
         raise HTTPException(status_code=404, detail="Subnet not found")

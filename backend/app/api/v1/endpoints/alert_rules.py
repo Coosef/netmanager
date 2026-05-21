@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.alert_rule import AlertRule
 from app.services.audit_service import log_action
 
@@ -35,11 +35,8 @@ def _serialize(rule: AlertRule) -> dict:
 async def list_rules(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     q = select(AlertRule)
-    if tenant_filter is not None:
-        q = q.where(AlertRule.tenant_id == tenant_filter)
     result = await db.execute(q.order_by(AlertRule.id))
     return [_serialize(r) for r in result.scalars().all()]
 
@@ -81,7 +78,6 @@ async def update_rule(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:edit"):
         raise HTTPException(403, "Insufficient permissions")
@@ -114,7 +110,6 @@ async def delete_rule(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:edit"):
         raise HTTPException(403, "Insufficient permissions")
@@ -125,10 +120,8 @@ async def delete_rule(
     await log_action(db, current_user, "alert_rule_deleted", "alert_rule", rule_id, rule.name, request=request)
 
 
-async def _get_or_404(db: AsyncSession, rule_id: int, tenant_filter=None) -> AlertRule:
+async def _get_or_404(db: AsyncSession, rule_id: int) -> AlertRule:
     q = select(AlertRule).where(AlertRule.id == rule_id)
-    if tenant_filter is not None:
-        q = q.where(AlertRule.tenant_id == tenant_filter)
     rule = (await db.execute(q)).scalar_one_or_none()
     if not rule:
         raise HTTPException(404, "Alert rule not found")

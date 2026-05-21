@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.device import Device, DeviceGroup
 from app.models.playbook import Playbook, PlaybookRun
 from app.services.audit_service import log_action
@@ -163,12 +163,9 @@ async def create_from_template(
 @router.get("", response_model=dict)
 async def list_playbooks(
     db: AsyncSession = Depends(get_db),
-    tenant_filter: TenantFilter = None,
     _: CurrentUser = None,
 ):
     q = select(Playbook).where(Playbook.is_active == True)
-    if tenant_filter is not None:
-        q = q.where(Playbook.tenant_id == tenant_filter)
     result = await db.execute(q.order_by(Playbook.created_at.desc()))
     playbooks = result.scalars().all()
     return {
@@ -220,9 +217,8 @@ async def get_playbook(
     playbook_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    pb = await _get_or_404(db, playbook_id, tenant_filter)
+    pb = await _get_or_404(db, playbook_id)
     return _pb_detail(pb)
 
 
@@ -232,12 +228,11 @@ async def update_playbook(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("task:create"):
         raise HTTPException(403, "Insufficient permissions")
 
-    pb = await _get_or_404(db, playbook_id, tenant_filter)
+    pb = await _get_or_404(db, playbook_id)
     body = await request.json()
 
     for field in ("name", "description", "steps", "target_group_id", "target_device_ids",
@@ -271,12 +266,11 @@ async def delete_playbook(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("task:create"):
         raise HTTPException(403, "Insufficient permissions")
 
-    pb = await _get_or_404(db, playbook_id, tenant_filter)
+    pb = await _get_or_404(db, playbook_id)
     pb.is_active = False
     await db.commit()
     await log_action(db, current_user, "playbook_deleted", "playbook", pb.id, pb.name, request=request)
@@ -290,12 +284,11 @@ async def run_playbook(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("task:create"):
         raise HTTPException(403, "Insufficient permissions")
 
-    pb = await _get_or_404(db, playbook_id, tenant_filter)
+    pb = await _get_or_404(db, playbook_id)
     if not pb.steps:
         raise HTTPException(400, "Playbook has no steps")
 
@@ -341,9 +334,8 @@ async def list_runs(
     playbook_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    await _get_or_404(db, playbook_id, tenant_filter)
+    await _get_or_404(db, playbook_id)
     result = await db.execute(
         select(PlaybookRun)
         .where(PlaybookRun.playbook_id == playbook_id)
@@ -375,10 +367,8 @@ async def get_run(
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-async def _get_or_404(db: AsyncSession, playbook_id: int, tenant_filter=None) -> Playbook:
+async def _get_or_404(db: AsyncSession, playbook_id: int) -> Playbook:
     q = select(Playbook).where(Playbook.id == playbook_id, Playbook.is_active == True)
-    if tenant_filter is not None:
-        q = q.where(Playbook.tenant_id == tenant_filter)
     pb = (await db.execute(q)).scalar_one_or_none()
     if not pb:
         raise HTTPException(404, "Playbook not found")
