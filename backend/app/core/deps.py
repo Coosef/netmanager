@@ -113,44 +113,15 @@ async def get_current_active_user(
     return current_user
 
 
-# ---------------------------------------------------------------------------
-# Legacy role-based deps (kept for backward compat)
-# ---------------------------------------------------------------------------
-
-# M6 final drop — legacy `require_roles(*roles: UserRole)` removed; every
-# caller has been migrated to `require_system_role(...)` (Faz 7 / M6-B1–B4).
-
-
-async def get_tenant_context(
-    current_user: Annotated[User, Depends(get_current_active_user)],
-) -> Optional[int]:
-    # Faz 7 — legacy tenant filtering is superseded by PostgreSQL RLS.
-    # Returning None makes every `if tenant_filter is not None:` guard in
-    # the endpoints skip its manual .where(Device.tenant_id == ...) — the
-    # RLS policies (migration M5) now do the org scoping at the DB.
-    return None
-
-
-async def get_accessible_location_ids(
-    current_user: Annotated[User, Depends(get_current_active_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> Optional[list[int]]:
-    # Faz 7 — superseded by RLS (the active-location GUC scopes rows).
-    return None
-
-
-async def get_accessible_location_names(
-    current_user: Annotated[User, Depends(get_current_active_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> Optional[list[str]]:
-    # Faz 7 — superseded by RLS.
-    return None
+# M6 final drop — `require_roles(*roles: UserRole)` removed; every caller
+# has been migrated to `require_system_role(...)` (Faz 7 / M6-B1–B4).
+# Faz 9 #3 — `get_tenant_context` / `get_accessible_location_ids` /
+# `get_accessible_location_names` removed alongside the
+# `TenantFilter` / `LocationFilter` / `LocationNameFilter` type aliases.
+# All three were no-op shims returning None — RLS supersedes them.
 
 
 CurrentUser = Annotated[User, Depends(get_current_active_user)]
-TenantFilter = Annotated[Optional[int], Depends(get_tenant_context)]
-LocationFilter = Annotated[Optional[list[int]], Depends(get_accessible_location_ids)]
-LocationNameFilter = Annotated[Optional[list[str]], Depends(get_accessible_location_names)]
 
 
 # ── Faz 7 — RLS-scoped DB session ─────────────────────────────────────────────
