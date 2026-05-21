@@ -10,7 +10,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter, RequestContext
+from app.core.deps import CurrentUser, RequestContext
 from app.core.request_context import is_super_admin, require_active_location
 from app.core.security import encrypt_credential
 # M6-B4 — UserRole no longer imported; system_role + RLS handle scoping.
@@ -109,16 +109,9 @@ def _command_risk(cmd: str) -> str:
 async def list_groups(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    if tenant_filter is not None:
-        # Only return groups that contain at least one device in this tenant
-        group_ids_q = select(Device.group_id).where(
-            Device.tenant_id == tenant_filter, Device.group_id.isnot(None), Device.is_active == True
-        ).distinct()
-        result = await db.execute(select(DeviceGroup).where(DeviceGroup.id.in_(group_ids_q)))
-    else:
-        result = await db.execute(select(DeviceGroup))
+    # Faz 9 #3 — org scope is RLS-enforced; no app-level tenant filter.
+    result = await db.execute(select(DeviceGroup))
     return result.scalars().all()
 
 
@@ -192,11 +185,8 @@ _LAYER_LABELS = {
 async def group_suggestions(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
     devices = (await db.execute(dev_q)).scalars().all()
     device_map = {d.id: d for d in devices}
     suggestions = []
@@ -325,8 +315,6 @@ async def _get_device_scoped(db: AsyncSession, device_id: int, current_user) -> 
 async def list_devices(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
-    location_filter: LocationNameFilter = None,
     skip: int = 0,
     limit: int = 50,
     search: str = Query(None),
@@ -338,22 +326,8 @@ async def list_devices(
     site: str = Query(None),
 ):
     query = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        query = query.where(Device.tenant_id == tenant_filter)
 
     # Location-scoped RBAC: restrict to accessible locations
-    if location_filter is not None:
-        if not location_filter:
-            # user has no assigned locations — return nothing
-            return {"total": 0, "items": [], "skip": skip, "limit": limit}
-        # If caller also passed explicit site filter, intersect
-        effective_sites = [location_filter] if isinstance(location_filter, str) else location_filter
-        if site:
-            effective_sites = [s for s in effective_sites if s == site]
-        if not effective_sites:
-            return {"total": 0, "items": [], "skip": skip, "limit": limit}
-        query = query.where(Device.site.in_(effective_sites))
-        site = None  # already applied
 
     if search:
         query = query.where(
@@ -491,7 +465,6 @@ async def bulk_update_credentials(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Copy SSH/enable credentials from a source device (or manual input) to multiple devices."""
     if not current_user.has_permission("device:edit"):
@@ -502,8 +475,6 @@ async def bulk_update_credentials(
 
     if payload.source_device_id:
         source_q = select(Device).where(Device.id == payload.source_device_id)
-        if tenant_filter is not None:
-            source_q = source_q.where(Device.tenant_id == tenant_filter)
         source = (await db.execute(source_q)).scalar_one_or_none()
         if not source:
             raise HTTPException(status_code=404, detail="Source device not found")
@@ -518,8 +489,6 @@ async def bulk_update_credentials(
         new_secret_enc = encrypt_credential(payload.enable_secret) if payload.enable_secret else None
 
     target_q = select(Device).where(Device.id.in_(payload.device_ids))
-    if tenant_filter is not None:
-        target_q = target_q.where(Device.tenant_id == tenant_filter)
     result = await db.execute(target_q)
     devices = result.scalars().all()
     if not devices:
@@ -543,12 +512,9 @@ async def bulk_update_credentials(
 async def get_location_options(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Return distinct site/building/floor values for cascading topology filters."""
     base = [Device.is_active == True]
-    if tenant_filter is not None:
-        base.append(Device.tenant_id == tenant_filter)
 
     sites_r = await db.execute(
         select(Device.site).where(*base, Device.site.isnot(None), Device.site != "").distinct()
@@ -768,7 +734,6 @@ async def config_search(
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Search the latest backup config of every device for a keyword or regex snippet."""
     if not current_user.has_permission("config:view"):
@@ -794,8 +759,6 @@ async def config_search(
         .where(ConfigBackup.config_text.ilike(f"%{q}%"))
         .where(Device.is_active == True)
     )
-    if tenant_filter is not None:
-        stmt = stmt.where(Device.tenant_id == tenant_filter)
 
     rows = (await db.execute(stmt.limit(limit))).all()
 
@@ -2506,7 +2469,6 @@ async def get_device_activity(
 async def get_health_scores(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """
     Compute a 0-100 health score for each active device.

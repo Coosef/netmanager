@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.device import Device
 from app.models.network_event import NetworkEvent
 from app.models.sla_policy import SlaPolicy
@@ -284,24 +284,14 @@ async def uptime_report(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Return uptime % for every active device (or a subset) over the window."""
     now = datetime.now(timezone.utc)
 
     q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        q = q.where(Device.tenant_id == tenant_filter)
     if device_ids:
         ids = [int(x) for x in device_ids.split(",") if x.strip().isdigit()]
         q = q.where(Device.id.in_(ids))
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return []
-        q = q.where(Device.site.in_(eff))
-        site = None
     if site:
         q = q.where(Device.site == site)
 
@@ -334,7 +324,6 @@ async def uptime_report(
 async def sla_compliance(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Check all SLA policies and return compliance status per policy."""
     now = datetime.now(timezone.utc)
@@ -344,8 +333,6 @@ async def sla_compliance(
         return []
 
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
     all_devices = (await db.execute(dev_q)).scalars().all()
     device_map = {d.id: d for d in all_devices}
 
@@ -400,13 +387,10 @@ async def device_uptime(
     window_days: int = Query(30, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Return uptime % for a specific device plus daily breakdown."""
     now = datetime.now(timezone.utc)
     q = select(Device).where(Device.id == device_id)
-    if tenant_filter is not None:
-        q = q.where(Device.tenant_id == tenant_filter)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Cihaz bulunamadı")
@@ -495,14 +479,6 @@ async def _compute_fleet_summary(
     """Pure compute — used by the endpoint directly and as the cache miss callback."""
     now = datetime.now(timezone.utc)
     fleet_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        fleet_q = fleet_q.where(Device.tenant_id == tenant_filter)
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return dict(_EMPTY_FLEET_SUMMARY)
-        fleet_q = fleet_q.where(Device.site.in_(eff))
-        site = None
     if site:
         fleet_q = fleet_q.where(Device.site == site)
     devices = (await db.execute(fleet_q)).scalars().all()
@@ -544,20 +520,21 @@ async def fleet_summary(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Aggregated uptime stats for the whole fleet (cached, Faz 6B)."""
     bypass = request.headers.get("X-Cache-Bypass") == "1"
 
     cache = get_aggregation_cache()
     version = await cache.read_version(_SLA_FLEET_VERSION_KEY)
+    # Faz 9 #3 — `tenant_filter` / `location_filter` shims always returned None.
+    # The cache key collapses to a single shared entry per (version, window, site).
+    # cache_warmer keeps calling the same helper with a per-tenant key — unaffected.
     cache_key = fleet_summary_cache_key(
-        version, tenant_filter, location_filter, window_days, site,
+        version, None, None, window_days, site,
     )
 
     async def _compute() -> dict:
-        return await _compute_fleet_summary(db, window_days, site, location_filter, tenant_filter)
+        return await _compute_fleet_summary(db, window_days, site, None, None)
 
     payload, status = await cache.get_or_compute(
         key=cache_key,

@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.audit_log import AuditLog
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
@@ -356,12 +356,9 @@ async def device_risk_score(
     device_id: int,
     _: CurrentUser,
     db: AsyncSession = Depends(get_db),
-    tenant_filter: TenantFilter = None,
 ):
     """0-100 risk puanı ve breakdown — tek cihaz."""
     q = select(Device).where(Device.id == device_id)
-    if tenant_filter is not None:
-        q = q.where(Device.tenant_id == tenant_filter)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
@@ -385,12 +382,6 @@ async def _compute_fleet_risk(
 ) -> dict:
     """Cache-miss callback — fetches devices, runs bulk risk, aggregates."""
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-    if location_filter is not None:
-        if not location_filter:
-            return dict(_EMPTY_FLEET_RISK)
-        dev_q = dev_q.where(Device.site.in_(location_filter))
     devices = (await db.execute(dev_q)).scalars().all()
 
     if not devices:
@@ -422,18 +413,20 @@ async def fleet_risk(
     _: CurrentUser,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Tüm aktif cihazların risk skorları — cached (Faz 6B)."""
     bypass = request.headers.get("X-Cache-Bypass") == "1"
 
     cache = get_aggregation_cache()
     version = await cache.read_version(_RISK_FLEET_VERSION_KEY)
-    cache_key = fleet_risk_cache_key(version, tenant_filter, location_filter, limit)
+    # Faz 9 #3 — `tenant_filter` / `location_filter` shims always returned None;
+    # the cache key collapses to a single shared entry per (version, limit). The
+    # cache_warmer still calls the same helper with a per-tenant key — it owns
+    # its own tenant_id source and is unaffected.
+    cache_key = fleet_risk_cache_key(version, None, None, limit)
 
     async def _compute() -> dict:
-        return await _compute_fleet_risk(db, limit, location_filter, tenant_filter)
+        return await _compute_fleet_risk(db, limit, None, None)
 
     payload, status = await cache.get_or_compute(
         key=cache_key,
@@ -455,15 +448,12 @@ async def device_mttr_mtbf(
     _: CurrentUser,
     window_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    tenant_filter: TenantFilter = None,
 ):
     """
     MTTR (Ort. Kurtarma Süresi): her offline→online çiftinin süresi ortalaması.
     MTBF (Ort. Arıza Arası Süre): ardışık offline başlangıçları arasındaki süre ortalaması.
     """
     q = select(Device).where(Device.id == device_id)
-    if tenant_filter is not None:
-        q = q.where(Device.tenant_id == tenant_filter)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
@@ -533,15 +523,12 @@ async def device_timeline(
     _: CurrentUser,
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
-    tenant_filter: TenantFilter = None,
 ):
     """
     Network event + config backup + audit log kayıtlarını tek zaman çizelgesinde birleştirir.
     Config değişikliği → ardından gelen olay ilişkisi burada görülür.
     """
     q = select(Device).where(Device.id == device_id)
-    if tenant_filter is not None:
-        q = q.where(Device.tenant_id == tenant_filter)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
         raise HTTPException(404, "Device not found")
@@ -637,7 +624,6 @@ async def root_cause_incidents(
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    tenant_filter: TenantFilter = None,
 ):
     """
     Son N saatteki correlation_incident olaylarını döndürür.
@@ -652,9 +638,6 @@ async def root_cause_incidents(
         .order_by(NetworkEvent.created_at.desc())
         .limit(limit)
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(NetworkEvent.device_id.in_(tenant_dev_ids))
     rows = (await db.execute(q)).scalars().all()
 
     incidents = []
@@ -705,7 +688,6 @@ async def get_anomalies(
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
-    tenant_filter: TenantFilter = None,
 ):
     """
     Son N saatteki davranış anomalisi olaylarını döndürür.
@@ -720,9 +702,6 @@ async def get_anomalies(
         .order_by(NetworkEvent.created_at.desc())
         .limit(limit)
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(NetworkEvent.device_id.in_(tenant_dev_ids))
     rows = (await db.execute(q)).scalars().all()
 
     counts: dict[str, int] = {t: 0 for t in _ANOMALY_TYPES}

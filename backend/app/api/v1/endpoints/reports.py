@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import case, desc
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter, LocationNameFilter
+from app.core.deps import CurrentUser
 from app.models.agent import Agent
 from app.models.config_backup import ConfigBackup
 from app.models.device import Device
@@ -23,8 +23,6 @@ router = APIRouter()
 async def report_summary(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
     site: str = Query(None),
 ):
     """High-level network summary for reports page."""
@@ -32,14 +30,6 @@ async def report_summary(
     since_7d = datetime.now(timezone.utc) - timedelta(days=7)
 
     dev_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return {}
-        dev_q = dev_q.where(Device.site.in_(eff))
-        site = None
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
@@ -59,12 +49,6 @@ async def report_summary(
 
     # Events 24h
     ev_q = select(NetworkEvent.severity, func.count()).where(NetworkEvent.created_at >= since_24h)
-    if tenant_filter is not None:
-        device_id_list = [d.id for d in devices]
-        if device_id_list:
-            ev_q = ev_q.where(NetworkEvent.device_id.in_(device_id_list))
-        else:
-            ev_q = ev_q.where(NetworkEvent.device_id.is_(None))
     ev_result = await db.execute(ev_q.group_by(NetworkEvent.severity))
     events_by_sev = {row[0]: row[1] for row in ev_result.fetchall()}
 
@@ -109,21 +93,11 @@ async def report_summary(
 async def report_devices(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
     format: str = Query("json", description="json or csv"),
     site: str = Query(None),
 ):
     """Device inventory report."""
     dev_q = select(Device).where(Device.is_active == True).order_by(Device.hostname)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return [] if format != "csv" else Response(content="", media_type="text/csv")
-        dev_q = dev_q.where(Device.site.in_(eff))
-        site = None
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
@@ -166,14 +140,10 @@ async def report_events(
     _: CurrentUser = None,
     hours: int = Query(24),
     format: str = Query("json"),
-    tenant_filter: TenantFilter = None,
 ):
     """Event history report."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     ev_q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        ev_q = ev_q.where(NetworkEvent.device_id.in_(tenant_dev_ids))
     result = await db.execute(ev_q.order_by(NetworkEvent.created_at.desc()).limit(2000))
     events = result.scalars().all()
 
@@ -209,14 +179,11 @@ async def report_events(
 async def report_backups(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     format: str = Query("json"),
     site: str = Query(None),
 ):
     """Backup status report — one row per device."""
     dev_q = select(Device).where(Device.is_active == True).order_by(Device.hostname)
-    if tenant_filter is not None:
-        dev_q = dev_q.where(Device.tenant_id == tenant_filter)
     if site:
         dev_q = dev_q.where(Device.site == site)
     devices = (await db.execute(dev_q)).scalars().all()
@@ -227,8 +194,6 @@ async def report_backups(
         func.max(ConfigBackup.created_at).label("latest"),
         func.count().label("count"),
     ).group_by(ConfigBackup.device_id)
-    if tenant_filter is not None:
-        bkp_q = bkp_q.where(ConfigBackup.tenant_id == tenant_filter)
     backup_result = await db.execute(bkp_q)
     backup_map = {row.device_id: {"latest": row.latest, "count": row.count} for row in backup_result.fetchall()}
 
@@ -275,14 +240,11 @@ async def report_backups(
 async def download_backups_zip(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Download latest config backup for every device as a single ZIP archive."""
     import io, zipfile
 
     bkp_subq_q = select(ConfigBackup.device_id, func.max(ConfigBackup.id).label("max_id")).group_by(ConfigBackup.device_id)
-    if tenant_filter is not None:
-        bkp_subq_q = bkp_subq_q.where(ConfigBackup.tenant_id == tenant_filter)
     subq = bkp_subq_q.subquery()
 
     zip_q = (
@@ -292,8 +254,6 @@ async def download_backups_zip(
         .where(Device.is_active == True)
         .order_by(Device.hostname)
     )
-    if tenant_filter is not None:
-        zip_q = zip_q.where(Device.tenant_id == tenant_filter)
     result = await db.execute(zip_q)
     rows = result.fetchall()
 
@@ -318,13 +278,10 @@ async def report_firmware(
     _: CurrentUser = None,
     format: str = Query("json"),
     site: str = Query(None),
-    tenant_filter: TenantFilter = None,
 ):
     """Firmware compliance report — groups devices by vendor + firmware version."""
     from collections import defaultdict
     fw_q = select(Device).where(Device.is_active == True).order_by(Device.vendor, Device.firmware_version)
-    if tenant_filter is not None:
-        fw_q = fw_q.where(Device.tenant_id == tenant_filter)
     if site:
         fw_q = fw_q.where(Device.site == site)
     devices = (await db.execute(fw_q)).scalars().all()
@@ -389,12 +346,9 @@ async def report_uptime(
     _: CurrentUser = None,
     days: int = Query(7),
     site: str = Query(None),
-    tenant_filter: TenantFilter = None,
 ):
     """Uptime trend — online/offline counts per day for last N days."""
     up_q = select(Device).where(Device.is_active == True)
-    if tenant_filter is not None:
-        up_q = up_q.where(Device.tenant_id == tenant_filter)
     if site:
         up_q = up_q.where(Device.site == site)
     devices = (await db.execute(up_q)).scalars().all()
@@ -434,7 +388,6 @@ async def report_problematic_devices(
     days: int = Query(7, ge=1, le=90),
     limit: int = Query(25, ge=5, le=100),
     site: str = Query(None),
-    tenant_filter: TenantFilter = None,
 ):
     """Top N most problematic devices by event count in last N days."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -451,9 +404,6 @@ async def report_problematic_devices(
         .where(NetworkEvent.created_at >= since)
         .where(NetworkEvent.device_id.isnot(None))
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        prob_q = prob_q.where(NetworkEvent.device_id.in_(tenant_dev_ids))
     if site:
         site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
         prob_q = prob_q.where(NetworkEvent.device_id.in_(site_ids))

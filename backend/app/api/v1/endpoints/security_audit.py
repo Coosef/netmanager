@@ -11,7 +11,7 @@ from sqlalchemy import cast, Date, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.device import Device
 from app.models.security_audit import SecurityAudit
 from app.models.task import Task, TaskType, TaskStatus
@@ -30,8 +30,6 @@ class RunAuditRequest(BaseModel):
 async def get_audit_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
     site: Optional[str] = Query(None),
 ):
     subq = (
@@ -44,16 +42,6 @@ async def get_audit_stats(
         (SecurityAudit.device_id == subq.c.device_id)
         & (SecurityAudit.created_at == subq.c.latest),
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(SecurityAudit.device_id.in_(tenant_dev_ids))
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return {"total": 0, "avg_score": 0, "grades": {"A": 0, "B": 0, "C": 0, "D": 0, "F": 0}, "critical_count": 0}
-        site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
-        q = q.where(SecurityAudit.device_id.in_(site_ids))
-        site = None
     if site:
         site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
         q = q.where(SecurityAudit.device_id.in_(site_ids))
@@ -89,8 +77,6 @@ async def export_audits_csv(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
     site: Optional[str] = Query(None),
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Stream latest security audit results as CSV."""
     try:
@@ -109,15 +95,7 @@ async def export_audits_csv(
         (SecurityAudit.device_id == subq.c.device_id)
         & (SecurityAudit.created_at == subq.c.latest),
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(SecurityAudit.device_id.in_(tenant_dev_ids))
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if eff:
-            site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
-            q = q.where(SecurityAudit.device_id.in_(site_ids))
-    elif site:
+    if site:
         site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
         q = q.where(SecurityAudit.device_id.in_(site_ids))
 
@@ -159,8 +137,6 @@ async def list_audits(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
 ):
     subq = (
         select(SecurityAudit.device_id, func.max(SecurityAudit.created_at).label("latest"))
@@ -172,16 +148,6 @@ async def list_audits(
         (SecurityAudit.device_id == subq.c.device_id)
         & (SecurityAudit.created_at == subq.c.latest),
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(SecurityAudit.device_id.in_(tenant_dev_ids))
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return {"total": 0, "items": []}
-        site_ids = select(Device.id).where(Device.site.in_(eff), Device.is_active == True)
-        q = q.where(SecurityAudit.device_id.in_(site_ids))
-        site = None
     if grade:
         q = q.where(SecurityAudit.grade == grade)
     if search:
@@ -225,12 +191,8 @@ async def get_audit_detail(
     audit_id: int,
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     q = select(SecurityAudit).where(SecurityAudit.id == audit_id)
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        q = q.where(SecurityAudit.device_id.in_(tenant_dev_ids))
     audit = (await db.execute(q)).scalar_one_or_none()
     if not audit:
         raise HTTPException(404, "Audit bulunamadı")
@@ -255,14 +217,7 @@ async def get_device_audit_history(
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    if tenant_filter is not None:
-        allowed = (await db.execute(
-            select(Device.id).where(Device.id == device_id, Device.tenant_id == tenant_filter)
-        )).scalar_one_or_none()
-        if allowed is None:
-            return []
     result = await db.execute(
         select(SecurityAudit)
         .where(SecurityAudit.device_id == device_id)
@@ -289,7 +244,6 @@ async def fleet_compliance_trend(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Daily average compliance score across all successfully audited devices."""
     since = datetime.now(timezone.utc) - timedelta(days=days)
@@ -309,9 +263,6 @@ async def fleet_compliance_trend(
         .group_by(cast(SecurityAudit.created_at, Date))
         .order_by(cast(SecurityAudit.created_at, Date))
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        trend_q = trend_q.where(SecurityAudit.device_id.in_(tenant_dev_ids))
     if site:
         site_ids = select(Device.id).where(Device.site == site, Device.is_active == True)
         trend_q = trend_q.where(SecurityAudit.device_id.in_(site_ids))
@@ -338,20 +289,15 @@ async def trigger_audit(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     from app.workers.tasks.security_audit_tasks import run_security_audit
 
     if body.device_ids:
         q = select(Device.id).where(Device.id.in_(body.device_ids), Device.is_active == True)
-        if tenant_filter is not None:
-            q = q.where(Device.tenant_id == tenant_filter)
         res = await db.execute(q)
         device_ids = [r[0] for r in res.all()]
     else:
         q = select(Device.id).where(Device.is_active == True)
-        if tenant_filter is not None:
-            q = q.where(Device.tenant_id == tenant_filter)
         res = await db.execute(q)
         device_ids = [r[0] for r in res.all()]
 

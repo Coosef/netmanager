@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.change_rollout import ChangeRollout
 from app.models.config_template import ConfigTemplate
 from app.models.device import Device
@@ -81,11 +81,8 @@ async def list_rollouts(
     offset: int = 0,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     q = select(ChangeRollout).order_by(ChangeRollout.created_at.desc())
-    if tenant_filter is not None:
-        q = q.where(ChangeRollout.tenant_id == tenant_filter)
     if status:
         q = q.where(ChangeRollout.status == status)
     total = (await db.execute(select(func.count()).select_from(q.subquery()))).scalar_one()
@@ -98,9 +95,8 @@ async def get_rollout(
     rollout_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     return _serialize(r)
 
 
@@ -150,9 +146,8 @@ async def update_rollout(
     payload: RolloutUpdate,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status not in ("draft",):
         raise HTTPException(status_code=400, detail="Only draft rollouts can be edited")
 
@@ -171,9 +166,8 @@ async def delete_rollout(
     rollout_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status in ("running",):
         raise HTTPException(status_code=400, detail="Cannot delete a running rollout")
     await db.delete(r)
@@ -186,10 +180,9 @@ async def submit_for_approval(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Move rollout from draft → pending_approval."""
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status != "draft":
         raise HTTPException(status_code=400, detail=f"Cannot submit from status '{r.status}'")
 
@@ -207,13 +200,12 @@ async def approve_rollout(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Approve a pending rollout (admin/super_admin only)."""
     if not current_user.has_permission("device:edit"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Cannot approve from status '{r.status}'")
 
@@ -232,12 +224,11 @@ async def reject_rollout(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     if not current_user.has_permission("device:edit"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status != "pending_approval":
         raise HTTPException(status_code=400, detail=f"Cannot reject from status '{r.status}'")
 
@@ -255,13 +246,12 @@ async def start_rollout(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Dispatch Celery task to execute the rollout."""
     if not current_user.has_permission("config:push"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status != "approved":
         raise HTTPException(status_code=400, detail=f"Rollout must be approved before starting (current: '{r.status}')")
 
@@ -278,13 +268,12 @@ async def rollback_rollout(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Dispatch Celery task to restore pre-rollout backups."""
     if not current_user.has_permission("config:push"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    r = await _get_or_404(db, rollout_id, tenant_filter)
+    r = await _get_or_404(db, rollout_id)
     if r.status not in ("done", "partial", "failed"):
         raise HTTPException(status_code=400, detail=f"Cannot rollback from status '{r.status}'")
     if not r.device_results:
@@ -305,10 +294,8 @@ async def rollback_rollout(
     return {"message": "Rollback queued", "rollout_id": rollout_id}
 
 
-async def _get_or_404(db: AsyncSession, rollout_id: int, tenant_filter=None) -> ChangeRollout:
+async def _get_or_404(db: AsyncSession, rollout_id: int) -> ChangeRollout:
     q = select(ChangeRollout).where(ChangeRollout.id == rollout_id)
-    if tenant_filter is not None:
-        q = q.where(ChangeRollout.tenant_id == tenant_filter)
     r = (await db.execute(q)).scalar_one_or_none()
     if not r:
         raise HTTPException(status_code=404, detail="Rollout not found")

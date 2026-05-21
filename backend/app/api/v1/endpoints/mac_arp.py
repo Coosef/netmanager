@@ -8,7 +8,7 @@ from sqlalchemy import func, or_, select, delete as _del, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter, TenantFilter
+from app.core.deps import CurrentUser
 from app.models.device import Device
 from app.models.mac_arp import ArpEntry, MacAddressEntry
 from app.services.audit_service import log_action
@@ -268,7 +268,6 @@ async def collect_mac_arp(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Trigger MAC + ARP collection for given device_ids (or all online devices)."""
     if not current_user.has_permission("config:view"):
@@ -278,8 +277,6 @@ async def collect_mac_arp(
     device_ids: list[int] = body.get("device_ids", [])
 
     query = select(Device).where(Device.is_active == True, Device.status == "online")
-    if tenant_filter is not None:
-        query = query.where(Device.tenant_id == tenant_filter)
     if device_ids:
         query = query.where(Device.id.in_(device_ids))
 
@@ -313,8 +310,6 @@ async def collect_mac_arp(
 async def list_mac_table(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
     skip: int = 0,
     limit: int = Query(100, le=500),
     device_id: Optional[int] = Query(None),
@@ -325,19 +320,7 @@ async def list_mac_table(
     site: Optional[str] = Query(None),
 ):
     query = select(MacAddressEntry)
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        query = query.where(MacAddressEntry.device_id.in_(tenant_dev_ids))
-    # Location RBAC
-    effective_sites = location_filter  # None = unrestricted
-    if effective_sites is not None:
-        if site:
-            effective_sites = [s for s in effective_sites if s == site]
-            site = None
-        if not effective_sites:
-            return {"total": 0, "items": []}
-        loc_dev_ids = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
-        query = query.where(MacAddressEntry.device_id.in_(loc_dev_ids))
+    # Faz 9 #3 — org / location scope is RLS-enforced; only `site` narrows here.
     if device_id:
         query = query.where(MacAddressEntry.device_id == device_id)
     if mac_address:
@@ -383,8 +366,6 @@ async def list_mac_table(
 async def list_arp_table(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
-    tenant_filter: TenantFilter = None,
     skip: int = 0,
     limit: int = Query(100, le=500),
     device_id: Optional[int] = Query(None),
@@ -393,18 +374,7 @@ async def list_arp_table(
     site: Optional[str] = Query(None),
 ):
     query = select(ArpEntry)
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        query = query.where(ArpEntry.device_id.in_(tenant_dev_ids))
-    effective_sites = location_filter
-    if effective_sites is not None:
-        if site:
-            effective_sites = [s for s in effective_sites if s == site]
-            site = None
-        if not effective_sites:
-            return {"total": 0, "items": []}
-        loc_dev_ids = select(Device.id).where(Device.site.in_(effective_sites), Device.is_active == True)
-        query = query.where(ArpEntry.device_id.in_(loc_dev_ids))
+    # Faz 9 #3 — org / location scope is RLS-enforced; only `site` narrows here.
     if device_id:
         query = query.where(ArpEntry.device_id == device_id)
     if ip_address:
@@ -446,7 +416,6 @@ async def search_mac_arp(
     q: str = Query(..., min_length=3),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Search by MAC address or IP across both tables."""
     q_lower = q.lower().strip()
@@ -465,10 +434,6 @@ async def search_mac_arp(
             ArpEntry.device_hostname.ilike(f"%{q_lower}%"),
         )
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        mac_q = mac_q.where(MacAddressEntry.device_id.in_(tenant_dev_ids))
-        arp_q = arp_q.where(ArpEntry.device_id.in_(tenant_dev_ids))
     mac_hits = (await db.execute(mac_q.limit(50))).scalars().all()
     arp_hits = (await db.execute(arp_q.limit(50))).scalars().all()
 
@@ -504,7 +469,6 @@ async def port_summary(
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Return per-device, per-port MAC count summary."""
     query = (
@@ -523,9 +487,6 @@ async def port_summary(
         )
         .order_by(MacAddressEntry.device_hostname, MacAddressEntry.port)
     )
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        query = query.where(MacAddressEntry.device_id.in_(tenant_dev_ids))
     if device_id:
         query = query.where(MacAddressEntry.device_id == device_id)
     if site:
@@ -554,22 +515,16 @@ async def port_summary(
 async def mac_arp_stats(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
 ):
     """Summary statistics for the MAC/ARP tables."""
-    if tenant_filter is not None:
-        tenant_dev_ids = select(Device.id).where(Device.tenant_id == tenant_filter, Device.is_active == True)
-        mac_total = (await db.execute(select(func.count()).select_from(MacAddressEntry).where(MacAddressEntry.device_id.in_(tenant_dev_ids)))).scalar()
-        arp_total = (await db.execute(select(func.count()).select_from(ArpEntry).where(ArpEntry.device_id.in_(tenant_dev_ids)))).scalar()
-        device_count_mac = (await db.execute(select(func.count(MacAddressEntry.device_id.distinct())).where(MacAddressEntry.device_id.in_(tenant_dev_ids)))).scalar()
-    else:
-        mac_total = (await db.execute(select(func.count()).select_from(MacAddressEntry))).scalar()
-        arp_total = (await db.execute(select(func.count()).select_from(ArpEntry))).scalar()
-        device_count_mac = (
-            await db.execute(
-                select(func.count(MacAddressEntry.device_id.distinct()))
-            )
-        ).scalar()
+    # Faz 9 #3 — org scope is RLS-enforced; counts are over the active org.
+    mac_total = (await db.execute(select(func.count()).select_from(MacAddressEntry))).scalar()
+    arp_total = (await db.execute(select(func.count()).select_from(ArpEntry))).scalar()
+    device_count_mac = (
+        await db.execute(
+            select(func.count(MacAddressEntry.device_id.distinct()))
+        )
+    ).scalar()
 
     return {
         "mac_entries": mac_total,
@@ -582,7 +537,6 @@ async def mac_arp_stats(
 async def device_inventory(
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    tenant_filter: TenantFilter = None,
     skip: int = 0,
     limit: int = Query(200, le=1000),
     device_id: Optional[int] = Query(None),
@@ -617,15 +571,11 @@ async def device_inventory(
         )
         params["search"] = f"%{search}%"
 
-    # Always JOIN devices when filtering by tenant or site
-    needs_device_join = bool(site or tenant_filter is not None)
-    site_join = "JOIN devices dm ON dm.id = m.device_id" if needs_device_join else ""
+    # JOIN devices only when filtering by site (org-scope is RLS-enforced).
+    site_join = "JOIN devices dm ON dm.id = m.device_id" if site else ""
     if site:
         conditions.append("dm.site = :site")
         params["site"] = site
-    if tenant_filter is not None:
-        conditions.append("dm.tenant_id = :tenant_id")
-        params["tenant_id"] = tenant_filter
 
     where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
 

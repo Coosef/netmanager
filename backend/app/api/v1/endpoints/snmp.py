@@ -8,7 +8,7 @@ from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, LocationNameFilter
+from app.core.deps import CurrentUser
 from app.core.security import decrypt_credential_safe, encrypt_credential
 from app.models.device import Device
 from app.models.snmp_metric import SnmpPollResult
@@ -187,16 +187,10 @@ async def traffic_rates(
     site: str = Query(default=None),
     db: AsyncSession = Depends(get_db),
     _: CurrentUser = None,
-    location_filter: LocationNameFilter = None,
 ):
     """Return current throughput in Mbps per interface, calculated from the last two poll snapshots.
     Independent of stored utilization_pct — always accurate as long as counters advance."""
-    if location_filter is not None:
-        eff = [s for s in location_filter if not site or s == site] if site else location_filter
-        if not eff:
-            return {"items": [], "total": 0}
-        site_clause = f"AND d.site = ANY(:sites)"
-    elif site:
+    if site:
         site_clause = "AND d.site = :site"
     else:
         site_clause = ""
@@ -252,9 +246,7 @@ async def traffic_rates(
     """)
 
     params: dict = {"min_mbps": min_mbps, "limit": limit}
-    if location_filter is not None:
-        params["sites"] = eff
-    elif site:
+    if site:
         params["site"] = site
     rows = (await db.execute(sql, params)).mappings().all()
 
