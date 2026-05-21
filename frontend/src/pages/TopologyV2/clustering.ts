@@ -129,9 +129,47 @@ function repOf(
 }
 
 /**
- * Build a fresh meta-edge in the graph from an aggregation entry.
- * Centralised so the full and delta paths agree on the styling.
+ * Build a fresh meta-edge in the graph from an aggregation entry, OR
+ * revive an existing (possibly hidden) one with the same id. The delta
+ * path retains stale meta-edges with `hidden: true` instead of dropping
+ * them (see `applyClusterViewDelta` step 6 for why — dropping a single
+ * edge fires `edgeDropped` on Sigma's graphology subscription, which
+ * synchronously runs a full O(N+E) re-index at 10 k).
+ *
+ * Returns:
+ *   `'added'`   — the edge didn't exist; created it.
+ *   `'revived'` — the edge existed (likely with `hidden: true` from a
+ *                 previous delta); refreshed its attributes + unhid.
+ *   `'skipped'` — endpoint node missing; nothing written.
  */
+function addOrReviveMetaEdge(
+  graph: Graph,
+  a: string,
+  b: string,
+  count: number,
+  utilizationSum: number,
+): 'added' | 'revived' | 'skipped' {
+  const k = a < b ? `${a}|${b}` : `${b}|${a}`
+  const id = `meta-${k}`
+  const attrs = {
+    edgeKind: 'meta' as const,
+    count,
+    utilization: count ? utilizationSum / count : 0,
+    size: 1 + Math.min(6, Math.log2(count + 1) * 2),
+    color: '#5b6b85',
+    hidden: false,
+  }
+  if (graph.hasEdge(id)) {
+    graph.mergeEdgeAttributes(id, attrs)
+    return 'revived'
+  }
+  if (!graph.hasNode(a) || !graph.hasNode(b)) return 'skipped'
+  graph.addEdgeWithKey(id, a, b, attrs)
+  return 'added'
+}
+
+/** Backwards-compat thin wrapper for the FULL path, which still wants
+ *  to know only "did we add a new one?" for its visible-count tally. */
 function addMetaEdge(
   graph: Graph,
   a: string,
@@ -139,19 +177,7 @@ function addMetaEdge(
   count: number,
   utilizationSum: number,
 ): boolean {
-  const k = a < b ? `${a}|${b}` : `${b}|${a}`
-  const id = `meta-${k}`
-  if (graph.hasEdge(id)) return false
-  if (!graph.hasNode(a) || !graph.hasNode(b)) return false
-  graph.addEdgeWithKey(id, a, b, {
-    edgeKind: 'meta',
-    count,
-    utilization: count ? utilizationSum / count : 0,
-    size: 1 + Math.min(6, Math.log2(count + 1) * 2),
-    color: '#5b6b85',
-    hidden: false,
-  })
-  return true
+  return addOrReviveMetaEdge(graph, a, b, count, utilizationSum) === 'added'
 }
 
 /**
@@ -305,20 +331,32 @@ export function applyClusterViewDelta(
     graph.setNodeAttribute(key, 'hidden', hiddenFor(model, graph, key, next as Set<string>))
   }
 
-  // ── 4. drop meta-edges incident to ANY touched node ─────────────────────
-  // Stale meta-edges live on touched cluster reps OR on touched devices
-  // — a device that was visible (its own rep) can have a meta-edge that
-  // collapses when the device hides (the cluster becomes its new rep).
-  // Iterating touchedNodes (which already covers both) handles both
-  // categories without a second pass over the graph.
-  const dropQueue = new Set<string>()
+  // ── 4. collect meta-edges potentially affected by the diff ──────────────
+  // Critical Sigma internal we work around (T8.3.E2.e, see sigma.esm.js
+  // around line 1804+ and line 3268+): when an edge is dropped,
+  // `dropEdgeGraphUpdate` calls `refresh({ schedule: true })`. That
+  // option only defers the RENDER — the **re-index** runs synchronously,
+  // hitting the `fullRefresh` branch (no `partialGraph` is passed),
+  // which does `clearEdgeIndices() + clearNodeIndices()` + a full
+  // `forEachNode + forEachEdge` walk of the entire graph. At 10 k each
+  // drop costs ~10 ms; 1300+ drops cascade to ~13 s of main-thread
+  // blocking.
+  //
+  // Instead of dropping, we **hide**. Stale meta-edges stay in the
+  // graph with `hidden: true`. The Sigma reducer skips them
+  // visually, and a future delta either re-uses them (via
+  // `addOrReviveMetaEdge`, which sets `hidden: false`) or leaves them
+  // hidden. The hide event fires `edgeAttributesUpdated`, which Sigma
+  // handles with a partial `refresh({ partialGraph: { edges: [edge] }})`
+  // — cheap (~0.1 ms). A full apply (initial mount / model swap)
+  // sweeps any accumulation back to a clean state.
+  const candidateStaleMeta = new Set<string>()
   for (const key of touchedNodes) {
     if (!graph.hasNode(key)) continue
     graph.forEachEdge(key, (edge, attr) => {
-      if (attr.edgeKind === 'meta') dropQueue.add(edge)
+      if (attr.edgeKind === 'meta') candidateStaleMeta.add(edge)
     })
   }
-  dropQueue.forEach((e) => graph.dropEdge(e))
 
   // ── 5. re-aggregate meta-edges from touched link edges ──────────────────
   interface MetaAgg { a: string; b: string; count: number; util: number }
@@ -329,9 +367,13 @@ export function applyClusterViewDelta(
   for (const key of touchedNodes) {
     if (!graph.hasNode(key)) continue
     graph.forEachEdge(key, (edge, attr, source, target) => {
+      // Skip non-link edges WITHOUT adding them to `visited` — meta-edges
+      // are managed in step 6, and including them here would leak their
+      // ids into `touchedEdgeIds`, only for the drop pass to delete them
+      // and Sigma's partial refresh to then throw `getEdgeAttributes`.
+      if (attr.edgeKind !== 'link') return
       if (visited.has(edge)) return
       visited.add(edge)
-      if (attr.edgeKind !== 'link') return
       const sHidden = graph.getNodeAttribute(source, 'hidden')
       const tHidden = graph.getNodeAttribute(target, 'hidden')
       const linkVisible = !sHidden && !tHidden
@@ -351,23 +393,42 @@ export function applyClusterViewDelta(
     })
   }
 
-  // ── 6. add fresh meta-edges ──────────────────────────────────────────────
-  // Track edges added so Sigma can buffer-upload just these (B5 of
-  // T8.3.D: avoid the full WebGL rebuild on every cluster-state flip).
+  // ── 6. emit meta-edges: add new / revive matching / hide stale ─────────
+  // For every aggregated key the new state requires:
+  //   * if the id exists (visible or hidden from a prior delta) →
+  //     `addOrReviveMetaEdge` updates its attrs + unhides
+  //   * else → add fresh.
+  // Candidates that no aggregation re-produces get **hidden** (not
+  // dropped) — see step 4's comment for the rationale.
   const addedMetaIds: string[] = []
+  const revivedMetaIds: string[] = []
   for (const agg of meta.values()) {
     const id = `meta-${agg.a < agg.b ? `${agg.a}|${agg.b}` : `${agg.b}|${agg.a}`}`
-    if (addMetaEdge(graph, agg.a, agg.b, agg.count, agg.util)) addedMetaIds.push(id)
+    const outcome = addOrReviveMetaEdge(graph, agg.a, agg.b, agg.count, agg.util)
+    if (outcome === 'added') addedMetaIds.push(id)
+    else if (outcome === 'revived') revivedMetaIds.push(id)
+    candidateStaleMeta.delete(id)  // not stale; either added or revived
   }
+  // Hide candidates that no aggregation re-produced. Already-hidden
+  // ones are skipped to avoid re-firing the event handler.
+  const hiddenStaleIds: string[] = []
+  candidateStaleMeta.forEach((e) => {
+    if (!graph.hasEdge(e)) return
+    if (graph.getEdgeAttribute(e, 'hidden')) return
+    graph.setEdgeAttribute(e, 'hidden', true)
+    hiddenStaleIds.push(e)
+  })
 
   // Touched edges for partial Sigma refresh:
   //  * every link edge re-evaluated above (`visited` set)
-  //  * every newly-added meta-edge
-  // Dropped meta-edges don't need to appear here — Sigma's graphology
-  // subscription notices `dropEdge` and removes them from its index.
+  //  * every meta-edge added, revived, or freshly hidden
+  // All ids in `touchedEdgeIds` exist in the graph after the delta —
+  // Sigma can safely look them up to re-apply reducers.
   const touchedEdgeIds: string[] = []
   visited.forEach((e) => touchedEdgeIds.push(e))
   for (const id of addedMetaIds) touchedEdgeIds.push(id)
+  for (const id of revivedMetaIds) touchedEdgeIds.push(id)
+  for (const id of hiddenStaleIds) touchedEdgeIds.push(id)
 
   return {
     visibleNodes: 0, visibleEdges: 0, metaEdges: 0,

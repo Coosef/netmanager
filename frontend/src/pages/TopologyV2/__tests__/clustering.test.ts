@@ -70,10 +70,12 @@ describe('expandCluster', () => {
 // ── T8.3.E2.a — delta path ───────────────────────────────────────────────
 
 /**
- * Snapshot the graph state that defines "the cluster view": every
- * node's `hidden` flag + the set of meta-edges and their aggregated
- * counts. Two equal snapshots mean two graphs are visually identical
- * from the topology-view perspective.
+ * Snapshot the VISIBLE cluster view: every node's `hidden` flag + the
+ * set of meta-edges that are currently visible (with their aggregated
+ * counts). The delta path retains stale meta-edges with `hidden: true`
+ * for performance (see clustering.ts step 6) instead of dropping them,
+ * so we compare against the VISIBLE-only state — that's what the user
+ * actually sees, and what the full path produces from scratch.
  */
 function viewSnapshot(model: TopologyModel) {
   const hidden = new Map<string, boolean>()
@@ -84,6 +86,7 @@ function viewSnapshot(model: TopologyModel) {
   const linkHidden = new Map<string, boolean>()
   model.graph.forEachEdge((key, attr) => {
     if (attr.edgeKind === 'meta') {
+      if (attr.hidden) return        // delta-hidden stale meta-edge
       metaEdges.set(key, {
         count: attr.count as number,
         utilization: attr.utilization as number,

@@ -15,7 +15,10 @@ import { useEffect, useRef } from 'react'
 import Sigma from 'sigma'
 import { styleGraph, type TopologyModel } from './graphModel'
 import { applyClusterView, applyClusterViewDelta } from './clustering'
-import { createLayoutWorker, layoutDurationMs, positionClusterNodes } from './layout'
+import {
+  createLayoutWorker, layoutDurationMs,
+  positionClusterNodes, positionClusterNodesChunked,
+} from './layout'
 import { createTrafficAnimator, type TrafficAnimator } from './traffic'
 import { cameraRatioToZoomTier, shouldShowLabel, type ZoomTier } from './rendering'
 import {
@@ -140,14 +143,35 @@ export default function SigmaCanvas({
 
     const layout = createLayoutWorker(model.graph)
     layout.start()
-    const stopAt = window.setTimeout(() => {
+    // T8.3.E2.e (BASELINE_PROFILE B6) — the post-FA2 finalize used to
+    // run `positionClusterNodes(model)` + a full `renderer.refresh()`
+    // synchronously, producing a 10–15 s main-thread block at 10 k.
+    // The chunked variant yields between time-budgeted batches of
+    // clusters; the refresh is partial-graph (only the cluster nodes
+    // we explicitly re-positioned — FA2 streamed device updates into
+    // graphology continuously during its 9 s run, so Sigma already
+    // holds fresh device-buffer state by the time we arrive here).
+    let finalizeCancelled = false
+    const stopAt = window.setTimeout(async () => {
+      if (finalizeCancelled) return
       layout.stop()
-      positionClusterNodes(model)
-      renderer.refresh()
+      const writtenClusters: string[] = []
+      await positionClusterNodesChunked(model, {
+        isCancelled: () => finalizeCancelled,
+        onWritten: (id) => writtenClusters.push(id),
+      })
+      if (finalizeCancelled || !sigmaRef.current) return
+      // Partial refresh — only the cluster nodes we touched. Devices
+      // were streamed through `Sigma`'s graphology subscription during
+      // FA2 iteration, so their buffers are already current. Falling
+      // back to a full refresh if the partialGraph hint is ignored
+      // would still be correct, just costlier.
+      renderer.refresh({ partialGraph: { nodes: writtenClusters } })
       trafficRef.current?.start()
     }, layoutDurationMs(model.graph.order))
 
     return () => {
+      finalizeCancelled = true
       window.clearTimeout(stopAt)
       trafficRef.current?.stop()
       trafficRef.current = null
@@ -180,6 +204,8 @@ export default function SigmaCanvas({
       // First run after mount, or `model` identity changed (location
       // swap). Graph state may not reflect any specific `prev` — start
       // fresh with the full path + full centroid sweep + full refresh.
+      // The full path also sweeps any stale hidden meta-edges the
+      // delta path may have accumulated (clustering.ts step 6).
       applyClusterView(model, collapsed)
       positionClusterNodes(model)
       sigmaRef.current.refresh()
@@ -187,18 +213,13 @@ export default function SigmaCanvas({
       // Delta path: only the cluster ids in `added = next \ prev` need
       // a fresh centroid (they just became visible). The clusters in
       // `removed` are now hidden; their centroid doesn't matter.
-      // Untouched clusters keep their last-known centroid — same
-      // behaviour as before across patch-driven re-renders.
       const result = applyClusterViewDelta(model, last.collapsed, collapsed)
       const added = new Set<string>()
       for (const c of collapsed) if (!last.collapsed.has(c)) added.add(c)
       positionClusterNodes(model, { touched: added })
-      // T8.3.E2.d / BASELINE_PROFILE B5 — partial Sigma refresh.
-      // Re-upload only the buffers whose underlying state changed; at
-      // 10 k this turns a ~2 s full rebuild into a sub-50-ms partial
-      // one. Newly-positioned cluster nodes are already in
-      // `touchedNodeIds` (they sit in `added`, which gets fed into the
-      // touched-node set by `applyClusterViewDelta`).
+      // Partial Sigma refresh — only the buffers whose underlying
+      // state changed. At 10 k this turns a ~2 s full re-index into a
+      // sub-50 ms partial one.
       sigmaRef.current.refresh({
         partialGraph: {
           nodes: result.touchedNodeIds,
