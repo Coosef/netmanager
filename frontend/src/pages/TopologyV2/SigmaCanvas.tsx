@@ -179,12 +179,20 @@ export default function SigmaCanvas({
     if (last.model !== model || last.collapsed === null) {
       // First run after mount, or `model` identity changed (location
       // swap). Graph state may not reflect any specific `prev` — start
-      // fresh with the full path.
+      // fresh with the full path + full centroid sweep.
       applyClusterView(model, collapsed)
+      positionClusterNodes(model)
     } else {
+      // Delta path: only the cluster ids in `added = next \ prev` need
+      // a fresh centroid (they just became visible). The clusters in
+      // `removed` are now hidden; their centroid doesn't matter.
+      // Untouched clusters keep their last-known centroid — same
+      // behaviour as before across patch-driven re-renders.
       applyClusterViewDelta(model, last.collapsed, collapsed)
+      const added = new Set<string>()
+      for (const c of collapsed) if (!last.collapsed.has(c)) added.add(c)
+      positionClusterNodes(model, { touched: added })
     }
-    positionClusterNodes(model)
     lastClusterApplyRef.current = { model, collapsed }
     sigmaRef.current.refresh()
   }, [collapsed, model])

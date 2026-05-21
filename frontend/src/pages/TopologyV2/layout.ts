@@ -35,25 +35,62 @@ export function layoutDurationMs(nodeCount: number): number {
 }
 
 /**
+ * Place a cluster node at the centroid of its member devices. Returns
+ * `true` if a position was written. Pulled out of `positionClusterNodes`
+ * so the full and touched-only paths share the same arithmetic.
+ */
+function recomputeClusterCentroid(
+  graph: Graph,
+  cluster: { id: string; memberDeviceKeys: readonly string[] },
+): boolean {
+  let sx = 0
+  let sy = 0
+  let n = 0
+  for (const key of cluster.memberDeviceKeys) {
+    if (!graph.hasNode(key)) continue
+    sx += graph.getNodeAttribute(key, 'x') as number
+    sy += graph.getNodeAttribute(key, 'y') as number
+    n++
+  }
+  if (n > 0 && graph.hasNode(cluster.id)) {
+    graph.setNodeAttribute(cluster.id, 'x', sx / n)
+    graph.setNodeAttribute(cluster.id, 'y', sy / n)
+    return true
+  }
+  return false
+}
+
+/**
  * Place every cluster node at the centroid of its member devices. Called
  * once the device layout has settled; cluster super-nodes then sit over
  * the mass they represent instead of wherever the worker scattered them.
+ *
+ * `opts.touched` (T8.3.E2.c) — only recompute centroids of these
+ * cluster IDs. The intended use is the SigmaCanvas `[collapsed, model]`
+ * delta path: pass the `added = next \ prev` set, and the function
+ * skips every cluster whose membership didn't move. At 10 k with ~100
+ * clusters, this turns an O(Σ-of-all-memberDeviceKeys) sweep into an
+ * O(Σ-of-added-memberDeviceKeys) one — typically a single cluster's
+ * worth of work.
+ *
+ * Pass `undefined` (or omit `opts`) to keep the previous behaviour
+ * (full sweep over every cluster). The mount effect and the
+ * `[patchSignal]` effect both use the full sweep for correctness:
+ * they have no useful `touched` signal.
  */
-export function positionClusterNodes(model: TopologyModel): void {
+export function positionClusterNodes(
+  model: TopologyModel,
+  opts?: { touched?: ReadonlySet<string> },
+): void {
   const { graph, clusters } = model
+  if (opts?.touched) {
+    for (const clusterId of opts.touched) {
+      const cluster = clusters.get(clusterId)
+      if (cluster) recomputeClusterCentroid(graph, cluster)
+    }
+    return
+  }
   for (const cluster of clusters.values()) {
-    let sx = 0
-    let sy = 0
-    let n = 0
-    for (const key of cluster.memberDeviceKeys) {
-      if (!graph.hasNode(key)) continue
-      sx += graph.getNodeAttribute(key, 'x') as number
-      sy += graph.getNodeAttribute(key, 'y') as number
-      n++
-    }
-    if (n > 0 && graph.hasNode(cluster.id)) {
-      graph.setNodeAttribute(cluster.id, 'x', sx / n)
-      graph.setNodeAttribute(cluster.id, 'y', sy / n)
-    }
+    recomputeClusterCentroid(graph, cluster)
   }
 }
