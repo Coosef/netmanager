@@ -123,3 +123,53 @@ After deploy:
     backend process and very few worker children — it has been
     inadequate since the move to forked Celery worker pools.
     Documented now; revisit if the worker pool sizes change.
+
+## 8. VPS deploy attempt + rollback (same day)
+
+Within an hour of the SIGBUS recovery the T9 fix was committed,
+merged to `main` (`870368b`), and a deploy was attempted on the
+VPS. The deploy surfaced a **second, unrelated** failure that had
+been masked all along: the VPS Postgres schema was on alembic
+revision `d5e6f7a8b9c0` (Faz 6 baseline), while `main` had moved
+through Faz 7 + Faz 8 + M6 + Faz 9 since. None of the intervening
+migrations had ever been applied.
+
+Concretely: after `git pull && docker compose build && docker compose
+up -d`, backend went into a new restart loop with
+`asyncpg.exceptions.InvalidPasswordError: password authentication
+failed for user "netmgr_app"`. The `netmgr_app` role is created by
+a Faz 7 migration; on the un-migrated VPS it doesn't exist and the
+backend's default `APP_DB_USER=netmgr_app` could not authenticate.
+Naively running `alembic upgrade head` at that point would have
+applied M6's destructive `f8a5_drop_legacy_tenant` migration against
+live production data — unacceptable without a `pg_dump` snapshot
+and a step-by-step plan.
+
+**Rollback executed:**
+  * `git reset --hard eb7710a` in `/opt/netmanager` (VPS HEAD pinned
+    back to the pre-deploy commit; `main` branch on the VPS is now
+    detached relative to `origin/main`).
+  * `docker compose build` + `docker compose up -d --force-recreate
+    backend celery_worker celery_agent_worker celery_default_worker`.
+  * Side benefit: the `prom_multiproc` volume had already been
+    recreated at the new `256m` size during the failed T9 attempt,
+    and Docker keeps volumes across `compose down`. So the VPS now
+    runs the **eb7710a code** (no `mark_process_dead` hook) on the
+    **256M tmpfs** — the SIGBUS root cause has not been re-fixed
+    but the buffer is 4× larger, extending time-to-saturation
+    proportionally.
+
+**Post-rollback state (verified 09:57 UTC):**
+  * Backend `Up 36s (healthy)`, RestartCount=0
+  * `/health/ready` 200, all checks ok
+  * 11 / 11 containers healthy
+  * tmpfs 256M
+
+**Hazard for the next deploy:** a routine `git pull` on the VPS will
+re-trigger the same failure. The proper deploy chain — Faz 7 M1–M5 →
+Faz 7 phase 6 → Faz 8 A–H → M6 destructive → Faz 9 → T9 — has to be
+run as a single planned event with backup, per-step verification,
+and a documented rollback. Tracked in
+[../memory/project_vps_deploy_hazard.md](../memory/project_vps_deploy_hazard.md)
+and the M6 deploy template at
+[M6_DEPLOY_LOG.md](M6_DEPLOY_LOG.md).
