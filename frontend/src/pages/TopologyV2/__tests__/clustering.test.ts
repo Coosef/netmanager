@@ -102,7 +102,10 @@ describe('applyClusterViewDelta', () => {
     const A = collapsedSetForTier(m, 'layer')
     const B = new Set(A) // same contents, different identity
     const res = applyClusterViewDelta(m, A, B)
-    expect(res).toEqual({ visibleNodes: 0, visibleEdges: 0, metaEdges: 0 })
+    expect(res).toEqual({
+      visibleNodes: 0, visibleEdges: 0, metaEdges: 0,
+      touchedNodeIds: [], touchedEdgeIds: [],
+    })
     // counted via the explicit counter
     expect(countClusterView(m).visibleNodes).toBe(2)
   })

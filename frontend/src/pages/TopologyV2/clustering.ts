@@ -23,6 +23,25 @@ export interface ClusterViewResult {
   metaEdges: number
 }
 
+/**
+ * Extra payload returned by `applyClusterViewDelta` — the set of nodes
+ * and edges Sigma needs to re-upload to GPU buffers after the delta.
+ * Plumbing it from `clustering.ts` to the SigmaCanvas effect lets the
+ * caller pass a `partialGraph` to `sigma.refresh()` instead of a full
+ * 10k-node buffer rebuild.
+ *
+ * Conservatively over-includes — a node/edge that was touched but
+ * didn't actually change a paint-relevant attribute still gets a
+ * harmless re-upload. Under-inclusion would leave stale visuals, so
+ * `touchedNodeIds` mirrors the delta's `touchedNodes` set verbatim and
+ * `touchedEdgeIds` covers every edge whose `hidden` may have flipped
+ * plus every meta-edge added in step 6.
+ */
+export interface ClusterViewDeltaResult extends ClusterViewResult {
+  touchedNodeIds: string[]
+  touchedEdgeIds: string[]
+}
+
 /** Collapsed-cluster set for a global tier. */
 export function collapsedSetForTier(model: TopologyModel, tier: ClusterTier): Set<string> {
   const set = new Set<string>()
@@ -252,7 +271,7 @@ export function applyClusterViewDelta(
   model: TopologyModel,
   prev: ReadonlySet<string>,
   next: ReadonlySet<string>,
-): ClusterViewResult {
+): ClusterViewDeltaResult {
   const graph = model.graph
 
   // ── 1. diff ──────────────────────────────────────────────────────────────
@@ -261,7 +280,10 @@ export function applyClusterViewDelta(
   for (const c of next) if (!prev.has(c)) added.add(c)
   for (const c of prev) if (!next.has(c)) removed.add(c)
   if (added.size === 0 && removed.size === 0) {
-    return { visibleNodes: 0, visibleEdges: 0, metaEdges: 0 }
+    return {
+      visibleNodes: 0, visibleEdges: 0, metaEdges: 0,
+      touchedNodeIds: [], touchedEdgeIds: [],
+    }
   }
 
   // ── 2. touched node set ──────────────────────────────────────────────────
@@ -301,7 +323,7 @@ export function applyClusterViewDelta(
   // ── 5. re-aggregate meta-edges from touched link edges ──────────────────
   interface MetaAgg { a: string; b: string; count: number; util: number }
   const meta = new Map<string, MetaAgg>()
-  const visited = new Set<string>()
+  const visited = new Set<string>()       // doubles as the "touched link edges" set
   const nextSet = next as Set<string>
 
   for (const key of touchedNodes) {
@@ -330,11 +352,28 @@ export function applyClusterViewDelta(
   }
 
   // ── 6. add fresh meta-edges ──────────────────────────────────────────────
+  // Track edges added so Sigma can buffer-upload just these (B5 of
+  // T8.3.D: avoid the full WebGL rebuild on every cluster-state flip).
+  const addedMetaIds: string[] = []
   for (const agg of meta.values()) {
-    addMetaEdge(graph, agg.a, agg.b, agg.count, agg.util)
+    const id = `meta-${agg.a < agg.b ? `${agg.a}|${agg.b}` : `${agg.b}|${agg.a}`}`
+    if (addMetaEdge(graph, agg.a, agg.b, agg.count, agg.util)) addedMetaIds.push(id)
   }
 
-  return { visibleNodes: 0, visibleEdges: 0, metaEdges: 0 }
+  // Touched edges for partial Sigma refresh:
+  //  * every link edge re-evaluated above (`visited` set)
+  //  * every newly-added meta-edge
+  // Dropped meta-edges don't need to appear here — Sigma's graphology
+  // subscription notices `dropEdge` and removes them from its index.
+  const touchedEdgeIds: string[] = []
+  visited.forEach((e) => touchedEdgeIds.push(e))
+  for (const id of addedMetaIds) touchedEdgeIds.push(id)
+
+  return {
+    visibleNodes: 0, visibleEdges: 0, metaEdges: 0,
+    touchedNodeIds: Array.from(touchedNodes),
+    touchedEdgeIds,
+  }
 }
 
 /**

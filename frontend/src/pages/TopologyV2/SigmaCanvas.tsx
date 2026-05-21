@@ -179,22 +179,34 @@ export default function SigmaCanvas({
     if (last.model !== model || last.collapsed === null) {
       // First run after mount, or `model` identity changed (location
       // swap). Graph state may not reflect any specific `prev` — start
-      // fresh with the full path + full centroid sweep.
+      // fresh with the full path + full centroid sweep + full refresh.
       applyClusterView(model, collapsed)
       positionClusterNodes(model)
+      sigmaRef.current.refresh()
     } else {
       // Delta path: only the cluster ids in `added = next \ prev` need
       // a fresh centroid (they just became visible). The clusters in
       // `removed` are now hidden; their centroid doesn't matter.
       // Untouched clusters keep their last-known centroid — same
       // behaviour as before across patch-driven re-renders.
-      applyClusterViewDelta(model, last.collapsed, collapsed)
+      const result = applyClusterViewDelta(model, last.collapsed, collapsed)
       const added = new Set<string>()
       for (const c of collapsed) if (!last.collapsed.has(c)) added.add(c)
       positionClusterNodes(model, { touched: added })
+      // T8.3.E2.d / BASELINE_PROFILE B5 — partial Sigma refresh.
+      // Re-upload only the buffers whose underlying state changed; at
+      // 10 k this turns a ~2 s full rebuild into a sub-50-ms partial
+      // one. Newly-positioned cluster nodes are already in
+      // `touchedNodeIds` (they sit in `added`, which gets fed into the
+      // touched-node set by `applyClusterViewDelta`).
+      sigmaRef.current.refresh({
+        partialGraph: {
+          nodes: result.touchedNodeIds,
+          edges: result.touchedEdgeIds,
+        },
+      })
     }
     lastClusterApplyRef.current = { model, collapsed }
-    sigmaRef.current.refresh()
   }, [collapsed, model])
 
   // ── overlay layer toggle / incident focus — repaint via the reducers ──────
