@@ -9,6 +9,11 @@
  *
  * On reconnect the client cannot know which events it missed, so it
  * fires `onReconnect` — the caller refetches and resyncs by graph_version.
+ *
+ * T8.2 — the framework-free pieces of this contract (`wsPathForLocation`,
+ * `isTopologyFrame`, `nextBackoffDelay`) are exported as pure helpers
+ * so the WebSocket-bound hook stays thin and the behaviour is unit
+ * testable without a DOM / WS mock harness.
  */
 import { useEffect, useRef, useState } from 'react'
 import { buildWsUrl } from '@/utils/ws'
@@ -25,6 +30,44 @@ interface Options {
 }
 
 const BACKOFF_MS = [2000, 4000, 8000, 15000]
+
+// ── Pure helpers (T8.2 — unit testable) ──────────────────────────────────
+
+/**
+ * Resolve the WS path for a given active location.
+ *   - `null`            → org-wide  → `/api/v1/ws/events`
+ *   - non-null number   → narrowed  → `/api/v1/ws/events?location=<id>`
+ *
+ * A location change yields a different path; the hook tears down the old
+ * socket and connects a fresh one — old-location frames stop arriving.
+ */
+export function wsPathForLocation(locationId: number | null): string {
+  return locationId != null
+    ? `/api/v1/ws/events?location=${locationId}`
+    : '/api/v1/ws/events'
+}
+
+/**
+ * Type-guard for an arbitrary WS frame — narrows to `TopologyEvent` if the
+ * payload looks like a topology event. Used by the hook to skip non-
+ * topology frames the same socket may deliver (alarms, heartbeats, etc.).
+ */
+export function isTopologyFrame(frame: unknown): frame is TopologyEvent {
+  if (typeof frame !== 'object' || frame === null) return false
+  const f = frame as Record<string, unknown>
+  return typeof f.event_type === 'string' && f.event_type.startsWith('topology_')
+}
+
+/**
+ * Exponential-with-cap backoff delay for the n-th reconnect attempt
+ * (n=0 is the first retry). The schedule is `[2s, 4s, 8s, 15s, 15s, …]` —
+ * never longer than 15 s so a transient network blip doesn't lock the
+ * UI out of live updates for minutes.
+ */
+export function nextBackoffDelay(retryCount: number): number {
+  const idx = Math.max(0, Math.min(retryCount, BACKOFF_MS.length - 1))
+  return BACKOFF_MS[idx]
+}
 
 export function useTopologyRealtime({ enabled, locationId, onEvent, onReconnect }: Options) {
   const [status, setStatus] = useState<RealtimeStatus>('closed')
@@ -44,9 +87,7 @@ export function useTopologyRealtime({ enabled, locationId, onEvent, onReconnect 
     let timer: ReturnType<typeof setTimeout> | null = null
     let everOpened = false
 
-    const path = locationId != null
-      ? `/api/v1/ws/events?location=${locationId}`
-      : '/api/v1/ws/events'
+    const path = wsPathForLocation(locationId)
 
     const connect = () => {
       if (destroyed) return
@@ -61,13 +102,13 @@ export function useTopologyRealtime({ enabled, locationId, onEvent, onReconnect 
         everOpened = true
       }
       ws.onmessage = (e) => {
-        let frame: TopologyEvent
+        let frame: unknown
         try {
           frame = JSON.parse(e.data as string)
         } catch {
           return
         }
-        if (typeof frame.event_type === 'string' && frame.event_type.startsWith('topology_')) {
+        if (isTopologyFrame(frame)) {
           onEventRef.current(frame)
         }
       }
@@ -75,7 +116,7 @@ export function useTopologyRealtime({ enabled, locationId, onEvent, onReconnect 
       ws.onclose = () => {
         if (destroyed) return
         setStatus('closed')
-        const delay = BACKOFF_MS[Math.min(retry, BACKOFF_MS.length - 1)]
+        const delay = nextBackoffDelay(retry)
         retry++
         timer = setTimeout(connect, delay)
       }

@@ -1,10 +1,34 @@
 /**
- * Runtime validation for the v2 topology contract.
+ * TopologyV2 engine-internal contract boundary.
  *
- * The backend contract (`GET /topology/graph?v=2`) is the single source
- * of truth; this guards the engine against a malformed / wrong-version
- * payload before it reaches the graph model. Types live in
- * `@/api/topologyContract`.
+ * Two responsibilities, one module:
+ *   1. **Runtime validation** of the `GET /topology/graph?v=2` payload
+ *      — `validateTopologyGraphV2()` + `TopologyContractError` — so
+ *      the engine surfaces a clear error instead of rendering garbage
+ *      on a malformed / wrong-version response.
+ *   2. **Engine-internal type re-export** — every TopologyV2 module
+ *      (`graphModel`, `clustering`, `rendering`, `patch`, `realtime`,
+ *      `overlays/*`, `three/*`, the test fixtures, …) imports
+ *      contract types from HERE, never from `@/api/topologyContract`
+ *      directly. The deliberate single chokepoint means we can:
+ *        - keep one definition of "what `@/api/topologyContract`
+ *          types the engine depends on" without grepping 38 files;
+ *        - swap the upstream package without touching engine modules
+ *          (e.g. if the contract package is renamed or split);
+ *        - add engine-only augmentations next to the imports if ever
+ *          needed, without polluting the shared package.
+ *
+ * **Not a public surface.** TopologyV2 exposes exactly one external
+ * symbol — the default `TopologyV2Page` from `index.tsx` (T8.1 §4.1).
+ * Nothing outside `frontend/src/pages/TopologyV2/` imports this file.
+ *
+ * **Re-exports policy.** `export *` is deliberate, not an oversight.
+ * The 14 re-exported types form the engine's stable working set against
+ * the upstream contract; trimming to the currently-consumed subset
+ * would force a churning, low-value maintenance burden on every new
+ * patch / overlay / scene-data evolution. ts-prune flags the
+ * not-yet-consumed entries as "unused"; that is expected and benign
+ * (they are part of the boundary's stable surface, not dead code).
  */
 import type {
   TopologyGraphV2,

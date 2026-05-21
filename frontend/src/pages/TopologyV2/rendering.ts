@@ -7,7 +7,6 @@
 import type {
   TrafficClass,
   EdgeAnomalyState,
-  Criticality,
 } from './contract'
 
 // ── palette ───────────────────────────────────────────────────────────────
@@ -120,9 +119,3 @@ export function shouldShowLabel(
   return labelPriority <= maxPriority
 }
 
-export const criticalityRank: Record<Criticality, number> = {
-  critical: 3,
-  high: 2,
-  normal: 1,
-  low: 0,
-}

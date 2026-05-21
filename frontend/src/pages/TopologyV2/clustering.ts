@@ -58,22 +58,6 @@ export function expandCluster(
   return next
 }
 
-/** Collapse a cluster (and fold any of its descendants back in). */
-export function collapseCluster(
-  model: TopologyModel,
-  collapsed: Set<string>,
-  clusterId: string,
-): Set<string> {
-  const next = new Set(collapsed)
-  const drop = (id: string) => {
-    next.delete(id)
-    model.clusters.get(id)?.childClusterIds.forEach(drop)
-  }
-  drop(clusterId)
-  next.add(clusterId)
-  return next
-}
-
 function anyAncestorCollapsed(
   model: TopologyModel,
   clusterId: string,
