@@ -41,19 +41,25 @@ for (const size of SIZES) {
       settleTimeoutMs: settleTimeoutMs(size),
       action: async ({ page }) => {
         await waitForTestHandles(page)
-        // Snapshot the initial collapsed set so we can restore it.
-        const before = await page.evaluate(() => {
-          // The harness installs `listClusterIds()`; the initial
-          // collapsed set isn't exposed (it's derived from the
-          // collapsedSetForTier helper). Treat "the current cluster
-          // IDs" as the initial frontier and pick the first N as
-          // expand targets.
+        // Snapshot the initial collapsed set so we can faithfully
+        // restore the frontier at the end. `getCollapsed()` returns
+        // the ACTUAL collapsed cluster IDs at this moment (the default
+        // 'layer' tier frontier built by `collapsedSetForTier` on
+        // mount). Earlier versions of this spec used `listClusterIds()`
+        // which returns EVERY cluster — that made the restore step a
+        // bulk "collapse-everything" call that essentially performed
+        // a full reapply equivalent, blocking the main thread for
+        // seconds and masking the per-action expand cost.
+        const initialCollapsed = await page.evaluate(() => {
           const h = (window as unknown as {
-            __perfTestHandles: { listClusterIds: () => string[] }
+            __perfTestHandles: { getCollapsed: () => string[] }
           }).__perfTestHandles
-          return h.listClusterIds()
+          return h.getCollapsed()
         })
-        const targets = before.slice(0, MAX_TARGETS)
+        // Targets to drill: real cluster IDs from the current frontier
+        // (so the expand actually does something). Pick the first N
+        // from the snapshot for determinism.
+        const targets = initialCollapsed.slice(0, MAX_TARGETS)
         if (targets.length === 0) {
           // Synthetic 1k graph might end up with zero clusters at the
           // active tier. Don't fail — emit the artifact with a note
@@ -69,14 +75,14 @@ for (const size of SIZES) {
           }, clusterId)
           await page.waitForTimeout(perCycle)
         }
-        // Restore the original frontier (no need to recompute; just
-        // collapse the IDs back).
+        // Restore the original frontier — small diff vs the post-drill
+        // state, so the delta path handles it in O(touched) again.
         await page.evaluate((ids) => {
           const h = (window as unknown as {
             __perfTestHandles: { setCollapsed: (ids: string[]) => void }
           }).__perfTestHandles
           h.setCollapsed(ids)
-        }, before)
+        }, initialCollapsed)
         await page.waitForTimeout(perCycle)
       },
     })

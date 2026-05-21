@@ -14,8 +14,11 @@
 import { useEffect, useRef } from 'react'
 import Sigma from 'sigma'
 import { styleGraph, type TopologyModel } from './graphModel'
-import { applyClusterView } from './clustering'
-import { createLayoutWorker, layoutDurationMs, positionClusterNodes } from './layout'
+import { applyClusterView, applyClusterViewDelta } from './clustering'
+import {
+  createLayoutWorker, layoutDurationMs,
+  positionClusterNodes, positionClusterNodesChunked,
+} from './layout'
 import { createTrafficAnimator, type TrafficAnimator } from './traffic'
 import { cameraRatioToZoomTier, shouldShowLabel, type ZoomTier } from './rendering'
 import {
@@ -140,14 +143,35 @@ export default function SigmaCanvas({
 
     const layout = createLayoutWorker(model.graph)
     layout.start()
-    const stopAt = window.setTimeout(() => {
+    // T8.3.E2.e (BASELINE_PROFILE B6) — the post-FA2 finalize used to
+    // run `positionClusterNodes(model)` + a full `renderer.refresh()`
+    // synchronously, producing a 10–15 s main-thread block at 10 k.
+    // The chunked variant yields between time-budgeted batches of
+    // clusters; the refresh is partial-graph (only the cluster nodes
+    // we explicitly re-positioned — FA2 streamed device updates into
+    // graphology continuously during its 9 s run, so Sigma already
+    // holds fresh device-buffer state by the time we arrive here).
+    let finalizeCancelled = false
+    const stopAt = window.setTimeout(async () => {
+      if (finalizeCancelled) return
       layout.stop()
-      positionClusterNodes(model)
-      renderer.refresh()
+      const writtenClusters: string[] = []
+      await positionClusterNodesChunked(model, {
+        isCancelled: () => finalizeCancelled,
+        onWritten: (id) => writtenClusters.push(id),
+      })
+      if (finalizeCancelled || !sigmaRef.current) return
+      // Partial refresh — only the cluster nodes we touched. Devices
+      // were streamed through `Sigma`'s graphology subscription during
+      // FA2 iteration, so their buffers are already current. Falling
+      // back to a full refresh if the partialGraph hint is ignored
+      // would still be correct, just costlier.
+      renderer.refresh({ partialGraph: { nodes: writtenClusters } })
       trafficRef.current?.start()
     }, layoutDurationMs(model.graph.order))
 
     return () => {
+      finalizeCancelled = true
       window.clearTimeout(stopAt)
       trafficRef.current?.stop()
       trafficRef.current = null
@@ -160,11 +184,50 @@ export default function SigmaCanvas({
   }, [model])
 
   // ── cluster view changes ──────────────────────────────────────────────────
+  //
+  // T8.3.E2.b: prefer the delta path when only `collapsed` changed.
+  // The first run after mount (or any time `model` identity changes —
+  // e.g. a location swap) falls back to the full `applyClusterView`
+  // because the graph state may not reflect a known `prev`. Subsequent
+  // runs use `applyClusterViewDelta(prev, next)` so the work is
+  // O(touched), not O(N+E). See T8.3.D §9 for the baseline numbers
+  // this targets; the validation gradient lives in
+  // `docs/TOPOLOGY_T8_3_BASELINE_PROFILE.md`.
+  const lastClusterApplyRef = useRef<{
+    model: TopologyModel | null
+    collapsed: Set<string> | null
+  }>({ model: null, collapsed: null })
   useEffect(() => {
     if (!sigmaRef.current) return
-    applyClusterView(model, collapsed)
-    positionClusterNodes(model)
-    sigmaRef.current.refresh()
+    const last = lastClusterApplyRef.current
+    if (last.model !== model || last.collapsed === null) {
+      // First run after mount, or `model` identity changed (location
+      // swap). Graph state may not reflect any specific `prev` — start
+      // fresh with the full path + full centroid sweep + full refresh.
+      // The full path also sweeps any stale hidden meta-edges the
+      // delta path may have accumulated (clustering.ts step 6).
+      applyClusterView(model, collapsed)
+      positionClusterNodes(model)
+      sigmaRef.current.refresh()
+    } else {
+      // Delta path: only the cluster ids in `added = next \ prev` need
+      // a fresh centroid (they just became visible). The clusters in
+      // `removed` are now hidden; their centroid doesn't matter.
+      const result = applyClusterViewDelta(model, last.collapsed, collapsed)
+      const added = new Set<string>()
+      for (const c of collapsed) if (!last.collapsed.has(c)) added.add(c)
+      positionClusterNodes(model, { touched: added })
+      // Partial Sigma refresh — only the buffers whose underlying
+      // state changed. At 10 k this turns a ~2 s full re-index into a
+      // sub-50 ms partial one.
+      sigmaRef.current.refresh({
+        partialGraph: {
+          nodes: result.touchedNodeIds,
+          edges: result.touchedEdgeIds,
+        },
+      })
+    }
+    lastClusterApplyRef.current = { model, collapsed }
   }, [collapsed, model])
 
   // ── overlay layer toggle / incident focus — repaint via the reducers ──────

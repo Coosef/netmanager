@@ -158,12 +158,13 @@ export class CDPCollector {
         requestAnimationFrame(tick)
       }
       requestAnimationFrame(tick)
-      // long-task observer
+      // long-task observer — capture each task's actual startTime
+      // (relative to navigation) so the harness can attribute blocks
+      // to specific phases (boot vs action vs observation window).
       try {
         const obs = new PerformanceObserver((list) => {
-          const now = performance.now()
           for (const e of list.getEntries()) {
-            rec.longTasks.push({ ts: now, dur: e.duration })
+            rec.longTasks.push({ ts: e.startTime, dur: e.duration })
           }
         })
         obs.observe({ entryTypes: ['longtask'] })

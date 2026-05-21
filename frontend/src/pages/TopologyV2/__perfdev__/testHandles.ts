@@ -61,6 +61,11 @@ export interface TestHandlesAPI {
    * harness can pick targets without re-implementing topology
    * traversal in TypeScript-on-page. */
   listClusterIds: () => string[]
+  /** Snapshot the current collapsed-cluster set as an array. The
+   * cluster-expand-collapse harness uses this to restore the initial
+   * frontier after a drill sequence — distinct from `listClusterIds`,
+   * which returns EVERY cluster, not just the collapsed ones. */
+  getCollapsed: () => string[]
   /** Replace the collapsed-cluster set wholesale. */
   setCollapsed: (clusters: string[]) => void
   /** Drill one level into a single cluster — delegates to

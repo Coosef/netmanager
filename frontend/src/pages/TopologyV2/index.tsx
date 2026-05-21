@@ -226,6 +226,11 @@ export default function TopologyV2Page() {
   // doesn't. Same dynamic-chunk isolation as PerfOverlay / stressLoader.
   const handleEventRef = useRef(handleEvent)
   handleEventRef.current = handleEvent
+  // Mirror the live `collapsed` Set so test handles can snapshot the
+  // current frontier — distinct from `listClusterIds`, which returns
+  // every cluster including non-collapsed ones.
+  const collapsedRef = useRef(collapsed)
+  collapsedRef.current = collapsed
   useEffect(() => {
     if (!stressOpts || typeof window === 'undefined') return
     let cancelled = false
@@ -239,6 +244,7 @@ export default function TopologyV2Page() {
           const e = engineRef.current
           return e ? Array.from(e.model.clusters.keys()) : []
         },
+        getCollapsed: () => Array.from(collapsedRef.current),
         setCollapsed: (ids) => setCollapsed(new Set(ids)),
         expandCluster: (clusterId) => {
           const e = engineRef.current

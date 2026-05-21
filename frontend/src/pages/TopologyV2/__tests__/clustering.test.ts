@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { buildTopologyModel } from '../graphModel'
+import { buildTopologyModel, type TopologyModel } from '../graphModel'
 import {
-  collapsedSetForTier, expandCluster, applyClusterView,
+  collapsedSetForTier, expandCluster,
+  applyClusterView, applyClusterViewDelta, countClusterView,
 } from '../clustering'
 import { makeFixture } from './fixture'
 
@@ -63,5 +64,190 @@ describe('expandCluster', () => {
     expect(next.has('loc:7')).toBe(false)
     expect(next.has('loc:7|layer:core')).toBe(true)
     expect(next.has('loc:7|layer:access')).toBe(true)
+  })
+})
+
+// ── T8.3.E2.a — delta path ───────────────────────────────────────────────
+
+/**
+ * Snapshot the VISIBLE cluster view: every node's `hidden` flag + the
+ * set of meta-edges that are currently visible (with their aggregated
+ * counts). The delta path retains stale meta-edges with `hidden: true`
+ * for performance (see clustering.ts step 6) instead of dropping them,
+ * so we compare against the VISIBLE-only state — that's what the user
+ * actually sees, and what the full path produces from scratch.
+ */
+function viewSnapshot(model: TopologyModel) {
+  const hidden = new Map<string, boolean>()
+  model.graph.forEachNode((key, attr) => {
+    hidden.set(key, !!attr.hidden)
+  })
+  const metaEdges = new Map<string, { count: number; utilization: number }>()
+  const linkHidden = new Map<string, boolean>()
+  model.graph.forEachEdge((key, attr) => {
+    if (attr.edgeKind === 'meta') {
+      if (attr.hidden) return        // delta-hidden stale meta-edge
+      metaEdges.set(key, {
+        count: attr.count as number,
+        utilization: attr.utilization as number,
+      })
+    } else if (attr.edgeKind === 'link') {
+      linkHidden.set(key, !!attr.hidden)
+    }
+  })
+  return { hidden, metaEdges, linkHidden }
+}
+
+describe('applyClusterViewDelta', () => {
+  it('returns zero counts on an empty diff (prev === next contents)', () => {
+    const m = buildTopologyModel(makeFixture())
+    applyClusterView(m, collapsedSetForTier(m, 'layer'))
+    const A = collapsedSetForTier(m, 'layer')
+    const B = new Set(A) // same contents, different identity
+    const res = applyClusterViewDelta(m, A, B)
+    expect(res).toEqual({
+      visibleNodes: 0, visibleEdges: 0, metaEdges: 0,
+      touchedNodeIds: [], touchedEdgeIds: [],
+    })
+    // counted via the explicit counter
+    expect(countClusterView(m).visibleNodes).toBe(2)
+  })
+
+  it('expand: location → layer matches a full apply', () => {
+    // delta path: start at location tier, expand `loc:7` to the layer tier
+    const mDelta = buildTopologyModel(makeFixture())
+    const atLocation = collapsedSetForTier(mDelta, 'location')
+    applyClusterView(mDelta, atLocation)
+    const atLayer = expandCluster(mDelta, atLocation, 'loc:7')
+    applyClusterViewDelta(mDelta, atLocation, atLayer)
+
+    // reference: a fresh model with the layer set applied directly
+    const mFull = buildTopologyModel(makeFixture())
+    applyClusterView(mFull, collapsedSetForTier(mFull, 'layer'))
+
+    expect(viewSnapshot(mDelta)).toEqual(viewSnapshot(mFull))
+    // and the counts agree too
+    expect(countClusterView(mDelta)).toEqual(countClusterView(mFull))
+  })
+
+  it('expand: layer → rack/access mix (two sequential expands) matches a full apply', () => {
+    // `expandCluster` drills ONE tier per call. From {core, access}:
+    // expanding `core` → {rack:R1, access} (core's child is rack:R1);
+    // expanding `access` next → {rack:R1} (access has no children).
+    const mDelta = buildTopologyModel(makeFixture())
+    const atLayer = collapsedSetForTier(mDelta, 'layer')
+    applyClusterView(mDelta, atLayer)
+    let next = expandCluster(mDelta, atLayer, 'loc:7|layer:core')
+    applyClusterViewDelta(mDelta, atLayer, next)
+    const afterCore = new Set(next)
+    next = expandCluster(mDelta, afterCore, 'loc:7|layer:access')
+    applyClusterViewDelta(mDelta, afterCore, next)
+
+    // reference: a fresh apply at the same end state
+    const mFull = buildTopologyModel(makeFixture())
+    applyClusterView(mFull, next)
+
+    expect(viewSnapshot(mDelta)).toEqual(viewSnapshot(mFull))
+    expect(countClusterView(mDelta)).toEqual(countClusterView(mFull))
+  })
+
+  it('fully drilling to device tier (rack → device) matches a full apply', () => {
+    // continues the previous chain one more expand
+    const mDelta = buildTopologyModel(makeFixture())
+    const atLayer = collapsedSetForTier(mDelta, 'layer')
+    applyClusterView(mDelta, atLayer)
+    let next = expandCluster(mDelta, atLayer, 'loc:7|layer:core')
+    applyClusterViewDelta(mDelta, atLayer, next)
+    let prev = new Set(next)
+    next = expandCluster(mDelta, prev, 'loc:7|layer:access')
+    applyClusterViewDelta(mDelta, prev, next)
+    prev = new Set(next)
+    // expand the rack — its only child is none (rack has no sub-clusters)
+    next = expandCluster(mDelta, prev, 'loc:7|layer:core|rack:R1')
+    applyClusterViewDelta(mDelta, prev, next)
+    expect(next.size).toBe(0) // arrived at device tier
+
+    const mFull = buildTopologyModel(makeFixture())
+    applyClusterView(mFull, collapsedSetForTier(mFull, 'device'))
+
+    expect(viewSnapshot(mDelta)).toEqual(viewSnapshot(mFull))
+    expect(countClusterView(mDelta)).toEqual(countClusterView(mFull))
+  })
+
+  it('collapse: device → layer (re-collapse) matches a full apply', () => {
+    const mDelta = buildTopologyModel(makeFixture())
+    applyClusterView(mDelta, collapsedSetForTier(mDelta, 'device'))
+    // collapse to the layer set
+    const target = collapsedSetForTier(mDelta, 'layer')
+    applyClusterViewDelta(mDelta, new Set<string>(), target)
+
+    const mFull = buildTopologyModel(makeFixture())
+    applyClusterView(mFull, target)
+
+    expect(viewSnapshot(mDelta)).toEqual(viewSnapshot(mFull))
+  })
+
+  it('expand then collapse round-trip returns to the starting view', () => {
+    const m = buildTopologyModel(makeFixture())
+    const atLayer = collapsedSetForTier(m, 'layer')
+    applyClusterView(m, atLayer)
+    const start = viewSnapshot(m)
+
+    // expand `loc:7|layer:access` to device tier (no children → just drops it)
+    const next = expandCluster(m, atLayer, 'loc:7|layer:access')
+    applyClusterViewDelta(m, atLayer, next)
+    // collapse back
+    applyClusterViewDelta(m, next, atLayer)
+
+    expect(viewSnapshot(m)).toEqual(start)
+  })
+
+  it('replays a chain of deltas to the same end state as a single direct delta', () => {
+    // A → B → C via the delta chain
+    const mChain = buildTopologyModel(makeFixture())
+    const atLocation = collapsedSetForTier(mChain, 'location')
+    applyClusterView(mChain, atLocation)
+    const atLayer = expandCluster(mChain, atLocation, 'loc:7')
+    applyClusterViewDelta(mChain, atLocation, atLayer)
+    const atDevice = new Set<string>()
+    applyClusterViewDelta(mChain, atLayer, atDevice)
+
+    // A → C directly via the delta path
+    const mDirect = buildTopologyModel(makeFixture())
+    applyClusterView(mDirect, atLocation)
+    applyClusterViewDelta(mDirect, atLocation, atDevice)
+
+    expect(viewSnapshot(mChain)).toEqual(viewSnapshot(mDirect))
+  })
+
+  it('re-applying the same delta is idempotent (no duplicate meta-edges)', () => {
+    const m = buildTopologyModel(makeFixture())
+    const atDevice = new Set<string>()
+    applyClusterView(m, atDevice)
+    const atLayer = collapsedSetForTier(m, 'layer')
+
+    applyClusterViewDelta(m, atDevice, atLayer)
+    const afterOnce = viewSnapshot(m)
+    // applying the SAME delta again is a no-op because prev/next match
+    // the diff this time is empty
+    applyClusterViewDelta(m, atLayer, atLayer)
+    expect(viewSnapshot(m)).toEqual(afterOnce)
+  })
+
+  it('preserves the meta-edge styling (size formula, color)', () => {
+    const m = buildTopologyModel(makeFixture())
+    applyClusterView(m, collapsedSetForTier(m, 'device'))
+    applyClusterViewDelta(m, new Set<string>(), collapsedSetForTier(m, 'layer'))
+
+    const mFull = buildTopologyModel(makeFixture())
+    applyClusterView(mFull, collapsedSetForTier(mFull, 'layer'))
+
+    const dAttrs = m.graph.getEdgeAttributes('meta-loc:7|layer:access|loc:7|layer:core')
+    const fAttrs = mFull.graph.getEdgeAttributes('meta-loc:7|layer:access|loc:7|layer:core')
+    expect(dAttrs.color).toBe(fAttrs.color)
+    expect(dAttrs.size).toBe(fAttrs.size)
+    expect(dAttrs.count).toBe(fAttrs.count)
+    expect(dAttrs.utilization).toBe(fAttrs.utilization)
+    expect(dAttrs.hidden).toBe(fAttrs.hidden)
   })
 })
