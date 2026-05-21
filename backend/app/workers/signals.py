@@ -6,14 +6,28 @@ Registers task_prerun / task_postrun / task_failure hooks to:
   - Bind celery_task_id to structlog context for log correlation
   - Record task duration and success/failure in Prometheus metrics
 
+Plus (T9, 2026-05-21) a `worker_process_shutdown` hook that calls
+`prometheus_client.multiprocess.mark_process_dead` so each forked
+worker child cleans up its per-PID `.db` files in
+`PROMETHEUS_MULTIPROC_DIR` instead of leaving them to accumulate
+across child respawns. See
+`docs/POSTMORTEM_2026-05-21_PROM_MULTIPROC_TMPFS.md`.
+
 This module is imported (side-effect import) at the bottom of celery_app.py
 so signals self-register when the worker process starts.
 """
+import os
 import threading
 import time
 
 import structlog
-from celery.signals import task_failure, task_postrun, task_prerun, worker_process_init
+from celery.signals import (
+    task_failure,
+    task_postrun,
+    task_prerun,
+    worker_process_init,
+    worker_process_shutdown,
+)
 
 from app.core.metrics import CELERY_TASK_DURATION_SECONDS, CELERY_TASK_TOTAL
 
@@ -28,6 +42,33 @@ def _configure_worker_logging(**kwargs):
     """Call configure_logging() in each spawned worker process."""
     from app.core.logging_config import configure_logging
     configure_logging()
+
+
+# ── Worker shutdown — prometheus_multiproc cleanup (T9) ───────────────────────
+
+@worker_process_shutdown.connect
+def _cleanup_prom_multiproc_on_child_exit(**kwargs):
+    """Mark this worker child's per-PID prometheus .db files dead so they
+    are unlinked from the multiproc dir before the parent recycles the
+    child.
+
+    Without this, every child respawn (e.g. `worker_max_tasks_per_child`,
+    crash recovery) leaves stale `.db` files behind. Over thousands of
+    respawns the multiproc tmpfs saturates and mmap writes start
+    returning SIGBUS — the failure mode that caused the
+    2026-05-21 prod outage (see post-mortem). `mark_process_dead` is a
+    standard prometheus_client API for exactly this scenario.
+
+    Failure is non-fatal — the child is exiting anyway; logging at debug
+    keeps healthy shutdowns silent.
+    """
+    if not os.environ.get("PROMETHEUS_MULTIPROC_DIR"):
+        return  # multiproc disabled (e.g. dev / tests) — nothing to clean
+    try:
+        from prometheus_client import multiprocess
+        multiprocess.mark_process_dead(os.getpid())
+    except Exception as exc:
+        log.debug("prom_multiproc cleanup failed", pid=os.getpid(), exc=str(exc))
 
 
 # ── Queue resolution helper ───────────────────────────────────────────────────
