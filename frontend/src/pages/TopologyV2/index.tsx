@@ -113,6 +113,10 @@ export default function TopologyV2Page() {
   }, [stressOpts, stressData])
 
   const [engine, setEngine] = useState<Engine | null>(null)
+  // engineRef mirrors `engine` for the T8.3.C testHandles useEffect below;
+  // testHandles capture engineRef in their closures so they see the
+  // current engine even though the install effect runs once per stress
+  // mode activation.
   const [patchSignal, setPatchSignal] = useState(0)
   const [drift, setDrift] = useState<TopologyEvent | null>(null)
   const [overlayLayers, setOverlayLayers] = useState<Set<OverlayLayer>>(
@@ -150,6 +154,44 @@ export default function TopologyV2Page() {
     if (!prefsLoaded) return
     saveUiPrefs({ viewMode, layoutMode, overlayLayers: [...overlayLayers] })
   }, [prefsLoaded, viewMode, layoutMode, overlayLayers])
+
+  // ── T8.3.C perf test handles ─────────────────────────────────────────────
+  // Same dynamic-chunk isolation as PerfOverlay / stressLoader: the production
+  // bundle never downloads testHandles unless the URL flips stress mode on.
+  // The handles are pass-throughs to the existing state setters — no new
+  // mutation paths; `patch.ts` is still the single graph-mutation point
+  // (T8.2 §6.5 invariant), and the overlays remain read-only.
+  const engineRef = useRef<Engine | null>(null)
+  engineRef.current = engine   // mirror live engine into ref — matches the
+                               // pattern at the keyboard-shortcuts block.
+  useEffect(() => {
+    if (!stressOpts || typeof window === 'undefined') return
+    let cancelled = false
+    void import('./__perfdev__/testHandles').then(({ installTestHandles }) => {
+      if (cancelled) return
+      installTestHandles({
+        setPresentation: (on) => setPresentation(on),
+        setFullscreen: (on) => setFullscreen(on),
+        setOverlayLayers: (layers) => setOverlayLayers(new Set(layers)),
+        listClusterIds: () => {
+          const e = engineRef.current
+          return e ? Array.from(e.model.clusters.keys()) : []
+        },
+        setCollapsed: (ids) => setCollapsed(new Set(ids)),
+        expandCluster: (clusterId) => {
+          const e = engineRef.current
+          if (!e) return
+          setCollapsed((prev) => expandCluster(e.model, prev, clusterId))
+        },
+      })
+    })
+    return () => {
+      cancelled = true
+      void import('./__perfdev__/testHandles').then(({ uninstallTestHandles }) => {
+        uninstallTestHandles()
+      })
+    }
+  }, [stressOpts])
 
   // ── ingest contract data — build once per location, else patch in place ──
   useEffect(() => {
@@ -257,8 +299,7 @@ export default function TopologyV2Page() {
   }, [])
 
   // ── keyboard shortcuts (F · 2 · 3 · C · O · I · Esc) ─────────────────────
-  const engineRef = useRef<Engine | null>(engine)
-  engineRef.current = engine
+  // (engineRef declared earlier alongside the T8.3.C testHandles block.)
   const overlayModelRef = useRef(overlayModel)
   overlayModelRef.current = overlayModel
 
