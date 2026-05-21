@@ -155,43 +155,14 @@ export default function TopologyV2Page() {
     saveUiPrefs({ viewMode, layoutMode, overlayLayers: [...overlayLayers] })
   }, [prefsLoaded, viewMode, layoutMode, overlayLayers])
 
-  // ── T8.3.C perf test handles ─────────────────────────────────────────────
-  // Same dynamic-chunk isolation as PerfOverlay / stressLoader: the production
-  // bundle never downloads testHandles unless the URL flips stress mode on.
-  // The handles are pass-throughs to the existing state setters — no new
-  // mutation paths; `patch.ts` is still the single graph-mutation point
-  // (T8.2 §6.5 invariant), and the overlays remain read-only.
+  // ── T8.3.C perf test handles — engine ref (declared early; the install
+  //    `useEffect` lives further down, after `handleEvent`, so the
+  //    ws-patch-flood handle can route through the canonical realtime
+  //    funnel without breaking the T8.2 §6.5 single-mutation-point
+  //    invariant).
   const engineRef = useRef<Engine | null>(null)
   engineRef.current = engine   // mirror live engine into ref — matches the
                                // pattern at the keyboard-shortcuts block.
-  useEffect(() => {
-    if (!stressOpts || typeof window === 'undefined') return
-    let cancelled = false
-    void import('./__perfdev__/testHandles').then(({ installTestHandles }) => {
-      if (cancelled) return
-      installTestHandles({
-        setPresentation: (on) => setPresentation(on),
-        setFullscreen: (on) => setFullscreen(on),
-        setOverlayLayers: (layers) => setOverlayLayers(new Set(layers)),
-        listClusterIds: () => {
-          const e = engineRef.current
-          return e ? Array.from(e.model.clusters.keys()) : []
-        },
-        setCollapsed: (ids) => setCollapsed(new Set(ids)),
-        expandCluster: (clusterId) => {
-          const e = engineRef.current
-          if (!e) return
-          setCollapsed((prev) => expandCluster(e.model, prev, clusterId))
-        },
-      })
-    })
-    return () => {
-      cancelled = true
-      void import('./__perfdev__/testHandles').then(({ uninstallTestHandles }) => {
-        uninstallTestHandles()
-      })
-    }
-  }, [stressOpts])
 
   // ── ingest contract data — build once per location, else patch in place ──
   useEffect(() => {
@@ -247,6 +218,86 @@ export default function TopologyV2Page() {
     onEvent: handleEvent,
     onReconnect: scheduleRefetch,
   })
+
+  // ── T8.3.C testHandles install ───────────────────────────────────────────
+  // `handleEvent` is captured via a ref so the install's `useEffect` can
+  // depend on `[stressOpts]` only — handleEvent's useCallback identity
+  // changes whenever `scheduleRefetch` changes, but the handle behavior
+  // doesn't. Same dynamic-chunk isolation as PerfOverlay / stressLoader.
+  const handleEventRef = useRef(handleEvent)
+  handleEventRef.current = handleEvent
+  useEffect(() => {
+    if (!stressOpts || typeof window === 'undefined') return
+    let cancelled = false
+    void import('./__perfdev__/testHandles').then(({ installTestHandles }) => {
+      if (cancelled) return
+      installTestHandles({
+        setPresentation: (on) => setPresentation(on),
+        setFullscreen: (on) => setFullscreen(on),
+        setOverlayLayers: (layers) => setOverlayLayers(new Set(layers)),
+        listClusterIds: () => {
+          const e = engineRef.current
+          return e ? Array.from(e.model.clusters.keys()) : []
+        },
+        setCollapsed: (ids) => setCollapsed(new Set(ids)),
+        expandCluster: (clusterId) => {
+          const e = engineRef.current
+          if (!e) return
+          setCollapsed((prev) => expandCluster(e.model, prev, clusterId))
+        },
+        dispatchPatchBurst: async ({ count, intervalMs, targetDistinctNodes = 50 }) => {
+          const e = engineRef.current
+          const fn = handleEventRef.current
+          const zero = {
+            durationMs: 0, applied: 0, ignored_scope_mismatch: 0,
+            stale: 0, refetch: 0, invalid_payload: 0, drift: 0,
+          }
+          if (!e) return zero
+
+          // Round-robin a bounded set of device IDs so each event lands
+          // on a real, non-cluster node (only `topology_node_updated`
+          // events; status flips between online/offline). graphology
+          // stores the kind under `nodeKind` (graphModel.ts:147) — NOT
+          // `kind`, which is the contract-side field name.
+          const ids: string[] = []
+          e.model.graph.forEachNode((n, attrs) => {
+            if (ids.length >= targetDistinctNodes) return
+            if ((attrs as { nodeKind?: string }).nodeKind === 'device') ids.push(n)
+          })
+          if (ids.length === 0) return zero
+
+          const start = performance.now()
+          for (let i = 0; i < count; i++) {
+            const nodeId = ids[i % ids.length]
+            const event: TopologyEvent = {
+              event_type: 'topology_node_updated',
+              graph_version: expectedVersion.current + 1,
+              node_id: nodeId,
+              changes: { status: i % 2 === 0 ? 'offline' : 'online' },
+            }
+            fn(event)
+            if (intervalMs > 0) {
+              await new Promise<void>((r) => setTimeout(r, intervalMs))
+            } else {
+              await Promise.resolve()
+            }
+          }
+          return {
+            durationMs: performance.now() - start,
+            applied: count,                  // approximation — handleEvent
+            ignored_scope_mismatch: 0,        // doesn't echo per-event outcome
+            stale: 0, refetch: 0, invalid_payload: 0, drift: 0,
+          }
+        },
+      })
+    })
+    return () => {
+      cancelled = true
+      void import('./__perfdev__/testHandles').then(({ uninstallTestHandles }) => {
+        uninstallTestHandles()
+      })
+    }
+  }, [stressOpts])
 
   // ── cluster view ─────────────────────────────────────────────────────────
   useEffect(() => {

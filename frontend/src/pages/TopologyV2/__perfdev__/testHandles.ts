@@ -26,6 +26,27 @@ import type { OverlayLayer } from '../overlays/overlayModel'
 
 const KEY = '__perfTestHandles' as const
 
+export interface PatchBurstOptions {
+  /** Number of events to dispatch. */
+  count: number
+  /** ms between events; 0 = back-to-back (most stressful). */
+  intervalMs: number
+  /** How many distinct device IDs to round-robin across (default 50). */
+  targetDistinctNodes?: number
+}
+
+export interface PatchBurstResult {
+  /** Wall-clock from first dispatch to final settle, in ms. */
+  durationMs: number
+  /** Per-status counts (sum == count). */
+  applied: number
+  ignored_scope_mismatch: number
+  stale: number
+  refetch: number
+  invalid_payload: number
+  drift: number
+}
+
 export interface TestHandlesAPI {
   /** Toggle the NOC / presentation mode (hides decorative panels). */
   setPresentation: (on: boolean) => void
@@ -45,6 +66,14 @@ export interface TestHandlesAPI {
   /** Drill one level into a single cluster — delegates to
    * `clustering.expandCluster` with the current engine model. */
   expandCluster: (clusterId: string) => void
+  /**
+   * Dispatch a synthetic burst of `topology_node_updated` events
+   * through the SAME `applyTopologyEvent` funnel the WebSocket path
+   * uses (T8.2 §6.5: patch.ts stays the single mutation point). The
+   * harness uses this for the `ws-patch-flood` scenario to load the
+   * real-time update path without standing up a fake WS server.
+   */
+  dispatchPatchBurst: (opts: PatchBurstOptions) => Promise<PatchBurstResult>
 }
 
 interface HandleHost {
