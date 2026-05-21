@@ -12,6 +12,35 @@
  * patch engine (patch.ts) so a freshly fetched contract and an
  * incremental event produce identical graph state. Pure data — no
  * Sigma, no DOM — unit testable.
+ *
+ * ── Lifetime invariants (T8.2 — render ownership contract) ─────────────
+ *
+ * 1. The `TopologyModel.graph` is a **mutable singleton**. It is built
+ *    once by `buildTopologyModel(contract)` and lives until the next
+ *    full rebuild — i.e. a location switch or a `graph_version` gap
+ *    that forces a controlled refetch (see `patch.diffAndPatch`).
+ *
+ * 2. The graph is **mutated in place** by `patch.ts` — the single
+ *    merge point for both realtime events (`applyTopologyEvent`) and
+ *    full-contract reconciliation (`diffAndPatch`). No other module
+ *    should call `graph.addNode` / `dropNode` / `addEdgeWithKey` /
+ *    `setNodeAttribute` etc. directly. Overlays (`overlays/*`), the
+ *    3D projection (`three/sceneData.ts`), and the 2D canvas
+ *    (`SigmaCanvas.tsx`) all read the graph but never write it.
+ *
+ * 3. Every mutation MUST be followed by a `patchSignal` increment in
+ *    the orchestrating React component (`index.tsx`). Downstream
+ *    renderers (Sigma traffic loop, `three/Scene.tsx` memo'd scene
+ *    data, overlay derivations) re-read the graph only when
+ *    `patchSignal` changes — a mutation without a bump is invisible
+ *    to the renderer. The patch helpers in `patch.ts` mutate the
+ *    graph and report what changed; bumping `patchSignal` after a
+ *    successful patch is the caller's responsibility.
+ *
+ * 4. New graph instances are created ONLY on location switch (or a
+ *    `graph_version` gap forcing a refetch). Any other re-creation
+ *    is a bug: it would lose the Sigma camera, lose the FA2 layout
+ *    state, and re-mount the WebGL surface unnecessarily.
  */
 import Graph from 'graphology'
 import type {
