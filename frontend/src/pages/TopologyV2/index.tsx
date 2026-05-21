@@ -200,17 +200,85 @@ export default function TopologyV2Page() {
   useEffect(() => () => { if (refetchTimer.current) clearTimeout(refetchTimer.current) }, [])
 
   // ── realtime topology events ─────────────────────────────────────────────
-  const handleEvent = useCallback((event: TopologyEvent) => {
-    setEngine((prev) => {
-      if (!prev) return prev
-      const outcome = applyTopologyEvent(prev.model, event, expectedVersion.current)
+  // T8.3.E1.b — rAF-aligned coalescing. The pre-E1 implementation
+  // called `applyTopologyEvent` + bumped `patchSignal` synchronously per
+  // event, so a 50 Hz burst at 10 k triggered ~250 React commits and
+  // ~250 Sigma refreshes inside five seconds — saturating the main
+  // thread. Now events queue into a ref-held buffer and a single
+  // `requestAnimationFrame` callback drains the queue per frame: events
+  // are still applied through the canonical `applyTopologyEvent` funnel
+  // (T8.2 §6.5 invariant — `patch.ts` stays the single mutation point),
+  // but only one `setPatchSignal` fires per frame, and the touched
+  // node/edge ids are written to `patchTouchedRef` so the SigmaCanvas
+  // patchSignal effect can do a partial refresh.
+  const eventQueueRef = useRef<TopologyEvent[]>([])
+  const flushRafRef = useRef<number | null>(null)
+  // Touched-ids ledger for the SigmaCanvas patchSignal effect.
+  // Mutated by the flush; consumed + cleared by the effect.
+  const patchTouchedRef = useRef<{
+    nodes: Set<string>
+    edges: Set<string>
+    structural: boolean
+  }>({ nodes: new Set(), edges: new Set(), structural: false })
+  const engineRefForEvents = useRef<Engine | null>(engine)
+  engineRefForEvents.current = engine
+
+  const flushEvents = useCallback(() => {
+    flushRafRef.current = null
+    const events = eventQueueRef.current
+    if (events.length === 0) return
+    eventQueueRef.current = []
+    const eng = engineRefForEvents.current
+    if (!eng) return
+    let appliedCount = 0
+    let driftEvent: TopologyEvent | null = null
+    let needsRefetch = false
+    const touched = patchTouchedRef.current
+    for (const e of events) {
+      const outcome = applyTopologyEvent(eng.model, e, expectedVersion.current)
       expectedVersion.current = outcome.version
-      if (outcome.status === 'applied') setPatchSignal((v) => v + 1)
-      else if (outcome.status === 'drift') setDrift(event)
-      else if (outcome.status === 'refetch') scheduleRefetch()
-      return prev
-    })
+      if (outcome.status === 'applied') {
+        appliedCount++
+        // Surface the touched element ids for the partial Sigma refresh.
+        if (e.node_id) touched.nodes.add(e.node_id)
+        if (e.edge_id) touched.edges.add(e.edge_id)
+        if (e.node?.id) touched.nodes.add(e.node.id)
+        if (e.edge?.id) touched.edges.add(e.edge.id)
+        // Structural events change cluster.memberDeviceKeys → the
+        // cluster view must be re-derived; pure attribute updates can
+        // skip that O(N+E) walk.
+        if (e.event_type === 'topology_node_added' ||
+            e.event_type === 'topology_node_removed' ||
+            e.event_type === 'topology_edge_added' ||
+            e.event_type === 'topology_edge_removed') {
+          touched.structural = true
+        }
+      } else if (outcome.status === 'drift') {
+        driftEvent = e
+      } else if (outcome.status === 'refetch') {
+        needsRefetch = true
+      }
+    }
+    if (driftEvent) setDrift(driftEvent)
+    if (needsRefetch) scheduleRefetch()
+    if (appliedCount > 0) setPatchSignal((v) => v + 1)
   }, [scheduleRefetch])
+
+  const handleEvent = useCallback((event: TopologyEvent) => {
+    eventQueueRef.current.push(event)
+    if (flushRafRef.current === null) {
+      flushRafRef.current = requestAnimationFrame(flushEvents)
+    }
+  }, [flushEvents])
+
+  // Cancel any pending rAF on unmount so the closure doesn't fire on a
+  // dead component.
+  useEffect(() => () => {
+    if (flushRafRef.current !== null) {
+      cancelAnimationFrame(flushRafRef.current)
+      flushRafRef.current = null
+    }
+  }, [])
 
   const { status: rtStatus } = useTopologyRealtime({
     enabled: !!engine,
@@ -420,6 +488,7 @@ export default function TopologyV2Page() {
         <SigmaCanvas
           key={`2d:${engine.locationId}`}
           model={engine.model} collapsed={collapsed} patchSignal={patchSignal}
+          patchTouched={patchTouchedRef.current}
           overlay={overlay} onExpandCluster={handleExpandCluster}
           onSelectNode={setSelected} onZoomTier={handleZoomTier}
         />
