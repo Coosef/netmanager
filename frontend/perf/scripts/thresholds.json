@@ -1,0 +1,40 @@
+{
+  "$comment": [
+    "T8.3.C threshold config — baseline OK/WARN/FAIL bands per metric.",
+    "Read by `aggregate.ts`; consumed by `SUMMARY.md` and the hotspot",
+    "ranking that feeds T8.3.D. These numbers are deliberately rough —",
+    "they're calibrated against the FIRST baseline run, not a tuned target.",
+    "T8.3.D will tighten the bands once it has a clearer picture; T8.3.E's",
+    "optimization gate will lock them.",
+    "",
+    "Rules:",
+    "  * `okMin` set ⇒ metric is higher-is-better. value ≥ okMin → OK;",
+    "    value ≥ warnMin (and < okMin) → WARN; otherwise FAIL.",
+    "  * `okMax` set ⇒ metric is lower-is-better. value ≤ okMax → OK;",
+    "    value ≤ warnMax (and > okMax) → WARN; otherwise FAIL.",
+    "  * A scenario block in `scenarios.<name>.<metric>` overrides the",
+    "    matching `metrics.<metric>` entry for cells of that scenario."
+  ],
+  "metrics": {
+    "avgFps":          { "okMin": 50, "warnMin": 30 },
+    "p95FrameTimeMs":  { "okMax": 20, "warnMax": 50 },
+    "longestTaskMs":   { "okMax": 250, "warnMax": 1000 },
+    "totalLongTaskMs": { "okMax": 500, "warnMax": 5000 }
+  },
+  "scenarios": {
+    "cold-boot": {
+      "$comment": "Bundle parse adds a ~150ms baseline; loosen long-task bounds.",
+      "longestTaskMs": { "okMax": 200, "warnMax": 400 }
+    },
+    "ws-patch-flood": {
+      "$comment": "Designed to stress the renderer; FPS is the canonical signal, totalLT is naturally larger.",
+      "avgFps":          { "okMin": 40, "warnMin": 15 },
+      "totalLongTaskMs": { "okMax": 2000, "warnMax": 20000 }
+    },
+    "cluster-expand-collapse": {
+      "$comment": "Drilling clusters does real work; bounded by the action count, not the user wait. T8.3.E target.",
+      "longestTaskMs":   { "okMax": 400, "warnMax": 2000 },
+      "totalLongTaskMs": { "okMax": 1500, "warnMax": 10000 }
+    }
+  }
+}
