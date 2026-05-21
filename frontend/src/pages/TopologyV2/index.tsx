@@ -37,6 +37,13 @@ import {
 } from './noc/nocUi'
 import { loadUiPrefs, saveUiPrefs } from './noc/uiPrefs'
 import { scaleProfile } from './scaleConfig'
+// T8.3.A — dev / perf measurement scaffolding. `parseStressParams` is
+// pure + type-only; the heavier `loadStressGraph` (synthetic generator)
+// and the `PerfOverlay` component are dynamic-imported below so neither
+// the synthetic graph nor the overlay ships in the default production
+// chunk. A user without `?stress=` or `?perf=1` downloads neither.
+import { parseStressParams, type StressOptions } from './__perfdev__/stressLoader'
+import type { TopologyGraphV2 } from './contract'
 
 const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
 const BORDER = '1px solid rgba(148, 163, 184, 0.18)'
@@ -67,7 +74,43 @@ interface Engine { model: TopologyModel; locationId: number | null }
 
 export default function TopologyV2Page() {
   const { activeLocationId } = useSite()
-  const { data, isLoading, isError, error, refetch } = useTopologyGraphV2()
+
+  // ── T8.3.A perf scaffolding ─────────────────────────────────────────────
+  // Resolve `?stress=N&scenario=…&perf=1` once at mount. The flag also
+  // drives a real-API short-circuit so the page never talks to the
+  // backend while a benchmark is running.
+  const stressOpts: StressOptions | null = useMemo(
+    () => (typeof window !== 'undefined' ? parseStressParams(window.location.search) : null),
+    [],
+  )
+  const [stressData, setStressData] = useState<TopologyGraphV2 | null>(null)
+  const [PerfOverlayCmp, setPerfOverlayCmp] = useState<React.ComponentType | null>(null)
+
+  // Real API hook — disabled when we're in stress mode so a benchmark
+  // never accidentally pulls a real org's graph alongside the synthetic.
+  const realQuery = useTopologyGraphV2()
+  const data: TopologyGraphV2 | undefined = stressOpts ? (stressData ?? undefined) : realQuery.data
+  const isLoading = stressOpts ? stressData == null : realQuery.isLoading
+  const isError = stressOpts ? false : realQuery.isError
+  const error = stressOpts ? null : realQuery.error
+  const refetch = stressOpts ? (async () => undefined) : realQuery.refetch
+
+  // Dynamic-load the synthetic generator + perf overlay only when active.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    // Synthetic graph
+    if (stressOpts && !stressData) {
+      void import('./__perfdev__/stressLoader').then(({ loadStressGraph }) =>
+        loadStressGraph(stressOpts).then(setStressData),
+      )
+    }
+    // Perf overlay — visible in DEV or with ?perf=1
+    void import('./__perfdev__/PerfOverlay').then(({ isPerfMode, PerfOverlay }) => {
+      if (isPerfMode(window.location.search)) {
+        setPerfOverlayCmp(() => PerfOverlay)
+      }
+    })
+  }, [stressOpts, stressData])
 
   const [engine, setEngine] = useState<Engine | null>(null)
   const [patchSignal, setPatchSignal] = useState(0)
@@ -522,6 +565,9 @@ export default function TopologyV2Page() {
         )}
         {drift && <span style={{ color: '#f59e0b' }}>drift</span>}
       </div>
+
+      {/* T8.3.A — perf overlay, dynamic-loaded; visible in DEV or with ?perf=1 */}
+      {PerfOverlayCmp && <PerfOverlayCmp />}
     </div>
   )
 }
