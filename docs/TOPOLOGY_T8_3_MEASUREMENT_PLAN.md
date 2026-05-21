@@ -189,3 +189,47 @@ T8.3.D lands and is reviewed.
    used in T7; a real-prod dump would require a stable snapshot file
    in the repo.
 4. **No optimisation in this branch** — confirmed?
+
+## 11. Decisions — approved 2026-05-21
+
+| # | Decision | Implication |
+|---|---|---|
+| 1 | **Playwright** approved as pinned `@playwright/test` dev-dep | T8.3.B installs and pins one minor; lockfile updated; no prod bundle impact |
+| 2 | **Both** headless + user-hardware validate | Headless drives the matrix + hotspot ranking; the **same** in-app `<PerfOverlay>` is also visible in the user's real Chrome session so the same numbers can be eyeballed for spot-check validation. The harness writes `media: 'headless'`; manual spot-checks are recorded as `media: 'user-hw'` in the same JSON shape |
+| 3 | **Both** synthetic + small prod-shape dump | Primary matrix = synthetic 1k / 2.5k / 5k / 10k. Plus **one** prod-shape reference cell using a JSON snapshot exported from the **local docker stack** (`/topology/graph?v=2`, ~63 devices, 2 orgs) — checked into the repo at `frontend/perf/fixtures/prod-shape-small.json`. The VPS is currently pinned to `eb7710a` / `d5e6f7a8b9c0` so it has no v=2 contract; lokal docker is the only v=2-shape source today. The reference cell catches synthetic-vs-real mismatches even at a small size |
+| 4 | **Pure measurement** in this branch — confirmed | T8.3.A/B/C/D = harness + report only. Optimisation lives in `topology-gold/T8.3-perf-optimization` (or sub-branches), opened only after T8.3.D is reviewed |
+
+### 11.1 Edge cases the decisions surface
+
+  * The prod-shape dump is **63 nodes** — far below the matrix sizes.
+    It is not a benchmark cell; it is a **realism reference** to detect
+    "the synthetic graph is wrong" before drawing conclusions from the
+    1k+ runs. If a metric on prod-shape is wildly out of trend with
+    synthetic 1k, T8.3.A's syntheticGraph calibration is suspect.
+  * The "in-app perf overlay seen in both headless and user-Chrome"
+    invariant means the overlay must be reachable via URL param in
+    production builds too — strictly `?perf=1` opt-in, never auto-on.
+    Production users who don't append the param see nothing new.
+
+## 12. T8.3.A — what we'll do next
+
+Stub of the next deliverable so the user can sanity-check before code:
+
+  * `src/pages/TopologyV2/__perfdev__/stressLoader.ts` — picks up
+    `?stress=N&scenario=…` from the URL, synthesises a v=2 graph via
+    `__tests__/syntheticGraph.ts`, and returns it instead of the API
+    fetch. Guarded by `import.meta.env.DEV || hasQueryParam('perf')`.
+  * `src/pages/TopologyV2/__perfdev__/PerfOverlay.tsx` — rolling FPS,
+    heap, long-task count, Sigma reported render count. Position:
+    bottom-right corner. Visible only with `?perf=1`.
+  * `frontend/perf/fixtures/prod-shape-small.json` — exported from the
+    local docker stack with a small Python script that calls
+    `/api/v1/topology/graph?v=2` with the admin token and saves the
+    response. Checked into the repo. ~50 KB.
+  * Wiring in `src/pages/TopologyV2/index.tsx` — the perf loader has
+    priority over `useTopologyGraphV2()` when the URL param is set;
+    otherwise the page uses the real API hook unchanged.
+
+Verify: vitest 132 / 132, tsc 0, `npm run build` exit 0, `?stress=1000`
+on the local dev server renders the synthetic graph, default
+`/topology-next` still hits the real API.
