@@ -709,13 +709,16 @@ async def lifespan(app: FastAPI):
     except asyncio.TimeoutError:
         _startup_log.warning("startup: OUI yüklemesi zaman aştı — arka planda yeniden denenecek")
 
-    # Faz 6A — Agent Command Bridge: relay Celery→agent commands via Redis Pub/Sub
+    # Faz 6A — Agent Command Bridge: relay Celery→agent commands via Redis Pub/Sub.
+    # Faz 9 #6 — `start()` now schedules a retry-on-failure connector internally
+    # so a Redis-not-yet-ready race no longer permanently disables the bridge.
+    # We still wrap as a safety net but it should never fire.
     from app.services.agent_bridge import agent_bridge_listener as _bridge
     from app.core.redis_client import get_redis as _get_redis
     try:
         await _bridge.start(redis_client=_get_redis(), manager=_am)
     except Exception:
-        _startup_log.exception("startup: agent_bridge failed to start (non-fatal)")
+        _startup_log.exception("startup: agent_bridge.start raised unexpectedly")
 
     # Background tasks — tracked for graceful shutdown cancellation.
     # Created while the super-admin context is still active so each loop

@@ -129,37 +129,50 @@ trap for new contributors. Worth a one-liner in the frontend README
 not provision node_modules"). Tracked informally; not a separate
 backlog item.
 
-## 6. `agent_bridge` startup-race noise
+## 6. `agent_bridge` startup-race noise  — ✅ closed 2026-05-21 (Faz 9 #6)
 
 **Files:**
-  * [backend/app/main.py:712-718](backend/app/main.py#L712-L718)
   * [backend/app/services/agent_bridge.py](backend/app/services/agent_bridge.py)
+  * [backend/app/main.py](backend/app/main.py)
 
-Lifespan startup eagerly tries `agent_bridge_listener.start(...)` with
-the Redis client. If Redis is not yet resolvable at that moment, the
-try/except swallows the failure as
-`"startup: agent_bridge failed to start (non-fatal)"` with full
-`exc_info`. The bridge then stays stopped for the lifetime of that
-backend process — Celery→agent command relay does not work until the
-next restart.
+Was: lifespan startup synchronously called `agent_bridge_listener.start(...)`.
+If Redis was not yet resolvable at that moment, the try/except
+swallowed the failure as `"startup: agent_bridge failed to start
+(non-fatal)"` with full `exc_info`. The bridge then stayed dormant for
+the lifetime of that backend process — Celery→agent command relay
+silently didn't work until the next restart.
 
-**Why mostly harmless today:** in Docker Compose where Redis usually
-starts before backend, this rarely fires; the M6 deploy-verification
-turn caught it because Redis was deliberately stopped while we were
-testing other paths and got started later. After the restart with
-Redis up, the listener started cleanly:
-`bridge: listener started, pattern=agent:bridge:cmd:*`. So the warning
-is a startup-race symptom, not a persistent bug.
+**Closure (Faz 9 #6):** `AgentBridgeListener.start()` now schedules a
+background retry-on-failure connector task (`bg:agent_bridge_startup`)
+that loops over `psubscribe` with exponential backoff (2 → 4 → 8 → 16
+→ 30 s cap), at log levels INFO (first miss), WARNING (after 5
+consecutive failures), INFO (when subscribe finally succeeds with
+attempt count). `start()` itself returns immediately so backend boot
+is never blocked. `stop()` cancels both the startup task and the
+listen task — `docker compose stop` during a retry loop closes
+cleanly with no orphan-task warnings.
 
-**Cleanup:** either
-  * add explicit `depends_on: { redis: { condition: service_healthy } }`
-    to the `backend` service in `docker-compose.yml` (clean for the
-    common case), AND/OR
-  * make `agent_bridge_listener.start` retry-on-failure with exponential
-    backoff so a transient Redis unavailability at startup doesn't
-    silently disable command relay for the rest of the process lifetime.
+Verified scenarios:
 
-Added 2026-05-20 from the M6 production-readiness check.
+  A. Redis up at boot      → single `bridge: listener started, …` log
+  B. Redis down at boot    → `bridge: redis not ready yet, retrying`
+                             (INFO), backend boot still "Application
+                             startup complete"; bridge keeps retrying
+                             in background
+  C. Redis up mid-flight   → bridge auto-recovers with
+                             `bridge: listener started after N attempts`
+                             (INFO)
+  D. Shutdown during retry → clean `bridge: listener stopped`, no
+                             orphan tasks
+
+Out of scope and noted for a future item: the existing `_listen_loop`
+crashes at ERROR on Redis disconnect mid-process (`bridge: listen_loop
+crashed unexpectedly`); reconnection there would need a different
+retry pattern (cancel-and-reschedule from inside the loop's exception
+handler). Not covered here.
+
+Added 2026-05-20 from the M6 production-readiness check; closed in
+the next sweep.
 
 ---
 
@@ -172,10 +185,11 @@ Added 2026-05-20 from the M6 production-readiness check.
 3. ~~**§1 + §2 deps.py shims + endpoint sweep**~~ — ✅ closed 2026-05-21
    (Faz 9 #3 / commits `a7f1b47` + `45be55e`). Touch surface turned out
    to be ~391 in-body uses across 18 files, not ~25; net **-516 LOC**.
-4. **§6 agent_bridge startup race** — tiny `depends_on` + retry change;
-   bundle with any other compose/lifespan work. Next.
-5. **§4 cache warmer loop** — small, do alongside other Redis work.
+4. ~~**§6 agent_bridge startup race**~~ — ✅ closed 2026-05-21 (Faz 9 #6).
+   Retry-on-failure connector task replaces the one-shot startup; four
+   redis-up / redis-down / mid-recovery / shutdown scenarios verified
+   clean.
+5. **§4 cache warmer loop** — small, do alongside other Redis work. Next + last.
 
-None of these block production deploy. Items #1–#3 closed (~600 LOC of
-legacy plumbing removed). Items #4 (warmer dormancy) and #6 (bridge
-startup) remain.
+Items #1, #2, #3, #6 closed. Only §4 (warmer dormancy) remains. None
+of these blocked production deploy.

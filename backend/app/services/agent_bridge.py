@@ -39,31 +39,118 @@ class AgentBridgeListener:
 
     def __init__(self):
         self._task: asyncio.Task | None = None
+        self._startup_task: asyncio.Task | None = None  # Faz 9 #6 — retry-on-failure connector
         self._pubsub = None
         self._pubsub_conn: aioredis.Redis | None = None  # dedicated — no socket_timeout
         self._redis: aioredis.Redis | None = None        # for publish/setex (shared)
         self._manager = None
 
     async def start(self, redis_client: aioredis.Redis, manager) -> None:
-        """Start bridge listener — call once in lifespan startup."""
-        from app.core.config import settings
+        """Start bridge listener — non-blocking.
+
+        Faz 9 #6 — schedules a background retry-on-failure task so a transient
+        Redis unavailability at lifespan startup does not permanently disable
+        the bridge for the rest of the process lifetime. The retry task
+        terminates as soon as the pubsub psubscribe succeeds; from that
+        moment the bridge serves Celery→agent commands normally.
+
+        Idempotent: a second call while a previous start is still retrying
+        is a no-op. Cancel via `stop()`.
+        """
         self._redis = redis_client
         self._manager = manager
-        # Pub/Sub listener needs its own connection without socket_timeout so
-        # listen() can block indefinitely waiting for the next message.
-        # The shared redis_client has socket_timeout=5 (for health/command ops).
-        self._pubsub_conn = aioredis.from_url(
-            settings.REDIS_URL,
-            decode_responses=True,
-            # No socket_timeout — pubsub listen() must not time out between messages
+        if self._startup_task and not self._startup_task.done():
+            return  # already connecting
+        if self._task and not self._task.done():
+            return  # already running
+        self._startup_task = asyncio.create_task(
+            self._connect_with_retry(), name="bg:agent_bridge_startup",
         )
-        self._pubsub = self._pubsub_conn.pubsub()
-        await self._pubsub.psubscribe(_CMD_PATTERN)
-        self._task = asyncio.create_task(self._listen_loop(), name="bg:agent_bridge")
-        log.info("bridge: listener started, pattern=%s", _CMD_PATTERN)
+
+    async def _connect_with_retry(self) -> None:
+        """Connect to Redis and start the listen loop, retrying indefinitely
+        with exponential backoff (2 → 4 → 8 → 16 → 30 s cap). Designed to
+        recover from a Redis-not-yet-ready race at backend boot."""
+        from app.core.config import settings
+
+        backoff = 2.0
+        attempt = 0
+        try:
+            while True:
+                attempt += 1
+                try:
+                    # Pub/Sub listener needs its own connection without
+                    # socket_timeout so listen() can block indefinitely
+                    # between messages. The shared redis_client has
+                    # socket_timeout=5 (used by publish/setex only).
+                    pubsub_conn = aioredis.from_url(
+                        settings.REDIS_URL,
+                        decode_responses=True,
+                    )
+                    pubsub = pubsub_conn.pubsub()
+                    await pubsub.psubscribe(_CMD_PATTERN)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    if attempt == 1:
+                        # First miss is noise — Redis is usually slightly
+                        # behind the backend container in docker-compose.
+                        log.info(
+                            "bridge: redis not ready yet, retrying — %s",
+                            exc,
+                        )
+                    elif attempt == 5:
+                        # Five consecutive failures (~30 s of backoff) is
+                        # worth a louder note so ops can spot it.
+                        log.warning(
+                            "bridge: still unable to start after %d attempts — %s; will keep retrying",
+                            attempt, exc,
+                        )
+                    await asyncio.sleep(min(backoff, 30.0))
+                    backoff = min(backoff * 2, 30.0)
+                    continue
+
+                # Subscribe succeeded — install + launch listen loop.
+                self._pubsub_conn = pubsub_conn
+                self._pubsub = pubsub
+                self._task = asyncio.create_task(
+                    self._listen_loop(), name="bg:agent_bridge",
+                )
+                if attempt == 1:
+                    log.info("bridge: listener started, pattern=%s", _CMD_PATTERN)
+                else:
+                    log.info(
+                        "bridge: listener started after %d attempts, pattern=%s",
+                        attempt, _CMD_PATTERN,
+                    )
+                return
+        except asyncio.CancelledError:
+            # Shutdown raced ahead of our first successful subscribe.
+            # Drop any half-built pubsub objects so stop() has nothing to
+            # close out of order.
+            try:
+                if pubsub is not None:
+                    await pubsub.aclose()
+            except Exception:
+                pass
+            try:
+                if pubsub_conn is not None:
+                    await pubsub_conn.aclose()
+            except Exception:
+                pass
+            raise
 
     async def stop(self) -> None:
         """Gracefully cancel the listener. Call in lifespan shutdown."""
+        # Faz 9 #6 — cancel the retry-on-failure connector if we are still
+        # waiting for Redis at shutdown time. Cancelling stops the loop
+        # without leaking a half-built pubsub.
+        if self._startup_task and not self._startup_task.done():
+            self._startup_task.cancel()
+            try:
+                await self._startup_task
+            except asyncio.CancelledError:
+                pass
         if self._task:
             self._task.cancel()
             try:
