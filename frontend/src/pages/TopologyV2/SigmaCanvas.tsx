@@ -14,7 +14,7 @@
 import { useEffect, useRef } from 'react'
 import Sigma from 'sigma'
 import { styleGraph, type TopologyModel } from './graphModel'
-import { applyClusterView } from './clustering'
+import { applyClusterView, applyClusterViewDelta } from './clustering'
 import { createLayoutWorker, layoutDurationMs, positionClusterNodes } from './layout'
 import { createTrafficAnimator, type TrafficAnimator } from './traffic'
 import { cameraRatioToZoomTier, shouldShowLabel, type ZoomTier } from './rendering'
@@ -160,10 +160,32 @@ export default function SigmaCanvas({
   }, [model])
 
   // ── cluster view changes ──────────────────────────────────────────────────
+  //
+  // T8.3.E2.b: prefer the delta path when only `collapsed` changed.
+  // The first run after mount (or any time `model` identity changes —
+  // e.g. a location swap) falls back to the full `applyClusterView`
+  // because the graph state may not reflect a known `prev`. Subsequent
+  // runs use `applyClusterViewDelta(prev, next)` so the work is
+  // O(touched), not O(N+E). See T8.3.D §9 for the baseline numbers
+  // this targets; the validation gradient lives in
+  // `docs/TOPOLOGY_T8_3_BASELINE_PROFILE.md`.
+  const lastClusterApplyRef = useRef<{
+    model: TopologyModel | null
+    collapsed: Set<string> | null
+  }>({ model: null, collapsed: null })
   useEffect(() => {
     if (!sigmaRef.current) return
-    applyClusterView(model, collapsed)
+    const last = lastClusterApplyRef.current
+    if (last.model !== model || last.collapsed === null) {
+      // First run after mount, or `model` identity changed (location
+      // swap). Graph state may not reflect any specific `prev` — start
+      // fresh with the full path.
+      applyClusterView(model, collapsed)
+    } else {
+      applyClusterViewDelta(model, last.collapsed, collapsed)
+    }
     positionClusterNodes(model)
+    lastClusterApplyRef.current = { model, collapsed }
     sigmaRef.current.refresh()
   }, [collapsed, model])
 
