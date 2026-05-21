@@ -333,4 +333,11 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: "size=64m"
+      # T9 (2026-05-21) — bumped 64m → 256m after a SIGBUS restart loop
+      # caused by tmpfs saturation: forked Celery worker children (PIDs
+      # respawn over the container's lifetime) leave per-PID `.db` files
+      # in the multiproc dir; 17k+ stale entries had pushed tmpfs to 100%.
+      # 256m + the worker_process_shutdown mark_process_dead hook
+      # (app/workers/signals.py) together prevent recurrence. See
+      # docs/POSTMORTEM_2026-05-21_PROM_MULTIPROC_TMPFS.md.
+      o: "size=256m"
