@@ -169,7 +169,35 @@ export function diffAndPatch(model: TopologyModel, contract: TopologyGraphV2): P
 
 // ── single-event patch ────────────────────────────────────────────────────
 
-export type PatchStatus = 'applied' | 'stale' | 'refetch' | 'drift'
+/**
+ * Outcome statuses for an incoming realtime event.
+ *
+ *   - `applied`                 — the graph was mutated in place
+ *   - `stale`                   — graph_version < expected (replay) — dropped
+ *   - `refetch`                 — gap (missed events) or a bulk / structural
+ *                                 event the caller should resync from a fresh
+ *                                 contract
+ *   - `drift`                   — `topology_drift` UI signal (no mutation)
+ *   - `ignored_scope_mismatch`  — T8.2 defence-in-depth: the event's
+ *                                 organization_id / location_id does not
+ *                                 match the active session scope. Cross-org
+ *                                 leakage at the WS layer is a release
+ *                                 blocker (T8.6); rejecting at this single
+ *                                 merge point closes the door.
+ *   - `invalid_payload`         — the granular event is missing the data
+ *                                 it needs to apply (e.g. `node_added`
+ *                                 without `node`); a refetch is safer than
+ *                                 a partial update, so callers still
+ *                                 resync, but the status name surfaces the
+ *                                 distinction in logs / metrics.
+ */
+export type PatchStatus =
+  | 'applied'
+  | 'stale'
+  | 'refetch'
+  | 'drift'
+  | 'ignored_scope_mismatch'
+  | 'invalid_payload'
 
 export interface PatchOutcome {
   status: PatchStatus
@@ -192,21 +220,91 @@ export interface TopologyEvent {
   [key: string]: unknown
 }
 
+/** Active session scope (org + optional location) for the scope guard. */
+export interface PatchScope {
+  /** Active organization id — must match `event.organization_id` if present. */
+  orgId: number | null
+  /** Active location id — when non-null, must match `event.location_id`
+   *  if the event carries one. `null` = ALL LOCATIONS, accepts any. */
+  locationId: number | null
+}
+
+/**
+ * T8.2 scope guard — return `true` if the event is in-scope for the
+ * active session (or no scope was provided). The check is permissive on
+ * missing fields: an event without `organization_id` is treated as
+ * legacy / system and allowed; the org guard kicks in only when both
+ * sides declare an id and they disagree.
+ *
+ * Exported for direct unit testing; the integrated check happens inside
+ * `applyTopologyEvent`.
+ */
+export function eventInScope(event: TopologyEvent, scope: PatchScope | null): boolean {
+  if (!scope) return true
+  // Org check — the hard isolation boundary.
+  if (
+    scope.orgId != null &&
+    event.organization_id != null &&
+    event.organization_id !== scope.orgId
+  ) {
+    return false
+  }
+  // Location check — narrows only when the session has a specific location.
+  // ALL LOCATIONS (scope.locationId === null) accepts every event.
+  if (
+    scope.locationId != null &&
+    event.location_id != null &&
+    event.location_id !== scope.locationId
+  ) {
+    return false
+  }
+  return true
+}
+
 const GRANULAR = new Set([
   'topology_node_added', 'topology_node_updated', 'topology_node_removed',
   'topology_edge_added', 'topology_edge_updated', 'topology_edge_removed',
 ])
 
 /**
+ * Bulk / structural event types — well-formed but too coarse for a
+ * granular in-place patch; the caller resyncs from a fresh contract.
+ * `topology_drift` is handled separately above (its own UI state).
+ * An event_type with the `topology_` prefix that is in neither
+ * `GRANULAR` nor `KNOWN_BULK` is treated as `invalid_payload`, NOT
+ * silently refetched — refusing to refetch on an unrecognised name
+ * surfaces a backend / frontend contract drift in logs instead of
+ * masking it as a redundant fetch.
+ */
+const KNOWN_BULK = new Set([
+  'topology_links_updated',
+  'topology_links_replaced',
+])
+
+/**
  * Apply one realtime event. The graph mutates only on `applied`; `drift`
  * is a UI-state signal; `refetch` asks the caller to pull a fresh
- * contract; `stale` is a dropped replay.
+ * contract; `stale` is a dropped replay; `ignored_scope_mismatch` is
+ * the cross-org / cross-location defence-in-depth reject;
+ * `invalid_payload` is a malformed granular event.
+ *
+ * `currentScope` is optional for backwards-compat — when omitted, the
+ * scope check is skipped. Callsites in the engine should pass a scope
+ * derived from the auth-store / SiteContext so the guard runs.
  */
 export function applyTopologyEvent(
   model: TopologyModel,
   event: TopologyEvent,
   expectedVersion: number,
+  currentScope: PatchScope | null = null,
 ): PatchOutcome {
+  // T8.2 — scope guard FIRST. A cross-org event must never reach the
+  // mutation paths even by accident; rejecting here is the cheapest
+  // and most localised place to do it.
+  if (!eventInScope(event, currentScope)) {
+    return { status: 'ignored_scope_mismatch', version: expectedVersion }
+  }
+
   const rel = reconcileVersion(event.graph_version, expectedVersion)
   if (rel === 'stale') return { status: 'stale', version: expectedVersion }
   if (rel === 'gap') return { status: 'refetch', version: expectedVersion }
@@ -215,9 +313,15 @@ export function applyTopologyEvent(
   if (event.event_type === 'topology_drift') {
     return { status: 'drift', version: event.graph_version }
   }
-  if (!GRANULAR.has(event.event_type)) {
-    // bulk / structural (topology_links_updated, …) — reconcile by refetch
+  if (KNOWN_BULK.has(event.event_type)) {
+    // structural change (links_updated, …) — well-formed but coarse,
+    // resync from a fresh contract.
     return { status: 'refetch', version: expectedVersion }
+  }
+  if (!GRANULAR.has(event.event_type)) {
+    // Neither granular nor known-bulk — an unrecognised event type is
+    // a contract drift, not a refetch. Surface it.
+    return { status: 'invalid_payload', version: expectedVersion }
   }
 
   const { graph } = model
@@ -226,16 +330,22 @@ export function applyTopologyEvent(
     return { status: 'applied', version: event.graph_version }
   }
 
+  // Distinguish two failure modes for granular events (T8.2):
+  //   * malformed payload  → `invalid_payload` (the event itself is broken)
+  //   * out-of-sync graph  → `refetch`        (event is well-formed but the
+  //                                            local graph cannot apply it
+  //                                            in place — resync required)
+  const invalid = (): PatchOutcome => ({ status: 'invalid_payload', version: expectedVersion })
+  const resync = (): PatchOutcome => ({ status: 'refetch', version: expectedVersion })
+
   switch (event.event_type) {
     case 'topology_node_added': {
       const n = event.node
-      if (!n) return { status: 'refetch', version: expectedVersion }
+      if (!n) return invalid()
       if (graph.hasNode(n.id)) return ok()
       // only safe to apply in place when the hierarchy already exists
       const cid = n.data.cluster_id ?? null
-      if (cid && !model.clusters.has(cid)) {
-        return { status: 'refetch', version: expectedVersion }
-      }
+      if (cid && !model.clusters.has(cid)) return resync()
       const p = placeNewNode(model, cid)
       graph.addNode(n.id, { x: p.x, y: p.y, ...deviceNodeAttrs(n, model.clusters) })
       for (const c of clusterPath(cid, model.clusters)) {
@@ -246,13 +356,13 @@ export function applyTopologyEvent(
       return ok()
     }
     case 'topology_node_updated': {
-      if (!event.node_id || !event.changes) return { status: 'refetch', version: expectedVersion }
-      if (!graph.hasNode(event.node_id)) return { status: 'refetch', version: expectedVersion }
+      if (!event.node_id || !event.changes) return invalid()
+      if (!graph.hasNode(event.node_id)) return resync()
       graph.mergeNodeAttributes(event.node_id, event.changes)
       return ok()
     }
     case 'topology_node_removed': {
-      if (!event.node_id) return { status: 'refetch', version: expectedVersion }
+      if (!event.node_id) return invalid()
       if (graph.hasNode(event.node_id)) {
         const kind = graph.getNodeAttribute(event.node_id, 'nodeKind')
         graph.dropNode(event.node_id)
@@ -263,26 +373,25 @@ export function applyTopologyEvent(
     }
     case 'topology_edge_added': {
       const e = event.edge
-      if (!e) return { status: 'refetch', version: expectedVersion }
+      if (!e) return invalid()
       if (graph.hasEdge(e.id)) return ok()
-      if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) {
-        return { status: 'refetch', version: expectedVersion }
-      }
+      if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) return resync()
       graph.addEdgeWithKey(e.id, e.source, e.target, edgeAttrs(e))
       return ok()
     }
     case 'topology_edge_updated': {
-      if (!event.edge_id || !event.changes) return { status: 'refetch', version: expectedVersion }
-      if (!graph.hasEdge(event.edge_id)) return { status: 'refetch', version: expectedVersion }
+      if (!event.edge_id || !event.changes) return invalid()
+      if (!graph.hasEdge(event.edge_id)) return resync()
       graph.mergeEdgeAttributes(event.edge_id, event.changes)
       return ok()
     }
     case 'topology_edge_removed': {
-      if (!event.edge_id) return { status: 'refetch', version: expectedVersion }
+      if (!event.edge_id) return invalid()
       if (graph.hasEdge(event.edge_id)) graph.dropEdge(event.edge_id)
       return ok()
     }
     default:
-      return { status: 'refetch', version: expectedVersion }
+      // Unknown event type — neither in GRANULAR nor in the bulk set.
+      return invalid()
   }
 }

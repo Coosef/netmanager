@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { buildTopologyModel } from '../graphModel'
 import {
   reconcileVersion, ingestStrategy, diffAndPatch, applyTopologyEvent,
+  eventInScope,
   type TopologyEvent,
 } from '../patch'
 import { makeFixture } from './fixture'
@@ -156,10 +157,151 @@ describe('applyTopologyEvent', () => {
     expect(model.graph.hasNode('d-50')).toBe(true)
   })
 
-  it('refetches a node_added event that lacks node data', () => {
+  it('rejects a node_added event that lacks node data as invalid_payload', () => {
+    // T8.2 — malformed granular event (the payload is broken, not the
+    // local graph) surfaces as `invalid_payload`, NOT a controlled
+    // refetch. Callers still resync defensively, but the distinction
+    // is preserved in logs / metrics.
     const model = buildTopologyModel(makeFixture())
     const out = applyTopologyEvent(
       model, ev({ event_type: 'topology_node_added' }), 7)
+    expect(out.status).toBe('invalid_payload')
+  })
+})
+
+// ══════════════════════════════════════════════════════════════════════════
+// T8.2 — scope guard + invalid_payload + unknown event_type
+// ══════════════════════════════════════════════════════════════════════════
+
+describe('eventInScope (T8.2 scope guard)', () => {
+  const baseEvent = (): import('../patch').TopologyEvent => ({
+    event_type: 'topology_node_updated',
+    graph_version: 1,
+    organization_id: 1,
+    location_id: 10,
+  })
+
+  it('accepts everything when no scope is provided', () => {
+    expect(eventInScope(baseEvent(), null)).toBe(true)
+  })
+
+  it('accepts an event whose org_id + location_id match the session', () => {
+    expect(eventInScope(baseEvent(), { orgId: 1, locationId: 10 })).toBe(true)
+  })
+
+  it('rejects an event from another organization', () => {
+    expect(eventInScope(baseEvent(), { orgId: 2, locationId: 10 })).toBe(false)
+  })
+
+  it('rejects an event from another location of the same org', () => {
+    expect(eventInScope(baseEvent(), { orgId: 1, locationId: 11 })).toBe(false)
+  })
+
+  it('"ALL LOCATIONS" scope (locationId=null) accepts any location', () => {
+    expect(eventInScope(baseEvent(), { orgId: 1, locationId: null })).toBe(true)
+  })
+
+  it('is permissive when the event carries no organization_id (legacy / system)', () => {
+    const e = baseEvent()
+    delete e.organization_id
+    expect(eventInScope(e, { orgId: 1, locationId: 10 })).toBe(true)
+  })
+
+  it('is permissive when the event carries no location_id but the scope has one', () => {
+    const e = baseEvent()
+    delete e.location_id
+    expect(eventInScope(e, { orgId: 1, locationId: 10 })).toBe(true)
+  })
+
+  it('is permissive when the scope has no orgId set (anonymous probe)', () => {
+    expect(eventInScope(baseEvent(), { orgId: null, locationId: null })).toBe(true)
+  })
+})
+
+describe('applyTopologyEvent — T8.2 guards', () => {
+  const ev = (overrides: Partial<import('../patch').TopologyEvent> = {}): import('../patch').TopologyEvent => ({
+    event_type: 'topology_node_updated',
+    graph_version: 8,
+    organization_id: 1,
+    location_id: 10,
+    ...overrides,
+  })
+
+  it('cross-org event is rejected as ignored_scope_mismatch — graph untouched', () => {
+    const model = buildTopologyModel(makeFixture())
+    const before = model.graph.getNodeAttribute('d-3', 'status')
+    const out = applyTopologyEvent(
+      model,
+      ev({ node_id: 'd-3', changes: { status: 'offline' } }),
+      7,                                       // expectedVersion → would normally apply
+      { orgId: 2, locationId: 10 },            // different org!
+    )
+    expect(out.status).toBe('ignored_scope_mismatch')
+    expect(model.graph.getNodeAttribute('d-3', 'status')).toBe(before)
+  })
+
+  it('cross-location event is rejected as ignored_scope_mismatch', () => {
+    const model = buildTopologyModel(makeFixture())
+    const before = model.graph.getNodeAttribute('d-3', 'status')
+    const out = applyTopologyEvent(
+      model,
+      ev({ node_id: 'd-3', changes: { status: 'offline' } }),
+      7,
+      { orgId: 1, locationId: 99 },            // different location
+    )
+    expect(out.status).toBe('ignored_scope_mismatch')
+    expect(model.graph.getNodeAttribute('d-3', 'status')).toBe(before)
+  })
+
+  it('scope guard runs BEFORE version reconciliation', () => {
+    // A stale-version event from the wrong org must surface as scope
+    // mismatch, not stale — telling the operator the channel was
+    // misrouted, not that the event was old.
+    const model = buildTopologyModel(makeFixture())
+    const out = applyTopologyEvent(
+      model,
+      ev({ node_id: 'd-3', changes: { status: 'offline' }, graph_version: 1 }), // very old
+      7,
+      { orgId: 99, locationId: null },         // wrong org
+    )
+    expect(out.status).toBe('ignored_scope_mismatch')
+  })
+
+  it('an unknown event_type surfaces as invalid_payload', () => {
+    const model = buildTopologyModel(makeFixture())
+    const out = applyTopologyEvent(
+      model,
+      ev({ event_type: 'topology_unknown_thing', graph_version: 8 }),
+      7,
+    )
+    expect(out.status).toBe('invalid_payload')
+  })
+
+  it('node_updated missing node_id surfaces as invalid_payload', () => {
+    const model = buildTopologyModel(makeFixture())
+    const out = applyTopologyEvent(
+      model,
+      ev({ event_type: 'topology_node_updated', graph_version: 8, changes: { status: 'offline' } }),
+      7,
+    )
+    expect(out.status).toBe('invalid_payload')
+  })
+
+  it('node_updated for an absent node surfaces as refetch (structural drift)', () => {
+    // Distinct from invalid_payload — the event is well-formed but the
+    // local graph is out of sync (node never made it into the model);
+    // the caller resyncs.
+    const model = buildTopologyModel(makeFixture())
+    const out = applyTopologyEvent(
+      model,
+      ev({
+        event_type: 'topology_node_updated',
+        node_id: 'd-does-not-exist',
+        changes: { status: 'offline' },
+        graph_version: 8,
+      }),
+      7,
+    )
     expect(out.status).toBe('refetch')
   })
 })
