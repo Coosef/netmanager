@@ -309,3 +309,195 @@ collapse/expand and incident focus stay < 30 ms.
 1k smooth · 2.5k operationally usable · **5k acceptable** with the
 size-adaptive layer-tier default + LOD · 10k completes (build 29 ms) as
 a graceful-degradation stress case, not the primary target.
+
+---
+
+## 10. T8 — Cutover, Productionization & Audit Pass
+
+> **Status:** Approved 2026-05-21 after a §1–§9 reality check confirmed
+> T0–T7 are substantially complete and the remaining work is cutover
+> engineering, not feature development.
+
+T0–T7 have landed. `TopologyV2/` is wired behind the `topologyV2`
+feature flag at route `/topology-next` and the Sidebar's "Topology ·
+Gold" entry; the legacy `/topology` page and its 2,621 LOC still ship
+in parallel for the back-out path. T8 is the productionization phase
+that drives the cutover.
+
+### 10.1 Sequencing (locked)
+
+```
+T8.1 architecture audit ─┐
+T8.2 module separation ──┤── must precede ─▶ T8.3 / T8.5
+                                                ╲
+T8.4 UX polish (parallel; non-blocking) ──────── ╲
+                                                  T8.6 ── critical gate ──▶ T8.7 cutover
+T8.3 browser perf ─┐                             ╱
+                   ├─▶ go/no-go for T8.7         ╱
+T8.5 prod scale ──┘
+```
+
+  * T8.1 → T8.2 first — architecture stabilizes before invasive moves.
+  * T8.3 + T8.5 next — visible scale + perf gates.
+  * T8.4 runs in parallel — UX polish does not block engine work.
+  * T8.6 sits on top of everything as a continuous critical gate.
+  * **T8.7 last, only when all upstream gates are green.**
+
+### 10.2 T8.1 — Architecture audit pass
+
+Deliverables (one per bullet):
+
+  1. **Engine architecture map** — module graph of the 38 files under
+     `frontend/src/pages/TopologyV2/`; responsibility boundary per
+     module; data-flow arrows.
+  2. **Circular import audit** — `madge --circular`; the cycle list
+     (must be empty) and a one-line note if not.
+  3. **Public API surface audit** — what `TopologyV2/` exports to the
+     wider app; the legitimate external consumers vs. accidental
+     leakage.
+  4. **Coverage map** — for each module, which `__tests__/*.test.ts`
+     file covers it; gaps highlighted.
+  5. **Render ownership map** — answers, with file:line citations:
+       * Sigma — which state is it the source of truth for?
+       * `graphModel` — immutable snapshot or mutable singleton?
+       * `overlays/*` — render-only consumers or do they mutate model
+         state?
+       * `three/*` layer — source of truth or a projection of
+         `graphModel`?
+       * Realtime patch — single merge point (`patch.ts`?) or scattered?
+
+All five deliverables land in a new doc:
+`docs/TOPOLOGY_T8_1_ARCHITECTURE_AUDIT.md`. No code changes in T8.1;
+findings feed T8.2.
+
+### 10.3 T8.2 — Engine module separation review
+
+With T8.1's audit in hand: enforce SoC across `graphModel` ↔
+`clustering` ↔ `overlays` ↔ `three/*` ↔ `realtime`. Concretely:
+
+  * `clustering.ts` must not mutate overlay state.
+  * `overlays/*` must not leak `graphModel` internals.
+  * `three/sceneData.ts` must be a pure projection of `graphModel` (no
+    private state).
+  * Realtime patch path must converge at exactly one merge point.
+
+Land any rework as the smallest necessary commits; preserve behaviour;
+add unit tests around any boundary that gets clarified.
+
+### 10.4 T8.3 — Browser-side performance gate
+
+T7 measured the main-thread pipeline in Node — sufficient as a
+regression ceiling but insufficient as a production sign-off. T8.3
+runs **Chrome DevTools Performance** captures at 1k / 2.5k / 5k / 10k
+(stress) for each of these metrics:
+
+  * Main-thread blocking — longest task duration, sum of long tasks > 50 ms.
+  * GC spikes — major GC count and longest pause during 30 s pan/zoom.
+  * Layout worker saturation — FA2 worker busy-time fraction.
+  * React re-render storms — `<Profiler>` flame, expected: incremental
+    patches re-render only changed subtree.
+  * WebGL draw-call count — Sigma's renderer stats; r3f instanced
+    meshes should keep this near the cluster-bucket count.
+
+**Production gate:** 5k @ ≥30 FPS pan/zoom, sum-of-long-tasks
+< 200 ms / 30 s, memory < 1 GB. 10k stress must still navigate (not
+necessarily at full FPS).
+
+### 10.5 T8.4 — UX polish (parallel)
+
+Final NOC fullscreen pass · command-palette UX · focus / incident-mode
+hit-test ergonomics · legend / minimap / saved views · empty-state +
+error states · dark/light parity · keyboard shortcuts. Land as a
+series of small commits during T8.1–T8.5.
+
+### 10.6 T8.5 — Prod-grade scale test (five scenarios)
+
+Synthetic generator runs against the production stack (or a VPS-grade
+mirror). Each scenario is profiled independently:
+
+| Scenario | Why it matters |
+|---|---|
+| Cache warm  | Steady-state baseline (TTFB, repaint) |
+| Cache cold  | Worst-case first-paint after deploy/invalidate |
+| WS patch flood | Realtime stability under burst (e.g. mass link-down) |
+| Topology filter switch (layer / vendor / status) | UI responsiveness on rebind |
+| Fullscreen NOC mode | Sustained wall-display behaviour over 10+ minutes |
+
+5–10 concurrent users for the cache-warm and WS-flood scenarios.
+Measured on 1080p, 4K and (defensively) a 13" laptop viewport.
+
+### 10.7 T8.6 — Isolation & WebSocket live-update audit  (release blocker)
+
+**Cross-org topology leak = release blocker.** Six audit points,
+each verified by a scripted reproduction:
+
+  1. **WS channels** — org-A subscriber never receives an org-B
+     `topology_link_up/down` / `topology_node_added/removed` /
+     `topology_drift` event.
+  2. **Cache keys** — every `topology:*` key includes `o={org}` and
+     `l={loc}`; an org-A request can never read an org-B's cached
+     value (re-verify after T8.3 perf knob changes).
+  3. **TopologySnapshot** — snapshot diffs are location-scoped (G-C
+     column wired through `topology_twin.py` endpoints).
+  4. **Event replay** — a backend restart that replays buffered
+     events into a session does not deliver another org's events.
+  5. **Incremental patch** — `patch.ts` rejects (or routes to the
+     reconciler) any event whose `org_id` does not match the active
+     session.
+  6. **Overlay event stream** — anomaly / incident / drift overlays
+     subscribe to the per-org channel; verify under a location switch
+     that the previous location's events stop arriving.
+
+A failure on any point is a go-back-to-T8.2 condition.
+
+### 10.8 T8.7 — Cutover + legacy retire  (two-commit split)
+
+The cutover and the destructive deletion **must not share a commit**.
+
+  * **Commit A — route cutover + feature flag.**
+      * `App.tsx` route `/topology` → `<Navigate to="/topology-next" replace />`.
+      * Sidebar nav swaps so the legacy entry is gone; the V2 entry
+        becomes the primary "Topology" item.
+      * `featureFlags.ts: topologyV2` defaults to **on** in prod.
+      * Legacy `Topology/index.tsx` + `Topology3D.tsx` files stay on
+        disk — back-out is "revert this commit only".
+      * Smoke gate before Commit B: 24 h in prod, no rollback,
+        T8.6 audit re-passes, no new 5xx in topology paths.
+
+  * **Commit B — destructive legacy deletion.**
+      * Delete `frontend/src/pages/Topology/` (2,621 LOC: 2,026 LOC
+        `index.tsx` + 595 LOC `Topology3D.tsx`).
+      * Drop the `TopologyPage` import from `App.tsx`.
+      * Optionally remove the `topologyV2` flag entirely (or keep it
+        as an off-switch for one more release).
+      * No behaviour change beyond the file delete; the redirect
+        from Commit A remains.
+
+### 10.9 Test matrix
+
+| Path | Mechanism | T8 phase |
+|---|---|---|
+| TopologyV2 unit | `vitest run TopologyV2` (103 tests baseline) | every phase |
+| Sigma render | manual + Chrome DevTools Performance recording | T8.3 |
+| three.js / r3f | `three.test.ts` + new perf assertions | T8.3 |
+| Backend `/topology/graph?v=2` | `pytest` (600 baseline) + new isolation tests | T8.6 |
+| WS realtime | scripted 2-browser org-A/B leak repro | T8.6 |
+| Legacy route redirect | App.tsx smoke + curl | T8.7 Commit A |
+| Production deploy | 8-step deploy checklist (M6 template) | T8.7 |
+
+### 10.10 Go / no-go criteria
+
+**Go (Commit A merge):**
+
+  * T8.3 — 5k @ ≥30 FPS, long tasks < 200 ms / 30 s, memory < 1 GB.
+  * T8.5 — all five scenarios stable under load.
+  * T8.6 — zero cross-org leak, all six audit points pass.
+  * T8.2 — module graph clean, no circular imports.
+  * `pytest` + `vitest` + `tsc` baseline unchanged.
+
+**No-go (back to T8.2 or T8.3):**
+
+  * 5k FPS < 20 → retune LOD / clustering thresholds.
+  * Browser memory > 1.5 GB → tighten the LOD threshold ladder.
+  * Cross-org event leak → critical fix.
+  * WS reconnect drops events → realtime contract revision.
