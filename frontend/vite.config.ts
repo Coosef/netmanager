@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
@@ -94,5 +95,13 @@ export default defineConfig({
         ws: true,
       },
     },
+  },
+  // ── Vitest ─────────────────────────────────────────────────────────────
+  // The Playwright perf harness (`frontend/perf/`) uses `*.spec.ts` files
+  // that import from `@playwright/test`. Vitest's default discovery would
+  // pick those up and fail — exclude the whole tree. The harness has its
+  // own runner (`npx playwright test --config=perf/playwright.config.ts`).
+  test: {
+    exclude: ['**/node_modules/**', '**/dist/**', 'perf/**'],
   },
 })

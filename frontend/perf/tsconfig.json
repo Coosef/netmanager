@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./.playwright-output/tsc",
+    "noEmit": true,
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "Bundler",
+    "isolatedModules": false,
+    "allowImportingTsExtensions": false
+  },
+  "include": ["playwright.config.ts", "harness/**/*.ts", "specs/**/*.ts", "scripts/**/*.ts"],
+  "exclude": ["results/**", ".playwright-output/**", "fixtures/**"]
+}
