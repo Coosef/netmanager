@@ -90,29 +90,38 @@ reference is in the warmer code path.
 **Cleanup:** remove the per-tenant loop block + the `agg:dirty:tenant`
 constant; keep only the per-device dirty-set warming.
 
-## 5. TopologyV2 / vitest TS baseline
+## 5. TopologyV2 / vitest TS baseline  — ✅ closed 2026-05-21 (Faz 9 #2)
 
 **Files:** `frontend/src/pages/TopologyV2/**/*.ts(x)` +
 `frontend/src/pages/TopologyV2/__tests__/*.test.ts` +
 `frontend/src/hooks/__tests__/useEventStream.test.ts`
 
-96 TS errors at production build (pre-M6 = post-M6 = 96, unchanged).
-All stem from missing dev-deps:
+Was: 96 TS errors at production build, all cascading from missing
+modules — `graphology`, `graphology-layout-forceatlas2`, `sigma`,
+`@react-three/fiber`, `@react-three/drei`, `vitest`.
 
-  * `graphology`, `graphology-layout-forceatlas2`, `sigma`,
-    `@react-three/fiber`, `three` — UI-engine deps not installed
-  * `vitest` types not exposed to TS — the runtime works (33 tests
-    pass) but the static type-check fails on `import { describe, it } from "vitest"`
+**Root cause:** the packages were already declared in `package.json`
+and frozen in `package-lock.json`; only `node_modules/` was stale.
+Most likely cause: after the TD-1 lockfile regenerate (commit
+`f3c5e8d`), the new lockfile resolved but the actual dep tree never
+landed on disk.
 
-**Why harmless today:** the running app does not load TopologyV2 (the
-"Final Gold Release" topology rework is a separate deferred plan); the
-errors only affect `tsc`/build output but the actual JS bundle is
-produced because Vite's esbuild step is more lenient than `tsc`. `npm
-run build` still emits a deployable bundle.
+**Closure (Faz 9 #2):** ran `npm install` — populated 115 packages
+from the existing lockfile. Zero code changes were needed. Result:
 
-**Cleanup:** install the 5 missing UI deps + vitest types (or stub them
-behind a `// @ts-expect-error` until TopologyV2 ships). Independent of
-M6.
+  * `tsc --noEmit`        96 errors → **0 errors**
+  * `npm run build`       exit 0, dist/index-*.js produced (6.8 MB)
+  * `vitest run`          33 / 33 → **103 / 103** (the 6 previously
+                          file-load-failing test files now run, +70
+                          tests freshly passing)
+  * backend pytest        unchanged at 602 / 602
+
+**Dev-onboarding follow-up:** the failure mode (lockfile complete +
+node_modules empty → 96 TS errors that vanish on `npm install`) is a
+trap for new contributors. Worth a one-liner in the frontend README
+("after pull, `npm install` is mandatory — the lockfile alone does
+not provision node_modules"). Tracked informally; not a separate
+backlog item.
 
 ## 6. `agent_bridge` startup-race noise
 
@@ -150,12 +159,12 @@ Added 2026-05-20 from the M6 production-readiness check.
 
 ## Suggested ordering for Faz 9
 
-1. **§3 super-admin aliases + SuperAdmin page rewrite** — biggest user-
-   visible cleanup, frees the `tenantsApi` shim and the legacy keys.
-2. **§5 TopologyV2 deps** — clears the noisy build output so future TS
-   regressions stand out.
+1. ~~**§3 super-admin aliases + SuperAdmin page rewrite**~~ — ✅ closed
+   2026-05-20 (Faz 9 #1 / commit `75eef03`).
+2. ~~**§5 TopologyV2 deps**~~ — ✅ closed 2026-05-21 (Faz 9 #2). One
+   `npm install` zeroed the 96-error TS baseline.
 3. **§1 + §2 deps.py shims + endpoint sweep** — purely server-side,
-   ~25 site sweep, can be batched across 2-3 PRs.
+   ~25 site sweep, can be batched across 2-3 PRs. Next.
 4. **§6 agent_bridge startup race** — tiny `depends_on` + retry change;
    bundle with any other compose/lifespan work.
 5. **§4 cache warmer loop** — small, do alongside other Redis work.
