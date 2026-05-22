@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
   App, Button, Card, Col, Form, Input, Modal, Popconfirm, Progress, Row, Select, Space,
-  Statistic, Table, Tag, Tooltip, Drawer, Alert, Radio,
+  Table, Tag, Tooltip, Drawer, Alert, Radio,
 } from 'antd'
 import {
   PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined,
@@ -946,27 +946,41 @@ export default function DevicesPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Stats row */}
-      <Row gutter={12}>
-        {[
-          { label: t('devices.stat_total'), value: stats.total, color: '#3b82f6' },
-          { label: t('devices.stat_online'), value: stats.online, color: '#22c55e' },
-          { label: t('devices.stat_offline'), value: stats.offline, color: '#ef4444' },
-          { label: t('devices.stat_unknown'), value: stats.unknown, color: '#94a3b8' },
-        ].map(s => (
-          <Col span={6} key={s.label}>
-            <Card size="small"
-              style={{ border: `1px solid ${s.color}33`, borderRadius: 8 }}
-              styles={{ body: { padding: '10px 16px' } }}>
-              <Statistic
-                title={<span style={{ fontSize: 12 }}>{s.label}</span>}
-                value={s.value}
-                valueStyle={{ color: s.color, fontSize: 24, fontWeight: 700 }}
-              />
-            </Card>
-          </Col>
-        ))}
-      </Row>
+      {/* Page header (NOC design) */}
+      <div className="nm-page-hd">
+        <div>
+          <div className="nm-crumbs"><span>Envanter</span><span>Cihazlar</span></div>
+          <h1 className="nm-page-title">
+            {t('devices.title')}
+            <span className="nm-pill accent mono">{stats.total} {t('devices.records', 'kayıt')}</span>
+          </h1>
+          <div className="nm-page-sub">{t('devices.subtitle', 'Multi-vendor envanter — SSH bağlantı testi, otomatik yedek, vendor algılama ve agent ataması.')}</div>
+        </div>
+      </div>
+
+      {/* Stat bar (NOC design) */}
+      <div className="nm-statbar">
+        <div className="nm-stat ok">
+          <div className="nm-stat-label">{t('devices.stat_online')}</div>
+          <div className="nm-stat-val">{stats.online}<small>/ {stats.total}</small></div>
+          <div className="nm-stat-delta">{stats.total ? Math.round(stats.online / stats.total * 100) : 0}% filo</div>
+        </div>
+        <div className="nm-stat crit">
+          <div className="nm-stat-label">{t('devices.stat_offline')}</div>
+          <div className="nm-stat-val">{stats.offline}</div>
+          <div className="nm-stat-delta">çevrimdışı</div>
+        </div>
+        <div className="nm-stat warn">
+          <div className="nm-stat-label">{t('devices.stat_unknown')}</div>
+          <div className="nm-stat-val">{stats.unknown}</div>
+          <div className="nm-stat-delta">unreachable</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">{t('devices.stat_total')}</div>
+          <div className="nm-stat-val">{stats.total}</div>
+          <div className="nm-stat-delta">yönetilen cihaz</div>
+        </div>
+      </div>
 
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
