@@ -1,5 +1,21 @@
 # T8.3.D — Browser-Perf Baseline Profile
 
+> **🟢 OUTCOME (post-E1/E2):** Both hotspots identified in this doc
+> are closed. Matrix flagged cells: 6 → 1; total weight: 24 → 1.
+> The remaining cell is `ws-patch-flood @ 10k` with weight=1 (only
+> `p95FrameTimeMs = 33 ms` in WARN — a Sigma WebGL paint-side concern,
+> out of scope for the coalescing work). Branch
+> `topology-gold/T8.3-browser-perf` is main-merge-ready. Closing
+> summary: [TOPOLOGY_T8_3_FINAL.md](./TOPOLOGY_T8_3_FINAL.md).
+> Sub-phase reports: [E2 results](./TOPOLOGY_T8_3_E2_RESULTS.md),
+> [E1 results](./TOPOLOGY_T8_3_E1_RESULTS.md).
+>
+> The rest of THIS document is the immutable pre-E baseline T8.3.E
+> was designed against — kept verbatim for reference and any future
+> "before/after" citation.
+>
+> ---
+
 > **Status:** baseline profile derived from the T8.3.C 24-cell matrix.
 > **No runtime code change** is associated with this document; it converts
 > the measurement output (`frontend/perf/results/SUMMARY.md` + the 24 raw

@@ -72,4 +72,4 @@ Ties broken by avgFps ascending (worst FPS first).
 | 1 | ws-patch-flood | 10k | 1 | 🟢 52 | 🟡 33ms | 🟢 150ms | 🟢 352ms |
 
 ---
-_Generated 2026-05-21T21:09:43.053Z from 24 artifact files._
+_Generated 2026-05-22T06:47:31.439Z from 24 artifact files._
