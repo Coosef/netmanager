@@ -17,7 +17,8 @@
 import type { TopologyGraphV2, TopologyNode, TopologyEdge } from './contract'
 import {
   buildClusterIndex, deviceNodeAttrs, clusterNodeAttrs, edgeAttrs,
-  seedPosition, styleGraph, clusterPath, type TopologyModel,
+  seedPosition, styleGraph, restyleNode, restyleEdge,
+  clusterPath, type TopologyModel,
 } from './graphModel'
 
 // ── version reconciliation ────────────────────────────────────────────────
@@ -325,10 +326,25 @@ export function applyTopologyEvent(
   }
 
   const { graph } = model
-  const ok = (): PatchOutcome => {
-    styleGraph(model)
+  // T8.3.E1 — scoped restyle per event. The pre-E1 implementation
+  // called `styleGraph(model)` (O(N+E) full sweep) after every
+  // successful event; for a `ws-patch-flood` burst at 10 k that
+  // amounted to ~250 full sweeps and saturated the main thread.
+  // The scoped variants update only the touched element. Visual
+  // outcome is identical: a node/edge whose attributes change gets
+  // exactly the same style derivation `styleGraph` would have
+  // produced for it.
+  const okNode = (nodeId: string): PatchOutcome => {
+    restyleNode(model, nodeId)
     return { status: 'applied', version: event.graph_version }
   }
+  const okEdge = (edgeId: string): PatchOutcome => {
+    restyleEdge(model, edgeId)
+    return { status: 'applied', version: event.graph_version }
+  }
+  /** Variant for events that don't restyle anything (removals — the
+   *  element is gone). */
+  const okNoRestyle = (): PatchOutcome => ({ status: 'applied', version: event.graph_version })
 
   // Distinguish two failure modes for granular events (T8.2):
   //   * malformed payload  → `invalid_payload` (the event itself is broken)
@@ -342,7 +358,7 @@ export function applyTopologyEvent(
     case 'topology_node_added': {
       const n = event.node
       if (!n) return invalid()
-      if (graph.hasNode(n.id)) return ok()
+      if (graph.hasNode(n.id)) return okNode(n.id)
       // only safe to apply in place when the hierarchy already exists
       const cid = n.data.cluster_id ?? null
       if (cid && !model.clusters.has(cid)) return resync()
@@ -353,13 +369,13 @@ export function applyTopologyEvent(
       }
       if (n.kind === 'device') model.deviceCount++
       else model.ghostCount++
-      return ok()
+      return okNode(n.id)
     }
     case 'topology_node_updated': {
       if (!event.node_id || !event.changes) return invalid()
       if (!graph.hasNode(event.node_id)) return resync()
       graph.mergeNodeAttributes(event.node_id, event.changes)
-      return ok()
+      return okNode(event.node_id)
     }
     case 'topology_node_removed': {
       if (!event.node_id) return invalid()
@@ -369,26 +385,26 @@ export function applyTopologyEvent(
         if (kind === 'device') model.deviceCount = Math.max(0, model.deviceCount - 1)
         else if (kind === 'ghost') model.ghostCount = Math.max(0, model.ghostCount - 1)
       }
-      return ok()
+      return okNoRestyle()
     }
     case 'topology_edge_added': {
       const e = event.edge
       if (!e) return invalid()
-      if (graph.hasEdge(e.id)) return ok()
+      if (graph.hasEdge(e.id)) return okEdge(e.id)
       if (!graph.hasNode(e.source) || !graph.hasNode(e.target)) return resync()
       graph.addEdgeWithKey(e.id, e.source, e.target, edgeAttrs(e))
-      return ok()
+      return okEdge(e.id)
     }
     case 'topology_edge_updated': {
       if (!event.edge_id || !event.changes) return invalid()
       if (!graph.hasEdge(event.edge_id)) return resync()
       graph.mergeEdgeAttributes(event.edge_id, event.changes)
-      return ok()
+      return okEdge(event.edge_id)
     }
     case 'topology_edge_removed': {
       if (!event.edge_id) return invalid()
       if (graph.hasEdge(event.edge_id)) graph.dropEdge(event.edge_id)
-      return ok()
+      return okNoRestyle()
     }
     default:
       // Unknown event type — neither in GRANULAR nor in the bulk set.

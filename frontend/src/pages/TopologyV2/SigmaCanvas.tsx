@@ -34,11 +34,33 @@ export interface SelectedNode {
   raw?: unknown
 }
 
+/**
+ * T8.3.E1 — touched-element ledger written by `index.tsx`'s
+ * rAF-coalesced flush and read by this component's `patchSignal`
+ * effect. The shared mutable container lets the effect issue a
+ * partial Sigma refresh (only the touched buffers) and skip the
+ * `applyClusterView` re-derivation when no structural event fired.
+ *
+ * Owned by the page; passed through by reference. After each
+ * patchSignal bump the effect drains and clears the sets.
+ */
+export interface PatchTouchedLedger {
+  nodes: Set<string>
+  edges: Set<string>
+  /** `true` when at least one of the flush's events was a
+   *  node/edge add/remove — the cluster view must be re-derived. */
+  structural: boolean
+}
+
 interface SigmaCanvasProps {
   model: TopologyModel
   collapsed: Set<string>
   /** Bumped by the page on every in-place patch (poll / realtime event). */
   patchSignal: number
+  /** Optional touched-element ledger used by the partial-refresh path
+   *  on patches (T8.3.E1). When absent, the patch effect falls back to
+   *  a full refresh — same behaviour as pre-E1. */
+  patchTouched?: PatchTouchedLedger
   /** Operational-intelligence overlay (T5) — applied in the reducers. */
   overlay?: OverlayContext
   onExpandCluster: (clusterId: string) => void
@@ -47,7 +69,8 @@ interface SigmaCanvasProps {
 }
 
 export default function SigmaCanvas({
-  model, collapsed, patchSignal, overlay, onExpandCluster, onSelectNode, onZoomTier,
+  model, collapsed, patchSignal, patchTouched, overlay,
+  onExpandCluster, onSelectNode, onZoomTier,
 }: SigmaCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
@@ -236,15 +259,66 @@ export default function SigmaCanvas({
   }, [overlay])
 
   // ── in-place patch (poll / realtime) — no remount ─────────────────────────
+  //
+  // T8.3.E1.c — the patch effect now reads the `patchTouched` ledger
+  // populated by the page's rAF-coalesced flush:
+  //   * `structural === false` (only `topology_*_updated` events) →
+  //     skip `applyClusterView` entirely. Pure attribute updates can't
+  //     change cluster.memberDeviceKeys or the hidden state of any
+  //     node; re-deriving the view would be wasted O(N+E) work.
+  //   * `nodes` / `edges` → partial Sigma refresh — re-upload only the
+  //     touched WebGL buffers instead of the full graph.
+  // Falls back to the pre-E1 behaviour (full refresh + applyClusterView)
+  // when `patchTouched` is absent or empty.
   useEffect(() => {
     if (!sigmaRef.current || patchSignal === 0) return
-    // the graph was mutated in place by the patch engine; re-derive the
-    // cluster view, re-collect hot edges and repaint.
-    applyClusterView(model, collapsed)
-    positionClusterNodes(model)
-    trafficRef.current?.stop()
-    trafficRef.current?.start()
-    sigmaRef.current.refresh()
+    const t = patchTouched
+    const usePartial = t && (t.nodes.size > 0 || t.edges.size > 0) && !t.structural
+    if (!usePartial) {
+      // Fallback (no ledger, empty ledger, or structural events in
+      // the flush) → re-derive the cluster view.
+      applyClusterView(model, collapsed)
+      positionClusterNodes(model)
+    }
+    if (usePartial) {
+      // `skipIndexation: true` keeps Sigma's `needToProcess` flag from
+      // flipping, so the next animation frame skips the O(N+E)
+      // `process()` pass (extent computation + normalization matrix
+      // rebuild). Safe here because the touched nodes / edges already
+      // exist in `nodeProgramIndex` / `edgeProgramIndex` — we
+      // intentionally only enter the partial branch when there are
+      // no structural events in the flush. Pre-E1 the patch effect
+      // called `refresh()` with no options, which forced the
+      // `fullRefresh` branch (re-index of every node + edge) every
+      // single time.
+      sigmaRef.current.refresh({
+        partialGraph: {
+          nodes: Array.from(t!.nodes),
+          edges: Array.from(t!.edges),
+        },
+        skipIndexation: true,
+      })
+    } else {
+      sigmaRef.current.refresh()
+    }
+    // Capture touched-edge count BEFORE clearing so the traffic-
+    // restart decision below can read it.
+    const touchedEdgesInFlush = t?.edges.size ?? 0
+    if (t) {
+      t.nodes.clear()
+      t.edges.clear()
+      t.structural = false
+    }
+    // Traffic-animator restart is only needed when the set of hot
+    // edges may have shifted: any edge attribute update OR a
+    // structural event. Pure node-attribute updates (the
+    // ws-patch-flood shape) leave the hot-edge set unchanged, so we
+    // skip the ~5–10 ms `collect() + setInterval` re-arm cycle.
+    const trafficNeedsRefresh = !t || t.structural || touchedEdgesInFlush > 0
+    if (trafficNeedsRefresh) {
+      trafficRef.current?.stop()
+      trafficRef.current?.start()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patchSignal])
 
