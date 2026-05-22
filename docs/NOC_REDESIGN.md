@@ -85,3 +85,11 @@ For EACH page, in this order, I will:
 10. **SLA & Uptime** — SLA donuts + uptime tables.
 11. **Audit Log** — audit `nm-table`.
 12. **Ayarlar** — settings sections (`nm-card`).
+
+## Phase 2 — Interactive features (LAST, after all page visuals)
+Net-new product features from the mockup (state + persistence + decisions). Build
+after the page-by-page visual rollout is complete. Tracked here so nothing is lost:
+- **Özelleştir panel** — preset/role layouts (Operator/Admin/Exec/Wall) + top-bar role tabs (NOC/Admin/Yönetici); density (compact/regular/spacious); accent-color picker; menu position (side/top).
+- **Dashboard edit mode** — drag-drop widget reorder, hide/show, "Widget Ekle"; **saved layouts** (named, persisted).
+- **⌘K command palette** — nav + actions (customize/theme/edit/rotation/sound) on top of existing GlobalSearch.
+- **NOC wall mode** — live ticker (done on dashboard), auto-rotation (cycle views fullscreen), critical sound alerts.
