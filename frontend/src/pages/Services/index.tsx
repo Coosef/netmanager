@@ -6,7 +6,7 @@ import {
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined,
-  AlertOutlined, CheckCircleOutlined, ApartmentOutlined,
+  AlertOutlined, CheckCircleOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { servicesApi, type Service } from '@/api/services'
@@ -183,16 +183,15 @@ export default function ServicesPage() {
   ]
 
   return (
-    <div style={{ padding: '16px 20px', background: isDark ? '#030c1e' : '#f0f5fb', minHeight: '100vh' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+    <div style={{ padding: '4px 2px', background: 'var(--bg-0)', minHeight: '100%' }}>
+      <div className="nm-page-hd">
         <div>
-          <h2 style={{ margin: 0, color: C.text, fontSize: 18, fontWeight: 700 }}>
-            <ApartmentOutlined style={{ marginRight: 8, color: '#3b82f6' }} />
+          <div className="nm-crumbs"><span>Envanter</span><span>Servisler</span></div>
+          <h1 className="nm-page-title">
             Servis Etki Haritası
-          </h2>
-          <p style={{ margin: '4px 0 0', color: C.muted, fontSize: 13 }}>
-            Mantıksal servisler ve cihaz etki analizi
-          </p>
+            <span className="nm-pill accent mono">{data?.items?.length ?? 0}</span>
+          </h1>
+          <div className="nm-page-sub">Mantıksal servisler ve cihaz etki analizi</div>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
           Yeni Servis
