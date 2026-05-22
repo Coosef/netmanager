@@ -410,6 +410,19 @@ hit-test ergonomics · legend / minimap / saved views · empty-state +
 error states · dark/light parity · keyboard shortcuts. Land as a
 series of small commits during T8.1–T8.5.
 
+**Backlog — Sigma 0-height resilience (from T8.3.1 smoke):** when the
+Sigma container mounts with height=0 (`SigmaCanvas` is
+`position:absolute; inset:0` and the layout uses `min-height:100vh`,
+not a definite height), Sigma throws *"Container has no height"* and the
+**root** `ErrorBoundary` white-screens the *entire* app — not just the
+topology pane. Reproduced reliably under Playwright (headless + headed,
+cold-goto + warm client-nav); a real browser resolves the height during
+paint so it isn't seen manually, but a slow device / backgrounded tab /
+deferred layout could trip it. Fix: pass `allowInvalidContainer: true`
+to the Sigma constructor (it resizes on the next frame) and/or scope a
+graceful local fallback so topology degrades alone instead of taking
+down the whole app.
+
 ### 10.6 T8.5 — Prod-grade scale test (five scenarios)
 
 Synthetic generator runs against the production stack (or a VPS-grade
