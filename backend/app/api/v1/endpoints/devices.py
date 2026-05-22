@@ -790,6 +790,182 @@ async def config_search(
     return {"query": q, "total": len(results), "items": results}
 
 
+# ---------------------------------------------------------------------------
+# Device Health Scores
+# ---------------------------------------------------------------------------
+#
+# Declared BEFORE the parameterized "/{device_id}" routes below. FastAPI
+# matches routes in declaration order; when "/health-scores" sat after
+# "/{device_id}", GET /health-scores bound to the catch-all and tried to
+# parse "health-scores" as an int device_id → 422 int_parsing. Static
+# string routes must precede parameterized ones. (T8.3.1 UI API cleanup)
+
+@router.get("/health-scores")
+async def get_health_scores(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """
+    Compute a 0-100 health score for each active device.
+    Score factors:
+      - Offline / unreachable status: -40 / -20
+      - Critical events in last 24h: -10 per event (max -30)
+      - Config drift (hash != golden): -15
+      - No backup in last 7 days: -10
+    """
+    from datetime import timedelta, timezone
+    from app.models.network_event import NetworkEvent
+
+    now = __import__('datetime').datetime.now(timezone.utc)
+    since_24h = now - timedelta(hours=24)
+    since_7d  = now - timedelta(days=7)
+
+    # All active devices — RLS (Faz 7) scopes by org/location at the DB; no
+    # application-level tenant filter needed. The `tenant_filter` shim
+    # (deps.get_tenant_context) returns None unconditionally now.
+    q = select(Device).where(Device.is_active == True)
+    devices_list = (await db.execute(q)).scalars().all()
+
+    if not devices_list:
+        return {"items": [], "avg_score": 0}
+
+    device_ids = [d.id for d in devices_list]
+
+    # Critical events per device last 24h
+    event_rows = (await db.execute(
+        select(NetworkEvent.device_id, func.count().label("cnt"))
+        .where(NetworkEvent.device_id.in_(device_ids),
+               NetworkEvent.severity == "critical",
+               NetworkEvent.created_at >= since_24h)
+        .group_by(NetworkEvent.device_id)
+    )).fetchall()
+    critical_map = {r[0]: r[1] for r in event_rows}
+
+    # Latest backup per device
+    backup_rows = (await db.execute(
+        select(ConfigBackup.device_id, func.max(ConfigBackup.created_at).label("latest"))
+        .where(ConfigBackup.device_id.in_(device_ids))
+        .group_by(ConfigBackup.device_id)
+    )).fetchall()
+    backup_map = {r[0]: r[1] for r in backup_rows}
+
+    # Golden config hashes
+    golden_rows = (await db.execute(
+        select(ConfigBackup.device_id, ConfigBackup.config_hash)
+        .where(ConfigBackup.device_id.in_(device_ids), ConfigBackup.is_golden == True)
+    )).fetchall()
+    golden_map = {r[0]: r[1] for r in golden_rows}
+
+    # Latest backup hash per device (for drift check)
+    latest_hash_rows = (await db.execute(
+        select(ConfigBackup.device_id, ConfigBackup.config_hash, ConfigBackup.created_at)
+        .where(ConfigBackup.device_id.in_(device_ids))
+        .order_by(ConfigBackup.device_id, ConfigBackup.created_at.desc())
+    )).fetchall()
+    latest_hash_map: dict[int, str] = {}
+    for r in latest_hash_rows:
+        if r[0] not in latest_hash_map:
+            latest_hash_map[r[0]] = r[1]
+
+    results = []
+    for dev in devices_list:
+        score = 100
+        issues = []
+
+        if dev.status == "offline":
+            score -= 40; issues.append("offline")
+        elif dev.status == "unreachable":
+            score -= 20; issues.append("unreachable")
+
+        crit = min(critical_map.get(dev.id, 0), 3)
+        if crit:
+            score -= crit * 10; issues.append(f"{crit} kritik olay (24h)")
+
+        if dev.id in golden_map:
+            latest_h = latest_hash_map.get(dev.id)
+            if not latest_h or latest_h != golden_map[dev.id]:
+                score -= 15; issues.append("config drift")
+
+        latest_bk = backup_map.get(dev.id)
+        if latest_bk:
+            lb = latest_bk if latest_bk.tzinfo else latest_bk.replace(tzinfo=timezone.utc)
+            if (now - lb).total_seconds() > 7 * 86400:
+                score -= 10; issues.append("7+ gündür backup yok")
+        else:
+            score -= 10; issues.append("7+ gündür backup yok")
+
+        results.append({
+            "device_id": dev.id,
+            "hostname": dev.hostname,
+            "ip": dev.ip_address,
+            "vendor": dev.vendor,
+            "site": dev.site,
+            "status": dev.status,
+            "score": max(score, 0),
+            "issues": issues,
+        })
+
+    results.sort(key=lambda x: x["score"])
+    avg = round(sum(r["score"] for r in results) / len(results)) if results else 0
+    return {"items": results, "avg_score": avg}
+
+
+# Declared BEFORE "/{device_id}" for the same reason as /health-scores: a
+# PATCH /bulk-tag would otherwise bind to the PATCH /{device_id} catch-all
+# and 422 on int_parsing("bulk-tag"). The other bulk-* routes are POST and
+# safe (there is no bare POST /{device_id}). (T8.3.1 UI API cleanup)
+@router.patch("/bulk-tag", response_model=dict)
+async def bulk_tag_devices(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """Add or remove a tag on multiple devices at once.
+
+    Body: {"device_ids": [int], "tag": str, "action": "add" | "remove"}
+    """
+    if not current_user.has_permission("device:edit"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    body = await request.json()
+    device_ids: list[int] = body.get("device_ids", [])
+    tag_value: str = (body.get("tag") or "").strip()
+    action: str = body.get("action", "add")
+
+    if not device_ids:
+        raise HTTPException(400, "device_ids required")
+    if not tag_value:
+        raise HTTPException(400, "tag required")
+    if action not in ("add", "remove"):
+        raise HTTPException(400, "action must be 'add' or 'remove'")
+
+    # M6-B4 — org / location isolation enforced by RLS; no tenant clause.
+    devices = (await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all()
+    if not devices:
+        raise HTTPException(404, "No matching devices found")
+
+    updated = 0
+    for device in devices:
+        current_tags = [t.strip() for t in (device.tags or "").split(",") if t.strip()]
+        if action == "add":
+            if tag_value not in current_tags:
+                current_tags.append(tag_value)
+        else:
+            current_tags = [t for t in current_tags if t != tag_value]
+        new_tags = ",".join(current_tags)
+        if new_tags != (device.tags or ""):
+            device.tags = new_tags or None
+            updated += 1
+
+    await db.commit()
+    await log_action(
+        db, current_user, f"devices_bulk_tag_{action}", "device", None, None,
+        details={"device_ids": device_ids, "tag": tag_value, "updated": updated},
+        request=request,
+    )
+    return {"updated": updated, "total": len(devices), "tag": tag_value, "action": action}
+
+
 @router.get("/{device_id}", response_model=DeviceResponse)
 async def get_device(device_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = None):
     return await _get_device_scoped(db, device_id, current_user)
@@ -1044,58 +1220,6 @@ async def bulk_delete_devices(
         request=request,
     )
     return {"deleted": len(devices)}
-
-
-@router.patch("/bulk-tag", response_model=dict)
-async def bulk_tag_devices(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
-):
-    """Add or remove a tag on multiple devices at once.
-
-    Body: {"device_ids": [int], "tag": str, "action": "add" | "remove"}
-    """
-    if not current_user.has_permission("device:edit"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    body = await request.json()
-    device_ids: list[int] = body.get("device_ids", [])
-    tag_value: str = (body.get("tag") or "").strip()
-    action: str = body.get("action", "add")
-
-    if not device_ids:
-        raise HTTPException(400, "device_ids required")
-    if not tag_value:
-        raise HTTPException(400, "tag required")
-    if action not in ("add", "remove"):
-        raise HTTPException(400, "action must be 'add' or 'remove'")
-
-    # M6-B4 — org / location isolation enforced by RLS; no tenant clause.
-    devices = (await db.execute(select(Device).where(Device.id.in_(device_ids)))).scalars().all()
-    if not devices:
-        raise HTTPException(404, "No matching devices found")
-
-    updated = 0
-    for device in devices:
-        current_tags = [t.strip() for t in (device.tags or "").split(",") if t.strip()]
-        if action == "add":
-            if tag_value not in current_tags:
-                current_tags.append(tag_value)
-        else:
-            current_tags = [t for t in current_tags if t != tag_value]
-        new_tags = ",".join(current_tags)
-        if new_tags != (device.tags or ""):
-            device.tags = new_tags or None
-            updated += 1
-
-    await db.commit()
-    await log_action(
-        db, current_user, f"devices_bulk_tag_{action}", "device", None, None,
-        details={"device_ids": device_ids, "tag": tag_value, "updated": updated},
-        request=request,
-    )
-    return {"updated": updated, "total": len(devices), "tag": tag_value, "action": action}
 
 
 @router.post("/bulk-fetch-info", response_model=dict)
@@ -2459,120 +2583,6 @@ async def get_device_activity(
             for lg in logs
         ]
     }
-
-
-# ---------------------------------------------------------------------------
-# Device Health Scores
-# ---------------------------------------------------------------------------
-
-@router.get("/health-scores")
-async def get_health_scores(
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
-):
-    """
-    Compute a 0-100 health score for each active device.
-    Score factors:
-      - Offline / unreachable status: -40 / -20
-      - Critical events in last 24h: -10 per event (max -30)
-      - Config drift (hash != golden): -15
-      - No backup in last 7 days: -10
-    """
-    from datetime import timedelta, timezone
-    from app.models.network_event import NetworkEvent
-
-    now = __import__('datetime').datetime.now(timezone.utc)
-    since_24h = now - timedelta(hours=24)
-    since_7d  = now - timedelta(days=7)
-
-    # All active devices — RLS (Faz 7) scopes by org/location at the DB; no
-    # application-level tenant filter needed. The `tenant_filter` shim
-    # (deps.get_tenant_context) returns None unconditionally now.
-    q = select(Device).where(Device.is_active == True)
-    devices_list = (await db.execute(q)).scalars().all()
-
-    if not devices_list:
-        return {"items": [], "avg_score": 0}
-
-    device_ids = [d.id for d in devices_list]
-
-    # Critical events per device last 24h
-    event_rows = (await db.execute(
-        select(NetworkEvent.device_id, func.count().label("cnt"))
-        .where(NetworkEvent.device_id.in_(device_ids),
-               NetworkEvent.severity == "critical",
-               NetworkEvent.created_at >= since_24h)
-        .group_by(NetworkEvent.device_id)
-    )).fetchall()
-    critical_map = {r[0]: r[1] for r in event_rows}
-
-    # Latest backup per device
-    backup_rows = (await db.execute(
-        select(ConfigBackup.device_id, func.max(ConfigBackup.created_at).label("latest"))
-        .where(ConfigBackup.device_id.in_(device_ids))
-        .group_by(ConfigBackup.device_id)
-    )).fetchall()
-    backup_map = {r[0]: r[1] for r in backup_rows}
-
-    # Golden config hashes
-    golden_rows = (await db.execute(
-        select(ConfigBackup.device_id, ConfigBackup.config_hash)
-        .where(ConfigBackup.device_id.in_(device_ids), ConfigBackup.is_golden == True)
-    )).fetchall()
-    golden_map = {r[0]: r[1] for r in golden_rows}
-
-    # Latest backup hash per device (for drift check)
-    latest_hash_rows = (await db.execute(
-        select(ConfigBackup.device_id, ConfigBackup.config_hash, ConfigBackup.created_at)
-        .where(ConfigBackup.device_id.in_(device_ids))
-        .order_by(ConfigBackup.device_id, ConfigBackup.created_at.desc())
-    )).fetchall()
-    latest_hash_map: dict[int, str] = {}
-    for r in latest_hash_rows:
-        if r[0] not in latest_hash_map:
-            latest_hash_map[r[0]] = r[1]
-
-    results = []
-    for dev in devices_list:
-        score = 100
-        issues = []
-
-        if dev.status == "offline":
-            score -= 40; issues.append("offline")
-        elif dev.status == "unreachable":
-            score -= 20; issues.append("unreachable")
-
-        crit = min(critical_map.get(dev.id, 0), 3)
-        if crit:
-            score -= crit * 10; issues.append(f"{crit} kritik olay (24h)")
-
-        if dev.id in golden_map:
-            latest_h = latest_hash_map.get(dev.id)
-            if not latest_h or latest_h != golden_map[dev.id]:
-                score -= 15; issues.append("config drift")
-
-        latest_bk = backup_map.get(dev.id)
-        if latest_bk:
-            lb = latest_bk if latest_bk.tzinfo else latest_bk.replace(tzinfo=timezone.utc)
-            if (now - lb).total_seconds() > 7 * 86400:
-                score -= 10; issues.append("7+ gündür backup yok")
-        else:
-            score -= 10; issues.append("7+ gündür backup yok")
-
-        results.append({
-            "device_id": dev.id,
-            "hostname": dev.hostname,
-            "ip": dev.ip_address,
-            "vendor": dev.vendor,
-            "site": dev.site,
-            "status": dev.status,
-            "score": max(score, 0),
-            "issues": issues,
-        })
-
-    results.sort(key=lambda x: x["score"])
-    avg = round(sum(r["score"] for r in results) / len(results)) if results else 0
-    return {"items": results, "avg_score": avg}
 
 
 @router.get("/{device_id}/availability")
