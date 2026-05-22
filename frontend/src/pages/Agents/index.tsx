@@ -2087,27 +2087,12 @@ export default function AgentsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <style>{AGENTS_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#8b5cf620' : C.border}`,
-        borderLeft: '4px solid #8b5cf6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#8b5cf620', border: '1px solid #8b5cf630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <RobotOutlined style={{ color: '#8b5cf6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>{t('agents.title')}</div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Dağıtık ağ erişimi için bağlı agent yönetimi</div>
-          </div>
+      {/* Header (NOC design) */}
+      <div className="nm-page-hd">
+        <div>
+          <div className="nm-crumbs"><span>Yönetim</span><span>Ajanlar</span></div>
+          <h1 className="nm-page-title">{t('agents.title')}</h1>
+          <div className="nm-page-sub">Dağıtık ağ erişimi için bağlı agent yönetimi</div>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => queryClient.invalidateQueries({ queryKey: ['agents'] })} />
