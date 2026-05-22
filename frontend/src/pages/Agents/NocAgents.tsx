@@ -13,6 +13,7 @@ import { useSite } from '@/contexts/SiteContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons'
+import AgentDetailModal from './AgentDetailModal'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -29,6 +30,9 @@ export default function NocAgents() {
   const [newName, setNewName] = useState('')
   const [newLoc, setNewLoc] = useState<number | undefined>(undefined)
   const [createdAgent, setCreatedAgent] = useState<(Agent & { agent_key: string }) | null>(null)
+  const [detailAgent, setDetailAgent] = useState<Agent | null>(null)
+  const [detailTab, setDetailTab] = useState<string | undefined>(undefined)
+  const openDetail = (a: Agent, tab?: string) => { setDetailTab(tab); setDetailAgent(a) }
   const createMut = useMutation({
     mutationFn: (vars: { name: string; location_id?: number }) => agentsApi.create(vars),
     onSuccess: (a) => {
@@ -140,6 +144,9 @@ export default function NocAgents() {
       {/* Install instructions (ported from the original page — platform + one-liner + download) */}
       {createdAgent && <CreatedModal agent={createdAgent} onClose={() => setCreatedAgent(null)} />}
 
+      {/* Detail/management modal (card click) — full per-agent management */}
+      {detailAgent && <AgentDetailModal agent={detailAgent} initialTab={detailTab} onClose={() => setDetailAgent(null)} />}
+
       <div className="nm-statbar">
         <div className="nm-stat ok"><div className="nm-stat-label">Online</div><div className="nm-stat-val">{online}<small>/ {agents.length}</small></div></div>
         <div className="nm-stat warn"><div className="nm-stat-label">Yavaş</div><div className="nm-stat-val">{slow}</div></div>
@@ -164,20 +171,23 @@ export default function NocAgents() {
             const devices = deviceCountById[a.id] ?? 0
             const ok = a.status === 'online'
             return (
-              <div key={a.id} className="nm-card">
+              <div key={a.id} className="nm-card" style={{ cursor: 'pointer' }}
+                onClick={() => openDetail(a)} title="Detayları aç">
                 <div className="nm-card-hd">
                   <h3>
                     <span className={`nm-status-dot ${ok ? 'ok' : 'crit'}`}></span>
                     {a.name}
                     {a.version && <span className="nm-pill mono" style={{ fontSize: 9.5 }}>{a.version}</span>}
                   </h3>
-                  <Popconfirm title="Ajan silinsin mi?" description="Agent ve atamaları kaldırılır."
-                    okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
-                    onConfirm={() => delMut.mutate(a.id)}>
-                    <span className="nm-card-x" style={{ opacity: 1, marginLeft: 'auto' }} title="Sil">
-                      <DeleteOutlined />
-                    </span>
-                  </Popconfirm>
+                  <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: 'auto' }}>
+                    <Popconfirm title="Ajan silinsin mi?" description="Agent ve atamaları kaldırılır."
+                      okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
+                      onConfirm={() => delMut.mutate(a.id)}>
+                      <span className="nm-card-x" style={{ opacity: 1 }} title="Sil">
+                        <DeleteOutlined />
+                      </span>
+                    </Popconfirm>
+                  </span>
                 </div>
                 <div style={{ padding: '6px 18px 18px' }}>
                   <div style={{ display: 'flex', gap: 12, fontSize: 11.5, color: 'var(--fg-2)', marginBottom: 14, flexWrap: 'wrap' }}>
@@ -196,8 +206,9 @@ export default function NocAgents() {
                     <Stat label="KUYRUK" value={queue} warn={queue > 0} dim={queue === 0} />
                   </div>
                   <div style={{ display: 'flex', gap: 4, marginTop: 12, flexWrap: 'wrap' }}>
-                    {['SSH Akışı', 'SNMP', 'Keşif', 'Syslog'].map((c) => (
-                      <button key={c} className="nm-btn ghost" style={{ height: 26, fontSize: 11, padding: '0 10px' }}>{c}</button>
+                    {([['SSH Akışı', 'stream'], ['SNMP', 'snmp'], ['Keşif', 'discovery'], ['Syslog', 'syslog']] as const).map(([label, tab]) => (
+                      <button key={tab} className="nm-btn ghost" style={{ height: 26, fontSize: 11, padding: '0 10px' }}
+                        onClick={(e) => { e.stopPropagation(); openDetail(a, tab) }}>{label}</button>
                     ))}
                   </div>
                 </div>
