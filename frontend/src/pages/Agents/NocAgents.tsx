@@ -4,8 +4,9 @@
 // (full mgmt: create/delete/detail drawer/security) is preserved in git +
 // still mounted from index via the "Yönet" action drawer is out-of-scope here;
 // this is the inventory/overview surface the mockup specifies.
-import { useMemo } from 'react'
-import { useQuery, useQueries } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { App, Modal, Input, Button, Typography } from 'antd'
 import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import { RobotOutlined } from '@ant-design/icons'
@@ -13,10 +14,27 @@ import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
 dayjs.extend(relativeTime)
+const { Text } = Typography
 
 const hb = (iso: string | null) => (iso ? dayjs(iso).fromNow(true) : '—')
 
 export default function NocAgents() {
+  const qc = useQueryClient()
+  const { message } = App.useApp()
+  const [createOpen, setCreateOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [createdKey, setCreatedKey] = useState<{ name: string; id: string; agent_key: string } | null>(null)
+  const createMut = useMutation({
+    mutationFn: (name: string) => agentsApi.create({ name }),
+    onSuccess: (a) => {
+      setCreatedKey({ name: a.name, id: a.id, agent_key: a.agent_key })
+      setCreateOpen(false); setNewName('')
+      qc.invalidateQueries({ queryKey: ['agents-list'] })
+      message.success('Ajan oluşturuldu')
+    },
+    onError: () => message.error('Ajan oluşturulamadı'),
+  })
+
   const { data: agents = [] } = useQuery({ queryKey: ['agents-list'], queryFn: agentsApi.list, refetchInterval: 30000 })
   const { data: devicesData } = useQuery({ queryKey: ['devices-for-agents'], queryFn: () => devicesApi.list({ limit: 2000 }) })
   const { data: latencyMap = [] } = useQuery({ queryKey: ['agents-latency-map'], queryFn: agentsApi.getLatencyMap, refetchInterval: 60000 })
@@ -84,9 +102,28 @@ export default function NocAgents() {
         <div className="nm-page-actions">
           <button className="nm-btn ghost">Gecikme Haritası</button>
           <button className="nm-btn ghost">Vault Yenile</button>
-          <button className="nm-btn primary">+ Ajan Kur</button>
+          <button className="nm-btn primary" onClick={() => setCreateOpen(true)}>+ Ajan Kur</button>
         </div>
       </div>
+
+      {/* Create agent modal (real: agentsApi.create) */}
+      <Modal open={createOpen} title="Yeni Ajan Kur" onCancel={() => setCreateOpen(false)}
+        onOk={() => newName.trim() && createMut.mutate(newName.trim())}
+        confirmLoading={createMut.isPending} okText="Oluştur" cancelText="İptal">
+        <Input placeholder="Ajan adı (örn. agent-branch-ist)" value={newName}
+          onChange={(e) => setNewName(e.target.value)} onPressEnter={() => newName.trim() && createMut.mutate(newName.trim())} />
+      </Modal>
+
+      {/* One-time agent key after creation */}
+      <Modal open={!!createdKey} title="Ajan Anahtarı (tek seferlik)" footer={null} onCancel={() => setCreatedKey(null)}>
+        <div style={{ fontSize: 13, marginBottom: 10 }}>
+          <strong>{createdKey?.name}</strong> oluşturuldu. Bu anahtarı kaydedin — tekrar gösterilmeyecek:
+        </div>
+        <Text code copyable style={{ wordBreak: 'break-all', display: 'block' }}>{createdKey?.agent_key}</Text>
+        <div style={{ textAlign: 'right', marginTop: 16 }}>
+          <Button type="primary" onClick={() => setCreatedKey(null)}>Tamam</Button>
+        </div>
+      </Modal>
 
       <div className="nm-statbar">
         <div className="nm-stat ok"><div className="nm-stat-label">Online</div><div className="nm-stat-val">{online}<small>/ {agents.length}</small></div></div>
