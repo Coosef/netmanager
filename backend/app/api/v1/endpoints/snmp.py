@@ -381,7 +381,11 @@ async def snmp_cpu_ram(
 
 @router.get("/top-interfaces", response_model=dict)
 async def top_interfaces(
-    limit: int = Query(default=20, le=100),
+    # le=500 matches the /interfaces ceiling above; the Racks and Devices
+    # views request limit=500 with threshold=0 to pull the full ranked set
+    # in one shot. The previous le=100 rejected those calls with 422
+    # less_than_equal. (T8.3.1 UI API cleanup)
+    limit: int = Query(default=20, le=500),
     threshold: float = Query(default=0.0),
     site: str = Query(default=None),
     db: AsyncSession = Depends(get_db),
