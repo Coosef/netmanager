@@ -1,0 +1,15 @@
+# T8.3.B perf artifacts — ignored by default.
+#
+# The schema is locked in `harness/artifact.ts` (SCHEMA_VERSION); the
+# JSON files themselves carry per-run timestamps + machine-specific
+# browser builds, so committing them would just churn diffs. T8.3.C's
+# aggregator reads whatever is on disk at run time; T8.3.D's report
+# generator likewise produces a baseline from a local run.
+#
+# Keep this `.gitignore` tracked so the directory exists in fresh
+# checkouts (Playwright errors out trying to mkdir into a missing
+# parent on some filesystems).
+*.json
+*.tmp.*
+.playwright-summary.json
+!.gitignore

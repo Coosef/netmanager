@@ -305,3 +305,127 @@ describe('applyTopologyEvent — T8.2 guards', () => {
     expect(out.status).toBe('refetch')
   })
 })
+
+// ══════════════════════════════════════════════════════════════════════════
+// T8.3.E1.a — scoped restyle (one node / one edge), not the full graph
+// ══════════════════════════════════════════════════════════════════════════
+//
+// Pre-E1 every successful `applyTopologyEvent` called `styleGraph(model)`
+// — an O(N+E) walk that styled every node + every edge. Under the
+// `ws-patch-flood` scenario at 10 k this fired ~250 times in five
+// seconds and saturated the main thread.
+//
+// E1.a replaces the per-event full sweep with `restyleNode(model, id)`
+// / `restyleEdge(model, id)` (graphModel.ts) — scoped to the single
+// touched element. The asserts below pin down: (a) the touched
+// element's style attributes reflect the event's `changes`, AND
+// (b) an unrelated node/edge in the same graph keeps the style it had
+// before the event — proving the per-event work is genuinely O(1)
+// in graph size.
+
+describe('applyTopologyEvent — T8.3.E1.a scoped restyle', () => {
+  it('topology_node_updated restyles only the touched node', () => {
+    const model = buildTopologyModel(makeFixture())
+    // Baseline style for two devices.
+    const d1ColorBefore = model.graph.getNodeAttribute('d-1', 'color')
+    const d2ColorBefore = model.graph.getNodeAttribute('d-2', 'color')
+
+    // Flip d-2's status (was 'online') to 'offline'.
+    const out = applyTopologyEvent(
+      model,
+      {
+        event_type: 'topology_node_updated',
+        graph_version: 8,
+        node_id: 'd-2',
+        changes: { status: 'offline' },
+      },
+      7,
+    )
+
+    expect(out.status).toBe('applied')
+    // d-2's color must have shifted to the offline shade.
+    expect(model.graph.getNodeAttribute('d-2', 'color')).not.toBe(d2ColorBefore)
+    expect(model.graph.getNodeAttribute('d-2', 'status')).toBe('offline')
+    // d-1 must be untouched.
+    expect(model.graph.getNodeAttribute('d-1', 'color')).toBe(d1ColorBefore)
+  })
+
+  it('topology_edge_updated restyles only the touched edge', () => {
+    const model = buildTopologyModel(makeFixture())
+    const e1Before = {
+      color: model.graph.getEdgeAttribute('e-1-2', 'color'),
+      size: model.graph.getEdgeAttribute('e-1-2', 'size'),
+    }
+    const e2Before = {
+      color: model.graph.getEdgeAttribute('e-1-3', 'color'),
+      size: model.graph.getEdgeAttribute('e-1-3', 'size'),
+    }
+
+    // Bump e-1-2's utilization so its size derivation changes.
+    const out = applyTopologyEvent(
+      model,
+      {
+        event_type: 'topology_edge_updated',
+        graph_version: 8,
+        edge_id: 'e-1-2',
+        changes: { utilization: 0.95, trafficClass: 'saturated', anomalyState: 'asymmetric' },
+      },
+      7,
+    )
+
+    expect(out.status).toBe('applied')
+    // e-1-2's size + color must reflect the new attributes.
+    expect(model.graph.getEdgeAttribute('e-1-2', 'size')).not.toBe(e1Before.size)
+    // e-1-3 must keep its pre-event style.
+    expect(model.graph.getEdgeAttribute('e-1-3', 'color')).toBe(e2Before.color)
+    expect(model.graph.getEdgeAttribute('e-1-3', 'size')).toBe(e2Before.size)
+  })
+
+  it('topology_node_added restyles only the new node', () => {
+    const model = buildTopologyModel(makeFixture())
+    const d1ColorBefore = model.graph.getNodeAttribute('d-1', 'color')
+
+    const out = applyTopologyEvent(
+      model,
+      {
+        event_type: 'topology_node_added',
+        graph_version: 8,
+        node: {
+          id: 'd-9', kind: 'device',
+          data: {
+            device_id: 9, label: 'new-sw', ip: '10.0.0.9',
+            organization_id: 1, location_id: 7, location: 'HQ',
+            layer: 'access', rack: null, zone: null, device_role: 'switch',
+            vendor: 'aruba', status: 'online', criticality: 'normal',
+            cluster_id: 'loc:7|layer:access',
+            importance_score: 0.45, label_priority: 2, render_class: 'access',
+            min_zoom_level: 1, lod_tier: 'secondary',
+          },
+        },
+      },
+      7,
+    )
+
+    expect(out.status).toBe('applied')
+    expect(model.graph.hasNode('d-9')).toBe(true)
+    // The new node carries a colour derived from its status/layer.
+    expect(model.graph.getNodeAttribute('d-9', 'color')).toBeDefined()
+    // Pre-existing d-1 is untouched.
+    expect(model.graph.getNodeAttribute('d-1', 'color')).toBe(d1ColorBefore)
+  })
+
+  it('topology_node_removed needs no restyle (element is gone)', () => {
+    const model = buildTopologyModel(makeFixture())
+    const d1ColorBefore = model.graph.getNodeAttribute('d-1', 'color')
+
+    const out = applyTopologyEvent(
+      model,
+      { event_type: 'topology_node_removed', graph_version: 8, node_id: 'd-2' },
+      7,
+    )
+
+    expect(out.status).toBe('applied')
+    expect(model.graph.hasNode('d-2')).toBe(false)
+    expect(model.graph.getNodeAttribute('d-1', 'color')).toBe(d1ColorBefore)
+  })
+})

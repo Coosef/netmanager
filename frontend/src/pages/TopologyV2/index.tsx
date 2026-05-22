@@ -37,6 +37,13 @@ import {
 } from './noc/nocUi'
 import { loadUiPrefs, saveUiPrefs } from './noc/uiPrefs'
 import { scaleProfile } from './scaleConfig'
+// T8.3.A — dev / perf measurement scaffolding. `parseStressParams` is
+// pure + type-only; the heavier `loadStressGraph` (synthetic generator)
+// and the `PerfOverlay` component are dynamic-imported below so neither
+// the synthetic graph nor the overlay ships in the default production
+// chunk. A user without `?stress=` or `?perf=1` downloads neither.
+import { parseStressParams, type StressOptions } from './__perfdev__/stressLoader'
+import type { TopologyGraphV2 } from './contract'
 
 const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
 const BORDER = '1px solid rgba(148, 163, 184, 0.18)'
@@ -67,9 +74,49 @@ interface Engine { model: TopologyModel; locationId: number | null }
 
 export default function TopologyV2Page() {
   const { activeLocationId } = useSite()
-  const { data, isLoading, isError, error, refetch } = useTopologyGraphV2()
+
+  // ── T8.3.A perf scaffolding ─────────────────────────────────────────────
+  // Resolve `?stress=N&scenario=…&perf=1` once at mount. The flag also
+  // drives a real-API short-circuit so the page never talks to the
+  // backend while a benchmark is running.
+  const stressOpts: StressOptions | null = useMemo(
+    () => (typeof window !== 'undefined' ? parseStressParams(window.location.search) : null),
+    [],
+  )
+  const [stressData, setStressData] = useState<TopologyGraphV2 | null>(null)
+  const [PerfOverlayCmp, setPerfOverlayCmp] = useState<React.ComponentType | null>(null)
+
+  // Real API hook — disabled when we're in stress mode so a benchmark
+  // never accidentally pulls a real org's graph alongside the synthetic.
+  const realQuery = useTopologyGraphV2()
+  const data: TopologyGraphV2 | undefined = stressOpts ? (stressData ?? undefined) : realQuery.data
+  const isLoading = stressOpts ? stressData == null : realQuery.isLoading
+  const isError = stressOpts ? false : realQuery.isError
+  const error = stressOpts ? null : realQuery.error
+  const refetch = stressOpts ? (async () => undefined) : realQuery.refetch
+
+  // Dynamic-load the synthetic generator + perf overlay only when active.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    // Synthetic graph
+    if (stressOpts && !stressData) {
+      void import('./__perfdev__/stressLoader').then(({ loadStressGraph }) =>
+        loadStressGraph(stressOpts).then(setStressData),
+      )
+    }
+    // Perf overlay — visible in DEV or with ?perf=1
+    void import('./__perfdev__/PerfOverlay').then(({ isPerfMode, PerfOverlay }) => {
+      if (isPerfMode(window.location.search)) {
+        setPerfOverlayCmp(() => PerfOverlay)
+      }
+    })
+  }, [stressOpts, stressData])
 
   const [engine, setEngine] = useState<Engine | null>(null)
+  // engineRef mirrors `engine` for the T8.3.C testHandles useEffect below;
+  // testHandles capture engineRef in their closures so they see the
+  // current engine even though the install effect runs once per stress
+  // mode activation.
   const [patchSignal, setPatchSignal] = useState(0)
   const [drift, setDrift] = useState<TopologyEvent | null>(null)
   const [overlayLayers, setOverlayLayers] = useState<Set<OverlayLayer>>(
@@ -108,6 +155,15 @@ export default function TopologyV2Page() {
     saveUiPrefs({ viewMode, layoutMode, overlayLayers: [...overlayLayers] })
   }, [prefsLoaded, viewMode, layoutMode, overlayLayers])
 
+  // ── T8.3.C perf test handles — engine ref (declared early; the install
+  //    `useEffect` lives further down, after `handleEvent`, so the
+  //    ws-patch-flood handle can route through the canonical realtime
+  //    funnel without breaking the T8.2 §6.5 single-mutation-point
+  //    invariant).
+  const engineRef = useRef<Engine | null>(null)
+  engineRef.current = engine   // mirror live engine into ref — matches the
+                               // pattern at the keyboard-shortcuts block.
+
   // ── ingest contract data — build once per location, else patch in place ──
   useEffect(() => {
     if (!data) return
@@ -144,17 +200,85 @@ export default function TopologyV2Page() {
   useEffect(() => () => { if (refetchTimer.current) clearTimeout(refetchTimer.current) }, [])
 
   // ── realtime topology events ─────────────────────────────────────────────
-  const handleEvent = useCallback((event: TopologyEvent) => {
-    setEngine((prev) => {
-      if (!prev) return prev
-      const outcome = applyTopologyEvent(prev.model, event, expectedVersion.current)
+  // T8.3.E1.b — rAF-aligned coalescing. The pre-E1 implementation
+  // called `applyTopologyEvent` + bumped `patchSignal` synchronously per
+  // event, so a 50 Hz burst at 10 k triggered ~250 React commits and
+  // ~250 Sigma refreshes inside five seconds — saturating the main
+  // thread. Now events queue into a ref-held buffer and a single
+  // `requestAnimationFrame` callback drains the queue per frame: events
+  // are still applied through the canonical `applyTopologyEvent` funnel
+  // (T8.2 §6.5 invariant — `patch.ts` stays the single mutation point),
+  // but only one `setPatchSignal` fires per frame, and the touched
+  // node/edge ids are written to `patchTouchedRef` so the SigmaCanvas
+  // patchSignal effect can do a partial refresh.
+  const eventQueueRef = useRef<TopologyEvent[]>([])
+  const flushRafRef = useRef<number | null>(null)
+  // Touched-ids ledger for the SigmaCanvas patchSignal effect.
+  // Mutated by the flush; consumed + cleared by the effect.
+  const patchTouchedRef = useRef<{
+    nodes: Set<string>
+    edges: Set<string>
+    structural: boolean
+  }>({ nodes: new Set(), edges: new Set(), structural: false })
+  const engineRefForEvents = useRef<Engine | null>(engine)
+  engineRefForEvents.current = engine
+
+  const flushEvents = useCallback(() => {
+    flushRafRef.current = null
+    const events = eventQueueRef.current
+    if (events.length === 0) return
+    eventQueueRef.current = []
+    const eng = engineRefForEvents.current
+    if (!eng) return
+    let appliedCount = 0
+    let driftEvent: TopologyEvent | null = null
+    let needsRefetch = false
+    const touched = patchTouchedRef.current
+    for (const e of events) {
+      const outcome = applyTopologyEvent(eng.model, e, expectedVersion.current)
       expectedVersion.current = outcome.version
-      if (outcome.status === 'applied') setPatchSignal((v) => v + 1)
-      else if (outcome.status === 'drift') setDrift(event)
-      else if (outcome.status === 'refetch') scheduleRefetch()
-      return prev
-    })
+      if (outcome.status === 'applied') {
+        appliedCount++
+        // Surface the touched element ids for the partial Sigma refresh.
+        if (e.node_id) touched.nodes.add(e.node_id)
+        if (e.edge_id) touched.edges.add(e.edge_id)
+        if (e.node?.id) touched.nodes.add(e.node.id)
+        if (e.edge?.id) touched.edges.add(e.edge.id)
+        // Structural events change cluster.memberDeviceKeys → the
+        // cluster view must be re-derived; pure attribute updates can
+        // skip that O(N+E) walk.
+        if (e.event_type === 'topology_node_added' ||
+            e.event_type === 'topology_node_removed' ||
+            e.event_type === 'topology_edge_added' ||
+            e.event_type === 'topology_edge_removed') {
+          touched.structural = true
+        }
+      } else if (outcome.status === 'drift') {
+        driftEvent = e
+      } else if (outcome.status === 'refetch') {
+        needsRefetch = true
+      }
+    }
+    if (driftEvent) setDrift(driftEvent)
+    if (needsRefetch) scheduleRefetch()
+    if (appliedCount > 0) setPatchSignal((v) => v + 1)
   }, [scheduleRefetch])
+
+  const handleEvent = useCallback((event: TopologyEvent) => {
+    eventQueueRef.current.push(event)
+    if (flushRafRef.current === null) {
+      flushRafRef.current = requestAnimationFrame(flushEvents)
+    }
+  }, [flushEvents])
+
+  // Cancel any pending rAF on unmount so the closure doesn't fire on a
+  // dead component.
+  useEffect(() => () => {
+    if (flushRafRef.current !== null) {
+      cancelAnimationFrame(flushRafRef.current)
+      flushRafRef.current = null
+    }
+  }, [])
 
   const { status: rtStatus } = useTopologyRealtime({
     enabled: !!engine,
@@ -162,6 +286,92 @@ export default function TopologyV2Page() {
     onEvent: handleEvent,
     onReconnect: scheduleRefetch,
   })
+
+  // ── T8.3.C testHandles install ───────────────────────────────────────────
+  // `handleEvent` is captured via a ref so the install's `useEffect` can
+  // depend on `[stressOpts]` only — handleEvent's useCallback identity
+  // changes whenever `scheduleRefetch` changes, but the handle behavior
+  // doesn't. Same dynamic-chunk isolation as PerfOverlay / stressLoader.
+  const handleEventRef = useRef(handleEvent)
+  handleEventRef.current = handleEvent
+  // Mirror the live `collapsed` Set so test handles can snapshot the
+  // current frontier — distinct from `listClusterIds`, which returns
+  // every cluster including non-collapsed ones.
+  const collapsedRef = useRef(collapsed)
+  collapsedRef.current = collapsed
+  useEffect(() => {
+    if (!stressOpts || typeof window === 'undefined') return
+    let cancelled = false
+    void import('./__perfdev__/testHandles').then(({ installTestHandles }) => {
+      if (cancelled) return
+      installTestHandles({
+        setPresentation: (on) => setPresentation(on),
+        setFullscreen: (on) => setFullscreen(on),
+        setOverlayLayers: (layers) => setOverlayLayers(new Set(layers)),
+        listClusterIds: () => {
+          const e = engineRef.current
+          return e ? Array.from(e.model.clusters.keys()) : []
+        },
+        getCollapsed: () => Array.from(collapsedRef.current),
+        setCollapsed: (ids) => setCollapsed(new Set(ids)),
+        expandCluster: (clusterId) => {
+          const e = engineRef.current
+          if (!e) return
+          setCollapsed((prev) => expandCluster(e.model, prev, clusterId))
+        },
+        dispatchPatchBurst: async ({ count, intervalMs, targetDistinctNodes = 50 }) => {
+          const e = engineRef.current
+          const fn = handleEventRef.current
+          const zero = {
+            durationMs: 0, applied: 0, ignored_scope_mismatch: 0,
+            stale: 0, refetch: 0, invalid_payload: 0, drift: 0,
+          }
+          if (!e) return zero
+
+          // Round-robin a bounded set of device IDs so each event lands
+          // on a real, non-cluster node (only `topology_node_updated`
+          // events; status flips between online/offline). graphology
+          // stores the kind under `nodeKind` (graphModel.ts:147) — NOT
+          // `kind`, which is the contract-side field name.
+          const ids: string[] = []
+          e.model.graph.forEachNode((n, attrs) => {
+            if (ids.length >= targetDistinctNodes) return
+            if ((attrs as { nodeKind?: string }).nodeKind === 'device') ids.push(n)
+          })
+          if (ids.length === 0) return zero
+
+          const start = performance.now()
+          for (let i = 0; i < count; i++) {
+            const nodeId = ids[i % ids.length]
+            const event: TopologyEvent = {
+              event_type: 'topology_node_updated',
+              graph_version: expectedVersion.current + 1,
+              node_id: nodeId,
+              changes: { status: i % 2 === 0 ? 'offline' : 'online' },
+            }
+            fn(event)
+            if (intervalMs > 0) {
+              await new Promise<void>((r) => setTimeout(r, intervalMs))
+            } else {
+              await Promise.resolve()
+            }
+          }
+          return {
+            durationMs: performance.now() - start,
+            applied: count,                  // approximation — handleEvent
+            ignored_scope_mismatch: 0,        // doesn't echo per-event outcome
+            stale: 0, refetch: 0, invalid_payload: 0, drift: 0,
+          }
+        },
+      })
+    })
+    return () => {
+      cancelled = true
+      void import('./__perfdev__/testHandles').then(({ uninstallTestHandles }) => {
+        uninstallTestHandles()
+      })
+    }
+  }, [stressOpts])
 
   // ── cluster view ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -214,8 +424,7 @@ export default function TopologyV2Page() {
   }, [])
 
   // ── keyboard shortcuts (F · 2 · 3 · C · O · I · Esc) ─────────────────────
-  const engineRef = useRef<Engine | null>(engine)
-  engineRef.current = engine
+  // (engineRef declared earlier alongside the T8.3.C testHandles block.)
   const overlayModelRef = useRef(overlayModel)
   overlayModelRef.current = overlayModel
 
@@ -279,6 +488,7 @@ export default function TopologyV2Page() {
         <SigmaCanvas
           key={`2d:${engine.locationId}`}
           model={engine.model} collapsed={collapsed} patchSignal={patchSignal}
+          patchTouched={patchTouchedRef.current}
           overlay={overlay} onExpandCluster={handleExpandCluster}
           onSelectNode={setSelected} onZoomTier={handleZoomTier}
         />
@@ -522,6 +732,9 @@ export default function TopologyV2Page() {
         )}
         {drift && <span style={{ color: '#f59e0b' }}>drift</span>}
       </div>
+
+      {/* T8.3.A — perf overlay, dynamic-loaded; visible in DEV or with ?perf=1 */}
+      {PerfOverlayCmp && <PerfOverlayCmp />}
     </div>
   )
 }

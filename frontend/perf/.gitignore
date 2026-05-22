@@ -1,0 +1,4 @@
+# Playwright per-run output — traces, screenshots-on-failure, the
+# json summary, the tsc temp output. None of it should be committed
+# (test runs differ every time and the artifacts live elsewhere).
+.playwright-output/

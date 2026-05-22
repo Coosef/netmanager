@@ -220,6 +220,50 @@ export function buildTopologyModel(contract: TopologyGraphV2): TopologyModel {
   }
 }
 
+/**
+ * Apply the Sigma display attributes (colour / size / label) for ONE
+ * node — the scoped equivalent of `styleGraph`'s node pass.
+ *
+ * Used by the patch path (T8.3.E1: `patch.ts`) so a single
+ * `topology_node_updated` event only restyles the touched node, not
+ * the entire graph. Idempotent and side-effect-free on attrs the
+ * function doesn't write — safe to call repeatedly on the same node.
+ */
+export function restyleNode(model: TopologyModel, nodeId: string): void {
+  const { graph } = model
+  if (!graph.hasNode(nodeId)) return
+  const attr = graph.getNodeAttributes(nodeId)
+  if (attr.nodeKind === 'cluster') {
+    graph.mergeNodeAttributes(nodeId, {
+      color: clusterColor(attr.clusterType),
+      size: clusterSize(attr.collapsedCount || 1),
+      label: `${attr.label} · ${attr.collapsedCount}`,
+    })
+  } else {
+    graph.mergeNodeAttributes(nodeId, {
+      color: nodeColor({ kind: attr.nodeKind, status: attr.status, layer: attr.layer }),
+      size: nodeSize(attr.importanceScore || 0.3),
+      label: attr.label,
+    })
+  }
+}
+
+/**
+ * Apply the Sigma display attributes (colour / size) for ONE edge.
+ * Meta-edges are skipped — clustering owns their styling. Used by the
+ * patch path on `topology_edge_*` events.
+ */
+export function restyleEdge(model: TopologyModel, edgeId: string): void {
+  const { graph } = model
+  if (!graph.hasEdge(edgeId)) return
+  const attr = graph.getEdgeAttributes(edgeId)
+  if (attr.edgeKind === 'meta') return
+  graph.mergeEdgeAttributes(edgeId, {
+    color: edgeColor(attr.anomalyState, attr.trafficClass),
+    size: edgeSize(attr.utilization ?? null),
+  })
+}
+
 /** Apply static Sigma display attributes (colour / size / label) to every
  *  node + edge. Cheap, idempotent — re-run after a patch. */
 export function styleGraph(model: TopologyModel): void {
