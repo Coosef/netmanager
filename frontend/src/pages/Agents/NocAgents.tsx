@@ -6,11 +6,13 @@
 // this is the inventory/overview surface the mockup specifies.
 import { useMemo, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Modal, Input, Button, Typography, Select } from 'antd'
+import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Space } from 'antd'
 import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
-import { RobotOutlined } from '@ant-design/icons'
+import { useTheme } from '@/contexts/ThemeContext'
+import { useTranslation } from 'react-i18next'
+import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -26,12 +28,12 @@ export default function NocAgents() {
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newLoc, setNewLoc] = useState<number | undefined>(undefined)
-  const [createdKey, setCreatedKey] = useState<{ name: string; id: string; agent_key: string } | null>(null)
+  const [createdAgent, setCreatedAgent] = useState<(Agent & { agent_key: string }) | null>(null)
   const createMut = useMutation({
     mutationFn: (vars: { name: string; location_id?: number }) => agentsApi.create(vars),
     onSuccess: (a) => {
-      setCreatedKey({ name: a.name, id: a.id, agent_key: a.agent_key })
-      setCreateOpen(false); setNewName('')
+      setCreatedAgent(a as Agent & { agent_key: string })
+      setCreateOpen(false); setNewName(''); setNewLoc(undefined)
       qc.invalidateQueries({ queryKey: ['agents-list'] })
       message.success('Ajan oluşturuldu')
     },
@@ -130,16 +132,8 @@ export default function NocAgents() {
         )}
       </Modal>
 
-      {/* One-time agent key after creation */}
-      <Modal open={!!createdKey} title="Ajan Anahtarı (tek seferlik)" footer={null} onCancel={() => setCreatedKey(null)}>
-        <div style={{ fontSize: 13, marginBottom: 10 }}>
-          <strong>{createdKey?.name}</strong> oluşturuldu. Bu anahtarı kaydedin — tekrar gösterilmeyecek:
-        </div>
-        <Text code copyable style={{ wordBreak: 'break-all', display: 'block' }}>{createdKey?.agent_key}</Text>
-        <div style={{ textAlign: 'right', marginTop: 16 }}>
-          <Button type="primary" onClick={() => setCreatedKey(null)}>Tamam</Button>
-        </div>
-      </Modal>
+      {/* Install instructions (ported from the original page — platform + one-liner + download) */}
+      {createdAgent && <CreatedModal agent={createdAgent} onClose={() => setCreatedAgent(null)} />}
 
       <div className="nm-statbar">
         <div className="nm-stat ok"><div className="nm-stat-label">Online</div><div className="nm-stat-val">{online}<small>/ {agents.length}</small></div></div>
@@ -226,5 +220,96 @@ function Stat({ label, value, unit, warn, dim }: { label: string; value: string 
         {value}{unit && <small style={{ fontSize: 10, color: 'var(--fg-3)' }}>{unit}</small>}
       </div>
     </div>
+  )
+}
+
+// ── CreatedModal — install instructions (ported verbatim from the original
+//    AgentsPage so agent setup actually works: platform select + one-liner +
+//    download + server URL). ──────────────────────────────────────────────
+function mkC(isDark: boolean) {
+  return {
+    bg: isDark ? '#1e293b' : '#ffffff',
+    bg2: isDark ? '#0f172a' : '#f8fafc',
+    border: isDark ? '#334155' : '#e2e8f0',
+    text: isDark ? '#f1f5f9' : '#1e293b',
+    muted: isDark ? '#64748b' : '#94a3b8',
+  }
+}
+
+function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }; onClose: () => void }) {
+  const { isDark } = useTheme()
+  const C = mkC(isDark)
+  const [platform, setPlatform] = useState<'linux' | 'windows' | null>(null)
+  const [copiedCmd, setCopiedCmd] = useState(false)
+  const [serverUrl, setServerUrl] = useState(window.location.origin)
+  const { t } = useTranslation()
+
+  const copy = (text: string, setter: (v: boolean) => void) => {
+    navigator.clipboard.writeText(text); setter(true); setTimeout(() => setter(false), 2000)
+  }
+  const base = serverUrl.trim().replace(/\/$/, '') || window.location.origin
+  const downloadUrl = platform ? `${base}${agentsApi.downloadUrl(agent.id, agent.agent_key!, platform, base)}` : null
+  const installCmd = platform === 'linux'
+    ? `curl -fsSL '${downloadUrl}' | sudo bash`
+    : platform === 'windows'
+    ? `powershell -ExecutionPolicy Bypass -c "iwr -useb '${downloadUrl}' | iex"`
+    : null
+
+  return (
+    <Modal open onCancel={onClose} footer={null} width={600}
+      title={<Space><RobotOutlined style={{ color: '#3b82f6' }} /><span style={{ color: C.text }}>{t('agents.created_title')}</span></Space>}
+      styles={{ content: { background: C.bg, border: `1px solid ${C.border}` }, header: { background: C.bg, borderBottom: `1px solid ${C.border}` } }}>
+      <Alert type="warning" showIcon message={t('agents.created_warning')} style={{ marginBottom: 16 }} />
+      <Descriptions column={1} bordered size="small" style={{ marginBottom: 20 }}>
+        <Descriptions.Item label={t('agents.agent_id_label')}>
+          <Space><code style={{ background: isDark ? '#0f172a' : '#f5f5f5', padding: '1px 6px', borderRadius: 3 }}>{agent.id}</code>
+            <Button size="small" icon={<CopyOutlined />} onClick={() => copy(agent.id, () => {})} /></Space>
+        </Descriptions.Item>
+        <Descriptions.Item label={t('agents.agent_key_label')}>
+          <Space><code style={{ wordBreak: 'break-all', background: isDark ? '#0f172a' : '#f5f5f5', padding: '1px 6px', borderRadius: 3 }}>{agent.agent_key}</code>
+            <Button size="small" icon={<CopyOutlined />} onClick={() => copy(agent.agent_key!, () => {})} /></Space>
+        </Descriptions.Item>
+      </Descriptions>
+      <div style={{ marginBottom: 16 }}>
+        <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13, color: C.text }}>{t('agents.server_url_label')}</Text>
+        <Input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} placeholder="http://192.168.1.100:8000" addonBefore="URL" />
+        <Text style={{ fontSize: 11, color: C.muted }}>{t('agents.server_url_hint')}</Text>
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 12 }}>{t('agents.install_platform')}</div>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        {[
+          { key: 'linux' as const, icon: <ConsoleSqlOutlined style={{ fontSize: 28, color: '#f97316' }} />, label: t('agents.linux_label'), sub: t('agents.linux_sub') },
+          { key: 'windows' as const, icon: <WindowsOutlined style={{ fontSize: 28, color: '#3b82f6' }} />, label: t('agents.windows_label'), sub: t('agents.windows_sub') },
+        ].map((p) => {
+          const selected = platform === p.key
+          return (
+            <div key={p.key} onClick={() => setPlatform(p.key)}
+              style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: selected ? '2px solid #3b82f6' : `1px solid ${C.border}`,
+                background: selected ? (isDark ? '#3b82f620' : '#eff6ff') : C.bg2, borderRadius: 8, padding: '14px 8px', transition: 'all 0.15s' }}>
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>{p.icon}</div>
+              <Text strong style={{ color: C.text }}>{p.label}</Text><br />
+              <Text style={{ fontSize: 11, color: C.muted }}>{p.sub}</Text>
+            </div>
+          )
+        })}
+      </div>
+      {platform && installCmd && (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13, color: C.text }}>{t('agents.oneliner_label')}</Text>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#0f172a', borderRadius: 8, padding: '10px 12px', border: '1px solid #334155' }}>
+              <code style={{ flex: 1, fontSize: 11, color: '#e2e8f0', wordBreak: 'break-all', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{installCmd}</code>
+              <Button size="small" icon={<CopyOutlined />} type={copiedCmd ? 'primary' : 'default'} onClick={() => copy(installCmd, setCopiedCmd)} style={{ flexShrink: 0 }}>
+                {copiedCmd ? t('agents.copied') : t('agents.copy')}
+              </Button>
+            </div>
+          </div>
+          <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }} message={platform === 'linux' ? t('agents.linux_hint') : t('agents.windows_hint')} />
+          <Button type="default" icon={<DownloadOutlined />} block href={downloadUrl!} download>
+            {platform === 'linux' ? t('agents.download_linux') : t('agents.download_windows')}
+          </Button>
+        </>
+      )}
+    </Modal>
   )
 }
