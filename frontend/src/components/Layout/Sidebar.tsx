@@ -1,12 +1,10 @@
-import { useState } from 'react'
-import { Layout, Badge, Tooltip, Drawer } from 'antd'
+import { Drawer } from 'antd'
 import {
   DashboardOutlined, LaptopOutlined, ApartmentOutlined,
   RadarChartOutlined, AlertOutlined, PlayCircleOutlined,
   TeamOutlined, AuditOutlined, RobotOutlined,
-  BarChartOutlined, WifiOutlined, SettingOutlined, LineChartOutlined, FileTextOutlined,
-  MenuFoldOutlined, MenuUnfoldOutlined, ThunderboltOutlined,
-  SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
+  BarChartOutlined, SettingOutlined, LineChartOutlined, FileTextOutlined,
+  ThunderboltOutlined, SafetyOutlined, TableOutlined, ClusterOutlined, CalendarOutlined,
   AimOutlined, RiseOutlined, BranchesOutlined, CloudOutlined, FileDoneOutlined,
   HddOutlined, BuildOutlined, EnvironmentOutlined, CodeOutlined, QuestionCircleOutlined,
   CloseOutlined, GlobalOutlined, DiffOutlined, BugOutlined, BellOutlined,
@@ -15,50 +13,18 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { monitorApi } from '@/api/monitor'
 import { approvalsApi } from '@/api/approvals'
-import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { featureFlags } from '@/config/featureFlags'
 import type { UserRole } from '@/types'
 
-const { Sider } = Layout
-
-const SIDEBAR_CSS = `
-  @keyframes sideLogoGlow {
-    0%,100% { box-shadow: 0 0 14px #3b82f660, 0 0 28px #1d4ed840; }
-    50%      { box-shadow: 0 0 22px #3b82f6aa, 0 0 44px #1d4ed860; }
-  }
-  @keyframes sideActivePulse {
-    0%,100% { box-shadow: 0 0 8px  #3b82f620; }
-    50%      { box-shadow: 0 0 18px #3b82f650; }
-  }
-  .side-item {
-    transition: background 0.12s ease, transform 0.1s ease !important;
-  }
-  .side-item:hover {
-    transform: translateX(2px) !important;
-  }
-  .side-active {
-    animation: sideActivePulse 3.5s ease-in-out infinite;
-  }
-`
-
 // Role hierarchy order (lowest → highest)
 const ROLE_ORDER: UserRole[] = [
-  'location_viewer',
-  'viewer',
-  'location_operator',
-  'operator',
-  'location_manager',
-  'org_viewer',
-  'admin',
-  'super_admin',
+  'location_viewer', 'viewer', 'location_operator', 'operator',
+  'location_manager', 'org_viewer', 'admin', 'super_admin',
 ]
-
-function roleIndex(role: string): number {
-  return ROLE_ORDER.indexOf(role as UserRole)
-}
+const roleIndex = (role: string): number => ROLE_ORDER.indexOf(role as UserRole)
 
 interface SidebarProps {
   mobileOpen?: boolean
@@ -66,41 +32,27 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
-  const [collapsed, setCollapsed] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
-  const { isDark } = useTheme()
   const { t } = useTranslation()
   const { user, isSuperAdmin, isOrgAdmin, can } = useAuthStore()
   const isSA = isSuperAdmin()
   const isOA = isOrgAdmin()
   const isMobile = useIsMobile()
-
   const userRoleIdx = roleIndex(user?.role ?? 'viewer')
 
-  // Map sidebar items to permission checks; fall back to legacy role order
   const MODULE_MAP: Record<string, [string, string]> = {
-    '/devices':          ['devices', 'view'],
-    '/topology':         ['topology', 'view'],
-    '/ipam':             ['ipam', 'view'],
-    '/backups':          ['config_backups', 'view'],
-    '/monitor':          ['monitoring', 'view'],
-    '/incidents':         ['monitoring', 'view'],
-    '/escalation-rules':  ['monitoring', 'view'],
-    '/bandwidth':        ['monitoring', 'view'],
-    '/mac-arp':          ['monitoring', 'view'],
-    '/security-audit':   ['monitoring', 'view'],
-    '/asset-lifecycle':  ['monitoring', 'view'],
-    '/tasks':            ['tasks', 'view'],
-    '/playbooks':        ['playbooks', 'view'],
-    '/config-templates': ['driver_templates', 'view'],
-    '/audit':            ['audit_logs', 'view'],
-    '/reports':          ['reports', 'view'],
-    '/users':            ['users', 'view'],
-    '/locations':        ['locations', 'view'],
-    '/agents':           ['agents', 'view'],
-    '/driver-templates': ['driver_templates', 'view'],
-    '/settings':         ['settings', 'view'],
+    '/devices': ['devices', 'view'], '/topology': ['topology', 'view'],
+    '/ipam': ['ipam', 'view'], '/backups': ['config_backups', 'view'],
+    '/monitor': ['monitoring', 'view'], '/incidents': ['monitoring', 'view'],
+    '/escalation-rules': ['monitoring', 'view'], '/bandwidth': ['monitoring', 'view'],
+    '/mac-arp': ['monitoring', 'view'], '/security-audit': ['monitoring', 'view'],
+    '/asset-lifecycle': ['monitoring', 'view'], '/tasks': ['tasks', 'view'],
+    '/playbooks': ['playbooks', 'view'], '/config-templates': ['driver_templates', 'view'],
+    '/audit': ['audit_logs', 'view'], '/reports': ['reports', 'view'],
+    '/users': ['users', 'view'], '/locations': ['locations', 'view'],
+    '/agents': ['agents', 'view'], '/driver-templates': ['driver_templates', 'view'],
+    '/settings': ['settings', 'view'],
   }
 
   const canSee = (minRole?: UserRole, key?: string) => {
@@ -119,37 +71,17 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     queryFn: () => monitorApi.getStats(),
     refetchInterval: 30000,
   })
-
   const { data: approvalCount } = useQuery({
     queryKey: ['approval-pending-count'],
     queryFn: approvalsApi.pendingCount,
     refetchInterval: 30000,
   })
-
   const unacked = stats?.events_24h.unacknowledged ?? 0
-  const healthScore = stats?.health_score ?? 0
-  const healthColor = healthScore >= 80 ? '#22c55e' : healthScore >= 50 ? '#f59e0b' : '#ef4444'
-  const healthLabel = healthScore >= 80 ? t('sidebar.health_ok') : healthScore >= 50 ? t('sidebar.health_warn') : t('sidebar.health_crit')
-
-  const siderBg = isDark ? '#030c1e' : '#ffffff'
-  const borderColor = isDark ? '#112240' : '#e2e8f0'
-  const textPrimary = isDark ? '#f1f5f9' : '#1e293b'
-  const textSecondary = isDark ? '#94a3b8' : '#64748b'
-  const groupLabel = isDark ? '#3a5578' : '#94a3b8'
-  const activeItemBg = isDark ? '#1d4ed820' : '#eff6ff'
-  const hoverItemBg = isDark ? '#0e1e38' : '#f8fafc'
-  const trackBg = isDark ? '#0e1e38' : '#f1f5f9'
-
-  const isCollapsed = isMobile ? false : collapsed
 
   type NavItem = {
-    key: string
-    icon: React.ReactNode
-    label: string
-    badge?: boolean | 'approval'
-    minRole?: UserRole
+    key: string; icon: React.ReactNode; label: string
+    badge?: boolean | 'approval'; minRole?: UserRole
   }
-
   const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     {
       label: t('nav_group.main'),
@@ -205,8 +137,6 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       items: [
         ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as UserRole }] : []),
         ...(isOA && !isSA ? [{ key: '/org-admin', icon: <GlobalOutlined />, label: '⚙ Organizasyon Paneli', minRole: 'admin' as UserRole }] : []),
-        // M6 final drop — the standalone `/tenants` page is gone. Org
-        // overview + assignment lives in the Platform Paneli above.
         { key: '/permissions', icon: <SafetyOutlined />, label: 'Yetki Yönetimi', minRole: 'admin' as UserRole },
         { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
         { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },
@@ -220,174 +150,72 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
     },
   ]
 
-  const navContent = (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', background: siderBg }}>
-      <style>{SIDEBAR_CSS}</style>
+  const initials = (user?.username ?? 'NM').slice(0, 2).toUpperCase()
 
-      {/* Logo */}
-      <div style={{
-        height: 60, display: 'flex', alignItems: 'center',
-        padding: '0 20px', borderBottom: `1px solid ${borderColor}`,
-        gap: 10, flexShrink: 0,
-      }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8,
-          background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          flexShrink: 0,
-          animation: isDark ? 'sideLogoGlow 3s ease-in-out infinite' : undefined,
-        }}>
-          <WifiOutlined style={{ color: '#fff', fontSize: 16 }} />
+  const nav = (
+    <aside className="nm-sidebar" style={{ height: '100%' }}>
+      <div className="nm-brand" onClick={() => { navigate('/'); if (isMobile) onMobileClose?.() }} style={{ cursor: 'pointer' }}>
+        <div className="nm-brand-mark" />
+        <div className="nm-brand-name">
+          NetManager
+          <small>universal cloud</small>
         </div>
-        {!isCollapsed && (
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: textPrimary, fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>NetManager</div>
-            <div style={{ color: textSecondary, fontSize: 10 }}>Universal Cloud Network Manager</div>
-          </div>
-        )}
         {isMobile && (
-          <CloseOutlined
-            onClick={onMobileClose}
-            style={{ color: textSecondary, fontSize: 16, cursor: 'pointer', flexShrink: 0 }}
-          />
+          <CloseOutlined onClick={(e) => { e.stopPropagation(); onMobileClose?.() }}
+            style={{ marginLeft: 'auto', fontSize: 14, color: 'var(--fg-2)' }} />
         )}
       </div>
 
-      {/* Nav groups */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: '8px 0' }}>
+      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', margin: '0 -10px', padding: '0 10px' }}>
         {NAV_GROUPS.map((group) => {
-          const visibleItems = group.items.filter((item) => canSee(item.minRole, item.key))
-          if (visibleItems.length === 0) return null
+          const items = group.items.filter((it) => canSee(it.minRole, it.key))
+          if (!items.length) return null
           return (
             <div key={group.label}>
-              {!isCollapsed && (
-                <div style={{
-                  color: groupLabel, fontSize: 10, fontWeight: 600,
-                  padding: '12px 20px 4px', letterSpacing: '0.08em',
-                }}>
-                  {group.label}
-                </div>
-              )}
-              {visibleItems.map((item) => {
-                const isActive = location.pathname === item.key ||
+              <div className="nm-navsect">{group.label}</div>
+              {items.map((item) => {
+                const active = location.pathname === item.key ||
                   (item.key !== '/' && location.pathname.startsWith(item.key))
-                const badgeType = item.badge
-                const badgeCount = badgeType === 'approval'
+                const badgeCount = item.badge === 'approval'
                   ? (approvalCount?.count ?? 0)
-                  : badgeType ? unacked : 0
-                const showBadge = badgeCount > 0
-
-                const content = (
-                  <div
-                    key={item.key}
-                    onClick={() => { navigate(item.key); if (isMobile) onMobileClose?.() }}
-                    className={`side-item${isActive ? ' side-active' : ''}`}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 10,
-                      padding: isCollapsed ? '10px 0' : '9px 12px 9px 20px',
-                      margin: '1px 8px', borderRadius: 6, cursor: 'pointer',
-                      background: isActive ? activeItemBg : 'transparent',
-                      borderLeft: isActive ? '3px solid #3b82f6' : '3px solid transparent',
-                      transition: 'all 0.15s',
-                      justifyContent: isCollapsed ? 'center' : 'flex-start',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive) (e.currentTarget as HTMLElement).style.background = hoverItemBg
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive) (e.currentTarget as HTMLElement).style.background = 'transparent'
-                    }}
-                  >
-                    <span style={{ color: isActive ? '#3b82f6' : textSecondary, fontSize: 16, flexShrink: 0 }}>
-                      {item.icon}
-                    </span>
-                    {!isCollapsed && (
-                      <>
-                        <span style={{ color: isActive ? textPrimary : textSecondary, fontSize: 13, flex: 1, fontWeight: isActive ? 600 : 400 }}>
-                          {item.label}
-                        </span>
-                        {showBadge && (
-                          <Badge count={badgeCount} size="small" style={{ backgroundColor: badgeType === 'approval' ? '#f59e0b' : '#ef4444' }} />
-                        )}
-                      </>
+                  : item.badge ? unacked : 0
+                return (
+                  <div key={item.key}
+                    className={`nm-navitem ${active ? 'active' : ''}`}
+                    onClick={() => { navigate(item.key); if (isMobile) onMobileClose?.() }}>
+                    <span className="nm-navicon">{item.icon}</span>
+                    <span>{item.label}</span>
+                    {badgeCount > 0 && (
+                      <span className={`nm-navbadge ${item.badge === 'approval' ? 'warn' : 'crit'}`}>{badgeCount}</span>
                     )}
                   </div>
                 )
-
-                return isCollapsed ? (
-                  <Tooltip key={item.key} title={item.label} placement="right">
-                    {content}
-                  </Tooltip>
-                ) : content
               })}
             </div>
           )
         })}
       </div>
 
-      {/* System status */}
-      {!isCollapsed && (
-        <div style={{ borderTop: `1px solid ${borderColor}`, padding: '12px 16px', flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: healthColor, flexShrink: 0 }} />
-            <span style={{ color: textSecondary, fontSize: 11 }}>{t('sidebar.health_status')}</span>
-            <span style={{ color: healthColor, fontSize: 11, fontWeight: 600, marginLeft: 'auto' }}>{healthLabel}</span>
+      <div className="nm-sidebar-foot">
+        <div className="nm-avatar">{initials}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--fg-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {user?.username ?? 'NetManager'}
           </div>
-          <div style={{ background: trackBg, borderRadius: 4, height: 4, overflow: 'hidden' }}>
-            <div style={{ background: healthColor, width: `${healthScore}%`, height: '100%', transition: 'width 1s' }} />
-          </div>
-          <div style={{ color: groupLabel, fontSize: 10, marginTop: 4 }}>{t('sidebar.score')}: {healthScore}/100</div>
+          <small>{user?.role ?? ''}</small>
         </div>
-      )}
-
-      {/* Collapse toggle — desktop only */}
-      {!isMobile && (
-        <div
-          onClick={() => setCollapsed(!collapsed)}
-          style={{
-            borderTop: `1px solid ${borderColor}`, padding: '12px',
-            display: 'flex', justifyContent: collapsed ? 'center' : 'flex-end',
-            cursor: 'pointer', color: textSecondary, flexShrink: 0,
-          }}
-        >
-          {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-        </div>
-      )}
-    </div>
+      </div>
+    </aside>
   )
 
   if (isMobile) {
     return (
-      <Drawer
-        open={mobileOpen}
-        onClose={onMobileClose}
-        placement="left"
-        width={260}
-        styles={{ body: { padding: 0, background: siderBg }, header: { display: 'none' } }}
-        style={{ zIndex: 1001 }}
-      >
-        {navContent}
+      <Drawer open={mobileOpen} onClose={onMobileClose} placement="left" width={240}
+        styles={{ body: { padding: 0, background: 'var(--bg-1)' }, header: { display: 'none' } }}
+        style={{ zIndex: 1001 }}>
+        {nav}
       </Drawer>
     )
   }
-
-  return (
-    <Sider
-      width={220}
-      collapsedWidth={64}
-      collapsed={collapsed}
-      onCollapse={setCollapsed}
-      style={{
-        background: siderBg,
-        borderRight: `1px solid ${borderColor}`,
-        overflow: 'hidden',
-        position: 'sticky',
-        top: 0,
-        height: '100vh',
-        boxShadow: isDark ? '4px 0 24px rgba(0,0,0,0.6), inset -1px 0 0 #3b82f610' : '1px 0 4px rgba(0,0,0,0.06)',
-      }}
-    >
-      {navContent}
-    </Sider>
-  )
+  return nav
 }

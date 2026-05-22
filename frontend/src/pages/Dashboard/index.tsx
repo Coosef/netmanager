@@ -41,14 +41,15 @@ dayjs.extend(relativeTime)
 
 // ── Theme-aware palettes ─────────────────────────────────────────────────────
 const C_DARK = {
-  page:    '#030c1e',
-  card:    'rgba(6, 16, 40, 0.94)',
-  card2:   'rgba(3, 9, 26, 0.90)',
-  border:  'rgba(0, 195, 255, 0.09)',
-  text:    '#d8eeff',
-  muted:   '#5a7a9a',
-  dim:     '#304560',
-  hover:   'rgba(0, 195, 255, 0.06)',
+  // T8.4 — NOC design palette (canvas #070b18, panels #0e1729, border #1c2538)
+  page:    '#070b18',
+  card:    'rgba(14, 23, 41, 0.94)',
+  card2:   'rgba(10, 17, 32, 0.92)',
+  border:  'rgba(28, 37, 56, 0.9)',
+  text:    '#d7e6f5',
+  muted:   '#94a3b8',
+  dim:     '#64748b',
+  hover:   'rgba(34, 211, 197, 0.06)',
   bgTrack: 'rgba(255,255,255,0.05)',
 }
 const C_LIGHT = {
@@ -63,13 +64,13 @@ const C_LIGHT = {
   bgTrack: 'rgba(0,0,0,0.07)',
 }
 const N_DARK = {
-  cyan:   '#00d4ff',
-  green:  '#00e676',
-  red:    '#ff3d6a',
-  amber:  '#ffb300',
-  blue:   '#4488ff',
-  purple: '#a78bfa',
-  teal:   '#00bfa5',
+  cyan:   '#22d3c5',
+  green:  '#22c55e',
+  red:    '#ef4444',
+  amber:  '#eab308',
+  blue:   '#3b82f6',
+  purple: '#a855f7',
+  teal:   '#22d3c5',
 }
 const N_LIGHT = {
   cyan:   '#0284c7',
@@ -91,13 +92,13 @@ const makeTV_CSS = (isDark: boolean) => `
 @keyframes tvScan     { 0%{left:-40%} 100%{left:140%} }
 @keyframes tvTicker   { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
 @keyframes tvLed      { 0%,85%,100%{opacity:1} 90%{opacity:0.1} }
-@keyframes tvGlowGreen{ 0%,100%{box-shadow:0 0 6px #00e67640} 50%{box-shadow:0 0 18px #00e67680} }
-@keyframes tvGlowRed  { 0%,100%{box-shadow:0 0 6px #ff3d6a40} 50%{box-shadow:0 0 18px #ff3d6a80} }
+@keyframes tvGlowGreen{ 0%,100%{box-shadow:0 0 6px #22c55e40} 50%{box-shadow:0 0 18px #22c55e80} }
+@keyframes tvGlowRed  { 0%,100%{box-shadow:0 0 6px #ef444440} 50%{box-shadow:0 0 18px #ef444480} }
 @keyframes tvPulse    { 0%,100%{opacity:0.7} 50%{opacity:1} }
-@keyframes tvBorderPulse { 0%,100%{border-color:rgba(0,195,255,0.09)} 50%{border-color:rgba(0,195,255,0.22)} }
+@keyframes tvBorderPulse { 0%,100%{border-color:rgba(34, 211, 197,0.09)} 50%{border-color:rgba(34, 211, 197,0.22)} }
 .tv-card {
-  background: ${isDark ? 'rgba(6,16,40,0.94)' : 'rgba(255,255,255,0.97)'};
-  border: 1px solid ${isDark ? 'rgba(0,195,255,0.09)' : 'rgba(59,130,246,0.12)'};
+  background: ${isDark ? 'rgba(14, 23, 41,0.94)' : 'rgba(255,255,255,0.97)'};
+  border: 1px solid ${isDark ? 'rgba(34, 211, 197,0.09)' : 'rgba(59,130,246,0.12)'};
   border-radius: 12px;
   backdrop-filter: blur(10px);
   position: relative;
@@ -106,14 +107,14 @@ const makeTV_CSS = (isDark: boolean) => `
   transition: border-color 0.25s, box-shadow 0.25s;
 }
 .tv-card:hover {
-  border-color: ${isDark ? 'rgba(0,195,255,0.22)' : 'rgba(59,130,246,0.28)'};
-  box-shadow: ${isDark ? '0 4px 28px rgba(0,195,255,0.07)' : '0 4px 28px rgba(59,130,246,0.12)'};
+  border-color: ${isDark ? 'rgba(34, 211, 197,0.22)' : 'rgba(59,130,246,0.28)'};
+  box-shadow: ${isDark ? '0 4px 28px rgba(34, 211, 197,0.07)' : '0 4px 28px rgba(59,130,246,0.12)'};
 }
 .tv-card::after {
   content:'';
   position:absolute;
   inset:0;
-  background:${isDark ? 'linear-gradient(135deg, rgba(0,195,255,0.025) 0%, transparent 45%)' : 'linear-gradient(135deg, rgba(59,130,246,0.03) 0%, transparent 45%)'};
+  background:${isDark ? 'linear-gradient(135deg, rgba(34, 211, 197,0.025) 0%, transparent 45%)' : 'linear-gradient(135deg, rgba(59,130,246,0.03) 0%, transparent 45%)'};
   pointer-events:none;
 }
 .tv-scan {
@@ -544,7 +545,7 @@ export default function DashboardPage() {
       <div style={{
         position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 0,
         backgroundImage: isDark
-          ? 'radial-gradient(rgba(0,195,255,0.04) 1px, transparent 1px)'
+          ? 'radial-gradient(rgba(34, 211, 197,0.04) 1px, transparent 1px)'
           : 'radial-gradient(rgba(59,130,246,0.08) 1px, transparent 1px)',
         backgroundSize: '28px 28px',
       }} />
@@ -596,9 +597,9 @@ export default function DashboardPage() {
                 }}
                 onMouseEnter={(e) => {
                   const el = e.currentTarget as HTMLElement
-                  el.style.background = isDark ? 'rgba(0,195,255,0.12)' : 'rgba(59,130,246,0.10)'
+                  el.style.background = isDark ? 'rgba(34, 211, 197,0.12)' : 'rgba(59,130,246,0.10)'
                   el.style.color = N.cyan
-                  el.style.borderColor = isDark ? 'rgba(0,195,255,0.28)' : 'rgba(59,130,246,0.28)'
+                  el.style.borderColor = isDark ? 'rgba(34, 211, 197,0.28)' : 'rgba(59,130,246,0.28)'
                 }}
                 onMouseLeave={(e) => {
                   const el = e.currentTarget as HTMLElement
@@ -1506,7 +1507,7 @@ export default function DashboardPage() {
                               <stop offset="95%" stopColor={N.purple} stopOpacity={0}    />
                             </linearGradient>
                           </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,195,255,0.06)" />
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(34, 211, 197,0.06)" />
                           <XAxis dataKey="hour" tickFormatter={(v) => dayjs(v).format('HH:mm')} tick={{ fontSize: 10, fill: C.dim }} tickLine={false} axisLine={false} />
                           <YAxis tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10, fill: C.dim }} tickLine={false} axisLine={false} domain={[0, 'auto']} />
                           <RTooltip

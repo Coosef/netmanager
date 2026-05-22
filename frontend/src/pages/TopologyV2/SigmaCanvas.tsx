@@ -66,11 +66,26 @@ interface SigmaCanvasProps {
   onExpandCluster: (clusterId: string) => void
   onSelectNode: (node: SelectedNode | null) => void
   onZoomTier?: (tier: ZoomTier) => void
+  /** T8.4 — the page's left tool rail drives zoom/fit through this ref.
+   *  Populated on mount from the live Sigma camera; nulled on unmount.
+   *  Read-only escape hatch — does not touch the render/patch paths. */
+  cameraApiRef?: React.MutableRefObject<TopologyCameraApi | null>
+  /** T8.4 — filter-bar toggles. Consulted in the node reducer (via a ref,
+   *  so a toggle never remounts Sigma) to hide ghost / wireless nodes. */
+  filter?: { hideGhost: boolean; hideWireless: boolean }
+}
+
+/** Imperative camera controls exposed to the page tool rail (T8.4). */
+export interface TopologyCameraApi {
+  zoomIn: () => void
+  zoomOut: () => void
+  reset: () => void
+  zoomPct: () => number
 }
 
 export default function SigmaCanvas({
   model, collapsed, patchSignal, patchTouched, overlay,
-  onExpandCluster, onSelectNode, onZoomTier,
+  onExpandCluster, onSelectNode, onZoomTier, cameraApiRef, filter,
 }: SigmaCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sigmaRef = useRef<Sigma | null>(null)
@@ -81,6 +96,11 @@ export default function SigmaCanvas({
   // never remounts Sigma.
   const overlayRef = useRef<OverlayContext | undefined>(overlay)
   overlayRef.current = overlay
+
+  // T8.4 — filter toggles consulted in the node reducer (ref-held so a
+  // toggle refreshes rather than remounts Sigma).
+  const filterRef = useRef(filter)
+  filterRef.current = filter
 
   // ── mount: Sigma + layout worker + traffic animator ───────────────────────
   useEffect(() => {
@@ -102,6 +122,14 @@ export default function SigmaCanvas({
       zIndex: true,
       nodeReducer: (node, data) => {
         const attr = model.graph.getNodeAttributes(node)
+        // T8.4 filter-bar hide (ghost / wireless). Clusters always show.
+        const flt = filterRef.current
+        if (flt && attr.nodeKind !== 'cluster') {
+          if (flt.hideGhost && attr.nodeKind === 'ghost') return { ...data, hidden: true }
+          if (flt.hideWireless && String(attr.layer ?? '').toLowerCase() === 'wireless') {
+            return { ...data, hidden: true }
+          }
+        }
         const tier = zoomTierRef.current
         const show =
           attr.nodeKind === 'cluster' ||
@@ -155,6 +183,17 @@ export default function SigmaCanvas({
     }
     camera.on('updated', onCam)
 
+    // T8.4 — expose zoom/fit to the page tool rail. Pure camera ops; no
+    // graph mutation, no effect on the patch/refresh perf paths.
+    if (cameraApiRef) {
+      cameraApiRef.current = {
+        zoomIn: () => { camera.animate({ ratio: camera.ratio / 1.4 }, { duration: 200 }) },
+        zoomOut: () => { camera.animate({ ratio: camera.ratio * 1.4 }, { duration: 200 }) },
+        reset: () => { camera.animatedReset({ duration: 300 }) },
+        zoomPct: () => Math.round((1 / Math.max(camera.ratio, 1e-4)) * 100),
+      }
+    }
+
     renderer.on('clickNode', ({ node }) => {
       const attr = model.graph.getNodeAttributes(node)
       if (attr.nodeKind === 'cluster') onExpandCluster(node)
@@ -200,6 +239,7 @@ export default function SigmaCanvas({
       trafficRef.current = null
       layout.kill()
       camera.off('updated', onCam)
+      if (cameraApiRef) cameraApiRef.current = null
       renderer.kill()
       sigmaRef.current = null
     }
@@ -257,6 +297,11 @@ export default function SigmaCanvas({
   useEffect(() => {
     sigmaRef.current?.refresh()
   }, [overlay])
+
+  // T8.4 — re-render when a filter-bar toggle (ghost / wireless) flips.
+  useEffect(() => {
+    sigmaRef.current?.refresh()
+  }, [filter?.hideGhost, filter?.hideWireless])
 
   // ── in-place patch (poll / realtime) — no remount ─────────────────────────
   //

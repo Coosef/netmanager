@@ -14,9 +14,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Alert, Button, Empty, Segmented, Spin, Tag, Tooltip, Badge } from 'antd'
 import {
-  ReloadOutlined, FullscreenOutlined, FullscreenExitOutlined, AppstoreOutlined,
+  ReloadOutlined, FullscreenOutlined, FullscreenExitOutlined,
   ThunderboltOutlined, CloseOutlined, WarningOutlined, DesktopOutlined,
-  DownOutlined, RightOutlined, AimOutlined,
+  AimOutlined, SearchOutlined, ExportOutlined,
 } from '@ant-design/icons'
 import { useSite } from '@/contexts/SiteContext'
 import { useTopologyGraphV2 } from './api'
@@ -24,7 +24,7 @@ import { buildTopologyModel, type TopologyModel } from './graphModel'
 import { diffAndPatch, applyTopologyEvent, ingestStrategy, type TopologyEvent } from './patch'
 import { useTopologyRealtime } from './realtime'
 import { collapsedSetForTier, expandCluster, type ClusterTier } from './clustering'
-import SigmaCanvas, { type SelectedNode } from './SigmaCanvas'
+import SigmaCanvas, { type SelectedNode, type TopologyCameraApi } from './SigmaCanvas'
 import Topology3D from './three/Topology3D'
 import type { LayoutMode } from './three/layout3d'
 import type { CameraMode } from './three/CameraRig'
@@ -32,9 +32,7 @@ import type { ZoomTier } from './rendering'
 import { deriveOverlayModel, OVERLAY_LAYERS, type OverlayLayer } from './overlays/overlayModel'
 import { computeFocusSet } from './overlays/focus'
 import type { OverlayContext } from './overlays/overlayStyle'
-import {
-  keyboardAction, isPanelVisible, isPanelExpanded, togglePanel, type PanelId,
-} from './noc/nocUi'
+import { keyboardAction } from './noc/nocUi'
 import { loadUiPrefs, saveUiPrefs } from './noc/uiPrefs'
 import { scaleProfile } from './scaleConfig'
 // T8.3.A — dev / perf measurement scaffolding. `parseStressParams` is
@@ -45,17 +43,17 @@ import { scaleProfile } from './scaleConfig'
 import { parseStressParams, type StressOptions } from './__perfdev__/stressLoader'
 import type { TopologyGraphV2 } from './contract'
 
-const PANEL_BG = 'rgba(15, 23, 42, 0.92)'
-const BORDER = '1px solid rgba(148, 163, 184, 0.18)'
 const REFETCH_DEBOUNCE_MS = 800
 
 const TIER_BY_ZOOM: Record<ZoomTier, ClusterTier> = { 0: 'location', 1: 'layer', 2: 'device' }
 const LAYER_LEGEND: [string, string][] = [
-  ['Core', '#3b82f6'], ['Distribution', '#06b6d4'], ['Access', '#22c55e'],
-  ['Edge', '#a855f7'], ['Wireless', '#ec4899'],
+  ['Core', '#22d3c5'], ['Distribution', '#3b82f6'], ['Access', '#94a3b8'],
+  ['AP / Wireless', '#22c55e'], ['Edge', '#f97316'],
+  ['Down / Critical', '#ef4444'], ['Ghost', '#a855f7'],
 ]
 const TRAFFIC_LEGEND: [string, string][] = [
-  ['Idle', '#334155'], ['Normal', '#22c55e'], ['High', '#f59e0b'], ['Saturated', '#ef4444'],
+  ['Normal', '#22c55e'], ['High', '#f97316'], ['Management', '#a855f7'],
+  ['Suspicious', '#eab308'], ['Threat', '#ef4444'],
 ]
 const LAYER_META: Record<OverlayLayer, { label: string; color: string }> = {
   anomalyHeat: { label: 'Anomali Isısı', color: '#f59e0b' },
@@ -125,6 +123,8 @@ export default function TopologyV2Page() {
   const expectedVersion = useRef(0)
   const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const rootRef = useRef<HTMLDivElement>(null)
+  // T8.4 — camera controls for the left tool rail (filled by SigmaCanvas).
+  const cameraApiRef = useRef<TopologyCameraApi | null>(null)
 
   const [tier, setTier] = useState<ClusterTier>('layer')
   const [autoMode, setAutoMode] = useState(true)
@@ -137,8 +137,12 @@ export default function TopologyV2Page() {
   // ── NOC console UI state ─────────────────────────────────────────────────
   const [fullscreen, setFullscreen] = useState(false)
   const [presentation, setPresentation] = useState(false)
-  const [collapsedPanels, setCollapsedPanels] = useState<Set<PanelId>>(new Set())
   const [prefsLoaded, setPrefsLoaded] = useState(false)
+  // T8.4 NOC design — tool rail mode + hostname/IP search box.
+  const [tool, setTool] = useState<'select' | 'pan'>('select')
+  const [search, setSearch] = useState('')
+  const [showGhost, setShowGhost] = useState(true)
+  const [showWireless, setShowWireless] = useState(true)
 
   // ── persisted console prefs — load once, save on change ──────────────────
   useEffect(() => {
@@ -467,271 +471,439 @@ export default function TopologyV2Page() {
     return map[rtStatus]
   }, [rtStatus])
 
-  const panelCtx = { fullscreen, presentation, hasSelection: !!selected }
-  const showControls = isPanelVisible('controls', panelCtx)
-  const showIntel = isPanelVisible('intel', panelCtx)
-  const showDetail = isPanelVisible('detail', panelCtx)
-  const showLegend = isPanelVisible('legend', panelCtx)
-
   const counts = overlayModel?.counts
+
+  // ── T8.4 NOC design — derived figures + interactions ─────────────────────
+  const [zoomPct, setZoomPct] = useState(100)
+
+  // Header stat chips + bottom status-bar figures, from the RLS-scoped
+  // model + overlay counts; memoised against patch ticks.
+  const topoStats = useMemo(() => {
+    let down = 0
+    let unreach = 0
+    if (engine) {
+      engine.model.graph.forEachNode((_id, a) => {
+        const at = a as { status?: string; nodeKind?: string }
+        if (at.nodeKind === 'cluster') return
+        if (at.status === 'offline') down++
+        else if (at.status === 'unreachable') unreach++
+      })
+    }
+    return {
+      nodes: engine?.model.deviceCount ?? 0,
+      links: engine ? engine.model.graph.size : 0,
+      down,
+      critical: counts?.threats ?? unreach,
+      ghost: engine?.model.ghostCount ?? 0,
+      anomalies: (counts?.threats ?? 0) + (counts?.bottlenecks ?? 0),
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, patchSignal, counts])
+
+  // Filter-bar toggles → SigmaCanvas node-hide hint.
+  const filter = useMemo(
+    () => ({ hideGhost: !showGhost, hideWireless: !showWireless }),
+    [showGhost, showWireless],
+  )
+
+  // Hostname / IP search selects the first matching device node.
+  const runSearch = useCallback((q: string) => {
+    setSearch(q)
+    const eng = engineRef.current
+    if (!eng || !q.trim()) return
+    const needle = q.trim().toLowerCase()
+    let hit: string | null = null
+    eng.model.graph.forEachNode((id, a) => {
+      const at = a as { nodeKind?: string; label?: string; raw?: { data?: { ip?: string } } }
+      if (hit || at.nodeKind === 'cluster') return
+      const label = String(at.label ?? '').toLowerCase()
+      const ip = String(at.raw?.data?.ip ?? '').toLowerCase()
+      if (label.includes(needle) || ip.includes(needle)) hit = id
+    })
+    if (hit) {
+      const a = eng.model.graph.getNodeAttributes(hit)
+      setSelected({ id: hit, kind: a.nodeKind, label: a.label, raw: a.raw })
+    }
+  }, [])
+
+  // Tool-rail / minimap zoom + fit through the Sigma camera api.
+  const zoom = useCallback((dir: 'in' | 'out' | 'fit') => {
+    const api = cameraApiRef.current
+    if (!api) return
+    if (dir === 'in') api.zoomIn()
+    else if (dir === 'out') api.zoomOut()
+    else api.reset()
+    window.setTimeout(() => {
+      const a = cameraApiRef.current
+      if (a) setZoomPct(a.zoomPct())
+    }, 230)
+  }, [])
+
+  // KEŞIF → export current topology stats as a JSON snapshot (no backend).
+  const exportSnapshot = useCallback(() => {
+    const eng = engineRef.current
+    if (!eng) return
+    const payload = {
+      exported_at: new Date().toISOString(),
+      graph_version: eng.model.graphVersion,
+      stats: topoStats,
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `topology-${Date.now()}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [topoStats])
+
+  const chrome = !presentation
+  const node = selected
 
   return (
     <div
       ref={rootRef}
+      className="nm-topo-root"
       style={{
-        position: 'absolute', inset: 0, overflow: 'hidden',
-        background: 'radial-gradient(ellipse at 50% 35%, #0b1424 0%, #060b16 70%, #03070f 100%)',
+        // Normal-flow definite height (the page-wrapper has no positioned
+        // ancestor, so `inset:0` would collapse to content height). In
+        // fullscreen the browser sizes the element to the screen.
+        ...(fullscreen
+          ? { position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: 9999 }
+          : { position: 'relative', height: 'calc(100vh - 104px)', minHeight: 480 }),
+        overflow: 'hidden',
+        display: 'flex', flexDirection: 'column', gap: chrome ? 12 : 0,
+        padding: chrome ? 16 : 0,
+        borderRadius: chrome && !fullscreen ? 12 : 0,
+        background: C.bg,
+        fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+        color: C.text,
       }}
     >
-      {/* ── WebGL canvas — dominates the viewport ──────────────────────── */}
-      {engine && viewMode === '2d' && (
-        <SigmaCanvas
-          key={`2d:${engine.locationId}`}
-          model={engine.model} collapsed={collapsed} patchSignal={patchSignal}
-          patchTouched={patchTouchedRef.current}
-          overlay={overlay} onExpandCluster={handleExpandCluster}
-          onSelectNode={setSelected} onZoomTier={handleZoomTier}
-        />
-      )}
-      {engine && viewMode === '3d' && (
-        <Topology3D
-          key={`3d:${engine.locationId}`}
-          model={engine.model} collapsed={collapsed} patchSignal={patchSignal}
-          mode={layoutMode} cameraMode={cameraMode} overlay={overlay}
-          onSelectNode={setSelected} onExpandCluster={handleExpandCluster}
-        />
-      )}
-
-      {/* ── states: loading / error / empty ────────────────────────────── */}
-      {isLoading && !engine && (
-        <Centered><Spin size="large" tip="Topoloji yükleniyor…" /></Centered>
-      )}
-      {isError && (
-        <Centered>
-          <Alert type="error" showIcon message="Topoloji yüklenemedi"
-            description={(error as Error)?.message}
-            action={<Button size="small" onClick={() => void refetch()}>Yeniden dene</Button>} />
-        </Centered>
-      )}
-      {engine && engine.model.deviceCount === 0 && !isLoading && (
-        <Centered>
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={<span style={{ color: '#94a3b8' }}>Bu kapsamda cihaz yok</span>}
-          />
-        </Centered>
-      )}
-
-      {/* ── top bar — always-on minimal chrome ─────────────────────────── */}
-      <div style={{
-        position: 'absolute', top: 14, left: 14, right: 14, display: 'flex',
-        justifyContent: 'space-between', alignItems: 'flex-start', pointerEvents: 'none',
-      }}>
-        <div style={{
-          ...panelStyle, padding: presentation ? '6px 12px' : '8px 14px',
-          display: 'flex', alignItems: 'center', gap: 12, pointerEvents: 'auto',
-        }}>
-          <ThunderboltOutlined style={{ color: '#38bdf8', fontSize: 18 }} />
-          <div>
-            <div style={{ color: '#e2e8f0', fontWeight: 600, fontSize: 14, lineHeight: 1.1 }}>
-              Topology · Gold NOC
-            </div>
-            <div style={{ color: '#64748b', fontSize: 11 }}>
-              <Badge status={rtBadge} />
-              {viewMode === '3d' ? '3D Tactical' : '2D Sigma'} · realtime{' '}
-              {rtStatus === 'open' ? 'bağlı' : rtStatus}
+      {/* ── HEADER ─────────────────────────────────────────────────────── */}
+      {chrome && (
+        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 16, flexShrink: 0 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...crumb, marginBottom: 6 }}>ENVANTER › TOPOLOJİ</div>
+            <h1 style={{
+              margin: 0, fontSize: 26, fontWeight: 500, letterSpacing: '-0.01em',
+              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', color: C.text,
+            }}>
+              Ağ Topolojisi
+              <StatChip label="NODE" value={topoStats.nodes.toLocaleString()} />
+              <StatChip label="LINK" value={topoStats.links.toLocaleString()} />
+              {topoStats.down > 0 && <StatChip label="DOWN" value={topoStats.down} tone="red" />}
+              {topoStats.critical > 0 && <StatChip label="CRITICAL" value={topoStats.critical} tone="orange" />}
+              {topoStats.ghost > 0 && <StatChip label="GHOST" value={topoStats.ghost} tone="purple" />}
+            </h1>
+            <div style={{ fontSize: 12.5, color: C.muted, marginTop: 6 }}>
+              LLDP/CDP otomatik keşif · L2 anomali · Ghost node tespiti · Blast radius · AI katmanlı zekâ
             </div>
           </div>
-          {!presentation && (
-            <Link to="/topology" style={{ fontSize: 11, color: '#94a3b8', marginLeft: 6 }}>
-              Klasik →
-            </Link>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, pointerEvents: 'auto' }}>
-          <Segmented
-            size="small" value={viewMode}
-            onChange={(v) => setViewMode(v as '2d' | '3d')}
-            options={[{ label: '2D', value: '2d' }, { label: '3D', value: '3d' }]}
-          />
-          <Tooltip title="Sunum modu (NOC duvar ekranı)">
-            <Button size="small" type={presentation ? 'primary' : 'default'}
-              icon={<DesktopOutlined />} onClick={() => setPresentation((p) => !p)} />
-          </Tooltip>
-          <Tooltip title="Tam ekran — F">
-            <Button size="small"
-              icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
-              onClick={toggleFullscreen} />
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* ── drift detail banner ────────────────────────────────────────── */}
-      {drift && !presentation && (
-        <div style={{ position: 'absolute', top: 62, left: '50%', transform: 'translateX(-50%)', maxWidth: 540 }}>
-          <Alert
-            type="warning" showIcon icon={<WarningOutlined />}
-            message="Topoloji Drift — altın referanstan sapma"
-            description={
-              <div style={{ fontSize: 12 }}>
-                <div>{String(drift.message ?? 'Topoloji yapısı altın referanstan farklılaştı')}</div>
-                <div style={{ color: '#94a3b8', marginTop: 4 }}>
-                  graph v{drift.graph_version} · {String(drift.ts ?? '').slice(11, 19)}
-                </div>
-              </div>
-            }
-            action={<Button size="small" onClick={() => { setDrift(null); void refetch() }}>İncele</Button>}
-            closable onClose={() => setDrift(null)}
-          />
-        </div>
-      )}
-
-      {/* ── controls panel ─────────────────────────────────────────────── */}
-      {showControls && (
-        <FloatingPanel
-          style={{ top: 64, right: 14, width: 236 }}
-          title="KONSOL" icon={<AppstoreOutlined />}
-          expanded={isPanelExpanded('controls', collapsedPanels)}
-          onToggle={() => setCollapsedPanels((p) => togglePanel(p, 'controls'))}
-        >
-          {viewMode === '3d' && (
-            <>
-              <Segmented size="small" block value={layoutMode}
-                onChange={(v) => setLayoutMode(v as LayoutMode)}
-                options={[
-                  { label: 'Orbit', value: 'orbit' },
-                  { label: 'Cluster', value: 'cluster' },
-                ]} />
-              <Segmented size="small" block value={cameraMode}
-                onChange={(v) => setCameraMode(v as CameraMode)}
-                options={[
-                  { label: 'Sabit', value: 'orbit' },
-                  { label: 'Veri Akışı', value: 'traverse' },
-                ]} />
-            </>
-          )}
-          <div style={labelStyle}>KÜMELEME</div>
-          <Segmented size="small" block value={tier}
-            onChange={(v) => handleTier(v as ClusterTier)}
-            options={[
-              { label: 'Lokasyon', value: 'location' },
-              { label: 'Katman', value: 'layer' },
-              { label: 'Rack', value: 'rack' },
-              { label: 'Cihaz', value: 'device' },
-            ]} />
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button size="small" type={autoMode ? 'primary' : 'default'}
-              onClick={() => setAutoMode((m) => !m)}>
-              Semantik zoom {autoMode ? 'açık' : 'kapalı'}
-            </Button>
-            <Tooltip title="Yenile">
-              <Button size="small" icon={<ReloadOutlined />} onClick={() => void refetch()} />
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <Segmented size="small" value={viewMode}
+              onChange={(v) => setViewMode(v as '2d' | '3d')}
+              options={[{ label: '2D', value: '2d' }, { label: '3D', value: '3d' }]} />
+            <Tooltip title="Yeniden keşfet">
+              <Button size="small" icon={<ReloadOutlined />} onClick={() => void refetch()}>Keşfet</Button>
+            </Tooltip>
+            <Tooltip title="Sunum modu — NOC duvar ekranı">
+              <Button size="small" type={presentation ? 'primary' : 'default'}
+                icon={<DesktopOutlined />} onClick={() => setPresentation((p) => !p)} />
+            </Tooltip>
+            <Tooltip title="Tam ekran — F">
+              <Button size="small"
+                icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+                onClick={toggleFullscreen}>
+                {fullscreen ? 'Çık' : 'Tam Ekran'}
+              </Button>
             </Tooltip>
           </div>
-          {engine && (
-            <div style={{ color: '#64748b', fontSize: 11, lineHeight: 1.7 }}>
-              <div>{engine.model.deviceCount} cihaz · {engine.model.ghostCount} ghost</div>
-              <div>{engine.model.clusters.size} küme · graph v{engine.model.graphVersion}</div>
-            </div>
-          )}
-        </FloatingPanel>
+        </div>
       )}
 
-      {/* ── intelligence panel (overlay layers + tactical hints) ───────── */}
-      {showIntel && (
-        <FloatingPanel
-          style={{ bottom: 14, right: 14, width: 252 }}
-          title="İSTİHBARAT" icon={<ThunderboltOutlined />}
-          expanded={isPanelExpanded('intel', collapsedPanels)}
-          onToggle={() => setCollapsedPanels((p) => togglePanel(p, 'intel'))}
-        >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
-            {OVERLAY_LAYERS.map((layer) => {
-              const on = overlayLayers.has(layer)
-              const meta = LAYER_META[layer]
-              return (
-                <span key={layer} onClick={() => toggleLayer(layer)} style={{
-                  cursor: 'pointer', fontSize: 10, padding: '2px 7px', borderRadius: 5,
-                  border: `1px solid ${on ? meta.color : 'rgba(148,163,184,0.25)'}`,
-                  color: on ? '#e2e8f0' : '#64748b',
-                  background: on ? `${meta.color}22` : 'transparent',
-                  display: 'flex', alignItems: 'center', gap: 4,
-                }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 6, background: on ? meta.color : '#475569' }} />
-                  {meta.label}
-                </span>
-              )
-            })}
+      {/* ── FILTER BAR ─────────────────────────────────────────────────── */}
+      {chrome && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0,
+          padding: '8px 14px', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
+        }}>
+          <span style={crumb}>FİLTRELER</span>
+          <FilterToggle on={showGhost} color={C.purple} label="👻 Ghost node"
+            onClick={() => setShowGhost((v) => !v)} />
+          <FilterToggle on={showWireless} color={C.green} label="📶 Wireless"
+            onClick={() => setShowWireless((v) => !v)} />
+          <Link to="/topology" style={{ fontSize: 11, color: C.sub, marginLeft: 4 }}>Klasik →</Link>
+          <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {LAYER_LEGEND.map(([label, color]) => (
+              <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: C.sub, fontSize: 11 }}>
+                <span style={{ width: 9, height: 9, borderRadius: 2, background: color }} />{label}
+              </span>
+            ))}
+          </span>
+        </div>
+      )}
+
+      {/* ── MAIN GRID: tool rail · canvas · right panel ────────────────── */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: chrome ? '52px 1fr 272px' : '1fr',
+        gap: chrome ? 12 : 0, flex: 1, minHeight: 0,
+      }}>
+        {/* LEFT TOOL RAIL */}
+        {chrome && (
+          <div style={{
+            background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8,
+            padding: 6, display: 'flex', flexDirection: 'column', gap: 4, alignSelf: 'flex-start',
+          }}>
+            <ToolBtn icon="↖" active={tool === 'select'} title="Seç" onClick={() => setTool('select')} />
+            <ToolBtn icon="✋" active={tool === 'pan'} title="Kaydır" onClick={() => setTool('pan')} />
+            <div style={{ height: 1, background: C.border, margin: '2px 4px' }} />
+            <ToolBtn icon="⊕" title="Yakınlaştır" onClick={() => zoom('in')} />
+            <ToolBtn icon="⊖" title="Uzaklaştır" onClick={() => zoom('out')} />
+            <ToolBtn icon="⛶" title="Sığdır" onClick={() => zoom('fit')} />
+            <div style={{ height: 1, background: C.border, margin: '2px 4px' }} />
+            <ToolBtn icon={<AimOutlined />} title="Olaya odaklan — I" onClick={jumpToIncident} />
+            <ToolBtn icon={<ReloadOutlined />} title="Yenile" onClick={() => void refetch()} />
           </div>
-          {overlayModel && overlayModel.hints.length > 0 && (
-            <div style={{ marginTop: 4 }}>
-              {overlayModel.hints.map((h) => (
-                <div key={h.id}
-                  onClick={() => h.layer && setOverlayLayers((p) => new Set(p).add(h.layer!))}
+        )}
+
+        {/* CENTER CANVAS */}
+        <div style={{
+          position: 'relative', minHeight: 0, borderRadius: chrome ? 10 : 0,
+          overflow: 'hidden', border: chrome ? `1px solid ${C.border}` : 'none', background: C.bg,
+        }}>
+          {/* subtle grid + vignette */}
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.025) 1px, transparent 1px)',
+            backgroundSize: '32px 32px',
+          }} />
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            background: 'radial-gradient(ellipse 80% 60% at 50% 35%, rgba(34,211,197,0.05), transparent 70%)',
+          }} />
+
+          {engine && viewMode === '2d' && (
+            <SigmaCanvas
+              key={`2d:${engine.locationId}`}
+              model={engine.model} collapsed={collapsed} patchSignal={patchSignal}
+              patchTouched={patchTouchedRef.current}
+              overlay={overlay} onExpandCluster={handleExpandCluster}
+              onSelectNode={setSelected} onZoomTier={handleZoomTier}
+              cameraApiRef={cameraApiRef} filter={filter}
+            />
+          )}
+          {engine && viewMode === '3d' && (
+            <Topology3D
+              key={`3d:${engine.locationId}`}
+              model={engine.model} collapsed={collapsed} patchSignal={patchSignal}
+              mode={layoutMode} cameraMode={cameraMode} overlay={overlay}
+              onSelectNode={setSelected} onExpandCluster={handleExpandCluster}
+            />
+          )}
+
+          {isLoading && !engine && (
+            <Centered><Spin size="large" tip="Topoloji yükleniyor…" /></Centered>
+          )}
+          {isError && (
+            <Centered>
+              <Alert type="error" showIcon message="Topoloji yüklenemedi"
+                description={(error as Error)?.message}
+                action={<Button size="small" onClick={() => void refetch()}>Yeniden dene</Button>} />
+            </Centered>
+          )}
+          {engine && engine.model.deviceCount === 0 && !isLoading && (
+            <Centered>
+              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={<span style={{ color: C.sub }}>Bu kapsamda cihaz yok</span>} />
+            </Centered>
+          )}
+
+          {/* drift banner */}
+          {drift && chrome && (
+            <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', maxWidth: 540 }}>
+              <Alert type="warning" showIcon icon={<WarningOutlined />}
+                message="Topoloji Drift — altın referanstan sapma"
+                description={
+                  <div style={{ fontSize: 12 }}>
+                    <div>{String(drift.message ?? 'Topoloji yapısı altın referanstan farklılaştı')}</div>
+                    <div style={{ color: C.sub, marginTop: 4 }}>graph v{drift.graph_version}</div>
+                  </div>
+                }
+                action={<Button size="small" onClick={() => { setDrift(null); void refetch() }}>İncele</Button>}
+                closable onClose={() => setDrift(null)} />
+            </div>
+          )}
+
+          {/* zoom controls (design minimap position, bottom-left) */}
+          {chrome && (
+            <div style={{
+              position: 'absolute', left: 14, bottom: 14,
+              background: 'rgba(8,14,32,0.92)', border: `1px solid ${C.border}`, borderRadius: 6,
+              padding: 6, display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <ToolBtn icon="＋" title="Yakınlaştır" small onClick={() => zoom('in')} />
+              <ToolBtn icon="－" title="Uzaklaştır" small onClick={() => zoom('out')} />
+              <ToolBtn icon="⛶" title="Sığdır" small onClick={() => zoom('fit')} />
+              <span style={{ fontFamily: MONO, fontSize: 10, color: C.sub, minWidth: 34, textAlign: 'right' }}>
+                {zoomPct}%
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* RIGHT PANEL */}
+        {chrome && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, overflowY: 'auto', minHeight: 0 }}>
+            {/* GÖRÜNÜM */}
+            <NocCard title="GÖRÜNÜM">
+              <div style={{ position: 'relative' }}>
+                <span style={{ position: 'absolute', left: 10, top: 8, color: '#475569' }}>
+                  <SearchOutlined style={{ fontSize: 12 }} />
+                </span>
+                <input value={search} onChange={(e) => runSearch(e.target.value)}
+                  placeholder="Hostname veya IP ara…"
                   style={{
-                    display: 'flex', gap: 7, alignItems: 'flex-start', marginBottom: 6,
-                    cursor: h.layer ? 'pointer' : 'default',
-                  }}>
-                  <span style={{
-                    width: 7, height: 7, borderRadius: 7, marginTop: 3,
-                    background: HINT_DOT[h.severity], flexShrink: 0,
+                    width: '100%', height: 30, background: C.bg, border: `1px solid ${C.border}`,
+                    borderRadius: 6, color: C.text, fontSize: 11.5, padding: '0 10px 0 30px', outline: 'none',
                   }} />
-                  <span style={{ color: '#cbd5e1', fontSize: 11, lineHeight: 1.4 }}>{h.text}</span>
+              </div>
+            </NocCard>
+
+            {/* DİZİLİM — clustering tier + semantic zoom (+ 3D controls) */}
+            <NocCard title="GÖRÜNÜM — DİZİLİM">
+              {viewMode === '3d' && (
+                <>
+                  <Segmented size="small" block value={layoutMode}
+                    onChange={(v) => setLayoutMode(v as LayoutMode)}
+                    options={[{ label: 'Orbit', value: 'orbit' }, { label: 'Cluster', value: 'cluster' }]} />
+                  <Segmented size="small" block value={cameraMode}
+                    onChange={(v) => setCameraMode(v as CameraMode)}
+                    options={[{ label: 'Sabit', value: 'orbit' }, { label: 'Veri Akışı', value: 'traverse' }]} />
+                </>
+              )}
+              <div style={{ ...crumb, marginBottom: 2 }}>KÜMELEME</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                {([['location', 'Lokasyon'], ['layer', 'Katman'], ['rack', 'Rack'], ['device', 'Cihaz']] as [ClusterTier, string][]).map(([id, label]) => (
+                  <button key={id} onClick={() => handleTier(id)} style={tierBtn(tier === id)}>{label}</button>
+                ))}
+              </div>
+              <button onClick={() => setAutoMode((m) => !m)} style={tierBtn(autoMode)}>
+                Semantik zoom {autoMode ? 'açık' : 'kapalı'}
+              </button>
+            </NocCard>
+
+            {/* KEŞIF */}
+            <NocCard title="KEŞIF">
+              <button onClick={() => void refetch()} style={discoverBtn}>
+                <ReloadOutlined /> Tümünü Keşfet
+              </button>
+              <button onClick={jumpToIncident} style={{ ...secondaryBtn, color: C.orange, borderColor: 'rgba(249,115,22,0.4)' }}>
+                <ThunderboltOutlined /> Anomaliye Odaklan
+              </button>
+              <button onClick={exportSnapshot} style={secondaryBtn}>
+                <ExportOutlined /> JSON Dışa Aktar
+              </button>
+            </NocCard>
+
+            {/* İSTİHBARAT — overlay layers + tactical hints */}
+            <NocCard title="İSTİHBARAT">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                {OVERLAY_LAYERS.map((layer) => {
+                  const on = overlayLayers.has(layer)
+                  const meta = LAYER_META[layer]
+                  return (
+                    <span key={layer} onClick={() => toggleLayer(layer)} style={{
+                      cursor: 'pointer', fontSize: 10, padding: '2px 7px', borderRadius: 5,
+                      border: `1px solid ${on ? meta.color : 'rgba(148,163,184,0.25)'}`,
+                      color: on ? C.text : C.muted, background: on ? `${meta.color}22` : 'transparent',
+                      display: 'flex', alignItems: 'center', gap: 4,
+                    }}>
+                      <span style={{ width: 6, height: 6, borderRadius: 6, background: on ? meta.color : '#475569' }} />
+                      {meta.label}
+                    </span>
+                  )
+                })}
+              </div>
+              {overlayModel && overlayModel.hints.length > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  {overlayModel.hints.map((h) => (
+                    <div key={h.id}
+                      onClick={() => h.layer && setOverlayLayers((p) => new Set(p).add(h.layer!))}
+                      style={{ display: 'flex', gap: 7, alignItems: 'flex-start', marginBottom: 6, cursor: h.layer ? 'pointer' : 'default' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 7, marginTop: 3, background: HINT_DOT[h.severity], flexShrink: 0 }} />
+                      <span style={{ color: '#cbd5e1', fontSize: 11, lineHeight: 1.4 }}>{h.text}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {focusSet && (
+                <div style={{ color: C.teal, fontSize: 11 }}>
+                  <AimOutlined /> Olay odağı: {focusSet.nodes.size} cihaz etkilenebilir
+                </div>
+              )}
+            </NocCard>
+
+            {/* AÇIKLAMA — legend */}
+            <NocCard title="AÇIKLAMA">
+              {LAYER_LEGEND.map(([label, color]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '3px 0', fontSize: 12, color: C.text }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 2, background: color }} />{label}
                 </div>
               ))}
-            </div>
-          )}
-          {focusSet && (
-            <div style={{ color: '#38bdf8', fontSize: 11 }}>
-              <AimOutlined /> Olay odağı: {focusSet.nodes.size} cihaz etkilenebilir
-            </div>
-          )}
-        </FloatingPanel>
-      )}
-
-      {/* ── legend (auto-hidden in fullscreen / presentation) ──────────── */}
-      {showLegend && (
-        <div style={{ ...panelStyle, position: 'absolute', bottom: 14, left: 14, padding: 12, display: 'flex', gap: 20 }}>
-          <Legend title="Katman" items={LAYER_LEGEND} />
-          <Legend title="Trafik" items={TRAFFIC_LEGEND} />
-        </div>
-      )}
-
-      {/* ── selected-node detail (contextual) ──────────────────────────── */}
-      {showDetail && selected && (
-        <div style={{ ...panelStyle, position: 'absolute', top: 64, left: 14, width: 250, padding: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{selected.label}</span>
-            <CloseOutlined style={{ color: '#64748b', cursor: 'pointer' }}
-              onClick={() => setSelected(null)} />
+              <div style={{ height: 1, background: C.border, margin: '10px 0' }} />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, fontSize: 10.5, color: C.sub }}>
+                {TRAFFIC_LEGEND.map(([label, color]) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 0' }}>
+                    <span style={{ width: 18, height: 0, borderTop: `2px ${label === 'Normal' ? 'solid' : 'dashed'} ${color}` }} />
+                    <span>{label}</span>
+                  </div>
+                ))}
+              </div>
+            </NocCard>
           </div>
-          <Tag color={selected.kind === 'ghost' ? 'default' : 'blue'} style={{ marginTop: 8 }}>
-            {selected.kind}
-          </Tag>
-          {overlayModel?.nodes.get(selected.id)?.threat && (
-            <Tag color="red" style={{ marginTop: 8 }}>tehdit</Tag>
-          )}
-          <NodeDetail raw={selected.raw} />
+        )}
+      </div>
+
+      {/* ── BOTTOM STATUS BAR ──────────────────────────────────────────── */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 26, flexShrink: 0,
+        padding: chrome ? '9px 18px' : '5px 14px',
+        background: C.panel, border: `1px solid ${C.border}`, borderRadius: chrome ? 8 : 0,
+        fontSize: 11.5,
+      }}>
+        <StatusFig label="Node" value={topoStats.nodes.toLocaleString()} color={C.teal} />
+        <StatusFig label="Bağlantı" value={topoStats.links.toLocaleString()} color={C.teal} />
+        <StatusFig label="Down" value={topoStats.down} color={C.red} />
+        <StatusFig label="Critical" value={topoStats.critical} color={C.orange} />
+        <StatusFig label="Ghost" value={topoStats.ghost} color={C.purple} />
+        <StatusFig label="Anomali" value={topoStats.anomalies} color={C.yellow} />
+        <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 18, color: C.sub }}>
+          <span><Badge status={rtBadge} />{rtStatus === 'open' ? 'CANLI' : rtStatus.toUpperCase()}</span>
+          {engine && <span>{engine.model.clusters.size} küme</span>}
+          {engine && <span style={{ fontFamily: MONO }}>graph v{engine.model.graphVersion}</span>}
+        </span>
+      </div>
+
+      {/* ── SELECTED NODE DETAIL (floating) ───────────────────────────── */}
+      {node && (
+        <div style={{
+          position: 'absolute', right: chrome ? 296 : 16, top: chrome ? 96 : 16, width: 320, zIndex: 50,
+          background: 'rgba(14,23,41,0.97)', border: `1px solid ${C.teal}`, borderRadius: 10, padding: 16,
+          boxShadow: '0 20px 60px rgba(0,0,0,0.5)', backdropFilter: 'blur(20px)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ color: C.text, fontWeight: 600 }}>{node.label}</span>
+            <CloseOutlined style={{ color: C.muted, cursor: 'pointer' }} onClick={() => setSelected(null)} />
+          </div>
+          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+            <Tag color={node.kind === 'ghost' ? 'default' : 'cyan'}>{node.kind}</Tag>
+            {overlayModel?.nodes.get(node.id)?.threat && <Tag color="red">tehdit</Tag>}
+          </div>
+          <NodeDetail raw={node.raw} />
         </div>
       )}
-
-      {/* ── NOC status strip — minimal, always-on (wall-screen ready) ──── */}
-      <div style={{
-        position: 'absolute', bottom: 14, left: '50%', transform: 'translateX(-50%)',
-        ...panelStyle, padding: '5px 14px', display: 'flex', gap: 16, alignItems: 'center',
-        fontSize: 11, color: '#94a3b8',
-      }}>
-        <span><Badge status={rtBadge} />{rtStatus === 'open' ? 'CANLI' : rtStatus.toUpperCase()}</span>
-        {engine && <span>{engine.model.deviceCount} cihaz</span>}
-        {counts && counts.threats > 0 && (
-          <span style={{ color: '#ef4444' }}>⬤ {counts.threats} tehdit</span>
-        )}
-        {counts && counts.bottlenecks > 0 && (
-          <span style={{ color: '#f59e0b' }}>⬤ {counts.bottlenecks} darboğaz</span>
-        )}
-        {drift && <span style={{ color: '#f59e0b' }}>drift</span>}
-      </div>
 
       {/* T8.3.A — perf overlay, dynamic-loaded; visible in DEV or with ?perf=1 */}
       {PerfOverlayCmp && <PerfOverlayCmp />}
@@ -739,14 +911,39 @@ export default function TopologyV2Page() {
   )
 }
 
-// ── presentational helpers ────────────────────────────────────────────────
+// ── NOC design tokens + presentational helpers (T8.4) ──────────────────────
 
-const panelStyle: React.CSSProperties = {
-  background: PANEL_BG, border: BORDER, borderRadius: 10,
+const C = {
+  bg: '#070b18', panel: '#0e1729', border: '#1c2538',
+  text: '#d7e6f5', sub: '#94a3b8', muted: '#64748b',
+  teal: '#22d3c5', blue: '#3b82f6', green: '#22c55e', orange: '#f97316',
+  red: '#ef4444', yellow: '#eab308', purple: '#a855f7',
 }
-const labelStyle: React.CSSProperties = {
-  color: '#94a3b8', fontSize: 11, fontWeight: 600, letterSpacing: 0.4,
+const MONO = "'IBM Plex Mono', ui-monospace, monospace"
+
+const crumb: React.CSSProperties = {
+  fontFamily: MONO, fontSize: 10, color: C.muted,
+  letterSpacing: '0.14em', textTransform: 'uppercase', fontWeight: 600,
 }
+const secondaryBtn: React.CSSProperties = {
+  width: '100%', height: 30, fontSize: 11, marginBottom: 6,
+  background: 'transparent', color: C.text, border: `1px solid ${C.border}`,
+  borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center',
+  justifyContent: 'center', gap: 8,
+}
+const discoverBtn: React.CSSProperties = {
+  width: '100%', height: 34, fontSize: 12.5, marginBottom: 6,
+  background: C.blue, color: '#fff', border: 'none', borderRadius: 6,
+  cursor: 'pointer', fontWeight: 500, display: 'flex', alignItems: 'center',
+  justifyContent: 'center', gap: 8,
+}
+const tierBtn = (active: boolean): React.CSSProperties => ({
+  height: 30, fontSize: 11.5, padding: 0, marginTop: 6,
+  border: `1px solid ${active ? C.blue : C.border}`,
+  background: active ? 'rgba(59,130,246,0.18)' : 'transparent',
+  color: active ? '#60a5fa' : C.text, borderRadius: 6, cursor: 'pointer',
+  fontFamily: "'IBM Plex Sans', system-ui, sans-serif",
+})
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
@@ -756,48 +953,61 @@ function Centered({ children }: { children: React.ReactNode }) {
   )
 }
 
-function FloatingPanel({
-  style, title, icon, expanded, onToggle, children,
-}: {
-  style: React.CSSProperties
-  title: string
-  icon: React.ReactNode
-  expanded: boolean
-  onToggle: () => void
-  children: React.ReactNode
-}) {
+function NocCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div style={{ ...panelStyle, position: 'absolute', padding: 10, ...style }}>
-      <div
-        onClick={onToggle}
-        style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          cursor: 'pointer', ...labelStyle,
-        }}
-      >
-        <span>{icon} {title}</span>
-        {expanded ? <DownOutlined /> : <RightOutlined />}
-      </div>
-      {expanded && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 9, marginTop: 9 }}>
-          {children}
-        </div>
-      )}
+    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14 }}>
+      <div style={{ ...crumb, marginBottom: 10 }}>{title}</div>
+      {children}
     </div>
   )
 }
 
-function Legend({ title, items }: { title: string; items: [string, string][] }) {
+function StatChip({ label, value, tone }: { label: string; value: string | number; tone?: 'red' | 'orange' | 'purple' }) {
+  const map = {
+    red: { bg: 'rgba(239,68,68,0.18)', fg: C.red },
+    orange: { bg: 'rgba(249,115,22,0.18)', fg: C.orange },
+    purple: { bg: 'rgba(168,85,247,0.18)', fg: C.purple },
+  }
+  const t = tone ? map[tone] : { bg: C.border, fg: C.sub }
   return (
-    <div>
-      <div style={{ color: '#94a3b8', fontSize: 10, fontWeight: 600, marginBottom: 6 }}>{title}</div>
-      {items.map(([label, color]) => (
-        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 3 }}>
-          <span style={{ width: 9, height: 9, borderRadius: 9, background: color }} />
-          <span style={{ color: '#cbd5e1', fontSize: 10 }}>{label}</span>
-        </div>
-      ))}
-    </div>
+    <span style={{
+      fontFamily: MONO, fontSize: 10.5, padding: '2px 8px', borderRadius: 3,
+      background: t.bg, color: t.fg, fontWeight: 600, letterSpacing: '0.06em',
+    }}>{value} {label}</span>
+  )
+}
+
+function StatusFig({ label, value, color }: { label: string; value: string | number; color: string }) {
+  return (
+    <span><span style={{ color: C.muted }}>{label} </span>
+      <strong style={{ color, fontFamily: MONO }}>{value}</strong></span>
+  )
+}
+
+function FilterToggle({ on, color, label, onClick }: { on: boolean; color: string; label: string; onClick: () => void }) {
+  return (
+    <button onClick={onClick} style={{
+      height: 26, fontSize: 11, padding: '0 10px', cursor: 'pointer', borderRadius: 6,
+      background: on ? `${color}26` : 'transparent', color: on ? color : C.muted,
+      border: `1px solid ${on ? `${color}66` : C.border}`,
+    }}>{label}</button>
+  )
+}
+
+function ToolBtn({ icon, active, title, onClick, small }: {
+  icon: React.ReactNode; active?: boolean; title: string; onClick: () => void; small?: boolean
+}) {
+  const s = small ? 24 : 38
+  return (
+    <Tooltip title={title} placement="right">
+      <button onClick={onClick} style={{
+        width: s, height: s, borderRadius: 6, fontSize: small ? 12 : 14,
+        border: `1px solid ${active ? C.blue : 'transparent'}`,
+        background: active ? 'rgba(59,130,246,0.18)' : 'transparent',
+        color: active ? '#60a5fa' : C.sub, cursor: 'pointer',
+        display: 'grid', placeItems: 'center',
+      }}>{icon}</button>
+    </Tooltip>
   )
 }
 
@@ -810,10 +1020,10 @@ function NodeDetail({ raw }: { raw: unknown }) {
     ['Durum', d.status], ['Kritiklik', d.criticality],
   ]
   return (
-    <div style={{ marginTop: 8, fontSize: 11, lineHeight: 1.9 }}>
+    <div style={{ marginTop: 12, fontSize: 11.5, lineHeight: 1.9 }}>
       {rows.filter(([, v]) => v != null && v !== '').map(([k, v]) => (
         <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ color: '#64748b' }}>{k}</span>
+          <span style={{ color: C.muted, fontFamily: MONO, fontSize: 9.5, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{k}</span>
           <span style={{ color: '#cbd5e1' }}>{String(v)}</span>
         </div>
       ))}

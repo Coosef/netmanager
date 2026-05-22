@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { App, Layout, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Popover, Button, Tag, Empty, Spin, Modal, Form } from 'antd'
+import { App, Dropdown, Avatar, Space, Badge, Input, Tooltip, Typography, Popover, Button, Tag, Empty, Spin, Modal, Form } from 'antd'
 import {
   LogoutOutlined, KeyOutlined,
   BellOutlined, ReloadOutlined, SearchOutlined,
@@ -19,7 +19,6 @@ import LocationSelector from './LocationSelector'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 
-const { Header } = Layout
 
 const ROLE_COLORS: Record<string, string> = {
   super_admin: '#ef4444', admin: '#f97316', operator: '#3b82f6', viewer: '#22c55e',
@@ -121,16 +120,14 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
     { key: 'logout', icon: <LogoutOutlined />, label: t('header.logout'), danger: true, onClick: handleLogout },
   ]
 
-  const headerBg = isDark ? 'rgba(3,12,30,0.92)' : '#ffffff'
-  const headerBorder = isDark ? '#112240' : '#e2e8f0'
   const iconColor = isDark ? '#64748b' : '#94a3b8'
-  const textColor = isDark ? '#f1f5f9' : '#1e293b'
+  const textColor = isDark ? '#d7e6f5' : '#1e293b'
   const subColor = isDark ? '#64748b' : '#94a3b8'
-  const inputBg = isDark ? '#0e1e38' : '#f8fafc'
-  const inputBorder = isDark ? '#1a3458' : '#e2e8f0'
-  const notifBg = isDark ? '#0e1e38' : '#ffffff'
-  const notifBorder = isDark ? '#1a3458' : '#e2e8f0'
-  const notifItemHover = isDark ? '#030c1e' : '#f8fafc'
+  const inputBg = isDark ? '#0e1729' : '#f8fafc'
+  const inputBorder = isDark ? '#1c2538' : '#e2e8f0'
+  const notifBg = isDark ? '#0e1729' : '#ffffff'
+  const notifBorder = isDark ? '#1c2538' : '#e2e8f0'
+  const notifItemHover = isDark ? '#070b18' : '#f8fafc'
 
   const sevIcon = (s: string) => {
     if (s === 'critical') return <CloseCircleOutlined style={{ color: '#ef4444' }} />
@@ -256,23 +253,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
         </Form.Item>
       </Form>
     </Modal>
-    <Header style={{
-      background: headerBg,
-      backdropFilter: isDark ? 'blur(12px)' : undefined,
-      WebkitBackdropFilter: isDark ? 'blur(12px)' : undefined,
-      padding: '0 24px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: 16,
-      borderBottom: `1px solid ${headerBorder}`,
-      height: 60,
-      position: 'sticky',
-      top: 0,
-      zIndex: 100,
-      boxShadow: isDark
-        ? '0 1px 0 #112240, 0 4px 24px rgba(0,0,0,0.5)'
-        : '0 1px 4px rgba(0,0,0,0.06)',
-    }}>
+    <div className="nm-topbar" style={{ position: 'relative', zIndex: 100 }}>
       <style>{HEADER_CSS}</style>
 
       {/* Hamburger — mobile only */}
@@ -448,7 +429,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           </div>}
         </Space>
       </Dropdown>
-    </Header>
+    </div>
     </>
   )
 }

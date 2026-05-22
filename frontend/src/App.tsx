@@ -73,33 +73,42 @@ const queryClient = new QueryClient({
   },
 })
 
+// T8.4 — dark theme retuned to the NOC design palette (canvas #070b18,
+// panels #0e1729, borders #1c2538, teal accent #22d3c5) + IBM Plex Sans.
+const NOC_FONT = "'IBM Plex Sans', system-ui, -apple-system, sans-serif"
 const DARK_TOKENS = {
   algorithm: theme.darkAlgorithm,
   token: {
     colorPrimary: '#3b82f6',
-    colorBgBase: '#030c1e',
-    colorBgContainer: '#0e1e38',
-    colorBgElevated: '#0e1e38',
-    colorBgLayout: '#030c1e',
-    colorBorder: '#1a3458',
-    colorBorderSecondary: '#112240',
-    colorText: '#f1f5f9',
+    colorInfo: '#22d3c5',
+    colorBgBase: '#070b18',
+    colorBgContainer: '#0e1729',
+    colorBgElevated: '#0e1729',
+    colorBgLayout: '#070b18',
+    colorBorder: '#1c2538',
+    colorBorderSecondary: '#16202f',
+    colorText: '#d7e6f5',
     colorTextSecondary: '#94a3b8',
     colorTextTertiary: '#64748b',
     borderRadius: 8,
+    fontFamily: NOC_FONT,
   },
   components: {
-    Layout: { siderBg: '#030c1e', headerBg: '#030c1e', bodyBg: '#030c1e' },
-    Menu: { darkItemBg: '#030c1e', darkSubMenuItemBg: '#030c1e', darkItemSelectedBg: '#1d4ed8', darkItemHoverBg: '#0e1e38' },
-    Card: { colorBgContainer: '#0e1e38', colorBorderSecondary: '#1a3458' },
-    Table: { colorBgContainer: '#0e1e38', headerBg: '#071224', rowHoverBg: '#122040' },
-    Modal: { contentBg: '#0e1e38', headerBg: '#0e1e38', footerBg: '#0e1e38' },
-    Drawer: { colorBgElevated: '#0e1e38' },
-    Select: { colorBgContainer: '#0e1e38', colorBgElevated: '#0e1e38' },
-    Input: { colorBgContainer: '#0e1e38', colorBorder: '#1a3458' },
-    Tabs: { colorBorderSecondary: '#1a3458' },
-    Popover: { colorBgElevated: '#0e1e38' },
-    Tooltip: { colorBgSpotlight: '#1a3458' },
+    Layout: { siderBg: '#0b1322', headerBg: '#0b1322', bodyBg: '#070b18' },
+    Menu: {
+      darkItemBg: '#0b1322', darkSubMenuItemBg: '#0b1322',
+      darkItemSelectedBg: 'rgba(59,130,246,0.20)', darkItemSelectedColor: '#60a5fa',
+      darkItemHoverBg: '#0e1729',
+    },
+    Card: { colorBgContainer: '#0e1729', colorBorderSecondary: '#1c2538' },
+    Table: { colorBgContainer: '#0e1729', headerBg: '#0a1120', rowHoverBg: '#142236' },
+    Modal: { contentBg: '#0e1729', headerBg: '#0e1729', footerBg: '#0e1729' },
+    Drawer: { colorBgElevated: '#0e1729' },
+    Select: { colorBgContainer: '#0e1729', colorBgElevated: '#0e1729' },
+    Input: { colorBgContainer: '#0e1729', colorBorder: '#1c2538' },
+    Tabs: { colorBorderSecondary: '#1c2538' },
+    Popover: { colorBgElevated: '#0e1729' },
+    Tooltip: { colorBgSpotlight: '#1c2538' },
     Segmented: { itemSelectedBg: '#3b82f6' },
   },
 }
@@ -109,6 +118,7 @@ const LIGHT_TOKENS = {
   token: {
     colorPrimary: '#3b82f6',
     borderRadius: 8,
+    fontFamily: NOC_FONT,
   },
 }
 
@@ -148,28 +158,28 @@ function PermRoute({ children, module, action }: { children: React.ReactNode; mo
 const GLOBAL_CSS_DARK = `
   :root { color-scheme: dark; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #030c1e; }
-  ::-webkit-scrollbar-thumb { background: #1a3458; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #234870; }
-  ::selection { background: #3b82f640; color: #f1f5f9; }
+  ::-webkit-scrollbar-track { background: #070b18; }
+  ::-webkit-scrollbar-thumb { background: #1c2538; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2a3a52; }
+  ::selection { background: #22d3c540; color: #d7e6f5; }
   .ant-card { transition: box-shadow 0.2s, border-color 0.2s; }
-  .ant-card:hover { box-shadow: 0 4px 20px rgba(59,130,246,0.08) !important; }
+  .ant-card:hover { box-shadow: 0 4px 20px rgba(34,211,197,0.08) !important; }
   .ant-table-row { transition: background 0.1s; }
   .ant-btn-primary { box-shadow: 0 0 12px rgba(59,130,246,0.25) !important; }
   .ant-table-placeholder { background: transparent !important; }
   .ant-table-placeholder .ant-empty-description { color: #475569 !important; }
   .ant-table-placeholder .ant-empty-image svg { opacity: 0.25; }
   .ant-table-placeholder td { border-bottom: none !important; }
-  .perm-user-row td { border-bottom: 1px solid #112240 !important; }
+  .perm-user-row td { border-bottom: 1px solid #16202f !important; }
   .perm-user-row:last-child td { border-bottom: none !important; }
-  .ant-modal-content { background: #0e1e38 !important; border: 1px solid #1a3458 !important; }
-  .ant-modal-header { background: #0e1e38 !important; border-bottom: 1px solid #1a3458 !important; }
-  .ant-modal-footer { border-top: 1px solid #1a3458 !important; }
-  .ant-modal-title { color: #f1f5f9 !important; }
-  .ant-select-dropdown { background: #0e1e38 !important; border: 1px solid #1a3458 !important; }
+  .ant-modal-content { background: #0e1729 !important; border: 1px solid #1c2538 !important; }
+  .ant-modal-header { background: #0e1729 !important; border-bottom: 1px solid #1c2538 !important; }
+  .ant-modal-footer { border-top: 1px solid #1c2538 !important; }
+  .ant-modal-title { color: #d7e6f5 !important; }
+  .ant-select-dropdown { background: #0e1729 !important; border: 1px solid #1c2538 !important; }
   .ant-select-item { color: #94a3b8 !important; }
-  .ant-select-item-option-active { background: #122040 !important; }
-  .ant-select-item-option-selected { background: #1d4ed820 !important; color: #3b82f6 !important; }
+  .ant-select-item-option-active { background: #142236 !important; }
+  .ant-select-item-option-selected { background: #1d4ed820 !important; color: #60a5fa !important; }
   .ant-select-dropdown .ant-empty-description { color: #475569 !important; }
 `
 
