@@ -1113,6 +1113,13 @@ async def agent_websocket(
     key: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
+    # Agent WS connect is credential-authenticated (the agent_key below), not a
+    # user session — `get_db` carries no RLS context, so FORCE ROW LEVEL
+    # SECURITY on `agents` would hide the row and reject every connect (4004 →
+    # 403). Bypass RLS for the agent's own connection; the agent_key is the
+    # authenticator and the agent record fixes its org/location scope.
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
     agent = result.scalar_one_or_none()
 
