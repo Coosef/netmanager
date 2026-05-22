@@ -61,7 +61,19 @@ A page is **done** only when ALL of these match its mockup:
 6. **Verify** — `tsc` 0 · `vitest` · `build` clean.
 7. **Screenshot** (dark) + **commit** + flip status to ✅ in the table above.
 
-> Current gap: pages will first land at 🟡 (header+statbar) then be finished to ✅ (filters + nm-table/content). Devices is at 🟡.
+> ⚠️ **CORRECTION (user feedback 22 May):** header+statbar alone is **NOT done** — there is a
+> chasm vs the mockup. Each page's **inner content must be rebuilt to its mockup** (like the
+> Dashboard's full widget grid). The "🟡 header" pages are **partial**, not done:
+> - **Ajanlar** → agent **card grid** (per-agent: name+version+status dot, OS/location, CPU/RAM
+>   bars, CİHAZ/GECİKME/HEARTBEAT/KUYRUK, SSH/SNMP/Keşif/Syslog tags) + 6-stat row
+>   (ONLİNE/YAVAŞ/TOPLAM CİHAZ/ORT.GECİKME/OFFLİNE KUYRUĞU/VERSİYON).
+> - **Kabinler** → rack **cards** (A1 Core… with U-elevation mini-bars + CİHAZ/GÜÇ/MAX TEMP)
+>   + rack detail U-list + device table (Cihazlar/Kablolama/Sıcaklık/Güç tabs) + 6-stat row.
+> - **Devices/Monitor/Services**: inner table/list → mockup design.
+>
+> Full inner rebuild is the real per-page task — **Dashboard-sized**, needs focused context each.
+> **Reference: `frontend/src/pages/Dashboard/NocDashboard.tsx`** (self-contained, real data, nm-* widgets).
+> Re-do order for the partial pages: Ajanlar, Kabinler (mockups in hand) → Devices → Monitor → Services.
 
 ## 🙋 What I need from you (to verify + match exactly)
 - **Stay in DARK mode** when checking (top-bar sun/moon) — the NOC look lives there.
