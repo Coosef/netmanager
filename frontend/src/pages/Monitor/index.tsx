@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  App, Row, Col, Card, Table, Tag, Button, Space, Select, Typography,
+  App, Card, Table, Tag, Button, Space, Select, Typography,
   Badge, Tooltip, Popconfirm, Segmented, Modal, Descriptions, Divider,
 } from 'antd'
 import { useTranslation } from 'react-i18next'
@@ -27,7 +27,7 @@ import relativeTime from 'dayjs/plugin/relativeTime'
 
 dayjs.extend(relativeTime)
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 const SEV_HEX: Record<string, string> = {
   critical: '#ef4444', warning: '#f59e0b', info: '#3b82f6',
@@ -181,52 +181,6 @@ function TimelineView({
   )
 }
 
-function SevCard({ label, value, color, isDark, glow }: {
-  label: string; value: number; color: string; isDark: boolean; glow?: boolean
-}) {
-  return (
-    <div style={{
-      background: isDark
-        ? `linear-gradient(135deg, ${color}10 0%, #1e293b 100%)`
-        : '#ffffff',
-      border: `1px solid ${color}22`,
-      borderLeft: `3px solid ${color}`,
-      borderRadius: 10,
-      padding: '14px 18px',
-      position: 'relative',
-      overflow: 'hidden',
-      animation: glow && value > 0
-        ? color === '#ef4444' ? 'monitorCritGlow 2.5s ease-in-out infinite'
-        : 'monitorWarnGlow 3s ease-in-out infinite'
-        : undefined,
-      boxShadow: isDark
-        ? `0 2px 12px rgba(0,0,0,0.3)`
-        : `0 2px 8px rgba(0,0,0,0.06), 0 0 0 1px ${color}10`,
-      transition: 'box-shadow 0.2s',
-    }}>
-      <div style={{
-        position: 'absolute', top: -20, right: -20,
-        width: 72, height: 72, borderRadius: '50%',
-        background: `radial-gradient(circle, ${color}20, transparent 70%)`,
-        pointerEvents: 'none',
-      }} />
-      <div style={{
-        color: isDark ? '#475569' : '#94a3b8',
-        fontSize: 10, fontWeight: 700,
-        textTransform: 'uppercase', letterSpacing: '0.08em',
-        marginBottom: 10,
-      }}>
-        {label}
-      </div>
-      <div style={{
-        fontSize: 32, fontWeight: 800,
-        color, fontFamily: 'monospace', lineHeight: 1,
-      }}>
-        {value}
-      </div>
-    </div>
-  )
-}
 
 const TYPE_LABELS: Record<string, string> = {
   device_offline:        'Cihaz Offline',
@@ -920,7 +874,11 @@ export default function MonitorPage() {
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div>
-          <Title level={4} style={{ margin: 0 }}>{t('monitor.title')}</Title>
+          <div className="nm-crumbs"><span>İzleme</span><span>Uyarılar</span></div>
+          <h1 className="nm-page-title" style={{ margin: 0 }}>
+            {t('monitor.title')}
+            {unacked > 0 && <span className="nm-pill crit mono">{unacked}</span>}
+          </h1>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 4 }}>
             {/* Pulsing live dot */}
             <div style={{ position: 'relative', width: 8, height: 8, flexShrink: 0 }}>
@@ -999,20 +957,28 @@ export default function MonitorPage() {
       </div>
 
       {/* Stat cards */}
-      <Row gutter={[14, 14]} style={{ marginBottom: 16 }}>
-        <Col xs={12} sm={6}>
-          <SevCard label={t('monitor.stat_critical')} value={s?.events_24h.by_severity?.critical ?? 0} color="#ef4444" isDark={isDark} glow />
-        </Col>
-        <Col xs={12} sm={6}>
-          <SevCard label={t('monitor.stat_warning')} value={s?.events_24h.by_severity?.warning ?? 0} color="#f59e0b" isDark={isDark} glow />
-        </Col>
-        <Col xs={12} sm={6}>
-          <SevCard label={t('monitor.stat_total')} value={s?.events_24h.total ?? 0} color="#3b82f6" isDark={isDark} />
-        </Col>
-        <Col xs={12} sm={6}>
-          <SevCard label={t('monitor.stat_unacked')} value={unacked} color={unacked > 0 ? '#ef4444' : '#22c55e'} isDark={isDark} glow={unacked > 0} />
-        </Col>
-      </Row>
+      <div className="nm-statbar" style={{ marginBottom: 16 }}>
+        <div className="nm-stat crit">
+          <div className="nm-stat-label">{t('monitor.stat_critical')}</div>
+          <div className="nm-stat-val">{s?.events_24h.by_severity?.critical ?? 0}</div>
+          <div className="nm-stat-delta">son 24 saat</div>
+        </div>
+        <div className="nm-stat warn">
+          <div className="nm-stat-label">{t('monitor.stat_warning')}</div>
+          <div className="nm-stat-val">{s?.events_24h.by_severity?.warning ?? 0}</div>
+          <div className="nm-stat-delta">son 24 saat</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">{t('monitor.stat_total')}</div>
+          <div className="nm-stat-val">{s?.events_24h.total ?? 0}</div>
+          <div className="nm-stat-delta">toplam olay</div>
+        </div>
+        <div className={`nm-stat ${unacked > 0 ? 'crit' : 'ok'}`}>
+          <div className="nm-stat-label">{t('monitor.stat_unacked')}</div>
+          <div className="nm-stat-val">{unacked}</div>
+          <div className="nm-stat-delta">onaylanmamış</div>
+        </div>
+      </div>
 
       {/* Filters */}
       <Card
