@@ -24,7 +24,7 @@ NOC look; `.theme-light` flips the design vars.
 | — | Theme tokens (dark NOC + IBM Plex) | — | styles.css | ✅ `6953cca` |
 | — | Topology | /topology-next | pages-topology.jsx | ✅ `6953cca` |
 | — | Dashboard | / | dashboard.jsx + widgets.jsx | ✅ `a6cdf51` |
-| 1 | Cihazlar (Devices) | /devices | pages-devices.jsx · Cihazlar.html | ⏳ |
+| 1 | Cihazlar (Devices) | /devices | pages-devices.jsx · Cihazlar.html | 🟡 `10c4491` header+statbar (table→nm-table pending) |
 | 2 | Uyarılar (Alerts) | /monitor (alerts) | pages-alerts.jsx · Uyarilar.html | ⏳ |
 | 3 | Canlı İzleme (Monitor) | /monitor | pages-monitor.jsx · Canli Izleme.html | ⏳ |
 | 4 | Servisler (Services) | /services | Servisler.html | ⏳ |
