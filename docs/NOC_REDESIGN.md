@@ -29,7 +29,7 @@ NOC look; `.theme-light` flips the design vars.
 | 3 | Canlı İzleme (Monitor) | /monitor | pages-monitor.jsx · Canli Izleme.html | ⏳ |
 | 4 | Servisler (Services) | /services | Servisler.html | 🟡 header |
 | 5 | Kabinler (Racks) | /racks | pages-racks.jsx · Kabinler.html | 🟡 header |
-| 6 | Ajanlar (Agents) | /agents | Ajanlar.html | 🟡 header |
+| 6 | Ajanlar (Agents) | /agents | Ajanlar.html · pages-rest.jsx | ✅ FULL (card grid + 6-stat, real data) |
 | 7 | Playbooklar | /playbooks | Playbooklar.html | ⏳ |
 | 8 | Otomasyon | /automation? | Otomasyon.html | ⏳ |
 | 9 | Config Drift | /config-drift | Config Drift.html | ⏳ |
