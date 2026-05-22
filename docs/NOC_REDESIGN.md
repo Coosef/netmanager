@@ -27,7 +27,7 @@ NOC look; `.theme-light` flips the design vars.
 | 1 | Cihazlar (Devices) | /devices | pages-devices.jsx · Cihazlar.html | 🟡 `10c4491` header+statbar (table→nm-table pending) |
 | 2 | Uyarılar (/monitor) | /monitor | pages-alerts.jsx · Uyarilar.html | 🟡 header+statbar |
 | 3 | Canlı İzleme (Monitor) | /monitor | pages-monitor.jsx · Canli Izleme.html | ⏳ |
-| 4 | Servisler (Services) | /services | Servisler.html | ⏳ |
+| 4 | Servisler (Services) | /services | Servisler.html | 🟡 header |
 | 5 | Kabinler (Racks) | /racks | pages-racks.jsx · Kabinler.html | ⏳ |
 | 6 | Ajanlar (Agents) | /agents | Ajanlar.html | ⏳ |
 | 7 | Playbooklar | /playbooks | Playbooklar.html | ⏳ |
