@@ -97,17 +97,16 @@ const makeTV_CSS = (isDark: boolean) => `
 @keyframes tvPulse    { 0%,100%{opacity:0.7} 50%{opacity:1} }
 @keyframes tvBorderPulse { 0%,100%{border-color:rgba(34, 211, 197,0.09)} 50%{border-color:rgba(34, 211, 197,0.22)} }
 .tv-card {
-  background: ${isDark ? 'rgba(14, 23, 41,0.94)' : 'rgba(255,255,255,0.97)'};
-  border: 1px solid ${isDark ? 'rgba(34, 211, 197,0.09)' : 'rgba(59,130,246,0.12)'};
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   position: relative;
   overflow: hidden;
   animation: tvFadeIn 0.4s ease-out both;
   transition: border-color 0.25s, box-shadow 0.25s;
 }
 .tv-card:hover {
-  border-color: ${isDark ? 'rgba(34, 211, 197,0.22)' : 'rgba(59,130,246,0.28)'};
+  border-color: var(--accent-line);
   box-shadow: ${isDark ? '0 4px 28px rgba(34, 211, 197,0.07)' : '0 4px 28px rgba(59,130,246,0.12)'};
 }
 .tv-card::after {
@@ -230,46 +229,27 @@ function RingGauge({ pct, color, size = 96 }: { pct: number; color: string; size
 }
 
 // ── Neon stat card ────────────────────────────────────────────────────────────
+// T8.4 — design nm-kpi card (nm-hero strip). Keeps count-up + sparkline.
 function StatCard({ icon, label, value, sub, color, onClick, trend }: {
   icon: React.ReactNode; label: string; value: number | string
   sub?: string; color: string; onClick?: () => void; trend?: number[]
 }) {
-  const { C } = useDash()
   const numVal = typeof value === 'number' ? value : 0
   const animated = useCountUp(numVal)
   const display = typeof value === 'number' ? animated : value
 
   return (
-    <div
-      className="tv-card"
-      onClick={onClick}
-      style={{
-        padding: '16px 18px',
-        cursor: onClick ? 'pointer' : undefined,
-        borderTop: `2px solid ${color}`,
-        boxShadow: `0 2px 24px ${color}10, inset 0 1px 0 ${color}15`,
-        flex: 1, minWidth: 120,
-      }}
-    >
-      <div className="tv-scan" />
-      <div style={{ position: 'absolute', top: 10, right: 12, color, fontSize: 28, opacity: 0.07 }}>{icon}</div>
-      <div style={{ position: 'relative' }}>
-        <div style={{ color: C.muted, fontSize: 10, fontWeight: 700, letterSpacing: 1.8, textTransform: 'uppercase', marginBottom: 8 }}>
-          {label}
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 6 }}>
-          <div style={{
-            color, fontFamily: 'monospace', fontSize: 34, fontWeight: 900, lineHeight: 1,
-            textShadow: `0 0 22px ${color}55`,
-          }}>
-            {display}
-          </div>
-          {trend && trend.some(v => v > 0) && (
-            <MiniSparkline data={trend} color={color} width={76} height={30} />
-          )}
-        </div>
-        {sub && <div style={{ color: C.dim, fontSize: 10, marginTop: 6 }}>{sub}</div>}
+    <div className="nm-kpi" onClick={onClick}
+      style={{ cursor: onClick ? 'pointer' : undefined, borderTop: `2px solid ${color}` }}>
+      <div className="nm-kpi-label">
+        <span style={{ display: 'inline-flex', color, fontSize: 12 }}>{icon}</span>
+        {label}
       </div>
+      <div className="nm-kpi-value" style={{ color }}>{display}</div>
+      {sub && <div className="nm-kpi-delta">{sub}</div>}
+      {trend && trend.some((v) => v > 0) && (
+        <div className="nm-kpi-spark"><MiniSparkline data={trend} color={color} width={130} height={36} /></div>
+      )}
     </div>
   )
 }
@@ -408,21 +388,25 @@ function SectionBar({ icon, title }: { icon: React.ReactNode; title: string }) {
 }
 
 // ── Card header row ───────────────────────────────────────────────────────────
+// T8.4 — design nm-card-hd header.
 function CardHead({ icon, title, extra, color }: {
   icon: React.ReactNode; title: string; extra?: React.ReactNode; color?: string
 }) {
-  const { C, N } = useDash()
+  const { N } = useDash()
   const resolvedColor = color ?? N.cyan
   return (
     <div style={{
-      padding: '12px 18px',
-      borderBottom: `1px solid ${C.border}`,
+      padding: '11px 16px',
+      borderBottom: '1px solid var(--line-soft)',
       display: 'flex', justifyContent: 'space-between', alignItems: 'center',
     }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ color: resolvedColor }}>{icon}</span>
-        <span style={{ color: C.text, fontWeight: 600, fontSize: 13 }}>{title}</span>
-      </div>
+      <h3 style={{
+        margin: 0, display: 'flex', alignItems: 'center', gap: 8,
+        fontSize: 13, fontWeight: 600, color: 'var(--fg-0)',
+      }}>
+        <span style={{ color: resolvedColor, display: 'inline-flex' }}>{icon}</span>
+        {title}
+      </h3>
       {extra}
     </div>
   )
@@ -636,8 +620,8 @@ export default function DashboardPage() {
         {/* ── Status hero ──────────────────────────────────────────────────────── */}
         <StatusHero s={s} liveEvents={liveEvents} />
 
-        {/* ── Stat cards row ───────────────────────────────────────────────────── */}
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        {/* ── KPI strip (design nm-hero) ───────────────────────────────────────── */}
+        <div className="nm-hero">
           {topStatCards.map((c) => <StatCard key={c.label} {...c} />)}
         </div>
 
