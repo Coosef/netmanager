@@ -113,7 +113,7 @@ export const agentsApi = {
   list: () =>
     client.get<Agent[]>('/agents/').then((r) => r.data),
 
-  create: (data: { name: string }) =>
+  create: (data: { name: string; location_id?: number }) =>
     client.post<Agent & { agent_key: string }>('/agents/', data).then((r) => r.data),
 
   delete: (id: string) =>

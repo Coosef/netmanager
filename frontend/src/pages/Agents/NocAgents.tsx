@@ -6,9 +6,10 @@
 // this is the inventory/overview surface the mockup specifies.
 import { useMemo, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Modal, Input, Button, Typography } from 'antd'
+import { App, Modal, Input, Button, Typography, Select } from 'antd'
 import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
+import { useSite } from '@/contexts/SiteContext'
 import { RobotOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -21,19 +22,28 @@ const hb = (iso: string | null) => (iso ? dayjs(iso).fromNow(true) : '—')
 export default function NocAgents() {
   const qc = useQueryClient()
   const { message } = App.useApp()
+  const { locations, activeLocationId } = useSite()
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newLoc, setNewLoc] = useState<number | undefined>(undefined)
   const [createdKey, setCreatedKey] = useState<{ name: string; id: string; agent_key: string } | null>(null)
   const createMut = useMutation({
-    mutationFn: (name: string) => agentsApi.create({ name }),
+    mutationFn: (vars: { name: string; location_id?: number }) => agentsApi.create(vars),
     onSuccess: (a) => {
       setCreatedKey({ name: a.name, id: a.id, agent_key: a.agent_key })
       setCreateOpen(false); setNewName('')
       qc.invalidateQueries({ queryKey: ['agents-list'] })
       message.success('Ajan oluşturuldu')
     },
-    onError: () => message.error('Ajan oluşturulamadı'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ajan oluşturulamadı'),
   })
+  const submitCreate = () => {
+    const name = newName.trim()
+    const location_id = newLoc ?? activeLocationId ?? undefined
+    if (!name) { message.warning('Ajan adı gerekli'); return }
+    if (location_id == null) { message.warning('Lokasyon seçin'); return }
+    createMut.mutate({ name, location_id })
+  }
 
   const { data: agents = [] } = useQuery({ queryKey: ['agents-list'], queryFn: agentsApi.list, refetchInterval: 30000 })
   const { data: devicesData } = useQuery({ queryKey: ['devices-for-agents'], queryFn: () => devicesApi.list({ limit: 2000 }) })
@@ -106,12 +116,18 @@ export default function NocAgents() {
         </div>
       </div>
 
-      {/* Create agent modal (real: agentsApi.create) */}
+      {/* Create agent modal (real: agentsApi.create — requires location_id) */}
       <Modal open={createOpen} title="Yeni Ajan Kur" onCancel={() => setCreateOpen(false)}
-        onOk={() => newName.trim() && createMut.mutate(newName.trim())}
-        confirmLoading={createMut.isPending} okText="Oluştur" cancelText="İptal">
-        <Input placeholder="Ajan adı (örn. agent-branch-ist)" value={newName}
-          onChange={(e) => setNewName(e.target.value)} onPressEnter={() => newName.trim() && createMut.mutate(newName.trim())} />
+        onOk={submitCreate} confirmLoading={createMut.isPending} okText="Oluştur" cancelText="İptal"
+        okButtonProps={{ disabled: !newName.trim() || (activeLocationId == null && newLoc == null) }}>
+        <Input placeholder="Ajan adı (örn. agent-branch-ist)" value={newName} style={{ marginBottom: 12 }}
+          onChange={(e) => setNewName(e.target.value)} onPressEnter={submitCreate} />
+        <Select placeholder="Lokasyon seç (zorunlu — agent bir lokasyona bağlanır)" value={newLoc}
+          onChange={setNewLoc} style={{ width: '100%' }}
+          options={locations.map((l) => ({ label: l.name, value: l.id }))} />
+        {activeLocationId != null && (
+          <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 6 }}>Seçilmezse aktif lokasyon kullanılır.</div>
+        )}
       </Modal>
 
       {/* One-time agent key after creation */}
