@@ -509,9 +509,15 @@ async def download_installer(
     if platform not in ("linux", "windows"):
         raise HTTPException(status_code=400, detail="platform must be linux or windows")
 
+    # Public, credential-authenticated endpoint: the installer machine has no
+    # user session, so `get_db` carries no RLS context and FORCE ROW LEVEL
+    # SECURITY on `agents` would hide every row (→ 404). Bypass RLS for this
+    # lookup (transaction-local), then authenticate via the agent_key itself.
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
     agent = result.scalar_one_or_none()
-    if not agent:
+    if not agent or not verify_password(agent_key, agent.agent_key_hash):
         raise HTTPException(status_code=404, detail="Agent not found")
 
     if server_url:

@@ -6,13 +6,13 @@
 // this is the inventory/overview surface the mockup specifies.
 import { useMemo, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Space } from 'antd'
+import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Space, Popconfirm } from 'antd'
 import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
-import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined } from '@ant-design/icons'
+import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -38,6 +38,11 @@ export default function NocAgents() {
       message.success('Ajan oluşturuldu')
     },
     onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ajan oluşturulamadı'),
+  })
+  const delMut = useMutation({
+    mutationFn: (id: string) => agentsApi.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents-list'] }); message.success('Ajan silindi') },
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ajan silinemedi'),
   })
   const submitCreate = () => {
     const name = newName.trim()
@@ -166,6 +171,13 @@ export default function NocAgents() {
                     {a.name}
                     {a.version && <span className="nm-pill mono" style={{ fontSize: 9.5 }}>{a.version}</span>}
                   </h3>
+                  <Popconfirm title="Ajan silinsin mi?" description="Agent ve atamaları kaldırılır."
+                    okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
+                    onConfirm={() => delMut.mutate(a.id)}>
+                    <span className="nm-card-x" style={{ opacity: 1, marginLeft: 'auto' }} title="Sil">
+                      <DeleteOutlined />
+                    </span>
+                  </Popconfirm>
                 </div>
                 <div style={{ padding: '6px 18px 18px' }}>
                   <div style={{ display: 'flex', gap: 12, fontSize: 11.5, color: 'var(--fg-2)', marginBottom: 14, flexWrap: 'wrap' }}>
