@@ -2210,7 +2210,6 @@ export default function RacksPage() {
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
   })
 
-  const bg = isDark ? '#070b14' : '#f1f5f9'
   const cardBg = isDark ? '#0d1117' : '#ffffff'
   const borderCol = isDark ? '#1e2a3a' : '#e2e8f0'
   const textPrimary = isDark ? '#e2e8f0' : '#1e293b'
@@ -2242,33 +2241,13 @@ export default function RacksPage() {
   }
 
   return (
-    <div style={{ padding: 24, background: bg, minHeight: '100vh' }}>
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : '#ffffff',
-        border: `1px solid ${isDark ? '#3b82f620' : borderCol}`,
-        borderLeft: '4px solid #3b82f6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-        marginBottom: 20,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#3b82f620', border: '1px solid #3b82f630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <HddOutlined style={{ color: '#3b82f6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: textPrimary, fontWeight: 700, fontSize: 16 }}>Kabin Yönetimi</div>
-            <div style={{ color: textSecondary, fontSize: 12 }}>Cihazları fiziksel kabinlere yerleştirin · PDU, UPS ve diğer ekipmanları yönetin</div>
-          </div>
+    <div style={{ padding: '4px 2px', background: 'var(--bg-0)', minHeight: '100%' }}>
+      {/* Header (NOC design) */}
+      <div className="nm-page-hd">
+        <div>
+          <div className="nm-crumbs"><span>Envanter</span><span>Kabinler</span></div>
+          <h1 className="nm-page-title">Kabin Yönetimi</h1>
+          <div className="nm-page-sub">Cihazları fiziksel kabinlere yerleştirin · PDU, UPS ve diğer ekipmanları yönetin</div>
         </div>
         <Space>
           <Button.Group>
