@@ -110,6 +110,12 @@ async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
         title=title,
         message=f"Agent {agent.id} ({agent.machine_hostname or agent.last_ip or '?'})",
         details={"agent_id": agent.id, "platform": agent.platform, "version": agent.version},
+        # Stamp the agent's own org/location explicitly. The WS connection is
+        # RLS-scoped to the agent (not super-admin), and the transaction-local
+        # GUCs are cleared by the status commit before this emit — so the
+        # auto-stamp can't resolve org here. The agent record is the source.
+        organization_id=agent.organization_id,
+        location_id=agent.location_id,
     )
     db.add(ev)
 
@@ -1147,6 +1153,16 @@ async def agent_websocket(
         if allowed and client_ip not in allowed:
             await websocket.close(code=4003)
             return
+
+    # Authenticated via agent_key — now NARROW from the lookup bypass to the
+    # agent's OWN org/location so the rest of the connection is RLS-scoped,
+    # not super-admin (Faz 7 Phase 6e: agent ops scoped to the agent's scope).
+    await db.execute(_sql_text(
+        "SELECT set_config('app.is_super_admin','off',true),"
+        "       set_config('app.current_org_id', :o, true),"
+        "       set_config('app.current_location_id', :l, true)"
+    ), {"o": str(agent.organization_id),
+        "l": str(agent.location_id) if agent.location_id is not None else ''})
 
     await websocket.accept()
 
