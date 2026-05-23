@@ -157,6 +157,31 @@ export default function NocRacks() {
     },
     onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Yerleştirilemedi'),
   })
+  const createItemMut = useMutation({
+    mutationFn: (vars: { rackName: string; label: string; item_type: string; unit_start: number; unit_height: number; notes?: string }) =>
+      racksApi.createItem(vars.rackName, {
+        label: vars.label, item_type: vars.item_type,
+        unit_start: vars.unit_start, unit_height: vars.unit_height, notes: vars.notes,
+      }),
+    onSuccess: () => {
+      if (active) qc.invalidateQueries({ queryKey: ['rack-detail', active] })
+      qc.invalidateQueries({ queryKey: ['racks-list'] })
+      setPlaceAtU(null)
+      message.success('Item kabine eklendi')
+    },
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Eklenemedi'),
+  })
+
+  // Lokasyon kapsamında daha önce kullanılmış item_type değerleri — kullanıcı
+  // bir kez "kumanda" yazınca bir sonraki seferde listede görür. Tek DB +
+  // RLS (organization_id + location_id) sayesinde başka lokasyon görmüyor.
+  const knownItemTypes = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of Object.values(detailByName)) {
+      for (const it of r.items) if (it.item_type) s.add(it.item_type)
+    }
+    return Array.from(s).sort()
+  }, [detailByName])
 
   return (
     <div className="nm-page" style={{ padding: '4px 2px' }}>
@@ -212,8 +237,20 @@ export default function NocRacks() {
                   {activeDetail.devices.length} cihaz · {activeDetail.items.length} item · {activeDetail.total_u}U
                 </div>
               </div>
-              <div style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--fg-3)' }}>
-                Boş U'ya tıkla → cihaz yerleştir
+              <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>Boş U'ya tıkla veya</span>
+                <button className="nm-btn primary" style={{ height: 26, fontSize: 11 }}
+                  onClick={() => {
+                    // İlk uygun boş U'yu bul; yoksa U1 fallback.
+                    const totalU = activeDetail.total_u
+                    const occupied = new Set<number>()
+                    for (const d of activeDetail.devices) for (let i = 0; i < (d.rack_height || 1); i++) occupied.add(d.rack_unit + i)
+                    for (const it of activeDetail.items) for (let i = 0; i < (it.unit_height || 1); i++) occupied.add(it.unit_start + i)
+                    let u = 1; while (u <= totalU && occupied.has(u)) u++
+                    if (u > totalU) { message.warning('Kabinde boş U yok'); return }
+                    let max = 0; for (let i = u; i <= totalU; i++) { if (occupied.has(i)) break; max++ }
+                    setPlaceAtU({ u, maxHeight: max })
+                  }}>+ Cihaz / Item Ekle</button>
               </div>
             </div>
             <RackFrame detail={activeDetail}
@@ -248,12 +285,20 @@ export default function NocRacks() {
         onSubmit={(v) => createMut.mutate(v)} loading={createMut.isPending} />
 
       {placeAtU && activeDetail && (
-        <PlaceDeviceModal open onClose={() => setPlaceAtU(null)}
+        <PlaceModal open onClose={() => setPlaceAtU(null)}
           rackName={activeDetail.rack_name} u={placeAtU.u} maxHeight={placeAtU.maxHeight}
-          loading={placeMut.isPending}
-          onSubmit={(deviceId, height) => placeMut.mutate({
+          knownItemTypes={knownItemTypes}
+          deviceLoading={placeMut.isPending}
+          itemLoading={createItemMut.isPending}
+          onPlaceDevice={(deviceId, height) => placeMut.mutate({
             deviceId, rack_name: activeDetail.rack_name, rack_unit: placeAtU.u, rack_height: height,
-          })} />
+          })}
+          onCreateItem={(vars) => createItemMut.mutate({
+            rackName: activeDetail.rack_name,
+            label: vars.label, item_type: vars.item_type,
+            unit_start: placeAtU.u, unit_height: vars.height, notes: vars.notes,
+          })}
+        />
       )}
     </div>
   )
@@ -486,51 +531,167 @@ function ItemList({ detail, onRemove }: { detail: RackDetail; onRemove: (itemId:
   )
 }
 
-// ── Place device modal ────────────────────────────────────────────────────
-// Boş U'ya tıklanınca: atanmamış cihazlardan birini seç + yükseklik (1U/2U/4U)
-// ver → racksApi.setPlacement çağrılır. Cihaz oluşturmaz, mevcut envanterden
-// yerleştirme yapar (mockup'taki katalog/özel ürün ekleme bizim sistemde
-// "Cihaz Yönetimi" sayfasından — orada eklenmiş henüz yerleştirilmemiş
-// cihazlar burada gözüküyor).
-function PlaceDeviceModal({ open, onClose, rackName, u, maxHeight, loading, onSubmit }:
-  { open: boolean; onClose: () => void; rackName: string; u: number; maxHeight: number; loading: boolean
-    onSubmit: (deviceId: number, height: number) => void }) {
-  const { data: unassigned = [], isLoading } = useQuery({
+// ── Place modal (dual mode: Cihaz Yerleştir / Item Ekle) ──────────────────
+// Boş U'ya tıklanınca veya "+ Cihaz / Item Ekle" butonundan açılır.
+//
+// Mode A — "Cihaz Yerleştir": atanmamış cihazlardan birini seç + yükseklik
+//   gir → racksApi.setPlacement (yeni cihaz oluşturmaz, mevcut envanterden
+//   yerleştirir).
+// Mode B — "Item Ekle": PDU / UPS / patch panel gibi rack elemanları.
+//   item_type bir Select — katalogdaki standart türler + bu lokasyonda daha
+//   önce kullanılmış custom türler bir arada. Listede yoksa "Elle yaz" ile
+//   istediğin string'i ver — backend free-form kaydeder, bir sonraki sefer
+//   katalogda görürsün (RLS sayesinde başka lokasyon görmez).
+const STD_ITEM_TYPES = ['pdu', 'ups', 'patch_panel', 'cable_tray', 'fan', 'shelf', 'kvm', 'blank', 'other']
+
+function PlaceModal({
+  open, onClose, rackName, u, maxHeight, knownItemTypes,
+  deviceLoading, itemLoading, onPlaceDevice, onCreateItem,
+}: {
+  open: boolean
+  onClose: () => void
+  rackName: string
+  u: number
+  maxHeight: number
+  knownItemTypes: string[]
+  deviceLoading: boolean
+  itemLoading: boolean
+  onPlaceDevice: (deviceId: number, height: number) => void
+  onCreateItem: (vars: { label: string; item_type: string; height: number; notes?: string }) => void
+}) {
+  const { data: unassigned = [], isLoading: unLoading } = useQuery({
     queryKey: ['rack-unassigned'],
     queryFn: () => racksApi.unassigned(),
     enabled: open,
   })
+
+  const [mode, setMode] = useState<'device' | 'item'>('device')
+  // Mode A
   const [deviceId, setDeviceId] = useState<number | undefined>(undefined)
-  const [height, setHeight] = useState<number>(1)
-  const submit = () => { if (deviceId != null) onSubmit(deviceId, Math.max(1, Math.min(maxHeight, height))) }
+  const [devHeight, setDevHeight] = useState<number>(1)
+  // Mode B
+  const [itemLabel, setItemLabel] = useState('')
+  const [itemTypeMode, setItemTypeMode] = useState<'select' | 'custom'>('select')
+  const [itemTypeSel, setItemTypeSel] = useState<string | undefined>(undefined)
+  const [itemTypeCustom, setItemTypeCustom] = useState('')
+  const [itemHeight, setItemHeight] = useState<number>(1)
+  const [itemNotes, setItemNotes] = useState('')
+
+  // Standart türler + bu lokasyondaki daha önce kullanılmış custom türler.
+  const typeOptions = useMemo(() => {
+    const all = new Set<string>([...STD_ITEM_TYPES, ...knownItemTypes])
+    return Array.from(all).sort()
+  }, [knownItemTypes])
+
+  const submit = () => {
+    if (mode === 'device') {
+      if (deviceId != null) onPlaceDevice(deviceId, Math.max(1, Math.min(maxHeight, devHeight)))
+      return
+    }
+    const t = (itemTypeMode === 'custom' ? itemTypeCustom : itemTypeSel || '').trim()
+    if (!itemLabel.trim() || !t) return
+    onCreateItem({
+      label: itemLabel.trim(), item_type: t,
+      height: Math.max(1, Math.min(maxHeight, itemHeight)),
+      notes: itemNotes.trim() || undefined,
+    })
+  }
+  const okDisabled = mode === 'device'
+    ? deviceId == null
+    : (!itemLabel.trim() || !(itemTypeMode === 'custom' ? itemTypeCustom.trim() : itemTypeSel))
+
   return (
-    <Modal open={open} onCancel={onClose} onOk={submit} okText="Yerleştir" cancelText="İptal"
-      title={`${rackName} · U${u} — Cihaz Yerleştir`} confirmLoading={loading}
-      okButtonProps={{ disabled: deviceId == null }}
-      afterClose={() => { setDeviceId(undefined); setHeight(1) }}>
+    <Modal open={open} onCancel={onClose} onOk={submit}
+      okText={mode === 'device' ? 'Yerleştir' : 'Ekle'} cancelText="İptal"
+      title={`${rackName} · U${u} — Ekle`}
+      confirmLoading={mode === 'device' ? deviceLoading : itemLoading}
+      okButtonProps={{ disabled: okDisabled }}
+      afterClose={() => {
+        setMode('device'); setDeviceId(undefined); setDevHeight(1)
+        setItemLabel(''); setItemTypeMode('select'); setItemTypeSel(undefined)
+        setItemTypeCustom(''); setItemHeight(1); setItemNotes('')
+      }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ fontSize: 12, color: 'var(--fg-2)' }}>
-          U{u} pozisyonu için max <strong>{maxHeight}U</strong> ardışık boşluk var.
-          Yerleştirilecek cihaz, "Cihazlar" sayfasında mevcut ama henüz hiçbir kabine atanmamış olmalı
-          ({unassigned.length} aday bulundu).
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className={`nm-btn ${mode === 'device' ? 'primary' : 'ghost'}`} style={{ flex: 1, height: 30 }}
+            onClick={() => setMode('device')}>Cihaz Yerleştir</button>
+          <button className={`nm-btn ${mode === 'item' ? 'primary' : 'ghost'}`} style={{ flex: 1, height: 30 }}
+            onClick={() => setMode('item')}>Item Ekle (PDU / UPS / patch / …)</button>
         </div>
-        <div>
-          <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Cihaz</div>
-          <Select<number> showSearch placeholder={isLoading ? 'Yükleniyor…' : 'Atanmamış cihazlardan seç…'}
-            value={deviceId} onChange={setDeviceId} loading={isLoading} style={{ width: '100%' }}
-            options={unassigned.map((d) => ({
-              value: d.id,
-              label: `${d.hostname} — ${d.ip_address}${d.vendor ? ' · ' + d.vendor : ''}${d.model ? ' · ' + d.model : ''}`,
-            }))}
-            filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
-            notFoundContent={isLoading ? 'Yükleniyor…' : 'Atanmamış cihaz bulunamadı'} />
+        <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
+          U{u} için max <strong style={{ color: 'var(--fg-2)' }}>{maxHeight}U</strong> ardışık boşluk var.
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Yükseklik</span>
-          <InputNumber min={1} max={maxHeight} value={height}
-            onChange={(v) => setHeight(typeof v === 'number' ? v : 1)} style={{ width: 100 }} />
-          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>U (1–{maxHeight})</span>
-        </div>
+
+        {mode === 'device' ? (
+          <>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Cihaz</div>
+              <Select<number> showSearch placeholder={unLoading ? 'Yükleniyor…' : 'Atanmamış cihazlardan seç…'}
+                value={deviceId} onChange={setDeviceId} loading={unLoading} style={{ width: '100%' }}
+                options={unassigned.map((d) => ({
+                  value: d.id,
+                  label: `${d.hostname} — ${d.ip_address}${d.vendor ? ' · ' + d.vendor : ''}${d.model ? ' · ' + d.model : ''}`,
+                }))}
+                filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
+                notFoundContent={unLoading ? 'Yükleniyor…' : 'Atanmamış cihaz bulunamadı'} />
+              <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 4 }}>
+                Yerleştirilecek cihaz, "Cihazlar" sayfasında mevcut ama henüz hiçbir kabine atanmamış olmalı
+                ({unassigned.length} aday).
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Yükseklik</span>
+              <InputNumber min={1} max={maxHeight} value={devHeight}
+                onChange={(v) => setDevHeight(typeof v === 'number' ? v : 1)} style={{ width: 100 }} />
+              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>U (1–{maxHeight})</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Etiket</div>
+              <Input placeholder='örn. "PDU-A1-Sol" / "Patch Panel 48p"'
+                value={itemLabel} onChange={(e) => setItemLabel(e.target.value)} autoFocus />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>Tür</span>
+                <button className={`nm-btn ${itemTypeMode === 'select' ? 'primary' : 'ghost'}`}
+                  style={{ height: 22, fontSize: 10.5, padding: '0 8px' }}
+                  onClick={() => setItemTypeMode('select')}>Listeden seç</button>
+                <button className={`nm-btn ${itemTypeMode === 'custom' ? 'primary' : 'ghost'}`}
+                  style={{ height: 22, fontSize: 10.5, padding: '0 8px' }}
+                  onClick={() => setItemTypeMode('custom')}>Elle yaz</button>
+              </div>
+              {itemTypeMode === 'select' ? (
+                <Select<string> showSearch placeholder="Tür seç (pdu / ups / patch_panel / …)"
+                  value={itemTypeSel} onChange={setItemTypeSel} style={{ width: '100%' }}
+                  options={typeOptions.map((t) => ({ value: t, label: t }))}
+                  filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
+                  notFoundContent="Tür bulunamadı — 'Elle yaz' ile özel tür ekle" />
+              ) : (
+                <>
+                  <Input placeholder='örn. "kumandalı-switch", "kvm-2u"'
+                    value={itemTypeCustom} onChange={(e) => setItemTypeCustom(e.target.value)} />
+                  <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 4 }}>
+                    Eklediğin tür bu lokasyonda kayıtlı kalır, bir sonraki seferde listede çıkar.
+                  </div>
+                </>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Yükseklik</span>
+              <InputNumber min={1} max={maxHeight} value={itemHeight}
+                onChange={(v) => setItemHeight(typeof v === 'number' ? v : 1)} style={{ width: 100 }} />
+              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>U (1–{maxHeight})</span>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Not <span style={{ color: 'var(--fg-3)' }}>(opsiyonel)</span></div>
+              <Input.TextArea rows={2} placeholder="örn. seri no, watt, port sayısı…"
+                value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} />
+            </div>
+          </>
+        )}
       </div>
     </Modal>
   )
