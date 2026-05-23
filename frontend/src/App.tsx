@@ -13,6 +13,7 @@ import i18n from './i18n'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
+import { CustomizeProvider } from '@/contexts/CustomizeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
 import { authApi } from '@/api/auth'
@@ -287,9 +288,11 @@ export default function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
-          <SiteProvider>
-            <ThemedApp />
-          </SiteProvider>
+          <CustomizeProvider>
+            <SiteProvider>
+              <ThemedApp />
+            </SiteProvider>
+          </CustomizeProvider>
         </ThemeProvider>
       </QueryClientProvider>
     </ErrorBoundary>

@@ -5,6 +5,7 @@ import AppHeader from './Header'
 import GlobalSearchModal from './GlobalSearchModal'
 import LocationGate from './LocationGate'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useCustomize } from '@/contexts/CustomizeContext'
 import { useAlarmWatcher } from '@/hooks/useAlarmWatcher'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
@@ -29,6 +30,7 @@ const BOTTOM_NAV_ITEMS = [
 
 export default function AppLayout() {
   const { isDark } = useTheme()
+  const { menuPosition } = useCustomize()
   const location = useLocation()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
@@ -60,7 +62,7 @@ export default function AppLayout() {
     // `.theme-light` class flips the design CSS variables for light mode.
     <div className={`nm-app-shell ${isDark ? '' : 'theme-light'}`} style={{ height: '100vh', overflow: 'hidden' }}>
       <style>{LAYOUT_CSS}</style>
-      <div className="nm-root menu-side">
+      <div className={`nm-root menu-${menuPosition}`}>
         <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
         <div className="nm-main" style={{ gridTemplateRows: 'auto 1fr' }}>
           <AppHeader

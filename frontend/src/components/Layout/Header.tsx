@@ -5,8 +5,9 @@ import {
   BellOutlined, ReloadOutlined, SearchOutlined,
   SunOutlined, MoonOutlined, CheckOutlined,
   WarningOutlined, CloseCircleOutlined, InfoCircleOutlined,
-  LaptopOutlined, MenuOutlined,
+  LaptopOutlined, MenuOutlined, BgColorsOutlined,
 } from '@ant-design/icons'
+import CustomizePanel from '@/components/CustomizePanel'
 import { useNavigate } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuthStore } from '@/store/auth'
@@ -47,6 +48,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
 
   const [notifOpen, setNotifOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
   const searchRef = useRef<HTMLDivElement>(null)
   const [pwModalOpen, setPwModalOpen] = useState(false)
   const [pwForm] = Form.useForm()
@@ -297,6 +299,17 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           style={{ padding: '0 8px' }}
         />
       </Tooltip>
+
+      {/* Özelleştir paneli — tema/yoğunluk/aksent/menü */}
+      <Tooltip title="Özelleştir">
+        <Button
+          type="text"
+          icon={<BgColorsOutlined style={{ color: iconColor, fontSize: 16 }} />}
+          onClick={() => setCustomizeOpen(true)}
+          style={{ padding: '0 8px' }}
+        />
+      </Tooltip>
+      <CustomizePanel open={customizeOpen} onClose={() => setCustomizeOpen(false)} />
 
       {!isMobile && <Popover
         open={searchOpen && search.trim().length >= 2}
