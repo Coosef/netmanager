@@ -105,6 +105,23 @@ export interface OrgUpdatePayload {
   plan_id?: number | null
 }
 
+/** RBAC F5 — payload for /super-admin/orgs POST. The first admin user
+ *  is provisioned in the same transaction as the org itself; both the
+ *  org + that user appear atomically (no half-created orgs). */
+export interface OrgCreatePayload {
+  name: string
+  slug: string
+  description?: string
+  contact_email?: string
+  plan_id?: number
+  trial_days?: number          // default 14 on the backend
+  // First admin user — required
+  admin_username: string
+  admin_email: string
+  admin_password: string
+  admin_full_name?: string
+}
+
 export const superadminApi = {
   getSystemStats: () =>
     client.get<SystemStats>('/super-admin/system-stats').then((r) => r.data),
@@ -147,4 +164,10 @@ export const superadminApi = {
 
   updateOrg: (orgId: number, payload: OrgUpdatePayload) =>
     client.patch<Organization>(`/super-admin/orgs/${orgId}`, payload).then((r) => r.data),
+
+  /** Create a new organization and its first admin user atomically.
+   *  Super-admin only. Backend validates slug uniqueness + format
+   *  (`^[a-z0-9-]+$`) and provisions default permission sets. */
+  createOrg: (payload: OrgCreatePayload) =>
+    client.post<Organization>('/super-admin/orgs', payload).then((r) => r.data),
 }
