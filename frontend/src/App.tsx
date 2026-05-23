@@ -77,39 +77,42 @@ const queryClient = new QueryClient({
 // T8.4 — dark theme retuned to the NOC design palette (canvas #070b18,
 // panels #0e1729, borders #1c2538, teal accent #22d3c5) + IBM Plex Sans.
 const NOC_FONT = "'IBM Plex Sans', system-ui, -apple-system, sans-serif"
+// Dark tokens — kullanıcı geri bildirimine göre lacivert tonlar yerine
+// nötr koyu gri/siyaha yakın renkler (noc.css'in :root --bg-X tokenleriyle
+// senkron). Eski navy '#070b18'/'#0e1729' yerine '#131418'/'#1a1c20' vb.
 const DARK_TOKENS = {
   algorithm: theme.darkAlgorithm,
   token: {
     colorPrimary: '#3b82f6',
     colorInfo: '#22d3c5',
-    colorBgBase: '#070b18',
-    colorBgContainer: '#0e1729',
-    colorBgElevated: '#0e1729',
-    colorBgLayout: '#070b18',
-    colorBorder: '#1c2538',
-    colorBorderSecondary: '#16202f',
-    colorText: '#d7e6f5',
-    colorTextSecondary: '#94a3b8',
-    colorTextTertiary: '#64748b',
+    colorBgBase: '#131418',
+    colorBgContainer: '#1a1c20',
+    colorBgElevated: '#1a1c20',
+    colorBgLayout: '#131418',
+    colorBorder: '#2a2c30',
+    colorBorderSecondary: '#22242a',
+    colorText: '#e5e7eb',
+    colorTextSecondary: '#9ca3af',
+    colorTextTertiary: '#6b7280',
     borderRadius: 8,
     fontFamily: NOC_FONT,
   },
   components: {
-    Layout: { siderBg: '#0b1322', headerBg: '#0b1322', bodyBg: '#070b18' },
+    Layout: { siderBg: '#161719', headerBg: '#161719', bodyBg: '#131418' },
     Menu: {
-      darkItemBg: '#0b1322', darkSubMenuItemBg: '#0b1322',
+      darkItemBg: '#161719', darkSubMenuItemBg: '#161719',
       darkItemSelectedBg: 'rgba(59,130,246,0.20)', darkItemSelectedColor: '#60a5fa',
-      darkItemHoverBg: '#0e1729',
+      darkItemHoverBg: '#1e2025',
     },
-    Card: { colorBgContainer: '#0e1729', colorBorderSecondary: '#1c2538' },
-    Table: { colorBgContainer: '#0e1729', headerBg: '#0a1120', rowHoverBg: '#142236' },
-    Modal: { contentBg: '#0e1729', headerBg: '#0e1729', footerBg: '#0e1729' },
-    Drawer: { colorBgElevated: '#0e1729' },
-    Select: { colorBgContainer: '#0e1729', colorBgElevated: '#0e1729' },
-    Input: { colorBgContainer: '#0e1729', colorBorder: '#1c2538' },
-    Tabs: { colorBorderSecondary: '#1c2538' },
-    Popover: { colorBgElevated: '#0e1729' },
-    Tooltip: { colorBgSpotlight: '#1c2538' },
+    Card: { colorBgContainer: '#1a1c20', colorBorderSecondary: '#2a2c30' },
+    Table: { colorBgContainer: '#1a1c20', headerBg: '#16181c', rowHoverBg: '#23262d' },
+    Modal: { contentBg: '#1a1c20', headerBg: '#1a1c20', footerBg: '#1a1c20' },
+    Drawer: { colorBgElevated: '#1a1c20' },
+    Select: { colorBgContainer: '#1a1c20', colorBgElevated: '#1a1c20' },
+    Input: { colorBgContainer: '#1a1c20', colorBorder: '#2a2c30' },
+    Tabs: { colorBorderSecondary: '#2a2c30' },
+    Popover: { colorBgElevated: '#1a1c20' },
+    Tooltip: { colorBgSpotlight: '#2a2c30' },
     Segmented: { itemSelectedBg: '#3b82f6' },
   },
 }
@@ -156,32 +159,34 @@ function PermRoute({ children, module, action }: { children: React.ReactNode; mo
   return can(module, action) ? <>{children}</> : <Navigate to="/" replace />
 }
 
+// GLOBAL_CSS_DARK — DARK_TOKENS ile aynı palet (nötr koyu gri/siyah);
+// eski lacivert tonları (#070b18/#0e1729) yenisiyle değiştirildi.
 const GLOBAL_CSS_DARK = `
   :root { color-scheme: dark; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #070b18; }
-  ::-webkit-scrollbar-thumb { background: #1c2538; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #2a3a52; }
-  ::selection { background: #22d3c540; color: #d7e6f5; }
+  ::-webkit-scrollbar-track { background: #131418; }
+  ::-webkit-scrollbar-thumb { background: #2a2c30; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3c42; }
+  ::selection { background: #22d3c540; color: #e5e7eb; }
   .ant-card { transition: box-shadow 0.2s, border-color 0.2s; }
   .ant-card:hover { box-shadow: 0 4px 20px rgba(34,211,197,0.08) !important; }
   .ant-table-row { transition: background 0.1s; }
   .ant-btn-primary { box-shadow: 0 0 12px rgba(59,130,246,0.25) !important; }
   .ant-table-placeholder { background: transparent !important; }
-  .ant-table-placeholder .ant-empty-description { color: #475569 !important; }
+  .ant-table-placeholder .ant-empty-description { color: #6b7280 !important; }
   .ant-table-placeholder .ant-empty-image svg { opacity: 0.25; }
   .ant-table-placeholder td { border-bottom: none !important; }
-  .perm-user-row td { border-bottom: 1px solid #16202f !important; }
+  .perm-user-row td { border-bottom: 1px solid #22242a !important; }
   .perm-user-row:last-child td { border-bottom: none !important; }
-  .ant-modal-content { background: #0e1729 !important; border: 1px solid #1c2538 !important; }
-  .ant-modal-header { background: #0e1729 !important; border-bottom: 1px solid #1c2538 !important; }
-  .ant-modal-footer { border-top: 1px solid #1c2538 !important; }
-  .ant-modal-title { color: #d7e6f5 !important; }
-  .ant-select-dropdown { background: #0e1729 !important; border: 1px solid #1c2538 !important; }
-  .ant-select-item { color: #94a3b8 !important; }
-  .ant-select-item-option-active { background: #142236 !important; }
+  .ant-modal-content { background: #1a1c20 !important; border: 1px solid #2a2c30 !important; }
+  .ant-modal-header { background: #1a1c20 !important; border-bottom: 1px solid #2a2c30 !important; }
+  .ant-modal-footer { border-top: 1px solid #2a2c30 !important; }
+  .ant-modal-title { color: #e5e7eb !important; }
+  .ant-select-dropdown { background: #1a1c20 !important; border: 1px solid #2a2c30 !important; }
+  .ant-select-item { color: #9ca3af !important; }
+  .ant-select-item-option-active { background: #23262d !important; }
   .ant-select-item-option-selected { background: #1d4ed820 !important; color: #60a5fa !important; }
-  .ant-select-dropdown .ant-empty-description { color: #475569 !important; }
+  .ant-select-dropdown .ant-empty-description { color: #6b7280 !important; }
 `
 
 const GLOBAL_CSS_LIGHT = `

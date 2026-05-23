@@ -2,17 +2,19 @@
 /* IBM Plex Sans + IBM Plex Mono */
 
 :root {
-  /* Dark theme (default) */
-  --bg-0: oklch(0.16 0.012 250);          /* page bg */
-  --bg-1: oklch(0.19 0.014 250);          /* card bg */
-  --bg-2: oklch(0.22 0.014 250);          /* hover/elevated */
-  --bg-3: oklch(0.26 0.014 250);          /* inputs/sunken */
-  --line: oklch(0.30 0.012 250 / 0.6);    /* border */
-  --line-soft: oklch(0.28 0.012 250 / 0.4);
+  /* Dark theme (default) — kullanıcı geri bildirimine göre lacivert tonlar
+     yerine daha nötr koyu gri/siyaha yakın. Chroma 0.012→0.004 düşürüldü
+     (mavi tini neredeyse kaldırıldı) ve genel lightness biraz koyulaştı. */
+  --bg-0: oklch(0.13 0.004 250);          /* page bg — neredeyse siyah */
+  --bg-1: oklch(0.16 0.005 250);          /* card bg */
+  --bg-2: oklch(0.19 0.005 250);          /* hover/elevated */
+  --bg-3: oklch(0.23 0.006 250);          /* inputs/sunken */
+  --line: oklch(0.28 0.005 250 / 0.6);    /* border */
+  --line-soft: oklch(0.25 0.005 250 / 0.4);
   --fg-0: oklch(0.96 0.005 250);          /* primary text */
-  --fg-1: oklch(0.82 0.008 250);          /* secondary */
-  --fg-2: oklch(0.62 0.012 250);          /* tertiary */
-  --fg-3: oklch(0.48 0.012 250);          /* muted */
+  --fg-1: oklch(0.82 0.006 250);          /* secondary */
+  --fg-2: oklch(0.62 0.008 250);          /* tertiary */
+  --fg-3: oklch(0.48 0.008 250);          /* muted */
 
   /* Accent (teal) */
   --accent: oklch(0.80 0.14 175);
@@ -1671,8 +1673,13 @@
   visibility: hidden;
   transform: translateY(-4px);
   transition: opacity .14s, transform .14s, visibility .14s;
-  z-index: 50;
+  /* AppHeader (.nm-topbar) z-index 100; dropdown'ın AppHeader üzerine
+     çıkıp tıklanabilir kalması için 200. */
+  z-index: 200;
 }
+/* nm-tn-group da yüksek z-index alsın ki dropdown'ı barındıran konteyner
+   da AppHeader üzerinde kalsın (hover state'i koruyabilelim). */
+.nm-tn-group { z-index: 150; }
 /* Invisible bridge to keep hover when mouse crosses the 4px gap */
 .nm-tn-dropdown::before {
   content: "";

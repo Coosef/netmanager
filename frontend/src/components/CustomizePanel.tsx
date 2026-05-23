@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons'
 import { useTheme } from '@/contexts/ThemeContext'
 import {
-  useCustomize, ACCENT_PRESETS, PRESET_LAYOUTS,
+  useCustomize, ACCENT_PALETTES, PRESET_LAYOUTS,
   type Density, type MenuPosition, type ViewVariant,
 } from '@/contexts/CustomizeContext'
 import { useNocWall } from '@/contexts/NocWallContext'
@@ -23,7 +23,8 @@ interface Props { open: boolean; onClose: () => void }
 export default function CustomizePanel({ open, onClose }: Props) {
   const { isDark, toggle } = useTheme()
   const {
-    density, setDensity, menuPosition, setMenuPosition, accent, setAccent,
+    density, setDensity, menuPosition, setMenuPosition,
+    accent, accentPalette, setAccent, setAccentPalette,
     viewVariant, setViewVariant, soundEnabled, setSoundEnabled,
     editMode, setEditMode, savedLayouts, saveLayout, applyLayout, deleteLayout, reset,
   } = useCustomize()
@@ -115,10 +116,16 @@ export default function CustomizePanel({ open, onClose }: Props) {
         {/* HAZIR LAYOUT'LAR */}
         <Section title="Hazır Layout'lar" sub="Rol bazlı preset'ler — tek tıkla uygula">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {PRESET_LAYOUTS.map((p) => (
-              <PresetRow key={p.id} name={p.name} sub={p.sub} accent={p.config.accent || '#22d3c5'}
-                onClick={() => applyLayout(p.id)} />
-            ))}
+            {PRESET_LAYOUTS.map((p) => {
+              const palette = p.config.paletteName
+                ? ACCENT_PALETTES.find((x) => x.name === p.config.paletteName)
+                : undefined
+              return (
+                <PresetRow key={p.id} name={p.name} sub={p.sub}
+                  swatchColors={palette?.colors ?? ['#22d3c5', '#22c55e', '#f59e0b']}
+                  onClick={() => applyLayout(p.id)} />
+              )
+            })}
           </div>
         </Section>
 
@@ -210,24 +217,42 @@ export default function CustomizePanel({ open, onClose }: Props) {
           </div>
         </Section>
 
-        {/* AKSAN RENGİ */}
-        <Section title="Aksan Rengi" sub="Vurgu ve aktif öğeler">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 8, marginBottom: 10 }}>
-            {ACCENT_PRESETS.map((p) => {
-              const isActive = accent.toLowerCase() === p.hex.toLowerCase()
+        {/* AKSAN RENGİ — 3-renkli paletler */}
+        <Section title="Aksan Rengi" sub="3-renkli paletler — primary / secondary / tertiary tüm UI'a uygulanır">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 10 }}>
+            {ACCENT_PALETTES.map((p) => {
+              const isActive = accentPalette.name === p.name
               return (
-                <div key={p.hex} title={`${p.name} · ${p.hex}`} onClick={() => setAccent(p.hex)}
-                  style={{
-                    aspectRatio: '1', background: p.hex, borderRadius: 8, cursor: 'pointer',
-                    border: `2px solid ${isActive ? 'var(--fg-0)' : 'transparent'}`,
-                    boxShadow: isActive ? `0 0 0 1px ${p.hex}` : 'none',
-                    transition: 'all 0.12s',
-                  }} />
+                <div key={p.name} onClick={() => setAccentPalette(p)} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', borderRadius: 8, cursor: 'pointer',
+                  border: `1px solid ${isActive ? 'var(--accent)' : 'var(--line)'}`,
+                  background: isActive ? 'var(--accent-soft)' : 'var(--bg-1)',
+                  transition: 'all 0.12s',
+                }}>
+                  {/* 3 swatch yan yana */}
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    {p.colors.map((c, i) => (
+                      <span key={i} style={{
+                        width: 14, height: 14, borderRadius: 3, background: c,
+                        boxShadow: '0 0 0 1px rgba(0,0,0,0.15) inset',
+                      }} />
+                    ))}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12.5, fontWeight: isActive ? 600 : 500,
+                      color: isActive ? 'var(--accent)' : 'var(--fg-0)',
+                    }}>{p.name}</div>
+                    <div className="mono" style={{ fontSize: 9.5, color: 'var(--fg-3)' }}>{p.colors.join(' · ')}</div>
+                  </div>
+                  {isActive && <CheckOutlined style={{ color: 'var(--accent)', fontSize: 12 }} />}
+                </div>
               )
             })}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--fg-2)' }}>
-            <span>Veya özel:</span>
+            <span>Özel primary:</span>
             <ColorPicker value={accent} onChange={(c) => setAccent(c.toHexString())} size="small" />
             <span className="mono" style={{ color: 'var(--fg-3)' }}>{accent.toUpperCase()}</span>
           </div>
@@ -333,8 +358,8 @@ function ChoiceCard({ active, onClick, icon, label, sub, thumb }:
   )
 }
 
-function PresetRow({ name, sub, accent, onClick }:
-  { name: string; sub: string; accent: string; onClick: () => void }) {
+function PresetRow({ name, sub, swatchColors, onClick }:
+  { name: string; sub: string; swatchColors: readonly string[]; onClick: () => void }) {
   return (
     <div onClick={onClick} style={{
       display: 'flex', alignItems: 'center', gap: 10,
@@ -345,7 +370,11 @@ function PresetRow({ name, sub, accent, onClick }:
       cursor: 'pointer',
       transition: 'all 0.12s',
     }}>
-      <span style={{ width: 10, height: 10, borderRadius: 3, background: accent, flexShrink: 0 }} />
+      <div style={{ display: 'flex', gap: 3, flexShrink: 0 }}>
+        {swatchColors.map((c, i) => (
+          <span key={i} style={{ width: 11, height: 11, borderRadius: 3, background: c }} />
+        ))}
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg-0)' }}>{name}</div>
         <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>{sub}</div>

@@ -25,25 +25,26 @@ export interface PresetLayout {
     density: Density
     menuPosition: MenuPosition
     viewVariant: ViewVariant
-    accent: string
+    paletteName: string        // ACCENT_PALETTES'tan birinin adı
+    accent: string             // veya doğrudan hex (geriye uyumluluk)
   }>
 }
 export const PRESET_LAYOUTS: PresetLayout[] = [
   {
     id: 'operator', name: 'Operatör', sub: 'Olay akışı + topoloji ön planda',
-    config: { density: 'regular', menuPosition: 'side', viewVariant: 'workspace', accent: '#22d3c5' },
+    config: { density: 'regular', menuPosition: 'side', viewVariant: 'workspace', paletteName: 'Mint' },
   },
   {
     id: 'admin', name: 'Network Admin', sub: 'Risk, drift, onaylar, uyumluluk',
-    config: { density: 'compact', menuPosition: 'side', viewVariant: 'workspace', accent: '#3b82f6' },
+    config: { density: 'compact', menuPosition: 'side', viewVariant: 'workspace', paletteName: 'Ocean' },
   },
   {
     id: 'exec', name: 'Yönetici', sub: 'Editorial brief — günlük özet',
-    config: { density: 'spacious', menuPosition: 'top', viewVariant: 'editorial', accent: '#a3e635' },
+    config: { density: 'spacious', menuPosition: 'top', viewVariant: 'editorial', paletteName: 'Lime' },
   },
   {
     id: 'wall', name: 'NOC Duvarı', sub: 'Mission control — duvar ekranı',
-    config: { density: 'compact', menuPosition: 'top', viewVariant: 'mission', accent: '#f97316' },
+    config: { density: 'compact', menuPosition: 'top', viewVariant: 'mission', paletteName: 'Sunset' },
   },
 ]
 
@@ -57,6 +58,7 @@ export interface SavedLayout {
     menuPosition: MenuPosition
     viewVariant: ViewVariant
     accent: string
+    paletteName: string
   }
 }
 
@@ -65,40 +67,55 @@ interface CustomizeCtx {
   setDensity: (d: Density) => void
   menuPosition: MenuPosition
   setMenuPosition: (p: MenuPosition) => void
-  accent: string                              // hex string, örn. "#22d3c5"
-  setAccent: (hex: string) => void
+  // accent: artık 3 renkli palet — primary `accent`, secondary `info`, tertiary `warn`.
+  // Tek-renk seçim için custom hex'i 3'üne de uygula (info/warn'u kendi default'una bırak veya hex'in alt-renklerine).
+  accent: string                              // primary hex (örn. "#5eead4")
+  accentPalette: AccentPalette                // 3 renkli palet (preset veya custom)
+  setAccent: (hex: string) => void            // sadece primary'yi değiştirir (custom mod)
+  setAccentPalette: (p: AccentPalette) => void
   viewVariant: ViewVariant
   setViewVariant: (v: ViewVariant) => void
   soundEnabled: boolean
   setSoundEnabled: (v: boolean) => void
-  playBeep: () => void                        // kritik alarm geldiğinde useAlarmWatcher çağırır
+  playBeep: () => void
   editMode: boolean
   setEditMode: (v: boolean) => void
   savedLayouts: SavedLayout[]
   saveLayout: (name: string) => void
-  applyLayout: (id: string) => void          // saved veya preset id
+  applyLayout: (id: string) => void
   deleteLayout: (id: string) => void
   reset: () => void
 }
 
-// Defaults (NOC mint teal — noc.css'in :root --accent değeriyle yakın hex).
-const DEFAULT_ACCENT = '#22d3c5'
+// Defaults — NOC mint paletini varsayılan olarak kullan.
 const DEFAULT_DENSITY: Density = 'regular'
 const DEFAULT_MENU: MenuPosition = 'side'
 const DEFAULT_SOUND = false                   // varsayılan sessiz — kullanıcı isteyince açar
 const DEFAULT_VIEW: ViewVariant = 'workspace'
 
-// Önceden tanımlı renk paletleri — kullanıcı custom hex de girebilir.
-export const ACCENT_PRESETS: { name: string; hex: string }[] = [
-  { name: 'Mint',   hex: '#22d3c5' },   // default NOC
-  { name: 'Cyan',   hex: '#06b6d4' },
-  { name: 'Blue',   hex: '#3b82f6' },
-  { name: 'Violet', hex: '#8b5cf6' },
-  { name: 'Pink',   hex: '#ec4899' },
-  { name: 'Orange', hex: '#f97316' },
-  { name: 'Lime',   hex: '#a3e635' },
-  { name: 'Rose',   hex: '#f43f5e' },
+// 3-renkli aksent paletleri — mockup customize-panel.jsx ACCENT_PALETTES.
+// Her palet [primary (--accent), secondary (--info), tertiary (--warn-soft
+// vurgu)] üçlüsünden oluşur. Kullanıcı tek hex de seçebilir (custom).
+export interface AccentPalette {
+  name: string
+  colors: [string, string, string]   // [primary, secondary, tertiary]
+}
+export const ACCENT_PALETTES: AccentPalette[] = [
+  { name: 'Mint',   colors: ['#5eead4', '#22c55e', '#f59e0b'] },
+  { name: 'Vivid',  colors: ['#8b5cf6', '#3b82f6', '#ec4899'] },
+  { name: 'Lime',   colors: ['#a3e635', '#eab308', '#f97316'] },
+  { name: 'Ocean',  colors: ['#0ea5e9', '#10b981', '#f43f5e'] },
+  { name: 'Sunset', colors: ['#f97316', '#fb7185', '#facc15'] },
+  { name: 'Slate',  colors: ['#94a3b8', '#cbd5e1', '#f1f5f9'] },
 ]
+// Geriye uyumluluk için tek-renk preset listesi (CustomizePanel'in
+// custom hex section'unda kullanılır).
+export const ACCENT_PRESETS: { name: string; hex: string }[] =
+  ACCENT_PALETTES.map((p) => ({ name: p.name, hex: p.colors[0] }))
+
+// Default palette — Mint (NOC teal+green+orange).
+const DEFAULT_PALETTE: AccentPalette = ACCENT_PALETTES[0]
+const DEFAULT_ACCENT: string = DEFAULT_PALETTE.colors[0]
 
 const CustomizeContext = createContext<CustomizeCtx>({
   density: DEFAULT_DENSITY,
@@ -106,7 +123,9 @@ const CustomizeContext = createContext<CustomizeCtx>({
   menuPosition: DEFAULT_MENU,
   setMenuPosition: () => {},
   accent: DEFAULT_ACCENT,
+  accentPalette: DEFAULT_PALETTE,
   setAccent: () => {},
+  setAccentPalette: () => {},
   viewVariant: DEFAULT_VIEW,
   setViewVariant: () => {},
   soundEnabled: DEFAULT_SOUND,
@@ -124,6 +143,7 @@ const CustomizeContext = createContext<CustomizeCtx>({
 const LS_DENSITY = 'nm-customize-density'
 const LS_MENU = 'nm-customize-menu'
 const LS_ACCENT = 'nm-customize-accent'
+const LS_PALETTE = 'nm-customize-palette'    // palette name (Mint/Vivid/...) veya 'custom'
 const LS_SOUND = 'nm-customize-sound'
 const LS_VIEW = 'nm-customize-view'
 const LS_SAVED = 'nm-customize-saved'
@@ -139,6 +159,12 @@ function loadMenu(): MenuPosition {
 function loadAccent(): string {
   const v = localStorage.getItem(LS_ACCENT)
   return v && /^#[0-9a-fA-F]{6}$/.test(v) ? v : DEFAULT_ACCENT
+}
+function loadPalette(): AccentPalette {
+  const name = localStorage.getItem(LS_PALETTE)
+  if (!name) return DEFAULT_PALETTE
+  const found = ACCENT_PALETTES.find((p) => p.name === name)
+  return found ?? DEFAULT_PALETTE
 }
 function loadSound(): boolean {
   return localStorage.getItem(LS_SOUND) === 'on'
@@ -192,6 +218,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const [density, setDensityState] = useState<Density>(loadDensity)
   const [menuPosition, setMenuState] = useState<MenuPosition>(loadMenu)
   const [accent, setAccentState] = useState<string>(loadAccent)
+  const [accentPalette, setPaletteState] = useState<AccentPalette>(loadPalette)
   const [soundEnabled, setSoundState] = useState<boolean>(loadSound)
   const [viewVariant, setViewState] = useState<ViewVariant>(loadView)
   const [editMode, setEditModeState] = useState<boolean>(false)
@@ -213,17 +240,32 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     document.body.classList.add(`menu-${menuPosition}`)
   }, [menuPosition])
 
-  // accent — :root'taki 3 değişkeni inline override. document.documentElement
-  // <html> seviyesinde set ediyoruz ki noc.css'in :root değerini ezsin.
+  // accent + palette — 3 rengi de :root'a uygula:
+  //   primary  → --accent + --accent-soft + --accent-line
+  //   secondary→ --info + --info-soft         (var olan secondary slot)
+  //   tertiary → --warn yerine alternatif vurgu kanalı; bu sürümde
+  //              status warn'a dokunmuyoruz çünkü kritik/uyarı semantik
+  //              (sarı/turuncu doku); palette tertiary'sini sadece
+  //              CSS custom property `--accent-2` olarak expose ediyoruz
+  //              (Dashboard widget'ları kullanabilsin).
   useEffect(() => {
     localStorage.setItem(LS_ACCENT, accent)
+    localStorage.setItem(LS_PALETTE, accentPalette.name)
     const root = document.documentElement
-    root.style.setProperty('--accent', accent)
-    // noc.css'in :root default'unda --accent-soft alpha 0.14 (≈36/255),
-    // --accent-line alpha 0.35 (≈89/255). Aynı oranları koruyalım.
-    root.style.setProperty('--accent-soft', hexAlpha(accent, 36))
-    root.style.setProperty('--accent-line', hexAlpha(accent, 89))
-  }, [accent])
+    const [primary, secondary, tertiary] = accentPalette.colors
+    // Aktif palette varsa onun renklerini kullan; kullanıcı custom hex
+    // seçtiyse (accent !== primary), primary'yi accent'le ezeriz.
+    const eff = accent.toLowerCase() === primary.toLowerCase() ? primary : accent
+    root.style.setProperty('--accent', eff)
+    root.style.setProperty('--accent-soft', hexAlpha(eff, 36))
+    root.style.setProperty('--accent-line', hexAlpha(eff, 89))
+    // Secondary → --info (link/info accent)
+    root.style.setProperty('--info', secondary)
+    root.style.setProperty('--info-soft', hexAlpha(secondary, 36))
+    // Tertiary → ek slot. Dashboard widget'ları "--accent-2" ile alabilir.
+    root.style.setProperty('--accent-2', tertiary)
+    root.style.setProperty('--accent-2-soft', hexAlpha(tertiary, 36))
+  }, [accent, accentPalette])
 
   // soundEnabled persistence
   useEffect(() => {
@@ -251,7 +293,15 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
 
   const playBeep = () => { if (soundEnabled) playAlertBeep() }
 
+  // Palette değişince accent'i palette'in primary'sine al — kullanıcı
+  // bir palette seçtiğinde "Mint primary"yi otomatik aktif etmek için.
+  const setAccentPalette = (p: AccentPalette) => {
+    setPaletteState(p)
+    setAccentState(p.colors[0])
+  }
+
   // Bir preset veya saved layout uygula — id'ye bakar.
+  // preset.config.paletteName ile palette de değiştirilebilir.
   const applyLayout = (id: string) => {
     const preset = PRESET_LAYOUTS.find((p) => p.id === id)
     if (preset) {
@@ -259,7 +309,12 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
       if (c.density) setDensityState(c.density)
       if (c.menuPosition) setMenuState(c.menuPosition)
       if (c.viewVariant) setViewState(c.viewVariant)
-      if (c.accent) setAccentState(c.accent)
+      if (c.paletteName) {
+        const p = ACCENT_PALETTES.find((x) => x.name === c.paletteName)
+        if (p) { setPaletteState(p); setAccentState(p.colors[0]) }
+      } else if (c.accent) {
+        setAccentState(c.accent)
+      }
       return
     }
     const saved = savedLayouts.find((s) => s.id === id)
@@ -267,6 +322,8 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
       setDensityState(saved.config.density)
       setMenuState(saved.config.menuPosition)
       setViewState(saved.config.viewVariant)
+      const p = ACCENT_PALETTES.find((x) => x.name === saved.config.paletteName)
+      if (p) setPaletteState(p)
       setAccentState(saved.config.accent)
     }
   }
@@ -281,7 +338,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
         id: `s${Date.now()}`,
         name: trimmed,
         ts: Date.now(),
-        config: { density, menuPosition, viewVariant, accent },
+        config: { density, menuPosition, viewVariant, accent, paletteName: accentPalette.name },
       },
     ])
   }
@@ -292,6 +349,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const reset = () => {
     setDensityState(DEFAULT_DENSITY)
     setMenuState(DEFAULT_MENU)
+    setPaletteState(DEFAULT_PALETTE)
     setAccentState(DEFAULT_ACCENT)
     setSoundState(DEFAULT_SOUND)
     setViewState(DEFAULT_VIEW)
@@ -302,7 +360,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     <CustomizeContext.Provider value={{
       density, setDensity: setDensityState,
       menuPosition, setMenuPosition: setMenuState,
-      accent, setAccent: setAccentState,
+      accent, accentPalette, setAccent: setAccentState, setAccentPalette,
       viewVariant, setViewVariant: setViewState,
       soundEnabled, setSoundEnabled: setSoundState,
       playBeep,
