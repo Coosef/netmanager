@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import {
   Table, Tag, Input, Select, Space, Typography, Modal, Descriptions,
-  Badge, Tooltip, Button, DatePicker, Collapse, Statistic, Row, Col,
+  Badge, Tooltip, Button, DatePicker, Collapse,
 } from 'antd'
 import {
   InfoCircleOutlined, ClockCircleOutlined, GlobalOutlined, CodeOutlined,
-  FileSearchOutlined, DownloadOutlined, UserOutlined, WarningOutlined,
-  TeamOutlined,
+  DownloadOutlined, UserOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -282,72 +281,39 @@ export default function AuditLogPage() {
       }),
   })
 
+  const successCount = (data?.total ?? 0) - (data?.failure_count ?? 0)
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{AUDIT_CSS}</style>
 
-      {/* Header + Stats */}
-      <div style={{
-        background: isDark
-          ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)'
-          : C.bg,
-        border: `1px solid ${isDark ? '#3b82f620' : C.border}`,
-        borderLeft: `4px solid #3b82f6`,
-        borderRadius: 12,
-        padding: '16px 20px',
-        animation: isDark ? 'auditHeaderGlow 4s ease-in-out infinite' : undefined,
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{
-              width: 36, height: 36, borderRadius: 8,
-              background: '#3b82f620', border: '1px solid #3b82f630',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <FileSearchOutlined style={{ color: '#3b82f6', fontSize: 18 }} />
-            </div>
-            <div>
-              <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>
-                Denetim Kaydı
-                <Text style={{ color: C.dim, fontSize: 13, fontWeight: 400, marginLeft: 8 }}>({data?.total || 0})</Text>
-              </div>
-              <div style={{ color: C.muted, fontSize: 12 }}>Tüm kullanıcı aksiyonlarının denetim kaydı</div>
-            </div>
-          </div>
-          <Button
-            icon={<DownloadOutlined />}
-            onClick={() => data?.items && exportCSV(data.items)}
-            disabled={!data?.items?.length}
-          >
-            CSV İndir
-          </Button>
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>Denetim Kaydı</span></div>
+          <h1 className="nm-page-title">
+            Denetim Kaydı
+            <span className="nm-pill mono">{data?.total ?? 0} kayıt</span>
+            {(data?.failure_count ?? 0) > 0 && <span className="nm-pill crit">{data?.failure_count} başarısız</span>}
+          </h1>
+          <div className="nm-page-sub">Tüm kullanıcı aksiyonlarının denetim kaydı — kim, ne zaman, hangi kaynağa, hangi IP'den.</div>
         </div>
+        <div className="nm-page-actions">
+          <button className="nm-btn primary" onClick={() => data?.items && exportCSV(data.items)} disabled={!data?.items?.length}>
+            <DownloadOutlined /> CSV İndir
+          </button>
+        </div>
+      </div>
 
-        {/* Stats row */}
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          {[
-            { icon: <FileSearchOutlined />, title: 'Toplam Kayıt', value: data?.total ?? 0, color: '#3b82f6' },
-            { icon: <WarningOutlined />, title: 'Başarısız', value: data?.failure_count ?? 0, color: '#ef4444' },
-            { icon: <TeamOutlined />, title: 'Benzersiz Kullanıcı', value: data?.unique_users ?? 0, color: '#8b5cf6' },
-          ].map(({ icon, title, value, color }) => (
-            <Col key={title} xs={8} sm={8}>
-              <div style={{
-                background: `${color}0d`, border: `1px solid ${color}25`,
-                borderRadius: 8, padding: '10px 14px',
-                display: 'flex', alignItems: 'center', gap: 10,
-              }}>
-                <span style={{ color, fontSize: 18 }}>{icon}</span>
-                <Statistic
-                  title={<span style={{ fontSize: 11, color: C.muted }}>{title}</span>}
-                  value={value}
-                  valueStyle={{ fontSize: 20, color, lineHeight: 1 }}
-                />
-              </div>
-            </Col>
-          ))}
-        </Row>
+      <div className="nm-statbar">
+        <div className="nm-stat"><div className="nm-stat-label">Toplam Kayıt</div><div className="nm-stat-val">{data?.total ?? 0}</div></div>
+        <div className="nm-stat ok"><div className="nm-stat-label">Başarılı</div><div className="nm-stat-val">{successCount}</div></div>
+        <div className="nm-stat crit"><div className="nm-stat-label">Başarısız</div><div className="nm-stat-val">{data?.failure_count ?? 0}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">Benzersiz Kullanıcı</div><div className="nm-stat-val">{data?.unique_users ?? 0}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">Sayfa</div><div className="nm-stat-val">{page}</div><div className="nm-stat-delta">/ {Math.max(1, Math.ceil((data?.total ?? 0) / 50))}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">Görüntülenen</div><div className="nm-stat-val">{data?.items?.length ?? 0}</div></div>
+      </div>
 
-        {/* Filters */}
+      {/* Filter card */}
+      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
         <Space wrap>
           <Input.Search
             placeholder="Kullanıcı ara..."
