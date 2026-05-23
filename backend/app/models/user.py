@@ -124,6 +124,32 @@ class User(Base):
         without coordination."""
         return self.system_role
 
+    @role.setter
+    def role(self, value: str) -> None:
+        """Back-compat writer — accept the legacy `role` kwarg from older
+        call sites (UserCreate.role, UserUpdate.role, invite acceptance)
+        and forward it to system_role. Without this setter `User(role=…)`
+        and `setattr(user, "role", …)` both raise AttributeError because
+        Mapped attributes don't fall back to the @property shim above.
+        Legacy values are normalised: 'admin' → 'org_admin',
+        'org_viewer' → 'viewer', 'operator' → 'viewer',
+        'location_*' → 'location_admin'. Anything that already matches a
+        live SystemRole passes through unchanged."""
+        if value is None:
+            return
+        v = str(value).strip().lower()
+        legacy_map = {
+            # Faz 7 / M4 consolidation: old free-form values → 4-role model.
+            "admin":              "org_admin",
+            "org_viewer":         "viewer",
+            "operator":           "viewer",
+            "location_manager":   "location_admin",
+            "location_operator":  "location_admin",
+            "location_viewer":    "viewer",
+            "member":             "viewer",  # deprecated alias
+        }
+        self.system_role = legacy_map.get(v, v)
+
     @property
     def is_super_admin(self) -> bool:
         return self.system_role == SystemRole.SUPER_ADMIN
