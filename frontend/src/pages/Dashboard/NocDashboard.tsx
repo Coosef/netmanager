@@ -4,6 +4,16 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { CloseOutlined, HolderOutlined } from '@ant-design/icons'
+import {
+  DndContext, closestCenter, KeyboardSensor, PointerSensor,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  arrayMove, SortableContext, sortableKeyboardCoordinates,
+  useSortable, rectSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import { tasksApi } from '@/api/tasks'
 import { agentsApi } from '@/api/agents'
@@ -11,8 +21,11 @@ import { slaApi } from '@/api/sla'
 import { intelligenceApi } from '@/api/intelligence'
 import { servicesApi } from '@/api/services'
 import { approvalsApi } from '@/api/approvals'
+import { backupSchedulesApi } from '@/api/backupSchedules'
+import { devicesApi } from '@/api/devices'
 import { useEventStream } from '@/hooks/useEventStream'
 import { useSite } from '@/contexts/SiteContext'
+import { useCustomize, ALL_WIDGETS } from '@/contexts/CustomizeContext'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -95,9 +108,27 @@ function Donut({ value, label, color = 'var(--ok)' }: { value: number; label: st
 const sevPill = (s: string) => (s === 'critical' ? 'crit' : s === 'warning' ? 'warn' : s === 'info' ? 'info' : 'ok')
 
 // ── page ──────────────────────────────────────────────────────────────────
+// Span per widget id — Dashboard grid (12 cols). Tutarlı görünüm için
+// sabit map; user reorder etse de span'lar widget'a göre sabit.
+const WIDGET_SPAN: Record<string, string> = {
+  topo: 'span-5',
+  events: 'span-4',
+  services: 'span-3',
+  worst: 'span-4',
+  approvals: 'span-4',
+  agents: 'span-4',
+  risk: 'span-4',
+  sla: 'span-4',
+  anomalies: 'span-4',
+  drift: 'span-4',
+  probes: 'span-4',
+  vendors: 'span-4',
+}
+
 export default function NocDashboard() {
   const navigate = useNavigate()
   const { activeSite } = useSite()
+  const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget } = useCustomize()
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
 
   const { data: s } = useQuery({ queryKey: ['monitor-stats', activeSite], queryFn: () => monitorApi.getStats({ site: activeSite || undefined }), refetchInterval: 30000 })
@@ -108,6 +139,9 @@ export default function NocDashboard() {
   const { data: fleetImpact } = useQuery({ queryKey: ['fleet-impact-summary'], queryFn: servicesApi.getFleetImpact, refetchInterval: 120000 })
   const { data: anomalyData } = useQuery({ queryKey: ['behavior-anomalies'], queryFn: () => intelligenceApi.getAnomalies(24, 30), refetchInterval: 120000 })
   const { data: approvalCount } = useQuery({ queryKey: ['approval-pending-count'], queryFn: approvalsApi.pendingCount, refetchInterval: 30000 })
+  // Drift / probes / vendors — yeni widget'lar için
+  const { data: driftReport } = useQuery({ queryKey: ['dashboard-drift'], queryFn: () => backupSchedulesApi.driftReport({ limit: 6 }), refetchInterval: 300000 })
+  const { data: devicesData } = useQuery({ queryKey: ['dashboard-devices-vendors'], queryFn: () => devicesApi.list({ limit: 1000 }), refetchInterval: 120000 })
 
   useEventStream({
     onEvent: (ev: NetworkEvent) => setLiveEvents((prev) => [ev, ...prev].slice(0, 30)),
@@ -164,31 +198,161 @@ export default function NocDashboard() {
           delta="deneyim skoru" dir="up" />
       </div>
 
-      {/* widget grid */}
-      <div className="nm-grid cols-12" style={{ gap: 'var(--gap)', marginTop: 'var(--gap)' }}>
-        {/* Topology preview (compact) */}
-        <Card title="Topoloji Önizleme" pill={{ label: `${offline} down`, kind: offline ? 'crit' : 'ok' }} span="span-5" onTitle={() => navigate('/topology-next')}>
+      {/* widget grid — data-driven, drag-drop edit mode */}
+      <DashboardGrid
+        editMode={editMode}
+        order={widgetOrder}
+        hidden={widgetHidden}
+        setOrder={setWidgetOrder}
+        toggleWidget={toggleWidget}
+        render={(id) => renderWidget(id, {
+          navigate, online, offline, total, events24h, liveEvents,
+          impact, risk, agents, sla, anom, approvalCount, driftReport,
+          devicesData, tasks, now,
+        })}
+      />
+    </div>
+  )
+}
+
+// ── Sortable widget grid ─────────────────────────────────────────────────
+interface WidgetRenderCtx {
+  navigate: (path: string) => void
+  online: number; offline: number; total: number; events24h: number
+  liveEvents: NetworkEvent[]
+  impact: any; risk: any; agents: any[]; sla: any; anom: any
+  approvalCount: any; driftReport: any; devicesData: any
+  tasks: any[]; now: string
+}
+
+function DashboardGrid({ editMode, order, hidden, setOrder, toggleWidget, render }: {
+  editMode: boolean
+  order: string[]
+  hidden: string[]
+  setOrder: (next: string[]) => void
+  toggleWidget: (id: string) => void
+  render: (id: string) => React.ReactNode
+}) {
+  // ALL_WIDGETS dışı id'leri at, hidden'da olanları çıkar.
+  const validIds = ALL_WIDGETS.map((w) => w.id)
+  const visibleIds = order.filter((id) => validIds.includes(id) && !hidden.includes(id))
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  const onDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e
+    if (!over || active.id === over.id) return
+    const from = order.indexOf(String(active.id))
+    const to = order.indexOf(String(over.id))
+    if (from < 0 || to < 0) return
+    setOrder(arrayMove(order, from, to))
+  }
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={visibleIds} strategy={rectSortingStrategy}>
+        <div className="nm-grid cols-12" style={{ gap: 'var(--gap)', marginTop: 'var(--gap)' }}>
+          {visibleIds.map((id) => (
+            <SortableWidget key={id} id={id} span={WIDGET_SPAN[id] || 'span-4'}
+              editMode={editMode}
+              onRemove={() => toggleWidget(id)}>
+              {render(id)}
+            </SortableWidget>
+          ))}
+          {visibleIds.length === 0 && (
+            <div className="span-12" style={{
+              padding: 48, textAlign: 'center', color: 'var(--fg-3)',
+              border: '1px dashed var(--line)', borderRadius: 10,
+            }}>
+              Tüm widget'lar gizli. Özelleştir → Widget Görünürlüğü'nden seçim yap.
+            </div>
+          )}
+        </div>
+      </SortableContext>
+    </DndContext>
+  )
+}
+
+// dnd-kit sortable wrapper — edit mode'da grip + × overlay gösterir.
+function SortableWidget({ id, span, editMode, onRemove, children }: {
+  id: string; span: string; editMode: boolean
+  onRemove: () => void; children: React.ReactNode
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.6 : 1,
+    cursor: editMode ? 'grab' : undefined,
+  }
+  return (
+    <div ref={setNodeRef} className={span} style={style}>
+      <div style={{ position: 'relative', height: '100%' }}>
+        {editMode && (
+          <>
+            <button
+              {...attributes} {...listeners}
+              title="Sürükle"
+              style={{
+                position: 'absolute', top: 8, right: 36, zIndex: 5,
+                width: 26, height: 26, borderRadius: 6,
+                background: 'var(--accent)', color: '#000', border: 'none',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'grab', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}>
+              <HolderOutlined />
+            </button>
+            <button onClick={onRemove} title="Gizle"
+              style={{
+                position: 'absolute', top: 8, right: 8, zIndex: 5,
+                width: 26, height: 26, borderRadius: 6,
+                background: 'var(--crit)', color: '#fff', border: 'none',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+              }}>
+              <CloseOutlined />
+            </button>
+          </>
+        )}
+        {children}
+      </div>
+    </div>
+  )
+}
+
+// Widget id → JSX render. Tüm queries parent'tan ctx ile geçiyor.
+function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
+  const { navigate, online, offline, total, events24h, liveEvents,
+    impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData } = ctx
+
+  switch (id) {
+    case 'topo':
+      return (
+        <Card title="Topoloji Önizleme" pill={{ label: `${offline} down`, kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => navigate('/topology-next')}>
           <TopoMini online={online} offline={offline} total={total} />
         </Card>
-
-        {/* Event feed */}
-        <Card title="Olay Akışı" pill={{ label: `24sa · ${events24h}`, kind: 'accent' }} span="span-4" onTitle={() => navigate('/monitor')}>
-          {liveEvents.length === 0 ? (
-            <Empty>Son 30 dakikada olay yok</Empty>
-          ) : liveEvents.slice(0, 7).map((e, i) => (
-            <div key={i} className="nm-row" style={{ gridTemplateColumns: 'auto auto 1fr' }}>
-              <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10.5 }}>{dayjs(e.created_at).format('HH:mm:ss')}</span>
-              <span className={`nm-pill ${sevPill(e.severity)}`}>{e.severity}</span>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-0)' }}>{e.device_hostname || '—'}</span>
-                <span style={{ color: 'var(--fg-2)', marginLeft: 8, fontSize: 11.5 }}>{e.title}</span>
-              </span>
-            </div>
-          ))}
+      )
+    case 'events':
+      return (
+        <Card title="Olay Akışı" pill={{ label: `24sa · ${events24h}`, kind: 'accent' }} span="span-12" onTitle={() => navigate('/monitor')}>
+          {liveEvents.length === 0 ? <Empty>Son 30 dakikada olay yok</Empty> :
+            liveEvents.slice(0, 7).map((e, i) => (
+              <div key={i} className="nm-row" style={{ gridTemplateColumns: 'auto auto 1fr' }}>
+                <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10.5 }}>{dayjs(e.created_at).format('HH:mm:ss')}</span>
+                <span className={`nm-pill ${sevPill(e.severity)}`}>{e.severity}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-0)' }}>{e.device_hostname || '—'}</span>
+                  <span style={{ color: 'var(--fg-2)', marginLeft: 8, fontSize: 11.5 }}>{e.title}</span>
+                </span>
+              </div>
+            ))}
         </Card>
-
-        {/* Service impact */}
-        <Card title="Servis Etkisi" pill={impact?.critical_count ? { label: `${impact.critical_count} kesinti`, kind: 'crit' } : undefined} span="span-3" onTitle={() => navigate('/services')}>
+      )
+    case 'services':
+      return (
+        <Card title="Servis Etkisi" pill={impact?.critical_count ? { label: `${impact.critical_count} kesinti`, kind: 'crit' } : undefined} span="span-12" onTitle={() => navigate('/services')}>
           {!impact?.affected_services?.length ? <Empty>Etkilenen servis yok</Empty> :
             impact.affected_services.slice(0, 6).map((svc: any) => {
               const st = svc.impact_level === 'critical' ? 'crit' : svc.impact_level === 'high' ? 'warn' : svc.impact_level === 'medium' ? 'warn' : 'ok'
@@ -205,9 +369,10 @@ export default function NocDashboard() {
               )
             })}
         </Card>
-
-        {/* Worst devices */}
-        <Card title="En Sorunlu Cihazlar" pill={{ label: 'son 7g' }} span="span-4" onTitle={() => navigate('/intelligence')}>
+      )
+    case 'worst':
+      return (
+        <Card title="En Sorunlu Cihazlar" pill={{ label: 'son 7g' }} span="span-12" onTitle={() => navigate('/intelligence')}>
           {!risk?.top_risky?.length ? <Empty>Risk verisi yok</Empty> :
             risk.top_risky.slice(0, 5).map((d: any) => {
               const sc = Math.round(d.risk_score ?? 0)
@@ -224,9 +389,10 @@ export default function NocDashboard() {
               )
             })}
         </Card>
-
-        {/* Approvals */}
-        <Card title="Onay Bekleyenler" pill={(approvalCount?.count ?? 0) > 0 ? { label: String(approvalCount?.count), kind: 'warn' } : undefined} span="span-4" onTitle={() => navigate('/approvals')}>
+      )
+    case 'approvals':
+      return (
+        <Card title="Onay Bekleyenler" pill={(approvalCount?.count ?? 0) > 0 ? { label: String(approvalCount?.count), kind: 'warn' } : undefined} span="span-12" onTitle={() => navigate('/approvals')}>
           {(approvalCount?.count ?? 0) === 0 ? <Empty>Bekleyen onay yok</Empty> : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0' }}>
               <div className="mono" style={{ fontSize: 40, color: 'var(--warn)' }}>{approvalCount?.count}</div>
@@ -235,9 +401,10 @@ export default function NocDashboard() {
             </div>
           )}
         </Card>
-
-        {/* Agent fleet */}
-        <Card title="Agent Filosu" pill={{ label: `${agents.filter((a: any) => a.status === 'online').length} online`, kind: 'ok' }} span="span-4" onTitle={() => navigate('/agents')}>
+      )
+    case 'agents':
+      return (
+        <Card title="Agent Filosu" pill={{ label: `${agents.filter((a: any) => a.status === 'online').length} online`, kind: 'ok' }} span="span-12" onTitle={() => navigate('/agents')}>
           {!agents.length ? <Empty>Agent yok</Empty> :
             agents.slice(0, 5).map((a: any) => (
               <div key={a.name || a.id} className="nm-row" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
@@ -250,14 +417,16 @@ export default function NocDashboard() {
               </div>
             ))}
         </Card>
-
-        {/* Risk distribution */}
-        <Card title="Cihaz Risk Dağılımı" pill={{ label: `${risk?.summary?.total_devices ?? total} cihaz` }} span="span-4">
+      )
+    case 'risk':
+      return (
+        <Card title="Cihaz Risk Dağılımı" pill={{ label: `${risk?.summary?.total_devices ?? total} cihaz` }} span="span-12">
           <RiskDist summary={risk?.summary} />
         </Card>
-
-        {/* SLA compliance */}
-        <Card title="SLA Compliance" pill={sla?.avg_uptime_pct >= 99 ? { label: 'hedef üstü', kind: 'ok' } : undefined} span="span-4" onTitle={() => navigate('/sla')}>
+      )
+    case 'sla':
+      return (
+        <Card title="SLA Compliance" pill={sla?.avg_uptime_pct >= 99 ? { label: 'hedef üstü', kind: 'ok' } : undefined} span="span-12" onTitle={() => navigate('/sla')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, alignItems: 'center' }}>
             <Donut value={sla?.avg_uptime_pct ?? 0} label="Fleet SLA" color={(sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : (sla?.avg_uptime_pct ?? 0) >= 95 ? 'var(--warn)' : 'var(--crit)'} />
             <div style={{ fontSize: 11, color: 'var(--fg-2)', lineHeight: 2 }}>
@@ -267,9 +436,10 @@ export default function NocDashboard() {
             </div>
           </div>
         </Card>
-
-        {/* Anomalies */}
-        <Card title="Anormal Davranış" pill={anom?.total ? { label: `${anom.total} son 24sa`, kind: 'warn' } : undefined} span="span-4" onTitle={() => navigate('/intelligence')}>
+      )
+    case 'anomalies':
+      return (
+        <Card title="Anormal Davranış" pill={anom?.total ? { label: `${anom.total} son 24sa`, kind: 'warn' } : undefined} span="span-12" onTitle={() => navigate('/intelligence')}>
           {!anom?.events?.length ? <Empty>Anomali yok</Empty> :
             anom.events.slice(0, 5).map((evt: any, i: number) => (
               <div key={i} className="nm-row" style={{ gridTemplateColumns: '1fr auto' }}>
@@ -284,31 +454,66 @@ export default function NocDashboard() {
               </div>
             ))}
         </Card>
-
-        {/* Recent tasks (replaces probes when no probe data) */}
-        <Card title="Son Görevler" pill={{ label: `${tasks.length}` }} span="span-4" onTitle={() => navigate('/tasks')}>
-          {!tasks.length ? <Empty>Görev yok</Empty> :
-            tasks.slice(0, 6).map((tk: any) => (
-              <div key={tk.id} className="nm-row" style={{ gridTemplateColumns: '1fr auto' }}>
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12, color: 'var(--fg-1)' }}>{tk.name}</span>
-                <span className={`nm-pill ${tk.status === 'success' ? 'ok' : tk.status === 'failed' ? 'crit' : tk.status === 'running' ? 'info' : 'warn'}`}>{tk.status}</span>
+      )
+    case 'drift':
+      return (
+        <Card title="Config Drift" pill={driftReport?.drift_count ? { label: `${driftReport.drift_count} sapma`, kind: 'warn' } : { label: 'temiz', kind: 'ok' }} span="span-12" onTitle={() => navigate('/config-drift')}>
+          {!driftReport?.items?.length ? <Empty>Drift tespit edilmedi</Empty> :
+            driftReport.items.slice(0, 5).map((r: any) => (
+              <div key={r.device_id} className="nm-row" style={{ gridTemplateColumns: '1fr auto' }}>
+                <div style={{ minWidth: 0 }}>
+                  <div className="host" style={{ fontSize: 12 }}>{r.hostname}</div>
+                  <div className="ip">{r.ip || ''} {r.vendor ? `· ${r.vendor}` : ''}</div>
+                </div>
+                <span className={`nm-pill ${r.reason === 'no_backup' ? 'crit' : 'warn'}`}>
+                  {r.reason === 'no_backup' ? 'backup yok' : 'config değişti'}
+                </span>
               </div>
             ))}
         </Card>
-
-        {/* Clock / refresh footer card */}
-        <Card title="Sistem" span="span-4">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div className="mono" style={{ fontSize: 22, color: 'var(--fg-0)' }}>{now}</div>
-              <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>{dayjs().format('DD MMM YYYY, dddd')}</div>
+      )
+    case 'probes':
+      // Probes endpoint yok; placeholder + sayfaya yönlendir
+      return (
+        <Card title="Synthetic Probes" pill={{ label: 'her 60s' }} span="span-12" onTitle={() => navigate('/synthetic-probes')}>
+          <div style={{ padding: '14px 0', textAlign: 'center' }}>
+            <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 8 }}>
+              Probe sonuçları için dedike sayfaya bak
             </div>
-            <button className="nm-pill accent" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/reports')}>Raporlar →</button>
+            <button className="nm-pill accent" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/synthetic-probes')}>
+              Probe'lara git →
+            </button>
           </div>
         </Card>
-      </div>
-    </div>
-  )
+      )
+    case 'vendors': {
+      const items = (devicesData?.items as any[]) || []
+      const vendors = items.reduce<Record<string, number>>((acc, d) => {
+        const v = (d.vendor || 'bilinmeyen').toLowerCase()
+        acc[v] = (acc[v] || 0) + 1
+        return acc
+      }, {})
+      const sorted = Object.entries(vendors).sort((a, b) => b[1] - a[1]).slice(0, 6)
+      const totalCount = items.length || 1
+      return (
+        <Card title="Vendor Dağılımı" pill={{ label: `${items.length} cihaz` }} span="span-12" onTitle={() => navigate('/devices')}>
+          {sorted.length === 0 ? <Empty>Vendor verisi yok</Empty> :
+            sorted.map(([vendor, count]) => {
+              const pct = Math.round((count / totalCount) * 100)
+              return (
+                <div key={vendor} className="nm-row" style={{ gridTemplateColumns: '1fr auto auto' }}>
+                  <span className="mono" style={{ fontSize: 12, color: 'var(--fg-1)', textTransform: 'capitalize' }}>{vendor}</span>
+                  <div className="nm-bar"><div style={{ width: `${pct}%`, background: 'var(--accent)' }} /></div>
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{count} · {pct}%</span>
+                </div>
+              )
+            })}
+        </Card>
+      )
+    }
+    default:
+      return null
+  }
 }
 
 // ── small helpers ───────────────────────────────────────────────────────────

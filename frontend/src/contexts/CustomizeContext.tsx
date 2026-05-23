@@ -80,6 +80,12 @@ interface CustomizeCtx {
   playBeep: () => void
   editMode: boolean
   setEditMode: (v: boolean) => void
+  // Dashboard widget state — visible widgets'ı `hidden` ID listesinde
+  // tutar (visible = ALL_WIDGETS \ hidden); `order` görüntülenme sırası.
+  widgetHidden: string[]
+  toggleWidget: (id: string) => void
+  widgetOrder: string[]
+  setWidgetOrder: (next: string[]) => void
   savedLayouts: SavedLayout[]
   saveLayout: (name: string) => void
   applyLayout: (id: string) => void
@@ -92,6 +98,26 @@ const DEFAULT_DENSITY: Density = 'regular'
 const DEFAULT_MENU: MenuPosition = 'side'
 const DEFAULT_SOUND = false                   // varsayılan sessiz — kullanıcı isteyince açar
 const DEFAULT_VIEW: ViewVariant = 'workspace'
+
+// Tüm widget'lar — mockup customize-panel.jsx ALL_WIDGETS. ID'ler
+// NocDashboard'da render sırasını belirler; hidden listesinde olanlar
+// gizlenir.
+export interface WidgetMeta { id: string; label: string; cat: string }
+export const ALL_WIDGETS: WidgetMeta[] = [
+  { id: 'risk',      label: 'Risk Dağılımı',       cat: 'intelligence' },
+  { id: 'events',    label: 'Olay Akışı',          cat: 'monitoring' },
+  { id: 'topo',      label: 'Topoloji Önizleme',   cat: 'monitoring' },
+  { id: 'services',  label: 'Servis Etkisi',       cat: 'monitoring' },
+  { id: 'worst',     label: 'En Sorunlu Cihazlar', cat: 'intelligence' },
+  { id: 'agents',    label: 'Agent Filosu',        cat: 'monitoring' },
+  { id: 'sla',       label: 'SLA Compliance',      cat: 'intelligence' },
+  { id: 'drift',     label: 'Config Drift',        cat: 'config' },
+  { id: 'approvals', label: 'Onay Bekleyenler',    cat: 'ops' },
+  { id: 'probes',    label: 'Synthetic Probes',    cat: 'monitoring' },
+  { id: 'anomalies', label: 'Anomali Feed',        cat: 'intelligence' },
+  { id: 'vendors',   label: 'Vendor Dağılımı',     cat: 'inventory' },
+]
+const DEFAULT_ORDER = ALL_WIDGETS.map((w) => w.id)
 
 // 3-renkli aksent paletleri — mockup customize-panel.jsx ACCENT_PALETTES.
 // Her palet [primary (--accent), secondary (--info), tertiary (--warn-soft
@@ -133,6 +159,10 @@ const CustomizeContext = createContext<CustomizeCtx>({
   playBeep: () => {},
   editMode: false,
   setEditMode: () => {},
+  widgetHidden: [],
+  toggleWidget: () => {},
+  widgetOrder: DEFAULT_ORDER,
+  setWidgetOrder: () => {},
   savedLayouts: [],
   saveLayout: () => {},
   applyLayout: () => {},
@@ -147,6 +177,8 @@ const LS_PALETTE = 'nm-customize-palette'    // palette name (Mint/Vivid/...) ve
 const LS_SOUND = 'nm-customize-sound'
 const LS_VIEW = 'nm-customize-view'
 const LS_SAVED = 'nm-customize-saved'
+const LS_HIDDEN = 'nm-customize-widget-hidden'
+const LS_ORDER = 'nm-customize-widget-order'
 
 function loadDensity(): Density {
   const v = localStorage.getItem(LS_DENSITY)
@@ -180,6 +212,26 @@ function loadSaved(): SavedLayout[] {
     const arr = JSON.parse(v)
     return Array.isArray(arr) ? arr : []
   } catch { return [] }
+}
+function loadHidden(): string[] {
+  try {
+    const v = localStorage.getItem(LS_HIDDEN)
+    if (!v) return []
+    const arr = JSON.parse(v)
+    return Array.isArray(arr) ? arr.filter((x) => typeof x === 'string') : []
+  } catch { return [] }
+}
+function loadOrder(): string[] {
+  try {
+    const v = localStorage.getItem(LS_ORDER)
+    if (!v) return DEFAULT_ORDER
+    const arr = JSON.parse(v)
+    if (!Array.isArray(arr)) return DEFAULT_ORDER
+    // Ensure all ALL_WIDGETS ids appear in the order — append any missing.
+    const valid = arr.filter((x): x is string => typeof x === 'string' && DEFAULT_ORDER.includes(x))
+    const missing = DEFAULT_ORDER.filter((x) => !valid.includes(x))
+    return [...valid, ...missing]
+  } catch { return DEFAULT_ORDER }
 }
 
 // Web Audio API beep — mockup commandk.jsx'ten port. Kritik alarm
@@ -222,6 +274,8 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const [soundEnabled, setSoundState] = useState<boolean>(loadSound)
   const [viewVariant, setViewState] = useState<ViewVariant>(loadView)
   const [editMode, setEditModeState] = useState<boolean>(false)
+  const [widgetHidden, setWidgetHidden] = useState<string[]>(loadHidden)
+  const [widgetOrder, setWidgetOrderState] = useState<string[]>(loadOrder)
   const [savedLayouts, setSavedLayouts] = useState<SavedLayout[]>(loadSaved)
 
   // density class — sadece bir tane aktif olacak şekilde body'e uygula.
@@ -291,6 +345,19 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     try { localStorage.setItem(LS_SAVED, JSON.stringify(savedLayouts)) } catch { /* quota */ }
   }, [savedLayouts])
 
+  // widget hidden + order persistence
+  useEffect(() => {
+    try { localStorage.setItem(LS_HIDDEN, JSON.stringify(widgetHidden)) } catch { /* quota */ }
+  }, [widgetHidden])
+  useEffect(() => {
+    try { localStorage.setItem(LS_ORDER, JSON.stringify(widgetOrder)) } catch { /* quota */ }
+  }, [widgetOrder])
+
+  const toggleWidget = (id: string) => {
+    setWidgetHidden((prev) => prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id])
+  }
+  const setWidgetOrder = (next: string[]) => setWidgetOrderState(next)
+
   const playBeep = () => { if (soundEnabled) playAlertBeep() }
 
   // Palette değişince accent'i palette'in primary'sine al — kullanıcı
@@ -354,6 +421,8 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     setSoundState(DEFAULT_SOUND)
     setViewState(DEFAULT_VIEW)
     setEditModeState(false)
+    setWidgetHidden([])
+    setWidgetOrderState(DEFAULT_ORDER)
   }
 
   return (
@@ -365,6 +434,8 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
       soundEnabled, setSoundEnabled: setSoundState,
       playBeep,
       editMode, setEditMode: setEditModeState,
+      widgetHidden, toggleWidget,
+      widgetOrder, setWidgetOrder,
       savedLayouts, saveLayout, applyLayout, deleteLayout,
       reset,
     }}>

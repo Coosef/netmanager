@@ -13,7 +13,7 @@ import {
 } from '@ant-design/icons'
 import { useTheme } from '@/contexts/ThemeContext'
 import {
-  useCustomize, ACCENT_PALETTES, PRESET_LAYOUTS,
+  useCustomize, ACCENT_PALETTES, PRESET_LAYOUTS, ALL_WIDGETS,
   type Density, type MenuPosition, type ViewVariant,
 } from '@/contexts/CustomizeContext'
 import { useNocWall } from '@/contexts/NocWallContext'
@@ -26,7 +26,9 @@ export default function CustomizePanel({ open, onClose }: Props) {
     density, setDensity, menuPosition, setMenuPosition,
     accent, accentPalette, setAccent, setAccentPalette,
     viewVariant, setViewVariant, soundEnabled, setSoundEnabled,
-    editMode, setEditMode, savedLayouts, saveLayout, applyLayout, deleteLayout, reset,
+    editMode, setEditMode,
+    widgetHidden, toggleWidget,
+    savedLayouts, saveLayout, applyLayout, deleteLayout, reset,
   } = useCustomize()
   const wall = useNocWall()
   const [layoutName, setLayoutName] = useState('')
@@ -259,14 +261,65 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </Section>
 
         {/* DÜZENLEME MODU */}
-        <Section title="Düzenleme Modu" sub="Dashboard widget reorder + gizle/göster (Dashboard rewrite ile)" icon={<EditOutlined />}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
-            <div style={{ fontSize: 12, color: 'var(--fg-2)', maxWidth: '70%' }}>
-              {editMode
-                ? 'Açık — kartlar sürüklenebilir / gizle-göster modu aktif'
-                : 'Kapalı — Aç ve kartların yerini değiştir'}
+        <Section title="Düzenleme Modu" sub="Dashboard kartlarını sürükle, × ile kaldır" icon={<EditOutlined />}>
+          <button onClick={() => setEditMode(!editMode)} style={{
+            display: 'flex', alignItems: 'center', gap: 12,
+            width: '100%', padding: '12px 14px',
+            border: `1px solid ${editMode ? 'var(--accent)' : 'var(--line)'}`,
+            background: editMode ? 'var(--accent-soft)' : 'var(--bg-1)',
+            borderRadius: 8, cursor: 'pointer', textAlign: 'left',
+          }}>
+            <span style={{
+              width: 32, height: 32, borderRadius: 8,
+              background: editMode ? 'var(--accent)' : 'var(--bg-2)',
+              color: editMode ? '#000' : 'var(--fg-2)',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <EditOutlined />
+            </span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: editMode ? 'var(--accent)' : 'var(--fg-0)' }}>
+                Düzenleme Modu {editMode ? 'AÇIK' : 'KAPALI'}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                {editMode ? 'Kartları sürükleyerek yer değiştir, × ile kaldır' : 'Aç ve kartların yerini değiştir'}
+              </div>
             </div>
-            <Switch checked={editMode} onChange={setEditMode} />
+          </button>
+        </Section>
+
+        {/* WIDGET GÖRÜNÜRLÜĞÜ */}
+        <Section title="Widget Görünürlüğü" sub="Hangi widget'lar dashboard'da görünsün">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {ALL_WIDGETS.map((w) => {
+              const visible = !widgetHidden.includes(w.id)
+              return (
+                <div key={w.id} onClick={() => toggleWidget(w.id)} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '8px 10px', borderRadius: 6,
+                  border: `1px solid ${visible ? 'var(--accent-line, var(--accent))' : 'var(--line)'}`,
+                  background: visible ? 'var(--accent-soft)' : 'var(--bg-1)',
+                  cursor: 'pointer', transition: 'all 0.12s',
+                }}>
+                  <span style={{
+                    width: 18, height: 18, borderRadius: 4, flexShrink: 0,
+                    border: `1.5px solid ${visible ? 'var(--accent)' : 'var(--fg-3)'}`,
+                    background: visible ? 'var(--accent)' : 'transparent',
+                    color: '#000',
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    {visible && <CheckOutlined style={{ fontSize: 10 }} />}
+                  </span>
+                  <span style={{ flex: 1, fontSize: 12.5, color: visible ? 'var(--fg-0)' : 'var(--fg-2)' }}>
+                    {w.label}
+                  </span>
+                  <span style={{
+                    fontSize: 9.5, color: 'var(--fg-3)',
+                    fontFamily: 'var(--font-mono)', textTransform: 'uppercase',
+                  }}>{w.cat}</span>
+                </div>
+              )
+            })}
           </div>
         </Section>
 
