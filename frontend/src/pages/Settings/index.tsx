@@ -2111,28 +2111,16 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'general'
 
-  const C = { bg: isDark ? '#1e293b' : '#ffffff', bg2: isDark ? '#0f172a' : '#f8fafc', border: isDark ? '#334155' : '#e2e8f0', text: isDark ? '#f1f5f9' : '#1e293b', muted: isDark ? '#64748b' : '#94a3b8' }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#64748b20' : C.border}`,
-        borderLeft: '4px solid #64748b',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', alignItems: 'center', gap: 12,
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: '#64748b20', border: '1px solid #64748b30',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        }}>
-          <ToolOutlined style={{ color: '#64748b', fontSize: 20 }} />
-        </div>
-        <div>
-          <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>{t('settings.title')}</div>
-          <div style={{ color: C.muted, fontSize: 12 }}>NetManager v1.0</div>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>{t('settings.title')}</span></div>
+          <h1 className="nm-page-title">
+            {t('settings.title')}
+            <span className="nm-pill mono">NetManager v1.0</span>
+          </h1>
+          <div className="nm-page-sub">Genel ayarlar · bildirim kanalları · API anahtarları · yedek/restore · sürüm.</div>
         </div>
       </div>
 
