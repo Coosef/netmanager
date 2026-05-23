@@ -2013,6 +2013,35 @@ export default function SettingsPage() {
   const { isDark, toggle } = useTheme()
   const currentLang = i18n.language
 
+  // ── nm-statbar gerçek değerler — diğer sayfalar gibi ────────────────────
+  // Her API'nin list endpoint'i var; parallel useQuery'le çekiyoruz.
+  // Hata/loading durumunda 0 gösteriyoruz (sayfa açılınca hemen render olsun).
+  const { data: channels = [] } = useQuery({
+    queryKey: ['settings-stat-channels'],
+    queryFn: () => notificationsApi.list().then((d) => d.items),
+    staleTime: 60_000,
+  })
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['settings-stat-cred-profiles'],
+    queryFn: credentialProfilesApi.list,
+    staleTime: 60_000,
+  })
+  const { data: tokens = [] } = useQuery({
+    queryKey: ['settings-stat-tokens'],
+    queryFn: apiTokensApi.list,
+    staleTime: 60_000,
+  })
+  const { data: rules = [] } = useQuery({
+    queryKey: ['settings-stat-alert-rules'],
+    queryFn: alertRulesApi.list,
+    staleTime: 60_000,
+  })
+  const { data: slaPolicies = [] } = useQuery({
+    queryKey: ['settings-stat-sla'],
+    queryFn: slaApi.listPolicies,
+    staleTime: 60_000,
+  })
+
   function handleLangChange(code: string) {
     i18n.changeLanguage(code)
     localStorage.setItem('nm-lang', code)
@@ -2120,7 +2149,37 @@ export default function SettingsPage() {
             {t('settings.title')}
             <span className="nm-pill mono">NetManager v1.0</span>
           </h1>
-          <div className="nm-page-sub">Genel ayarlar · bildirim kanalları · API anahtarları · yedek/restore · sürüm.</div>
+          <div className="nm-page-sub">Genel ayarlar · bildirim kanalları · uyarı kuralları · SLA politikaları · kimlik & token yönetimi.</div>
+        </div>
+      </div>
+
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">Bildirim Kanalı</div>
+          <div className="nm-stat-val">{channels.length}</div>
+          <div className="nm-stat-delta">{channels.filter((c) => c.is_active).length} aktif</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Uyarı Kuralı</div>
+          <div className="nm-stat-val">{rules.length}</div>
+          <div className="nm-stat-delta">{rules.filter((r) => r.enabled).length} aktif</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SLA Politikası</div>
+          <div className="nm-stat-val">{slaPolicies.length}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Kimlik Profili</div>
+          <div className="nm-stat-val">{profiles.length}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">API Token</div>
+          <div className="nm-stat-val">{tokens.length}</div>
+        </div>
+        <div className="nm-stat ok">
+          <div className="nm-stat-label">Tema</div>
+          <div className="nm-stat-val mono" style={{ fontSize: 18 }}>{isDark ? 'Karanlık' : 'Açık'}</div>
+          <div className="nm-stat-delta">{currentLang.toUpperCase()} · v1.0.0</div>
         </div>
       </div>
 
