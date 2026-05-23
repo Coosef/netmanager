@@ -1,36 +1,21 @@
-import { useState } from 'react'
+// Approvals — NOC redesign (T8.4 B1.4).
+// Table → card grid: her onay talebi 'incident' boyutunda bir nesne; komut +
+// gerekçe + son tarih kartta nefes alıyor. /monitor Uyarılar sayfasıyla aynı
+// görsel dilde (severity stripe + sol border + body + action footer).
+import { useMemo, useState } from 'react'
 import {
   Button, Modal, Popconfirm, Select, Space,
-  Table, Tag, Tooltip, Input, message,
+  Tooltip, Input, message,
 } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, StopOutlined,
-  ExclamationCircleOutlined, ReloadOutlined,
+  ReloadOutlined, ClockCircleOutlined,
+  CodeOutlined, UserOutlined, EyeOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { approvalsApi, type ApprovalRequest } from '@/api/approvals'
 import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
-
-
-const APPROVALS_CSS = `
-@keyframes aprRowIn {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-.apr-row-pending td { background: rgba(245,158,11,0.04) !important; }
-`
-
-function mkC(isDark: boolean) {
-  return {
-    bg:     isDark ? '#1e293b' : '#ffffff',
-    bg2:    isDark ? '#0f172a' : '#f8fafc',
-    border: isDark ? '#334155' : '#e2e8f0',
-    text:   isDark ? '#f1f5f9' : '#1e293b',
-    muted:  isDark ? '#64748b' : '#94a3b8',
-    dim:    isDark ? '#475569' : '#cbd5e1',
-  }
-}
 
 const RISK_HEX: Record<string, string> = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
 const STATUS_HEX: Record<string, string> = {
@@ -48,7 +33,6 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ApprovalsPage() {
   const qc = useQueryClient()
   const { isDark } = useTheme()
-  const C = mkC(isDark)
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [detailModal, setDetailModal] = useState<ApprovalRequest | null>(null)
   const [rejectNote, setRejectNote] = useState('')
@@ -91,145 +75,62 @@ export default function ApprovalsPage() {
     onError: (e: any) => message.error(e?.response?.data?.detail || 'İptal başarısız'),
   })
 
-  const pendingItems = data?.items.filter(r => r.status === 'pending') ?? []
   const items = data?.items ?? []
 
-  const columns = [
-    {
-      title: 'Risk',
-      dataIndex: 'risk_level',
-      width: 90,
-      render: (v: string) => {
-        const hex = RISK_HEX[v] || '#64748b'
-        return <Tag style={{ color: hex, borderColor: hex + '50', background: hex + '18', fontSize: 11 }}>{v.toUpperCase()}</Tag>
-      },
-    },
-    {
-      title: 'Durum',
-      dataIndex: 'status',
-      width: 120,
-      render: (s: string) => {
-        const hex = STATUS_HEX[s] || '#64748b'
-        return (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 7, height: 7, borderRadius: '50%', background: hex, flexShrink: 0 }} />
-            <span style={{ fontSize: 12, color: C.text }}>{STATUS_LABEL[s] ?? s}</span>
-          </span>
-        )
-      },
-    },
-    {
-      title: 'Cihaz',
-      dataIndex: 'device_hostname',
-      width: 160,
-      render: (v: string) => <span style={{ fontWeight: 600, fontSize: 12, color: C.text }}>{v}</span>,
-    },
-    {
-      title: 'Komut',
-      dataIndex: 'command',
-      render: (v: string) => (
-        <code style={{ fontSize: 12, background: isDark ? '#0f172a' : '#f0fdfa', color: isDark ? '#4ec9b0' : '#0d9488', padding: '2px 6px', borderRadius: 3, border: `1px solid ${isDark ? '#134e4a' : '#99f6e4'}` }}>
-          {v}
-        </code>
-      ),
-    },
-    {
-      title: 'Talep Eden',
-      dataIndex: 'requester_username',
-      width: 120,
-      render: (v: string) => <span style={{ fontSize: 12, color: C.muted }}>{v}</span>,
-    },
-    {
-      title: 'Tarih',
-      dataIndex: 'created_at',
-      width: 130,
-      render: (v: string) => <span style={{ fontSize: 12, color: C.muted }}>{dayjs(v).format('DD.MM HH:mm')}</span>,
-    },
-    {
-      title: 'Bitiş',
-      dataIndex: 'expires_at',
-      width: 130,
-      render: (v: string) => {
-        const expired = dayjs(v).isBefore(dayjs())
-        return <span style={{ fontSize: 12, color: expired ? '#ef4444' : C.muted }}>{dayjs(v).format('DD.MM HH:mm')}</span>
-      },
-    },
-    {
-      title: 'İşlemler',
-      width: 180,
-      render: (_: unknown, r: ApprovalRequest) => (
-        <Space>
-          {r.status === 'pending' && (
-            <>
-              <Tooltip title="Onayla ve çalıştır">
-                <Popconfirm
-                  title={<>Komut cihazda çalıştırılacak:<br /><code>{r.command}</code></>}
-                  onConfirm={() => approveMutation.mutate(r.id)}
-                  okText="Onayla"
-                  cancelText="Vazgeç"
-                >
-                  <Button size="small" type="primary" icon={<CheckCircleOutlined />}
-                    loading={approveMutation.isPending} />
-                </Popconfirm>
-              </Tooltip>
-              <Tooltip title="Reddet">
-                <Button size="small" danger icon={<CloseCircleOutlined />}
-                  onClick={() => { setRejectTarget(r); setRejectNote('') }} />
-              </Tooltip>
-              <Tooltip title="İptal (talep sahibi)">
-                <Button size="small" icon={<StopOutlined />}
-                  loading={cancelMutation.isPending}
-                  onClick={() => cancelMutation.mutate(r.id)} />
-              </Tooltip>
-            </>
-          )}
-          <Button size="small" onClick={() => setDetailModal(r)}>Detay</Button>
-        </Space>
-      ),
-    },
-  ]
+  // ── Real-data stats — pulled from the filtered + un-filtered list
+  // (status filter changes the list; bekleyen/bugun stats use the active list
+  // so the bar mirrors what the user is actually looking at). Avg response is
+  // (reviewed_at - created_at) over items that have reviewed_at.
+  const stats = useMemo(() => {
+    const today = dayjs().startOf('day')
+    const now = dayjs()
+    const pending = items.filter((r) => r.status === 'pending').length
+    const approvedToday = items.filter((r) =>
+      r.status === 'executed' && r.reviewed_at && dayjs(r.reviewed_at).isAfter(today),
+    ).length
+    const rejectedToday = items.filter((r) =>
+      r.status === 'rejected' && r.reviewed_at && dayjs(r.reviewed_at).isAfter(today),
+    ).length
+    const highRiskPending = items.filter((r) => r.status === 'pending' && r.risk_level === 'high').length
+    const expiringSoon = items.filter((r) =>
+      r.status === 'pending' && dayjs(r.expires_at).diff(now, 'minute') < 60,
+    ).length
+
+    // Avg response (dakika) for items with both timestamps in the visible list
+    const responded = items.filter((r) => r.reviewed_at)
+    const avgMs = responded.length === 0 ? 0
+      : responded.reduce((s, r) => s + (dayjs(r.reviewed_at!).valueOf() - dayjs(r.created_at).valueOf()), 0) / responded.length
+    const avgMin = Math.round(avgMs / 60_000)
+
+    return { pending, approvedToday, rejectedToday, highRiskPending, expiringSoon, avgMin, total: items.length }
+  }, [items])
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <style>{APPROVALS_CSS}</style>
-
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#f59e0b20' : C.border}`,
-        borderLeft: '4px solid #f59e0b',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#f59e0b20', border: '1px solid #f59e0b30',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <CheckCircleOutlined style={{ color: '#f59e0b', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>
-              Onay Talepleri
-              {pendingItems.length > 0 && (
-                <Tag style={{ marginLeft: 8, fontSize: 11, color: '#ef4444', borderColor: '#ef444450', background: '#ef444418' }}>
-                  {pendingItems.length} bekliyor
-                </Tag>
-              )}
-            </div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Komut onay kuyruğu — 15s otomatik yenileme</div>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>Onay Talepleri</span></div>
+          <h1 className="nm-page-title">
+            Onay Talepleri
+            {stats.pending > 0 && (
+              <span className="nm-pill mono" style={{ color: 'var(--warn)', borderColor: 'var(--warn)' }}>
+                {stats.pending} bekliyor
+              </span>
+            )}
+            <span className="nm-pill mono">{stats.total} toplam</span>
+          </h1>
+          <div className="nm-page-sub">
+            Komut onay kuyruğu · 15s otomatik yenileme · talep eden bekliyor, gözden geç + uygula.
           </div>
         </div>
         <Space>
           <Select
             allowClear
             placeholder="Durum filtrele"
-            style={{ width: 160 }}
+            style={{ width: 170 }}
             value={statusFilter}
             onChange={setStatusFilter}
-            size="small"
             options={[
               { label: 'Bekliyor', value: 'pending' },
               { label: 'Çalıştırıldı', value: 'executed' },
@@ -238,55 +139,95 @@ export default function ApprovalsPage() {
               { label: 'Süresi Doldu', value: 'expired' },
             ]}
           />
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => refetch()}>Yenile</Button>
+          <Button icon={<ReloadOutlined />} onClick={() => refetch()}>Yenile</Button>
         </Space>
       </div>
 
-      {pendingItems.length > 0 && (
-        <div style={{
-          background: isDark ? '#1e293b' : '#fffbeb',
-          border: `1px solid ${isDark ? '#78350f' : '#fde68a'}`,
-          borderLeft: '3px solid #f59e0b',
-          borderRadius: 8, padding: '10px 14px',
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          <ExclamationCircleOutlined style={{ color: '#f59e0b' }} />
-          <span style={{ fontSize: 13, color: C.text }}>
-            <strong style={{ color: '#f59e0b' }}>{pendingItems.length}</strong> onay bekleyen komut var. Aşağıdan inceleyip onaylayabilir veya reddedebilirsiniz.
-          </span>
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className={`nm-stat ${stats.pending > 0 ? 'warn' : 'ok'}`}>
+          <div className="nm-stat-label">BEKLEYEN</div>
+          <div className="nm-stat-val">{stats.pending}</div>
+          <div className="nm-stat-delta">onay kuyruğu</div>
         </div>
-      )}
+        <div className={`nm-stat ${stats.highRiskPending > 0 ? 'crit' : ''}`}>
+          <div className="nm-stat-label">YÜKSEK RİSK</div>
+          <div className="nm-stat-val">{stats.highRiskPending}</div>
+          <div className="nm-stat-delta">pending · risk=high</div>
+        </div>
+        <div className={`nm-stat ${stats.expiringSoon > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">YAKIN SÜRESİ DOLAN</div>
+          <div className="nm-stat-val">{stats.expiringSoon}</div>
+          <div className="nm-stat-delta">&lt; 60 dk</div>
+        </div>
+        <div className="nm-stat ok">
+          <div className="nm-stat-label">BUGÜN ONAYLANAN</div>
+          <div className="nm-stat-val">{stats.approvedToday}</div>
+          <div className="nm-stat-delta">başarılı çalıştı</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">BUGÜN REDDEDİLEN</div>
+          <div className="nm-stat-val">{stats.rejectedToday}</div>
+          <div className="nm-stat-delta">manuel red</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">ORT. YANIT</div>
+          <div className="nm-stat-val mono">{stats.avgMin > 0 ? `${stats.avgMin}` : '—'}</div>
+          <div className="nm-stat-delta">{stats.avgMin > 0 ? 'dakika' : 'henüz veri yok'}</div>
+        </div>
+      </div>
 
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-        <Table
-          dataSource={items}
-          rowKey="id"
-          loading={isLoading}
-          columns={columns}
-          size="small"
-          pagination={{ pageSize: 20 }}
-          rowClassName={(r) => r.status === 'pending' ? 'apr-row-pending' : ''}
-          onRow={() => ({ style: { animation: 'aprRowIn 0.2s ease-out' } })}
-        />
+      {/* Approval cards */}
+      <div className="nm-card" style={{ padding: 0 }}>
+        <div className="nm-card-hd">
+          <h3><CheckCircleOutlined /> Talepler</h3>
+          <span className="nm-pill mono">{items.length}</span>
+        </div>
+        <div style={{ padding: 12 }}>
+          {isLoading && (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)' }}>Yükleniyor…</div>
+          )}
+          {!isLoading && items.length === 0 && (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--fg-3)' }}>
+              <CheckCircleOutlined style={{ fontSize: 32, opacity: 0.4, display: 'block', margin: '0 auto 8px' }} />
+              {statusFilter
+                ? `'${STATUS_LABEL[statusFilter] ?? statusFilter}' durumunda talep yok`
+                : 'Onay talebi yok — sakin liman'}
+            </div>
+          )}
+          {!isLoading && items.length > 0 && (
+            <div className="nm-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 12 }}>
+              {items.map((r) => (
+                <ApprovalCard
+                  key={r.id}
+                  r={r}
+                  onApprove={() => approveMutation.mutate(r.id)}
+                  onReject={() => { setRejectTarget(r); setRejectNote('') }}
+                  onCancel={() => cancelMutation.mutate(r.id)}
+                  onDetail={() => setDetailModal(r)}
+                  approveLoading={approveMutation.isPending}
+                  cancelLoading={cancelMutation.isPending}
+                />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Reject Modal */}
       <Modal
-        title={<Space><CloseCircleOutlined style={{ color: '#ef4444' }} /><span style={{ color: C.text }}>Talebi Reddet</span></Space>}
+        title={<Space><CloseCircleOutlined style={{ color: 'var(--crit)' }} /><span>Talebi Reddet</span></Space>}
         open={!!rejectTarget}
         onCancel={() => setRejectTarget(null)}
         onOk={() => rejectTarget && rejectMutation.mutate({ id: rejectTarget.id, note: rejectNote })}
         confirmLoading={rejectMutation.isPending}
         okText="Reddet"
         okButtonProps={{ danger: true }}
-        styles={{ content: { background: C.bg, border: `1px solid ${C.border}` }, header: { background: C.bg, borderBottom: `1px solid ${C.border}` } }}
       >
-        <div style={{ marginBottom: 8 }}>
-          <code style={{ background: isDark ? '#0f172a' : '#f0fdfa', color: isDark ? '#4ec9b0' : '#0d9488', padding: '2px 8px', borderRadius: 3, border: `1px solid ${isDark ? '#134e4a' : '#99f6e4'}` }}>
-            {rejectTarget?.command}
-          </code>
+        <div style={{ marginBottom: 10 }}>
+          <CommandCode command={rejectTarget?.command || ''} isDark={isDark} />
         </div>
-        <div style={{ marginBottom: 8, color: C.muted, fontSize: 13 }}>Reddetme nedeni (opsiyonel):</div>
+        <div style={{ marginBottom: 8, color: 'var(--fg-2)', fontSize: 13 }}>Reddetme nedeni (opsiyonel):</div>
         <Input.TextArea
           rows={3}
           value={rejectNote}
@@ -297,70 +238,234 @@ export default function ApprovalsPage() {
 
       {/* Detail Modal */}
       <Modal
-        title={<span style={{ color: C.text }}>Onay Talebi Detayı</span>}
+        title="Onay Talebi Detayı"
         open={!!detailModal}
         onCancel={() => setDetailModal(null)}
         footer={<Button onClick={() => setDetailModal(null)}>Kapat</Button>}
         width={700}
-        styles={{ content: { background: C.bg, border: `1px solid ${C.border}` }, header: { background: C.bg, borderBottom: `1px solid ${C.border}` } }}
       >
-        {detailModal && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', gap: 12 }}>
-              {[
-                { label: 'Durum', node: (() => { const hex = STATUS_HEX[detailModal.status] || '#64748b'; return <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: hex }} /><span style={{ fontSize: 12, color: C.text }}>{STATUS_LABEL[detailModal.status] ?? detailModal.status}</span></span> })() },
-                { label: 'Risk', node: (() => { const hex = RISK_HEX[detailModal.risk_level] || '#64748b'; return <Tag style={{ color: hex, borderColor: hex + '50', background: hex + '18', fontSize: 11 }}>{detailModal.risk_level.toUpperCase()}</Tag> })() },
-                { label: 'Cihaz', node: <span style={{ fontWeight: 600, color: C.text, fontSize: 13 }}>{detailModal.device_hostname}</span> },
-              ].map(({ label, node }) => (
-                <div key={label} style={{ flex: 1, background: C.bg2, border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 12px' }}>
-                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>{label}</div>
-                  {node}
-                </div>
-              ))}
-            </div>
-            <div>
-              <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Komut</div>
-              <code style={{ fontSize: 13, background: isDark ? '#0f172a' : '#f0fdfa', color: isDark ? '#4ec9b0' : '#0d9488', padding: '4px 10px', borderRadius: 4, display: 'inline-block', border: `1px solid ${isDark ? '#134e4a' : '#99f6e4'}` }}>
-                {detailModal.command}
-              </code>
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>Talep Eden</div>
-                <span style={{ color: C.text }}>{detailModal.requester_username}</span>
-              </div>
-              {detailModal.reviewer_username && (
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>İnceleyen</div>
-                  <span style={{ color: C.text }}>{detailModal.reviewer_username}</span>
-                </div>
-              )}
-            </div>
-            {detailModal.review_note && (
-              <div>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 2 }}>Not</div>
-                <span style={{ color: C.text }}>{detailModal.review_note}</span>
-              </div>
-            )}
-            {detailModal.result_output && (
-              <div>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Komut Çıktısı</div>
-                <pre style={{ background: '#0f172a', color: detailModal.result_success ? '#d4d4d4' : '#f48771', padding: '8px 12px', borderRadius: 4, fontSize: 11, maxHeight: 200, overflow: 'auto', margin: 0, border: '1px solid #1e293b' }}>
-                  {detailModal.result_output}
-                </pre>
-              </div>
-            )}
-            {detailModal.result_error && !detailModal.result_output && (
-              <div>
-                <div style={{ fontSize: 11, color: C.muted, marginBottom: 4 }}>Hata</div>
-                <pre style={{ background: '#0f172a', color: '#f48771', padding: '8px 12px', borderRadius: 4, fontSize: 11, margin: 0, border: '1px solid #1e293b' }}>
-                  {detailModal.result_error}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
+        {detailModal && <DetailBody r={detailModal} isDark={isDark} />}
       </Modal>
     </div>
+  )
+}
+
+// ─── Approval card ───────────────────────────────────────────────────────────
+
+function ApprovalCard({
+  r, onApprove, onReject, onCancel, onDetail, approveLoading, cancelLoading,
+}: {
+  r: ApprovalRequest
+  onApprove: () => void
+  onReject: () => void
+  onCancel: () => void
+  onDetail: () => void
+  approveLoading: boolean
+  cancelLoading: boolean
+}) {
+  const riskColor = RISK_HEX[r.risk_level] || 'var(--fg-3)'
+  const statusColor = STATUS_HEX[r.status] || 'var(--fg-3)'
+  const isPending = r.status === 'pending'
+  const now = dayjs()
+  const expiresIn = dayjs(r.expires_at).diff(now, 'minute')
+  const expired = expiresIn < 0
+  const expiringSoon = isPending && !expired && expiresIn < 60
+
+  return (
+    <div className="nm-card" style={{
+      padding: 0, position: 'relative', overflow: 'hidden',
+      borderLeft: `3px solid ${isPending ? riskColor : statusColor}`,
+    }}>
+      {/* Header bar: status dot + status label + risk pill (right) */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '8px 12px', borderBottom: '1px solid var(--border-0)',
+        background: isPending ? `${riskColor}08` : 'transparent',
+      }}>
+        <span className={`nm-status-dot ${isPending ? 'warn pulse' : ''}`}
+          style={{ background: statusColor, boxShadow: isPending ? `0 0 8px ${statusColor}` : 'none' }} />
+        <span style={{ fontSize: 12, color: 'var(--fg-1)', fontWeight: 500 }}>
+          {STATUS_LABEL[r.status] ?? r.status}
+        </span>
+        <span style={{ flex: 1 }} />
+        <span className="nm-pill mono" style={{
+          color: riskColor, borderColor: riskColor + '88', background: riskColor + '15',
+        }}>
+          {r.risk_level.toUpperCase()}
+        </span>
+      </div>
+
+      {/* Body */}
+      <div style={{ padding: 12 }}>
+        {/* Device + ID */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-0)' }} className="mono">
+            {r.device_hostname}
+          </span>
+          <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }} className="mono">#{r.id}</span>
+        </div>
+
+        {/* Command */}
+        <CommandCode command={r.command} />
+
+        {/* Meta row: requester · created · expires countdown */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+          marginTop: 10, fontSize: 11, color: 'var(--fg-3)',
+        }}>
+          <span><UserOutlined style={{ marginRight: 4 }} />{r.requester_username}</span>
+          <span><ClockCircleOutlined style={{ marginRight: 4 }} />{dayjs(r.created_at).format('DD.MM HH:mm')}</span>
+          {isPending && (
+            <span style={{ color: expired ? 'var(--crit)' : expiringSoon ? 'var(--warn)' : 'var(--fg-3)' }}>
+              <ClockCircleOutlined style={{ marginRight: 4 }} />
+              {expired ? 'süresi doldu' : `${expiresIn} dk içinde dolar`}
+            </span>
+          )}
+          {!isPending && r.reviewer_username && (
+            <span>İnceleyen: <strong style={{ color: 'var(--fg-1)' }}>{r.reviewer_username}</strong></span>
+          )}
+        </div>
+      </div>
+
+      {/* Footer actions */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 6,
+        padding: '8px 12px', borderTop: '1px solid var(--border-0)',
+        background: 'var(--bg-2)',
+      }}>
+        {isPending && (
+          <>
+            <Popconfirm
+              title={<>Komut cihazda çalıştırılacak.<br />Onaylıyor musunuz?</>}
+              onConfirm={onApprove}
+              okText="Onayla" cancelText="Vazgeç"
+            >
+              <Button size="small" type="primary" icon={<CheckCircleOutlined />}
+                loading={approveLoading}>
+                Onayla
+              </Button>
+            </Popconfirm>
+            <Button size="small" danger icon={<CloseCircleOutlined />} onClick={onReject}>
+              Reddet
+            </Button>
+            <Tooltip title="İptal (talep sahibi)">
+              <Button size="small" icon={<StopOutlined />}
+                loading={cancelLoading} onClick={onCancel} />
+            </Tooltip>
+          </>
+        )}
+        <span style={{ flex: 1 }} />
+        <Button size="small" type="text" icon={<EyeOutlined />} onClick={onDetail}>
+          Detay
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function CommandCode({ command, isDark }: { command: string; isDark?: boolean }) {
+  return (
+    <code style={{
+      display: 'block', padding: '8px 10px', borderRadius: 4,
+      fontSize: 12, fontFamily: 'IBM Plex Mono, monospace',
+      background: isDark === false ? '#f0fdfa' : 'var(--bg-2)',
+      color: isDark === false ? '#0d9488' : 'var(--accent-2, var(--accent))',
+      border: '1px solid var(--border-0)', wordBreak: 'break-all', lineHeight: 1.5,
+    }}>
+      <CodeOutlined style={{ marginRight: 6, opacity: 0.6 }} />{command}
+    </code>
+  )
+}
+
+function DetailBody({ r, isDark }: { r: ApprovalRequest; isDark: boolean }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        <FieldChip label="Durum">
+          <span className="nm-status-dot" style={{ background: STATUS_HEX[r.status], marginRight: 6 }} />
+          {STATUS_LABEL[r.status] ?? r.status}
+        </FieldChip>
+        <FieldChip label="Risk">
+          <span className="nm-pill mono" style={{
+            color: RISK_HEX[r.risk_level], borderColor: RISK_HEX[r.risk_level] + '88',
+            background: RISK_HEX[r.risk_level] + '15',
+          }}>
+            {r.risk_level.toUpperCase()}
+          </span>
+        </FieldChip>
+        <FieldChip label="Cihaz">
+          <span className="mono" style={{ fontWeight: 600 }}>{r.device_hostname}</span>
+        </FieldChip>
+      </div>
+      <div>
+        <FieldLabel>Komut</FieldLabel>
+        <CommandCode command={r.command} />
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <FieldChip label="Talep Eden">{r.requester_username}</FieldChip>
+        {r.reviewer_username && (
+          <FieldChip label="İnceleyen">{r.reviewer_username}</FieldChip>
+        )}
+        <FieldChip label="Oluşturuldu">
+          <span className="mono">{dayjs(r.created_at).format('DD.MM.YYYY HH:mm')}</span>
+        </FieldChip>
+        <FieldChip label="Bitiş">
+          <span className="mono" style={{ color: dayjs(r.expires_at).isBefore(dayjs()) ? 'var(--crit)' : undefined }}>
+            {dayjs(r.expires_at).format('DD.MM.YYYY HH:mm')}
+          </span>
+        </FieldChip>
+      </div>
+      {r.review_note && (
+        <div>
+          <FieldLabel>İnceleme Notu</FieldLabel>
+          <div style={{ color: 'var(--fg-1)' }}>{r.review_note}</div>
+        </div>
+      )}
+      {r.result_output && (
+        <div>
+          <FieldLabel>Komut Çıktısı</FieldLabel>
+          <pre style={{
+            background: '#0f172a', color: r.result_success ? '#d4d4d4' : '#f48771',
+            padding: '8px 12px', borderRadius: 4, fontSize: 11, maxHeight: 220,
+            overflow: 'auto', margin: 0, border: '1px solid #1e293b',
+          }}>{r.result_output}</pre>
+        </div>
+      )}
+      {r.result_error && !r.result_output && (
+        <div>
+          <FieldLabel>Hata</FieldLabel>
+          <pre style={{
+            background: '#0f172a', color: '#f48771',
+            padding: '8px 12px', borderRadius: 4, fontSize: 11,
+            margin: 0, border: '1px solid #1e293b',
+          }}>{r.result_error}</pre>
+        </div>
+      )}
+      {/* Suppress isDark unused-warning when there are no themed children */}
+      <span style={{ display: 'none' }}>{String(isDark)}</span>
+    </div>
+  )
+}
+
+function FieldChip({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{
+      background: 'var(--bg-2)', border: '1px solid var(--border-0)',
+      borderRadius: 6, padding: '8px 12px',
+    }}>
+      <FieldLabel>{label}</FieldLabel>
+      <div style={{ marginTop: 4 }}>{children}</div>
+    </div>
+  )
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontSize: 10, color: 'var(--fg-3)', letterSpacing: 0.5,
+      textTransform: 'uppercase',
+    }}>{children}</div>
   )
 }
