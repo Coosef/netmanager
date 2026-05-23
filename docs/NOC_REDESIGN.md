@@ -30,12 +30,12 @@ NOC look; `.theme-light` flips the design vars.
 | 4 | Servisler (Services) | /services | Servisler.html | ✅ FULL (card grid + 6-stat + detail drawer + Transfer device picker, real impact) `dfb3491` |
 | 5 | Kabinler (Racks) | /racks | pages-racks.jsx · Kabinler.html | ✅ FULL (rack grid + 6-stat + U-elevation + Cihazlar/Items tabs, real data) `4b61ffe` |
 | 6 | Ajanlar (Agents) | /agents | Ajanlar.html · pages-rest.jsx | ✅ FULL (card grid + 6-stat + detail modal, real data) `d04c484` |
-| 7 | Playbooklar | /playbooks | Playbooklar.html | ⏳ |
-| 8 | Otomasyon | /automation? | Otomasyon.html | ⏳ |
-| 9 | Config Drift | /config-drift | Config Drift.html | ⏳ |
-| 10 | SLA & Uptime | /sla | SLA.html | ⏳ |
-| 11 | Audit Log | /audit | pages-audit.jsx · Audit.html | ⏳ |
-| 12 | Ayarlar (Settings) | /settings | Ayarlar.html | ⏳ |
+| 7 | Playbooklar | /playbooks | Playbooklar.html | ✅ FULL (nm-page-hd + 6-stat + nm-table, real CRUD + run/dry-run/runs-history) `f109e17` |
+| 8 | Otomasyon | — | Otomasyon.html | ⏭ atlandı (navigasyonda yok; Playbooks otomasyonu kapsıyor) |
+| 9 | Config Drift | /config-drift | Config Drift.html | ✅ FULL (nm-page-hd + 6-stat + nm-table, real driftReport) `56b3570` |
+| 10 | SLA & Uptime | /sla | SLA.html | ✅ FULL (NOC header + 6-stat FleetSummary; chart/table korundu) `5ff26ee` |
+| 11 | Audit Log | /audit | pages-audit.jsx · Audit.html | ✅ FULL (NOC header + 6-stat; filter+table korundu) `f843917` |
+| 12 | Ayarlar (Settings) | /settings | Ayarlar.html | ✅ FULL (NOC header; Tabs sekmeleri ve içerik korundu) `6a5aaea` |
 
 **Pages without a mockup** (IPAM, VLAN, Backups, Compliance, Floor-plan, Intelligence,
 Alert-rules, Bandwidth, Mac-arp, Security-audit, Asset-lifecycle, Diagnostics, Tasks,
