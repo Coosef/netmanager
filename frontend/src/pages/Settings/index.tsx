@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Typography, Switch, Divider, Tag, Tabs, Table, Button, Modal, Form,
+  Typography, Switch, Divider, Tag, Table, Button, Modal, Form,
   Input, Select, Space, message, Popconfirm, Tooltip, InputNumber, Alert, DatePicker,
 } from 'antd'
 import {
@@ -2183,67 +2183,46 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setSearchParams({ tab: key })}
-        items={[
-          {
-            key: 'general',
-            label: <span><GlobalOutlined /> Genel</span>,
-            children: generalContent,
-          },
-          {
-            key: 'notifications',
-            label: <span><BellOutlined /> Bildirimler</span>,
-            children: <NotificationChannelsTab />,
-          },
-          {
-            key: 'alert-rules',
-            label: <span><AlertOutlined /> Uyarı Kuralları</span>,
-            children: <AlertRulesTab />,
-          },
-          {
-            key: 'maintenance',
-            label: <span><ToolOutlined /> Bakım Pencereleri</span>,
-            children: <MaintenanceWindowsTab />,
-          },
-          {
-            key: 'credentials',
-            label: <span><SafetyOutlined /> Kimlik Profilleri</span>,
-            children: <CredentialProfilesTab />,
-          },
-          {
-            key: 'rotation',
-            label: <span><SyncOutlined /> Şifre Rotasyonu</span>,
-            children: <SecretRotationTab />,
-          },
-          {
-            key: 'sla',
-            label: <span><RiseOutlined /> SLA Politikaları</span>,
-            children: <SlaPoliciesTab />,
-          },
-          {
-            key: 'snmp',
-            label: <span><WifiOutlined /> SNMP</span>,
-            children: <SnmpConfigTab />,
-          },
-          {
-            key: 'api-tokens',
-            label: <span><KeyOutlined /> API Tokenlar</span>,
-            children: <ApiTokensTab />,
-          },
-          {
-            key: 'driver-templates',
-            label: <span><CodeOutlined /> Sürücü Şablonları</span>,
-            children: <DriverTemplatesPage />,
-          },
-          {
-            key: 'ai',
-            label: <span><RobotOutlined /> AI Asistanı</span>,
-            children: <AISettingsTab />,
-          },
-        ]}
-      />
+      {/* Mockup tasarımı: sol dikey nav (220px) + sağ aktif sekme içeriği card */}
+      {(() => {
+        const TABS: { key: string; label: string; icon: React.ReactNode; content: React.ReactNode }[] = [
+          { key: 'general',          label: 'Genel',              icon: <GlobalOutlined />, content: generalContent },
+          { key: 'notifications',    label: 'Bildirimler',        icon: <BellOutlined />,   content: <NotificationChannelsTab /> },
+          { key: 'alert-rules',      label: 'Uyarı Kuralları',    icon: <AlertOutlined />,  content: <AlertRulesTab /> },
+          { key: 'maintenance',      label: 'Bakım Pencereleri',  icon: <ToolOutlined />,   content: <MaintenanceWindowsTab /> },
+          { key: 'credentials',      label: 'Kimlik Profilleri',  icon: <SafetyOutlined />, content: <CredentialProfilesTab /> },
+          { key: 'rotation',         label: 'Şifre Rotasyonu',    icon: <SyncOutlined />,   content: <SecretRotationTab /> },
+          { key: 'sla',              label: 'SLA Politikaları',   icon: <RiseOutlined />,   content: <SlaPoliciesTab /> },
+          { key: 'snmp',             label: 'SNMP',               icon: <WifiOutlined />,   content: <SnmpConfigTab /> },
+          { key: 'api-tokens',       label: 'API Tokenlar',       icon: <KeyOutlined />,    content: <ApiTokensTab /> },
+          { key: 'driver-templates', label: 'Sürücü Şablonları',  icon: <CodeOutlined />,   content: <DriverTemplatesPage /> },
+          { key: 'ai',               label: 'AI Asistanı',        icon: <RobotOutlined />,  content: <AISettingsTab /> },
+        ]
+        const active = TABS.find((t) => t.key === activeTab) ?? TABS[0]
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: '230px 1fr', gap: 14, flex: 1, minHeight: 0 }}>
+            {/* Sol nav */}
+            <div className="nm-card" style={{ padding: 6, height: 'fit-content', position: 'sticky', top: 8 }}>
+              {TABS.map((tab) => {
+                const isActive = tab.key === active.key
+                return (
+                  <div key={tab.key}
+                    className={`nm-navitem ${isActive ? 'active' : ''}`}
+                    onClick={() => setSearchParams({ tab: tab.key })}
+                    style={{ cursor: 'pointer' }}>
+                    <span className="nm-navicon">{tab.icon}</span>
+                    <span>{tab.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {/* Sağ içerik */}
+            <div className="nm-card" style={{ padding: 22, overflow: 'auto', minWidth: 0 }}>
+              {active.content}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
