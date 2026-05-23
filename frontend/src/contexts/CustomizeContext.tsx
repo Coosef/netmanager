@@ -21,6 +21,9 @@ interface CustomizeCtx {
   setMenuPosition: (p: MenuPosition) => void
   accent: string                              // hex string, örn. "#22d3c5"
   setAccent: (hex: string) => void
+  soundEnabled: boolean
+  setSoundEnabled: (v: boolean) => void
+  playBeep: () => void                        // kritik alarm geldiğinde useAlarmWatcher çağırır
   reset: () => void
 }
 
@@ -28,6 +31,7 @@ interface CustomizeCtx {
 const DEFAULT_ACCENT = '#22d3c5'
 const DEFAULT_DENSITY: Density = 'regular'
 const DEFAULT_MENU: MenuPosition = 'side'
+const DEFAULT_SOUND = false                   // varsayılan sessiz — kullanıcı isteyince açar
 
 // Önceden tanımlı renk paletleri — kullanıcı custom hex de girebilir.
 export const ACCENT_PRESETS: { name: string; hex: string }[] = [
@@ -48,12 +52,16 @@ const CustomizeContext = createContext<CustomizeCtx>({
   setMenuPosition: () => {},
   accent: DEFAULT_ACCENT,
   setAccent: () => {},
+  soundEnabled: DEFAULT_SOUND,
+  setSoundEnabled: () => {},
+  playBeep: () => {},
   reset: () => {},
 })
 
 const LS_DENSITY = 'nm-customize-density'
 const LS_MENU = 'nm-customize-menu'
 const LS_ACCENT = 'nm-customize-accent'
+const LS_SOUND = 'nm-customize-sound'
 
 function loadDensity(): Density {
   const v = localStorage.getItem(LS_DENSITY)
@@ -67,6 +75,34 @@ function loadAccent(): string {
   const v = localStorage.getItem(LS_ACCENT)
   return v && /^#[0-9a-fA-F]{6}$/.test(v) ? v : DEFAULT_ACCENT
 }
+function loadSound(): boolean {
+  return localStorage.getItem(LS_SOUND) === 'on'
+}
+
+// Web Audio API beep — mockup commandk.jsx'ten port. Kritik alarm
+// geldiğinde kısa "ding" sesi çalar. Tarayıcı autoplay policy nedeniyle
+// kullanıcı sayfa ile etkileşime geçmeden çalışmayabilir — bu sebeple
+// soundEnabled default false, kullanıcı bilinçli açar.
+function playAlertBeep() {
+  try {
+    type AudioCtxCtor = typeof AudioContext
+    const w = window as unknown as { AudioContext?: AudioCtxCtor; webkitAudioContext?: AudioCtxCtor }
+    const AC = w.AudioContext || w.webkitAudioContext
+    if (!AC) return
+    const ac = new AC()
+    const osc = ac.createOscillator()
+    const gain = ac.createGain()
+    osc.type = 'sine'
+    osc.frequency.value = 880
+    osc.connect(gain); gain.connect(ac.destination)
+    gain.gain.setValueAtTime(0, ac.currentTime)
+    gain.gain.linearRampToValueAtTime(0.18, ac.currentTime + 0.02)
+    gain.gain.linearRampToValueAtTime(0, ac.currentTime + 0.25)
+    osc.start(ac.currentTime)
+    osc.stop(ac.currentTime + 0.28)
+    setTimeout(() => ac.close(), 600)
+  } catch { /* AudioContext yok / muted */ }
+}
 
 // Hex → "#xxxxxxAA" alfa eklemek için. CSS modern browsers 8-haneli hex'i
 // destekliyor (#rrggbbaa).
@@ -79,6 +115,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const [density, setDensityState] = useState<Density>(loadDensity)
   const [menuPosition, setMenuState] = useState<MenuPosition>(loadMenu)
   const [accent, setAccentState] = useState<string>(loadAccent)
+  const [soundEnabled, setSoundState] = useState<boolean>(loadSound)
 
   // density class — sadece bir tane aktif olacak şekilde body'e uygula.
   useEffect(() => {
@@ -108,10 +145,18 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     root.style.setProperty('--accent-line', hexAlpha(accent, 89))
   }, [accent])
 
+  // soundEnabled persistence
+  useEffect(() => {
+    localStorage.setItem(LS_SOUND, soundEnabled ? 'on' : 'off')
+  }, [soundEnabled])
+
+  const playBeep = () => { if (soundEnabled) playAlertBeep() }
+
   const reset = () => {
     setDensityState(DEFAULT_DENSITY)
     setMenuState(DEFAULT_MENU)
     setAccentState(DEFAULT_ACCENT)
+    setSoundState(DEFAULT_SOUND)
   }
 
   return (
@@ -119,6 +164,8 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
       density, setDensity: setDensityState,
       menuPosition, setMenuPosition: setMenuState,
       accent, setAccent: setAccentState,
+      soundEnabled, setSoundEnabled: setSoundState,
+      playBeep,
       reset,
     }}>
       {children}

@@ -5,8 +5,10 @@ import AppHeader from './Header'
 import LocationGate from './LocationGate'
 import CommandPalette from '@/components/CommandPalette'
 import CustomizePanel from '@/components/CustomizePanel'
+import NocWallOverlay from '@/components/NocWallOverlay'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useCustomize } from '@/contexts/CustomizeContext'
+import { NocWallProvider, useNocWall } from '@/contexts/NocWallContext'
 import { useAlarmWatcher } from '@/hooks/useAlarmWatcher'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
@@ -29,9 +31,20 @@ const BOTTOM_NAV_ITEMS = [
   { key: '/settings',icon: <SettingOutlined />,      label: 'Ayarlar' },
 ]
 
+// AppLayout — NocWallProvider ile sarmalı (useNavigate gerekiyor; provider
+// BrowserRouter altında olmalı). Tüm gerçek layout AppLayoutInner'da.
 export default function AppLayout() {
+  return (
+    <NocWallProvider>
+      <AppLayoutInner />
+    </NocWallProvider>
+  )
+}
+
+function AppLayoutInner() {
   const { isDark, toggle: toggleTheme } = useTheme()
-  const { menuPosition } = useCustomize()
+  const { menuPosition, soundEnabled, setSoundEnabled } = useCustomize()
+  const wall = useNocWall()
   const location = useLocation()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
@@ -126,10 +139,16 @@ export default function AppLayout() {
         onAction={(act) => {
           if (act === 'theme') toggleTheme()
           else if (act === 'customize') setCustomizeOpen(true)
+          else if (act === 'sound-toggle') setSoundEnabled(!soundEnabled)
+          else if (act === 'wall-start') wall.start()
+          else if (act === 'wall-stop') wall.stop()
         }}
         isDark={isDark}
+        soundEnabled={soundEnabled}
+        wallActive={wall.active}
       />
       <CustomizePanel open={customizeOpen} onClose={() => setCustomizeOpen(false)} />
+      <NocWallOverlay />
     </div>
   )
 }

@@ -1,10 +1,12 @@
 // CustomizePanel — Drawer-based Phase 2 UI customization (Aşama 1).
 // Tema / Yoğunluk / Aksent rengi / Menü pozisyonu. Trigger: top bar
 // SettingOutlined icon. Preset layouts ve dashboard edit mode Aşama 2.
-import { Drawer, ColorPicker } from 'antd'
-import { SunOutlined, MoonOutlined, MenuOutlined, BgColorsOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Drawer, ColorPicker, Switch } from 'antd'
+import { SunOutlined, MoonOutlined, MenuOutlined, BgColorsOutlined, ReloadOutlined,
+  SoundOutlined, MonitorOutlined, StopOutlined } from '@ant-design/icons'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useCustomize, ACCENT_PRESETS, type Density, type MenuPosition } from '@/contexts/CustomizeContext'
+import { useNocWall } from '@/contexts/NocWallContext'
 
 interface Props {
   open: boolean
@@ -13,7 +15,9 @@ interface Props {
 
 export default function CustomizePanel({ open, onClose }: Props) {
   const { isDark, toggle } = useTheme()
-  const { density, setDensity, menuPosition, setMenuPosition, accent, setAccent, reset } = useCustomize()
+  const { density, setDensity, menuPosition, setMenuPosition, accent, setAccent,
+    soundEnabled, setSoundEnabled, reset } = useCustomize()
+  const wall = useNocWall()
 
   const DENSITIES: { id: Density; label: string; sub: string }[] = [
     { id: 'compact',  label: 'Sıkı',   sub: 'Daha fazla içerik, dar boşluklar' },
@@ -93,6 +97,43 @@ export default function CustomizePanel({ open, onClose }: Props) {
           <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 6 }}>
             ℹ Menü pozisyonu değişikliği için sayfayı yenilemen gerekebilir.
           </div>
+        </Section>
+
+        {/* Sesli alarm */}
+        <Section title="Sesli Alarm" sub="Kritik olaylarda bildirim sesi (kısa ding)" icon={<SoundOutlined />}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
+            <div style={{ fontSize: 12, color: 'var(--fg-2)', maxWidth: '70%' }}>
+              {soundEnabled
+                ? 'Açık — kritik olay geldiğinde web audio ile beep'
+                : 'Kapalı — sadece görsel bildirim'}
+            </div>
+            <Switch checked={soundEnabled} onChange={setSoundEnabled} />
+          </div>
+        </Section>
+
+        {/* NOC Duvar Modu */}
+        <Section title="NOC Duvar Modu" sub="Sayfalar arası otomatik dönüşüm (auto-rotation)" icon={<MonitorOutlined />}>
+          {wall.active ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 12, color: 'var(--accent)' }}>
+                Aktif: <strong>{wall.routes[wall.currentIdx]?.label || '?'}</strong> ({wall.currentIdx + 1}/{wall.routes.length}) · {wall.intervalSec}s/sayfa
+              </div>
+              <button className="nm-btn ghost" style={{ width: '100%', height: 30, fontSize: 12 }}
+                onClick={() => { wall.stop(); onClose() }}>
+                <StopOutlined /> Durdur
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <button className="nm-btn primary" style={{ width: '100%', height: 32, fontSize: 12 }}
+                onClick={() => { wall.start(); onClose() }}>
+                <MonitorOutlined /> Başlat ({wall.intervalSec}s/sayfa)
+              </button>
+              <div style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>
+                Default rota: {wall.routes.map((r) => r.label).join(' → ')}
+              </div>
+            </div>
+          )}
         </Section>
 
         {/* Sıfırla */}

@@ -16,17 +16,19 @@ import {
   BellOutlined, BarChartOutlined, RadarChartOutlined, SettingOutlined,
   SearchOutlined, BgColorsOutlined, SunOutlined, MoonOutlined,
   PlayCircleOutlined, AimOutlined, BuildOutlined, FileTextOutlined,
+  SoundOutlined, NotificationOutlined, MonitorOutlined, StopOutlined,
 } from '@ant-design/icons'
 import { devicesApi } from '@/api/devices'
 
 type Group = 'NAV' | 'AKSIYON' | 'CIHAZ'
+export type PaletteAction = 'theme' | 'customize' | 'sound-toggle' | 'wall-start' | 'wall-stop'
 interface Cmd {
   id: string
   group: Group
   label: string
   icon: React.ReactNode
   path?: string
-  action?: 'theme' | 'customize'
+  action?: PaletteAction
   hint?: string
 }
 
@@ -69,11 +71,13 @@ const NAV_COMMANDS: Cmd[] = [
 interface Props {
   open: boolean
   onClose: () => void
-  onAction: (action: 'theme' | 'customize') => void
+  onAction: (action: PaletteAction) => void
   isDark: boolean
+  soundEnabled: boolean
+  wallActive: boolean
 }
 
-export default function CommandPalette({ open, onClose, onAction, isDark }: Props) {
+export default function CommandPalette({ open, onClose, onAction, isDark, soundEnabled, wallActive }: Props) {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
   const [idx, setIdx] = useState(0)
@@ -86,13 +90,23 @@ export default function CommandPalette({ open, onClose, onAction, isDark }: Prop
     return () => clearTimeout(tm)
   }, [open])
 
-  // Aksiyon komutları — theme + customize. Edit mode / rotation Phase 2 sonrası.
+  // Aksiyon komutları — durum değişkenlerine göre dinamik etiketler.
   const ACTION_COMMANDS: Cmd[] = useMemo(() => [
-    { id: 'act-theme', group: 'AKSIYON', label: isDark ? 'Aydınlık temaya geç' : 'Karanlık temaya geç',
+    { id: 'act-theme', group: 'AKSIYON',
+      label: isDark ? 'Aydınlık temaya geç' : 'Karanlık temaya geç',
       icon: isDark ? <SunOutlined /> : <MoonOutlined />, action: 'theme' },
-    { id: 'act-customize', group: 'AKSIYON', label: 'Özelleştir panelini aç',
+    { id: 'act-customize', group: 'AKSIYON',
+      label: 'Özelleştir panelini aç',
       icon: <BgColorsOutlined />, action: 'customize' },
-  ], [isDark])
+    { id: 'act-sound', group: 'AKSIYON',
+      label: soundEnabled ? 'Kritik alarm sesini kapat' : 'Kritik alarm sesini aç',
+      icon: soundEnabled ? <NotificationOutlined /> : <SoundOutlined />, action: 'sound-toggle' },
+    ...(wallActive
+      ? [{ id: 'act-wall-stop', group: 'AKSIYON' as Group,
+          label: 'NOC Duvar modunu durdur', icon: <StopOutlined />, action: 'wall-stop' as PaletteAction }]
+      : [{ id: 'act-wall-start', group: 'AKSIYON' as Group,
+          label: 'NOC Duvar modunu başlat (auto-rotation)', icon: <MonitorOutlined />, action: 'wall-start' as PaletteAction }]),
+  ], [isDark, soundEnabled, wallActive])
 
   // Cihaz arama — query 2+ karakter ise devicesApi.list (limit 6)
   const { data: deviceRes } = useQuery({
