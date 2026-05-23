@@ -3,17 +3,20 @@
 // super-admin response aliases (`tenants`, `top_tenants_by_devices`,
 // `tenant_id`, `tenant_name`) were dropped in Faz 9 item #1.
 
-export type UserRole =
-  | 'super_admin'
-  | 'admin'
-  | 'org_viewer'
-  | 'location_manager'
-  | 'location_operator'
-  | 'location_viewer'
-  | 'operator'
-  | 'viewer'
+// RBAC F2 — single source of truth: 4-role system model from Faz 7 / M4.
+// Legacy values (admin, org_viewer, location_manager, location_operator,
+// location_viewer, operator, member) are normalised to one of these four
+// by the backend `User.role` setter (see backend/app/models/user.py).
+// Do not add new values without aligning backend SystemRole at the same time.
+export type SystemRole =
+  | 'super_admin'      // Platform-wide; RLS bypass
+  | 'org_admin'        // Full access within own organization (org-wide)
+  | 'location_admin'   // Manage assigned location(s) via user_locations
+  | 'viewer'           // Read-only, org or location scoped
 
-export type SystemRole = 'super_admin' | 'org_admin' | 'member'
+// Back-compat alias — older code reads `UserRole`; keep it as a type alias
+// of the same canonical type so a single removal sweep is unnecessary.
+export type UserRole = SystemRole
 
 export interface UserLocationItem {
   location_id: number
@@ -335,17 +338,49 @@ export const VENDOR_OS_MAP: Record<string, string[]> = {
   other:     OS_TYPE_OPTIONS.map((o) => o.value),
 }
 
-export const ROLE_OPTIONS = [
-  { label: 'Super Admin', value: 'super_admin' },
-  { label: 'Admin (Org Yönetici)', value: 'admin' },
-  { label: 'Org Viewer (Tüm Lok. Okuma)', value: 'org_viewer' },
-  { label: 'Lokasyon Yönetici', value: 'location_manager' },
-  { label: 'Lokasyon Operatör', value: 'location_operator' },
-  { label: 'Lokasyon Görüntüleyici', value: 'location_viewer' },
-  { label: 'Operator', value: 'operator' },
-  { label: 'Viewer', value: 'viewer' },
+// RBAC F2 — 4-role model with on-screen descriptions so admins
+// understand the scope each role implies before assigning. Order is
+// the privilege hierarchy: super-admin first, viewer last.
+export interface RoleOption {
+  value: SystemRole
+  label: string
+  desc: string         // shown under the label in the select dropdown
+  color: string        // accent for chips / status dots
+}
+
+export const SYSTEM_ROLE_OPTIONS: RoleOption[] = [
+  {
+    value: 'super_admin',
+    label: 'Süper Admin',
+    desc: 'Platform genelinde tam yetki — tüm organizasyonlar + tüm lokasyonlar (RLS bypass).',
+    color: '#ef4444',
+  },
+  {
+    value: 'org_admin',
+    label: 'Org Admin',
+    desc: 'Kendi organizasyonu içinde tam yetki — org\'undaki tüm lokasyonlara otomatik erişir.',
+    color: '#f97316',
+  },
+  {
+    value: 'location_admin',
+    label: 'Lokasyon Admin',
+    desc: 'Atandığı lokasyon(lar)da yönetici — bu sayfadan lokasyon ataması zorunlu.',
+    color: '#06b6d4',
+  },
+  {
+    value: 'viewer',
+    label: 'Görüntüleyici',
+    desc: 'Salt-okuma — org veya atandığı lokasyon kapsamında değişiklik yapamaz.',
+    color: '#22c55e',
+  },
 ]
 
+// Back-compat: older callers import `ROLE_OPTIONS` and only need {label,value}.
+// New callers should prefer `SYSTEM_ROLE_OPTIONS` for the desc/color fields.
+export const ROLE_OPTIONS = SYSTEM_ROLE_OPTIONS.map(({ value, label }) => ({ value, label }))
+
+// Per-location role (user_locations.loc_role). Independent from system_role —
+// these are the roles a Location Admin / Viewer can hold AT a given location.
 export const LOC_ROLE_OPTIONS = [
   { label: 'Lokasyon Yönetici', value: 'location_manager' },
   { label: 'Lokasyon Operatör', value: 'location_operator' },

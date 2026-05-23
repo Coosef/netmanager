@@ -16,13 +16,12 @@ import { useAuthStore } from '@/store/auth'
 import { monitorApi } from '@/api/monitor'
 import { approvalsApi } from '@/api/approvals'
 import { featureFlags } from '@/config/featureFlags'
-import type { UserRole } from '@/types'
+import type { SystemRole } from '@/types'
 
-const ROLE_ORDER: UserRole[] = [
-  'location_viewer', 'viewer', 'location_operator', 'operator',
-  'location_manager', 'org_viewer', 'admin', 'super_admin',
-]
-const roleIndex = (role: string): number => ROLE_ORDER.indexOf(role as UserRole)
+// RBAC F2 — 4-role hierarchy (lowest → highest). Must stay symmetric with
+// the backend SystemRole enum and the auth store's ROLE_ORDER.
+const ROLE_ORDER: SystemRole[] = ['viewer', 'location_admin', 'org_admin', 'super_admin']
+const roleIndex = (role: string): number => ROLE_ORDER.indexOf(role as SystemRole)
 
 export interface NavItem {
   key: string
@@ -30,7 +29,7 @@ export interface NavItem {
   label: string
   badge?: boolean | 'approval'
   badgeCount?: number      // hook'ta hesaplanır, render aşamasında basit
-  minRole?: UserRole
+  minRole?: SystemRole
 }
 export interface NavGroup {
   label: string
@@ -59,7 +58,7 @@ export function useNavGroups(): NavGroup[] {
   const isOA = isOrgAdmin()
   const userRoleIdx = roleIndex(user?.role ?? 'viewer')
 
-  const canSee = (minRole?: UserRole, key?: string) => {
+  const canSee = (minRole?: SystemRole, key?: string) => {
     if (!minRole && !key) return true
     if (isSA || isOA) return true
     if (key && MODULE_MAP[key]) {
@@ -97,55 +96,55 @@ export function useNavGroups(): NavGroup[] {
     {
       label: t('nav_group.discovery'),
       items: [
-        { key: '/discovery', icon: <RadarChartOutlined />, label: t('nav.discovery'), minRole: 'admin' },
-        { key: '/ipam', icon: <ClusterOutlined />, label: t('nav.ipam'), minRole: 'org_viewer' },
-        { key: '/vlan', icon: <BranchesOutlined />, label: t('nav.vlan'), minRole: 'org_viewer' },
-        { key: '/backups', icon: <CloudOutlined />, label: t('nav.backups'), minRole: 'location_manager' },
-        { key: '/config-drift', icon: <DiffOutlined />, label: 'Config Drift', minRole: 'org_viewer' },
-        { key: '/compliance', icon: <FileDoneOutlined />, label: t('nav.compliance'), minRole: 'location_manager' },
-        { key: '/racks', icon: <HddOutlined />, label: t('nav.racks'), minRole: 'admin' },
-        { key: '/floor-plan', icon: <BuildOutlined />, label: t('nav.floor_plan'), minRole: 'admin' },
+        { key: '/discovery', icon: <RadarChartOutlined />, label: t('nav.discovery'), minRole: 'org_admin' },
+        { key: '/ipam', icon: <ClusterOutlined />, label: t('nav.ipam'), minRole: 'viewer' },
+        { key: '/vlan', icon: <BranchesOutlined />, label: t('nav.vlan'), minRole: 'viewer' },
+        { key: '/backups', icon: <CloudOutlined />, label: t('nav.backups'), minRole: 'location_admin' },
+        { key: '/config-drift', icon: <DiffOutlined />, label: 'Config Drift', minRole: 'viewer' },
+        { key: '/compliance', icon: <FileDoneOutlined />, label: t('nav.compliance'), minRole: 'location_admin' },
+        { key: '/racks', icon: <HddOutlined />, label: t('nav.racks'), minRole: 'org_admin' },
+        { key: '/floor-plan', icon: <BuildOutlined />, label: t('nav.floor_plan'), minRole: 'org_admin' },
       ],
     },
     {
       label: t('nav_group.monitoring'),
       items: [
         { key: '/monitor', icon: <AlertOutlined />, label: t('nav.monitor'), badge: true, badgeCount: unacked },
-        { key: '/intelligence', icon: <BugOutlined />, label: 'Ağ Analitik', minRole: 'org_viewer' },
-        { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules'), minRole: 'admin' },
-        { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth'), minRole: 'org_viewer' },
-        { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence'), minRole: 'org_viewer' },
-        { key: '/security-audit', icon: <SafetyOutlined />, label: t('nav.security_audit'), minRole: 'org_viewer' },
-        { key: '/asset-lifecycle', icon: <CalendarOutlined />, label: t('nav.asset_lifecycle'), minRole: 'org_viewer' },
-        { key: '/diagnostics', icon: <AimOutlined />, label: t('nav.diagnostics'), minRole: 'operator' },
-        { key: '/tasks', icon: <PlayCircleOutlined />, label: t('nav.tasks'), minRole: 'operator' },
-        { key: '/playbooks', icon: <ThunderboltOutlined />, label: t('nav.playbooks'), minRole: 'admin' },
-        { key: '/config-templates', icon: <FileTextOutlined />, label: t('nav.config_templates'), minRole: 'admin' },
-        { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management'), minRole: 'location_manager' },
-        { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval', badgeCount: approvalCount?.count ?? 0, minRole: 'location_manager' },
-        { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla'), minRole: 'org_viewer' },
-        { key: '/synthetic-probes', icon: <RadarChartOutlined />, label: 'Synthetic Probes', minRole: 'org_viewer' },
-        { key: '/incidents', icon: <BugOutlined />, label: 'Incident RCA', minRole: 'org_viewer' },
-        { key: '/escalation-rules', icon: <BellOutlined />, label: 'Escalation Kuralları', minRole: 'admin' },
-        { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası', minRole: 'org_viewer' },
-        { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin', minRole: 'location_manager' },
-        { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports'), minRole: 'org_viewer' },
+        { key: '/intelligence', icon: <BugOutlined />, label: 'Ağ Analitik', minRole: 'viewer' },
+        { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules'), minRole: 'org_admin' },
+        { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth'), minRole: 'viewer' },
+        { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence'), minRole: 'viewer' },
+        { key: '/security-audit', icon: <SafetyOutlined />, label: t('nav.security_audit'), minRole: 'viewer' },
+        { key: '/asset-lifecycle', icon: <CalendarOutlined />, label: t('nav.asset_lifecycle'), minRole: 'viewer' },
+        { key: '/diagnostics', icon: <AimOutlined />, label: t('nav.diagnostics'), minRole: 'viewer' },
+        { key: '/tasks', icon: <PlayCircleOutlined />, label: t('nav.tasks'), minRole: 'viewer' },
+        { key: '/playbooks', icon: <ThunderboltOutlined />, label: t('nav.playbooks'), minRole: 'org_admin' },
+        { key: '/config-templates', icon: <FileTextOutlined />, label: t('nav.config_templates'), minRole: 'org_admin' },
+        { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management'), minRole: 'location_admin' },
+        { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval', badgeCount: approvalCount?.count ?? 0, minRole: 'location_admin' },
+        { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla'), minRole: 'viewer' },
+        { key: '/synthetic-probes', icon: <RadarChartOutlined />, label: 'Synthetic Probes', minRole: 'viewer' },
+        { key: '/incidents', icon: <BugOutlined />, label: 'Incident RCA', minRole: 'viewer' },
+        { key: '/escalation-rules', icon: <BellOutlined />, label: 'Escalation Kuralları', minRole: 'org_admin' },
+        { key: '/services', icon: <ApartmentOutlined />, label: 'Servis Etki Haritası', minRole: 'viewer' },
+        { key: '/topology-twin', icon: <ApartmentOutlined />, label: 'Network Digital Twin', minRole: 'location_admin' },
+        { key: '/reports', icon: <BarChartOutlined />, label: t('nav.reports'), minRole: 'viewer' },
       ],
     },
     {
       label: t('nav_group.management'),
       items: [
-        ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as UserRole }] : []),
-        ...(isOA && !isSA ? [{ key: '/org-admin', icon: <GlobalOutlined />, label: '⚙ Organizasyon Paneli', minRole: 'admin' as UserRole }] : []),
-        { key: '/permissions', icon: <SafetyOutlined />, label: 'Yetki Yönetimi', minRole: 'admin' as UserRole },
-        { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'admin' },
-        { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'admin' },
-        { key: '/users', icon: <TeamOutlined />, label: t('nav.users'), minRole: 'admin' },
-        { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations'), minRole: 'admin' },
-        { key: '/audit', icon: <AuditOutlined />, label: t('nav.audit'), minRole: 'org_viewer' },
-        { key: '/driver-templates', icon: <CodeOutlined />, label: t('nav.driver_templates'), minRole: 'admin' },
+        ...(isSA ? [{ key: '/superadmin', icon: <GlobalOutlined />, label: '⚙ Platform Paneli', minRole: 'super_admin' as SystemRole }] : []),
+        ...(isOA && !isSA ? [{ key: '/org-admin', icon: <GlobalOutlined />, label: '⚙ Organizasyon Paneli', minRole: 'org_admin' as SystemRole }] : []),
+        { key: '/permissions', icon: <SafetyOutlined />, label: 'Yetki Yönetimi', minRole: 'org_admin' as SystemRole },
+        { key: '/ai-assistant', icon: <RobotOutlined />, label: 'AI Ağ Asistanı', minRole: 'org_admin' },
+        { key: '/agents', icon: <RobotOutlined />, label: t('nav.agents'), minRole: 'org_admin' },
+        { key: '/users', icon: <TeamOutlined />, label: t('nav.users'), minRole: 'org_admin' },
+        { key: '/locations', icon: <EnvironmentOutlined />, label: t('nav.locations'), minRole: 'org_admin' },
+        { key: '/audit', icon: <AuditOutlined />, label: t('nav.audit'), minRole: 'viewer' },
+        { key: '/driver-templates', icon: <CodeOutlined />, label: t('nav.driver_templates'), minRole: 'org_admin' },
         { key: '/help', icon: <QuestionCircleOutlined />, label: t('nav.help') },
-        { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings'), minRole: 'admin' },
+        { key: '/settings', icon: <SettingOutlined />, label: t('nav.settings'), minRole: 'org_admin' },
       ],
     },
   ]

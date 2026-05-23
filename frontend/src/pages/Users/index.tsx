@@ -31,26 +31,27 @@ const USERS_CSS = `
 .users-row-inactive td { opacity: 0.55; }
 `
 
+// RBAC F2 — 4-role colour/label maps. Legacy keys (admin, org_viewer,
+// location_manager, location_operator, location_viewer, operator, member)
+// are kept as aliases that point at the same colour as their normalised
+// target so OLD invite tokens / persisted state still render correctly
+// while the backend setter is migrating values.
 const ROLE_HEX: Record<string, string> = {
-  super_admin: '#ef4444',
-  admin: '#f97316',
-  org_viewer: '#8b5cf6',
-  location_manager: '#06b6d4',
-  location_operator: '#3b82f6',
-  location_viewer: '#22c55e',
-  operator: '#3b82f6',
-  viewer: '#22c55e',
+  super_admin:    '#ef4444',
+  org_admin:      '#f97316',  admin:             '#f97316',
+  location_admin: '#06b6d4',  location_manager:  '#06b6d4',  location_operator: '#06b6d4',
+  viewer:         '#22c55e',  location_viewer:   '#22c55e',  org_viewer:        '#22c55e',
+                              operator:          '#22c55e',  member:            '#22c55e',
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  super_admin: 'SUPER ADMIN',
-  admin: 'ADMIN',
-  org_viewer: 'ORG VIEWER',
-  location_manager: 'LOC. MANAGER',
-  location_operator: 'LOC. OPERATOR',
-  location_viewer: 'LOC. VIEWER',
-  operator: 'OPERATOR',
-  viewer: 'VIEWER',
+  super_admin:    'SÜPER ADMİN',
+  org_admin:      'ORG ADMİN',         admin:             'ORG ADMİN',
+  location_admin: 'LOKASYON ADMİN',    location_manager:  'LOKASYON ADMİN',
+                                       location_operator: 'LOKASYON ADMİN',
+  viewer:         'GÖRÜNTÜLEYİCİ',     location_viewer:   'GÖRÜNTÜLEYİCİ',
+  org_viewer:     'GÖRÜNTÜLEYİCİ',     operator:          'GÖRÜNTÜLEYİCİ',
+  member:         'GÖRÜNTÜLEYİCİ',
 }
 
 function mkC(isDark: boolean) {
@@ -249,9 +250,11 @@ export default function UsersPage() {
     return { total: userList.length, active, mfa, last24h, pendingInvites, distinctRoles }
   }, [userList, invites])
 
+  // Only a super-admin may grant another user the super_admin role; org
+  // admins may not create / promote to super_admin or to org_admin.
   const ROLE_OPTIONS_FILTERED = isSA
     ? ROLE_OPTIONS
-    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin' && o.value !== 'admin')
+    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin' && o.value !== 'org_admin')
 
   const locNameMap = Object.fromEntries(
     (locationsData?.items || []).map((l) => [l.id, l.name])
@@ -349,7 +352,9 @@ export default function UsersPage() {
                 const hex = ROLE_HEX[r.role] || '#64748b'
                 const mfaOn = !!(r as any).mfa_enabled
                 const isMe = r.id === currentUser?.id
-                const isProtected = isMe || (!isSA && (r.role === 'admin' || r.role === 'super_admin'))
+                // Org admins cannot delete super_admin or other org_admin
+                // accounts — only super-admins (platform) can; never delete self.
+                const isProtected = isMe || (!isSA && (r.role === 'org_admin' || r.role === 'super_admin'))
                 return (
                   <tr key={r.id} className={!r.is_active ? 'users-row-inactive' : ''}>
                     <td>
