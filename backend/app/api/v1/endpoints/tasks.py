@@ -159,11 +159,14 @@ async def get_audit_log(
         query.order_by(AuditLog.created_at.desc()).offset(skip).limit(limit)
     )).scalars().all()
 
-    # Fetch user roles for current page in one query
+    # Fetch user roles for current page in one query.
+    # M6 final drop: `User.role` is now a Python @property shim returning
+    # `system_role`; SQL `select(User.role)` would fail (not a Mapped col).
+    # Use the actual column.
     user_ids = list({l.user_id for l in logs if l.user_id})
     role_map: dict[int, str] = {}
     if user_ids:
-        rows = (await db.execute(select(User.id, User.role).where(User.id.in_(user_ids)))).fetchall()
+        rows = (await db.execute(select(User.id, User.system_role).where(User.id.in_(user_ids)))).fetchall()
         role_map = {row[0]: row[1] for row in rows}
 
     # Summary stats for header

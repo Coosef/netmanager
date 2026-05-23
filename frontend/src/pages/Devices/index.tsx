@@ -13,7 +13,7 @@ import {
   ApartmentOutlined,
   DatabaseOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined,
   CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
-  SwapOutlined,
+  SwapOutlined, CodeOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
@@ -1337,6 +1337,11 @@ function NocDeviceTable({
                   <td className="col-actions">
                     <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
                       <Tooltip title="Detay"><button onClick={() => onDetail(d)}><EyeOutlined /></button></Tooltip>
+                      <Tooltip title="SSH Terminal (yeni sekme)">
+                        <button onClick={() => window.open(`/ssh/${d.id}?hostname=${encodeURIComponent(d.hostname)}&ip=${encodeURIComponent(d.ip_address)}`, '_blank', 'noopener,noreferrer')}>
+                          <CodeOutlined style={{ color: 'var(--ok)' }} />
+                        </button>
+                      </Tooltip>
                       <Tooltip title="SSH Bağlantı Testi"><button onClick={() => onTest(d)} disabled={testingId === d.id}><ThunderboltOutlined /></button></Tooltip>
                       <Tooltip title="Cihazdan Bilgi Çek"><button onClick={() => onFetchInfo(d)} disabled={fetchingId === d.id}><ReloadOutlined /></button></Tooltip>
                       <Tooltip title="Düzenle"><button onClick={() => onEdit(d)}><EditOutlined /></button></Tooltip>
