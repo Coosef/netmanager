@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import AppHeader from './Header'
-import GlobalSearchModal from './GlobalSearchModal'
 import LocationGate from './LocationGate'
+import CommandPalette from '@/components/CommandPalette'
+import CustomizePanel from '@/components/CustomizePanel'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useCustomize } from '@/contexts/CustomizeContext'
 import { useAlarmWatcher } from '@/hooks/useAlarmWatcher'
@@ -29,12 +30,13 @@ const BOTTOM_NAV_ITEMS = [
 ]
 
 export default function AppLayout() {
-  const { isDark } = useTheme()
+  const { isDark, toggle: toggleTheme } = useTheme()
   const { menuPosition } = useCustomize()
   const location = useLocation()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
-  const [searchOpen, setSearchOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   useAlarmWatcher()
@@ -43,9 +45,12 @@ export default function AppLayout() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // ⌘K / Ctrl+K → CommandPalette (NAV + AKSIYON + CİHAZ arama).
+      // Eski GlobalSearchModal yerine — CommandPalette üst kümesi (sayfa
+      // ara, tema değiştir, özelleştir, ayrıca cihaz arama dahil).
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault()
-        setSearchOpen((v) => !v)
+        setPaletteOpen((v) => !v)
       }
     }
     window.addEventListener('keydown', handler)
@@ -66,7 +71,7 @@ export default function AppLayout() {
         <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
         <div className="nm-main" style={{ gridTemplateRows: 'auto 1fr' }}>
           <AppHeader
-            onOpenSearch={() => setSearchOpen(true)}
+            onOpenSearch={() => setPaletteOpen(true)}
             onOpenMobileNav={() => setMobileNavOpen(true)}
           />
           <div className="nm-workspace">
@@ -115,7 +120,16 @@ export default function AppLayout() {
         </nav>
       )}
 
-      <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onAction={(act) => {
+          if (act === 'theme') toggleTheme()
+          else if (act === 'customize') setCustomizeOpen(true)
+        }}
+        isDark={isDark}
+      />
+      <CustomizePanel open={customizeOpen} onClose={() => setCustomizeOpen(false)} />
     </div>
   )
 }
