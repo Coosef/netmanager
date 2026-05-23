@@ -130,7 +130,7 @@ const WIDGET_SPAN: Record<string, string> = {
 export default function NocDashboard() {
   const navigate = useNavigate()
   const { activeSite } = useSite()
-  const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget } = useCustomize()
+  const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget, viewVariant } = useCustomize()
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
 
   const { data: s } = useQuery({ queryKey: ['monitor-stats', activeSite], queryFn: () => monitorApi.getStats({ site: activeSite || undefined }), refetchInterval: 30000 })
@@ -167,6 +167,20 @@ export default function NocDashboard() {
   const sla = slaFleet as any
   const tasks = (tasksData as any)?.items || []
 
+  // ── View variant dispatch ─────────────────────────────────────────────
+  // Mockup'taki 3 layout: workspace (default modüler grid), mission (NOC
+  // duvarı 3-col), editorial (günlük brief 3-col). Aynı queries kullanılır;
+  // sadece görsel düzen farklı.
+  if (viewVariant === 'mission') {
+    return <MissionVariant ctx={{ navigate, online, offline, total, events24h, liveEvents,
+      impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now }} />
+  }
+  if (viewVariant === 'editorial') {
+    return <EditorialVariant ctx={{ navigate, online, offline, total, events24h, liveEvents,
+      impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now }} />
+  }
+
+  // Default: workspace variant — mevcut nm-grid widget düzeni
   return (
     <div style={{ padding: 2 }}>
       {/* live ticker — sürekli akan ticker (noc.css nm-tick animation),
@@ -600,6 +614,311 @@ function RiskDist({ summary }: { summary?: any }) {
         <span>Toplam değerlendirilen</span>
         <span className="mono" style={{ color: 'var(--fg-0)' }}>{tot} cihaz</span>
       </div>
+    </div>
+  )
+}
+
+// ── Mission variant (NOC duvarı, 3-column) ─────────────────────────────
+// Mockup VariantMission: sol vital signs + risk; orta strip + map + alt
+// widget şeridi; sağ event rail. Sayfa flush (border'sız, full-bleed).
+function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
+  const { online, offline, total, events24h, liveEvents, anom, risk, sla, impact } = ctx
+  const unacked = anom?.unacked ?? 0
+  const critIncidents = impact?.critical_count ?? 0
+  return (
+    <div className="variant-mission" style={{ height: '100%' }}>
+      <div className="nm-mc-grid" style={{
+        display: 'grid', gridTemplateColumns: '360px 1fr 320px', height: '100%', minHeight: 600,
+      }}>
+        {/* SOL: Vital signs */}
+        <div style={{ borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ overflow: 'auto', flex: 1 }}>
+            <VitalSign label="ÇEVRİMİÇİ CİHAZ" value={online} unit={`/ ${total}`}
+              foot={<><span style={{ color: 'var(--ok)' }}>{online} aktif</span> · {offline} çevrimdışı</>}
+              kind="ok" />
+            <VitalSign label="AKTİF KRİTİK INCIDENT" value={critIncidents || 0}
+              foot={<>{critIncidents > 0 ? <><span style={{ color: 'var(--crit)' }}>{critIncidents} OPEN</span> · servis etkili</> : 'açık incident yok'}</>}
+              kind={critIncidents > 0 ? 'crit' : 'ok'} />
+            <VitalSign label="SON 24SA OLAY" value={events24h}
+              foot={<><span style={{ color: 'var(--fg-2)' }}>live</span> {liveEvents.length} new</>}
+              kind="info" />
+            <VitalSign label="FLEET AVAILABILITY" value={(sla?.avg_uptime_pct ?? 0).toFixed(1)} unit="%"
+              foot={<><span style={{ color: (sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : 'var(--warn)' }}>
+                hedef 99.0%</span> 30 günlük</>}
+              kind={(sla?.avg_uptime_pct ?? 0) >= 99 ? 'ok' : 'warn'} />
+            <div style={{ padding: '16px 18px', borderTop: '1px solid var(--line)' }}>
+              <div style={{
+                fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)',
+                textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 12,
+              }}>RİSK DAĞILIMI · {risk?.summary?.total_devices ?? total} CİHAZ</div>
+              <RiskDist summary={risk?.summary} />
+            </div>
+          </div>
+        </div>
+
+        {/* ORTA: Strip + Map + Alt widget şeridi */}
+        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
+          <div className="nm-mc-strip">
+            <div>
+              <div className="nm-mc-strip-label">EVENTS / 24SA</div>
+              <div className="nm-mc-strip-val">{events24h}</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>{liveEvents.length} live</div>
+            </div>
+            <div>
+              <div className="nm-mc-strip-label">UNACKED</div>
+              <div className="nm-mc-strip-val" style={{ color: unacked > 0 ? 'var(--crit)' : 'var(--ok)' }}>
+                {unacked}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>onay bekliyor</div>
+            </div>
+            <div>
+              <div className="nm-mc-strip-label">SLA · 30G</div>
+              <div className="nm-mc-strip-val" style={{ color: (sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : 'var(--warn)' }}>
+                {(sla?.avg_uptime_pct ?? 0).toFixed(1)}<small style={{ fontSize: 11, color: 'var(--fg-3)' }}>%</small>
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>HEDEF 99.0%</div>
+            </div>
+            <div>
+              <div className="nm-mc-strip-label">SERVİS DURUMU</div>
+              <div className="nm-mc-strip-val">
+                {impact ? `${(impact.total_services ?? 0) - (impact.critical_count ?? 0)}/${impact.total_services ?? 0}` : '—'}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: critIncidents > 0 ? 'var(--crit)' : 'var(--fg-3)', marginTop: 4 }}>
+                {critIncidents > 0 ? `${critIncidents} KESİNTİ` : 'stabil'}
+              </div>
+            </div>
+          </div>
+
+          {/* Map yer tutucu — gerçek bir harita olmadığından TopoMini'yi büyüt */}
+          <div style={{ flex: 1, position: 'relative', minHeight: 240, borderBottom: '1px solid var(--line)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+            <TopoMini online={online} offline={offline} total={total} />
+          </div>
+
+          {/* Alt widget şeridi: Drift / Approvals / Agents */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', borderTop: '1px solid var(--line)' }}>
+            <MiniWidget title="CONFIG DRIFT" value={ctx.driftReport?.drift_count ?? 0}
+              note={`${ctx.driftReport?.no_backup_count ?? 0} yedek yok`}
+              kind={ctx.driftReport?.drift_count ? 'warn' : 'ok'} />
+            <MiniWidget title="ONAY BEKLEYEN" value={ctx.approvalCount?.count ?? 0}
+              note="komut onayı"
+              kind={(ctx.approvalCount?.count ?? 0) > 0 ? 'warn' : 'ok'} />
+            <MiniWidget title="AGENT FİLOSU"
+              value={`${ctx.agents.filter((a: any) => a.status === 'online').length}/${ctx.agents.length}`}
+              note="online ajan" kind="ok" />
+          </div>
+        </div>
+
+        {/* SAĞ: Event rail */}
+        <div style={{ borderLeft: '1px solid var(--line)', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              <span className="nm-status-dot ok pulse" style={{ marginRight: 6 }} />
+              CANLI EVENT RAIL · {liveEvents.length}
+            </div>
+          </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
+            {liveEvents.length === 0 ? (
+              <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)', fontSize: 11 }}>
+                Son 30 dakikada olay yok
+              </div>
+            ) : liveEvents.slice(0, 30).map((e, i) => (
+              <div key={e.id || i} className="nm-fadein"
+                style={{ padding: '8px 10px', borderBottom: '1px solid var(--line-soft)', fontSize: 11 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10 }}>{dayjs(e.created_at).format('HH:mm')}</span>
+                  <span className={`nm-pill ${sevPill(e.severity)}`}>{e.severity}</span>
+                  {e.severity === 'critical' && !e.acknowledged && <span className="nm-led-crit" />}
+                </div>
+                <div className="mono" style={{ fontSize: 11, color: 'var(--fg-1)', marginTop: 2 }}>{e.device_hostname || '—'}</div>
+                <div style={{ fontSize: 11, color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.title}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function VitalSign({ label, value, unit, foot, kind }:
+  { label: string; value: string | number; unit?: string; foot?: React.ReactNode; kind?: 'ok' | 'warn' | 'crit' | 'info' }) {
+  const color = kind === 'crit' ? 'var(--crit)' : kind === 'warn' ? 'var(--warn)' : kind === 'ok' ? 'var(--ok)' : kind === 'info' ? 'var(--info)' : 'var(--fg-0)'
+  return (
+    <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--line-soft)' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)',
+        textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 44, fontWeight: 500, lineHeight: 1, color }}>
+        {value}{unit && <small style={{ fontSize: 16, color: 'var(--fg-3)' }}>{unit}</small>}
+      </div>
+      {foot && <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 8 }}>{foot}</div>}
+    </div>
+  )
+}
+
+function MiniWidget({ title, value, note, kind }:
+  { title: string; value: string | number; note: string; kind?: 'ok' | 'warn' | 'crit' }) {
+  const color = kind === 'crit' ? 'var(--crit)' : kind === 'warn' ? 'var(--warn)' : kind === 'ok' ? 'var(--ok)' : 'var(--fg-0)'
+  return (
+    <div style={{ padding: '14px 16px', borderRight: '1px solid var(--line)' }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-3)',
+        textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 24, fontWeight: 500, color }}>{value}</div>
+      <div style={{ fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>{note}</div>
+    </div>
+  )
+}
+
+// ── Editorial variant (günlük brief) ───────────────────────────────────
+// Mockup VariantEditorial: 3 sütun (kicker + headline + figures · numbers ·
+// brief). Operasyonel özet metinleri gerçek veriden türetiliyor.
+function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
+  const { online, offline, total, events24h, risk, sla, anom, impact, agents,
+    approvalCount, driftReport, now } = ctx
+  const expPct = ctx.risk?.summary?.experience_score ?? null
+  const criticalEvents = anom?.total ?? 0
+  const offlinePct = total > 0 ? Math.round((offline / total) * 100 * 10) / 10 : 0
+  return (
+    <div className="variant-editorial" style={{ height: '100%' }}>
+      <div className="nm-edit-wrap" style={{
+        display: 'grid', gridTemplateColumns: '1fr 1px 1fr 1px 1fr', gap: 24,
+        padding: '28px 32px', height: '100%', overflow: 'auto', alignItems: 'start',
+      }}>
+        {/* SOL: Operasyonel anlatı */}
+        <div className="nm-edit-col">
+          <div className="nm-edit-kicker">OPERASYONEL DURUM · {now}</div>
+          <div className="nm-edit-headline" style={{ fontSize: 26, fontWeight: 500, lineHeight: 1.2, margin: '12px 0 20px' }}>
+            {offline === 0
+              ? 'Filo bugün stabil; tüm cihazlar çevrimiçi.'
+              : offline <= 3
+              ? 'Filo büyük ölçüde stabil; az sayıda cihaz izlemede.'
+              : 'Filoda dikkat gerektiren çevrimdışı cihazlar var.'}
+          </div>
+          <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginTop: 14 }}>
+            ÇEVRİMDIŞI CİHAZ
+          </div>
+          <div className={`nm-edit-bigfig ${offline > 0 ? 'crit' : 'ok'}`}
+            style={{ fontSize: 92, fontWeight: 500, color: offline > 0 ? 'var(--crit)' : 'var(--ok)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>
+            {offline}<small style={{ fontSize: 18, color: 'var(--fg-3)' }}>/ {total}</small>
+          </div>
+          <div className="nm-edit-body" style={{ fontSize: 13, color: 'var(--fg-1)', lineHeight: 1.6, margin: '12px 0 20px' }}>
+            {online} cihaz aktif · filo doluluğu <strong>%{(100 - offlinePct).toFixed(1)}</strong>.
+            {(impact?.critical_count ?? 0) > 0 && <> Kritik etki altında <strong style={{ color: 'var(--crit)' }}>{impact.critical_count} servis</strong>.</>}
+            {' '}Son 24 saatte <strong>{events24h} olay</strong> kaydedildi.
+          </div>
+          <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
+            SON 24 SAAT
+          </div>
+          <div className="nm-edit-bigfig" style={{ fontSize: 72, fontWeight: 500, color: 'var(--fg-0)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>
+            {events24h}<small style={{ fontSize: 14, color: 'var(--fg-3)' }}>olay</small>
+          </div>
+          <div className="nm-edit-meta" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--fg-3)', marginTop: 20, fontFamily: 'var(--font-mono)' }}>
+            <span>Otomatik özet</span><span>·</span><span>NetManager Intelligence</span>
+            <span style={{ marginLeft: 'auto' }}>▲ canlı</span>
+          </div>
+        </div>
+
+        <div className="nm-edit-rule" style={{ background: 'var(--line)', height: '100%' }}></div>
+
+        {/* ORTA: Rakamlar */}
+        <div className="nm-edit-col">
+          <div className="nm-edit-kicker">RAKAMLAR</div>
+          <EditStat label="AKTİF INCIDENT" value={impact?.critical_count ?? 0}
+            note={(impact?.critical_count ?? 0) > 0
+              ? `${impact.critical_count} OPEN, servis etkili. En kritik servis: ${impact?.affected_services?.[0]?.service_name || '—'}.`
+              : 'Açık incident yok; tüm servisler stabil seyrediyor.'} />
+          <EditStat label="FLEET AVAILABILITY" value={(sla?.avg_uptime_pct ?? 0).toFixed(1)} unit="%"
+            note={`30 günlük pencerede ${(sla?.avg_uptime_pct ?? 0) >= 99 ? 'hedefin üstünde' : 'hedefin altında'} (99.0%). En kötü cihaz: ${sla?.worst_devices?.[0]?.hostname || '—'} · %${sla?.worst_devices?.[0]?.uptime_pct?.toFixed(1) || '—'}.`} />
+          <EditStat label="EXPERIENCE SCORE" value={expPct != null ? Math.round(expPct * 100) : '—'} unit={expPct != null ? '/100' : ''}
+            note="Synthetic probe + uptime + paket kaybı bileşeni." />
+          <EditStat label="RİSK · YÜKSEK VEYA ÜZERİ" value={(risk?.summary?.high ?? 0) + (risk?.summary?.critical ?? 0)}
+            note={`${risk?.summary?.critical ?? 0} kritik, ${risk?.summary?.high ?? 0} yüksek. En riskli cihaz: ${risk?.top_risky?.[0]?.hostname || '—'}.`} />
+          <EditStat label="ANORMAL DAVRANIŞ · 24SA" value={criticalEvents}
+            note={criticalEvents > 0 ? 'Behavior analytics anomali tespit etti.' : 'Anomali yok; filo davranışı normal.'} />
+        </div>
+
+        <div className="nm-edit-rule" style={{ background: 'var(--line)', height: '100%' }}></div>
+
+        {/* SAĞ: Brief */}
+        <div className="nm-edit-col">
+          <div className="nm-edit-kicker">BRIEF</div>
+          <div style={{ marginBottom: 22 }}>
+            <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
+              SERVİS DURUMU
+            </div>
+            {!impact?.affected_services?.length ? (
+              <div style={{ fontSize: 12, color: 'var(--fg-2)', padding: '14px 16px', border: '1px solid var(--line)', background: 'var(--bg-1)' }}>
+                Etkilenen servis yok — tüm servisler stabil.
+              </div>
+            ) : (
+              <div style={{ border: '1px solid var(--line)', background: 'var(--bg-1)' }}>
+                {impact.affected_services.slice(0, 4).map((svc: any) => (
+                  <div key={svc.service_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', borderBottom: '1px solid var(--line-soft)' }}>
+                    <span className={`nm-status-dot ${svc.impact_pct > 0 ? 'crit pulse' : 'ok pulse'}`} />
+                    <div style={{ flex: 1, fontSize: 12 }}>{svc.service_name}</div>
+                    <span className="mono" style={{ fontSize: 11, color: svc.impact_pct > 0 ? 'var(--crit)' : 'var(--ok)' }}>
+                      {svc.impact_pct > 0 ? `${svc.impact_pct}% etki` : 'stabil'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <div style={{ marginBottom: 22 }}>
+            <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
+              DİKKAT EDİLECEKLER
+            </div>
+            <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.7, color: 'var(--fg-1)' }}>
+              {(risk?.top_risky?.[0]) && (
+                <li><strong style={{ color: 'var(--fg-0)' }}>{risk.top_risky[0].hostname}</strong> — risk skoru {Math.round(risk.top_risky[0].risk_score ?? 0)}, kontrol önerilir.</li>
+              )}
+              {(impact?.affected_services?.[0]) && impact.affected_services[0].impact_pct > 0 && (
+                <li><strong style={{ color: 'var(--fg-0)' }}>{impact.affected_services[0].service_name}</strong> servisi şu an %{impact.affected_services[0].impact_pct} etkide.</li>
+              )}
+              {(approvalCount?.count ?? 0) > 0 && (
+                <li><strong style={{ color: 'var(--fg-0)' }}>{approvalCount.count} onay</strong> operatörler tarafından bekletiliyor.</li>
+              )}
+              {(driftReport?.drift_count ?? 0) > 0 && (
+                <li><strong style={{ color: 'var(--fg-0)' }}>{driftReport.drift_count} cihazda</strong> config drift tespit edildi.</li>
+              )}
+              {(agents.filter((a: any) => a.status !== 'online').length > 0) && (
+                <li><strong style={{ color: 'var(--fg-0)' }}>{agents.filter((a: any) => a.status !== 'online').length} ajan</strong> çevrimdışı.</li>
+              )}
+              {/* Hiçbir madde yoksa */}
+              {(risk?.top_risky?.length ?? 0) === 0 &&
+                (impact?.affected_services?.[0]?.impact_pct ?? 0) === 0 &&
+                (approvalCount?.count ?? 0) === 0 &&
+                (driftReport?.drift_count ?? 0) === 0 && (
+                <li style={{ color: 'var(--fg-3)' }}>Bugün için kayda değer bir dikkat noktası yok.</li>
+              )}
+            </ol>
+          </div>
+          <div>
+            <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
+              FİLO ÖZETİ
+            </div>
+            <div style={{ display: 'flex', gap: 18, fontSize: 12, color: 'var(--fg-2)' }}>
+              <div><strong style={{ color: 'var(--ok)' }}>{online}</strong> online</div>
+              <div><strong style={{ color: offline > 0 ? 'var(--crit)' : 'var(--fg-0)' }}>{offline}</strong> çevrimdışı</div>
+              <div><strong style={{ color: 'var(--fg-0)' }}>{total}</strong> toplam</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditStat({ label, value, unit, note }:
+  { label: string; value: string | number; unit?: string; note: string }) {
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)',
+        textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 48, fontWeight: 500, color: 'var(--fg-0)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>
+        {value}{unit && <small style={{ fontSize: 13, color: 'var(--fg-3)' }}>{unit}</small>}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.55, marginTop: 8 }}>{note}</div>
     </div>
   )
 }
