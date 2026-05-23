@@ -56,5 +56,9 @@ class UserResponse(BaseModel):
     last_login: Optional[datetime]
     created_at: datetime
     locations: list[UserLocationItem] = []
+    # MFA status — read-only here; managed via /users/me/mfa/*. The Users
+    # admin page needs `mfa_enabled` for the "MFA AÇIK" KPI; the rest of
+    # the MFA state (totp_secret, recovery codes) stays per-user-only.
+    mfa_enabled: bool = False
 
     model_config = {"from_attributes": True}

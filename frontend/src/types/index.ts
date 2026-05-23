@@ -66,6 +66,7 @@ export interface User {
   last_login?: string
   created_at: string
   locations?: UserLocationItem[]
+  mfa_enabled?: boolean    // surfaced by /users list (UserResponse.mfa_enabled)
 }
 
 export interface TokenResponse {
