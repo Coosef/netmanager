@@ -298,96 +298,6 @@ export default function PlaybooksPage() {
     URL.revokeObjectURL(url)
   }
 
-  const columns = [
-    {
-      title: 'Ad',
-      dataIndex: 'name',
-      render: (name: string, pb: Playbook) => (
-        <Space direction="vertical" size={0}>
-          <Text strong>{name}</Text>
-          {pb.description && <Text type="secondary" style={{ fontSize: 12 }}>{pb.description}</Text>}
-        </Space>
-      ),
-    },
-    {
-      title: 'Adımlar',
-      dataIndex: 'step_count',
-      width: 90,
-      render: (n: number) => <Tag icon={<CodeOutlined />}>{n} adım</Tag>,
-    },
-    {
-      title: 'Hedef',
-      width: 160,
-      render: (_: unknown, pb: Playbook) => {
-        const group = groupsData?.find((g) => g.id === pb.target_group_id)
-        if (group) return <Tag color="blue">{group.name}</Tag>
-        if (pb.target_device_ids?.length > 0) return <Tag>{pb.target_device_ids.length} cihaz</Tag>
-        return <Tag color="default">Tüm aktif cihazlar</Tag>
-      },
-    },
-    {
-      title: 'Tetikleyici',
-      width: 170,
-      render: (_: unknown, pb: Playbook) => {
-        if (pb.trigger_type === 'event') {
-          return (
-            <Space direction="vertical" size={0}>
-              <Tag color="orange" icon={<ThunderboltOutlined />}>Olay Bazlı</Tag>
-              {pb.trigger_event_type && (
-                <Text type="secondary" style={{ fontSize: 11 }}>{pb.trigger_event_type}</Text>
-              )}
-            </Space>
-          )
-        }
-        if (pb.trigger_type === 'scheduled' && pb.schedule_interval_hours) {
-          const label = SCHEDULE_OPTIONS.find(o => o.value === pb.schedule_interval_hours)?.label
-            ?? `Her ${pb.schedule_interval_hours}s`
-          return (
-            <Space direction="vertical" size={0}>
-              <Tag color="purple" icon={<ClockCircleOutlined />}>{label}</Tag>
-              {pb.next_run_at && <Text type="secondary" style={{ fontSize: 11 }}>Sonraki: {dayjs(pb.next_run_at).format('DD.MM HH:mm')}</Text>}
-            </Space>
-          )
-        }
-        return <Text type="secondary" style={{ fontSize: 12 }}>Manuel</Text>
-      },
-    },
-    {
-      title: 'Güncelleme',
-      dataIndex: 'updated_at',
-      width: 120,
-      render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(v).fromNow()}</Text>,
-    },
-    {
-      title: 'İşlemler',
-      width: 220,
-      render: (_: unknown, pb: Playbook) => (
-        <Space>
-          <Tooltip title="Çalıştır">
-            <Button size="small" type="primary" icon={<PlayCircleOutlined />}
-              loading={runMutation.isPending && (runMutation.variables as any)?.id === pb.id}
-              onClick={() => runMutation.mutate({ id: pb.id })} />
-          </Tooltip>
-          <Tooltip title="Dry-run (simülasyon)">
-            <Button size="small" icon={<ExperimentOutlined />}
-              loading={runMutation.isPending && (runMutation.variables as any)?.id === pb.id}
-              onClick={() => runMutation.mutate({ id: pb.id, dry_run: true })} />
-          </Tooltip>
-          <Tooltip title="Geçmiş">
-            <Button size="small" icon={<HistoryOutlined />}
-              onClick={() => setRunsModal(pb)} />
-          </Tooltip>
-          <Tooltip title="Düzenle">
-            <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(pb)} />
-          </Tooltip>
-          <Popconfirm title="Bu playbook silinsin mi?" onConfirm={() => deleteMutation.mutate(pb.id)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
-
   const runColumns = [
     {
       title: 'Durum',
@@ -446,65 +356,132 @@ export default function PlaybooksPage() {
     },
   ]
 
+  // Stats — mockup nm-statbar için (Toplam / Manuel / Olay / Zamanlanmış / Pre-Backup / Adım sayısı)
+  const stats = (() => {
+    const manualCount = playbooks.filter((p) => p.trigger_type === 'manual').length
+    const eventCount = playbooks.filter((p) => p.trigger_type === 'event').length
+    const scheduledCount = playbooks.filter((p) => p.is_scheduled).length
+    const backupCount = playbooks.filter((p) => p.pre_run_backup).length
+    const totalSteps = playbooks.reduce((s, p) => s + (p.step_count || 0), 0)
+    return { manualCount, eventCount, scheduledCount, backupCount, totalSteps }
+  })()
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{PLAYBOOKS_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#f59e0b20' : C.border}`,
-        borderLeft: '4px solid #f59e0b',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#f59e0b20', border: '1px solid #f59e0b30',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <ThunderboltOutlined style={{ color: '#f59e0b', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>
-              Playbook'lar
-              <span style={{ color: C.dim, fontSize: 13, fontWeight: 400, marginLeft: 8 }}>({playbooks.length})</span>
-            </div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Otomasyon iş akışları ve zamanlanmış görevler</div>
-          </div>
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Operasyon</span><span>Playbook'lar</span></div>
+          <h1 className="nm-page-title">
+            Playbook'lar
+            <span className="nm-pill mono">{playbooks.length} aktif</span>
+          </h1>
+          <div className="nm-page-sub">Çok adımlı otomasyon · manuel / zamanlanmış / olay tetikleyici · dry-run · pre-run backup.</div>
         </div>
-        <Space>
-          <Button icon={<AppstoreOutlined />} onClick={() => setTemplatesModal(true)}>
-            Şablonlar
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            Yeni Playbook
-          </Button>
-        </Space>
+        <div className="nm-page-actions">
+          <button className="nm-btn ghost" onClick={() => setTemplatesModal(true)}><AppstoreOutlined /> Şablonlar</button>
+          <button className="nm-btn primary" onClick={openCreate}><PlusOutlined /> Yeni Playbook</button>
+        </div>
       </div>
 
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-      <Table
-        dataSource={playbooks}
-        rowKey="id"
-        loading={isLoading}
-        columns={columns}
-        pagination={{ pageSize: 20 }}
-        size="small"
-        onRow={() => ({ style: { animation: 'pbRowIn 0.2s ease-out' } })}
-        rowClassName={(pb: any) => {
-          const lastRun = pb.last_run_status
-          if (lastRun === 'running') return 'pb-row-running'
-          if (lastRun === 'failed') return 'pb-row-failed'
-          return ''
-        }}
-      />
+      <div className="nm-statbar">
+        <div className="nm-stat"><div className="nm-stat-label">Toplam</div><div className="nm-stat-val">{playbooks.length}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">Manuel</div><div className="nm-stat-val">{stats.manualCount}</div></div>
+        <div className="nm-stat warn"><div className="nm-stat-label">Olay Tetikleyici</div><div className="nm-stat-val">{stats.eventCount}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">Zamanlanmış</div><div className="nm-stat-val">{stats.scheduledCount}</div></div>
+        <div className="nm-stat ok"><div className="nm-stat-label">Pre-Backup</div><div className="nm-stat-val">{stats.backupCount}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">Toplam Adım</div><div className="nm-stat-val">{stats.totalSteps}</div></div>
+      </div>
+
+      <div className="nm-table-wrap">
+        <div className="nm-table-toolbar">
+          <span className="count"><em>{playbooks.length}</em> playbook</span>
+          <span style={{ color: 'var(--fg-3)', marginLeft: 'auto', fontSize: 11 }}>{isLoading ? 'Yükleniyor…' : ' '}</span>
+        </div>
+        <div style={{ overflow: 'auto' }}>
+          <table className="nm-table">
+            <thead>
+              <tr>
+                <th>Ad</th>
+                <th>Adım</th>
+                <th>Hedef</th>
+                <th>Tetikleyici</th>
+                <th>Güncelleme</th>
+                <th className="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {playbooks.map((pb) => {
+                const group = groupsData?.find((g) => g.id === pb.target_group_id)
+                return (
+                  <tr key={pb.id}>
+                    <td>
+                      <div className="nm-host">{pb.name}</div>
+                      {pb.description && <div className="nm-host-ip">{pb.description}</div>}
+                    </td>
+                    <td><span className="nm-pill mono"><CodeOutlined /> {pb.step_count} adım</span></td>
+                    <td>
+                      {group ? <span className="nm-pill info">{group.name}</span>
+                        : pb.target_device_ids?.length > 0 ? <span className="nm-pill">{pb.target_device_ids.length} cihaz</span>
+                        : <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>tüm aktif cihazlar</span>}
+                    </td>
+                    <td>
+                      {pb.trigger_type === 'event' ? (
+                        <>
+                          <span className="nm-pill warn"><ThunderboltOutlined /> Olay</span>
+                          {pb.trigger_event_type && (
+                            <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 3 }}>{pb.trigger_event_type}</div>
+                          )}
+                        </>
+                      ) : pb.trigger_type === 'scheduled' && pb.schedule_interval_hours ? (
+                        <>
+                          <span className="nm-pill"><ClockCircleOutlined /> {(SCHEDULE_OPTIONS.find((o) => o.value === pb.schedule_interval_hours)?.label) ?? `Her ${pb.schedule_interval_hours}sa`}</span>
+                          {pb.next_run_at && <div className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 3 }}>Sonraki: {dayjs(pb.next_run_at).format('DD.MM HH:mm')}</div>}
+                        </>
+                      ) : (
+                        <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>Manuel</span>
+                      )}
+                    </td>
+                    <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>{dayjs(pb.updated_at).fromNow()}</td>
+                    <td className="col-actions">
+                      <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                        <Tooltip title="Çalıştır">
+                          <button onClick={() => runMutation.mutate({ id: pb.id })}
+                            disabled={runMutation.isPending && (runMutation.variables as { id: number })?.id === pb.id}>
+                            <PlayCircleOutlined />
+                          </button>
+                        </Tooltip>
+                        <Tooltip title="Dry-run (simülasyon)">
+                          <button onClick={() => runMutation.mutate({ id: pb.id, dry_run: true })}
+                            disabled={runMutation.isPending && (runMutation.variables as { id: number })?.id === pb.id}>
+                            <ExperimentOutlined />
+                          </button>
+                        </Tooltip>
+                        <Tooltip title="Çalıştırma Geçmişi">
+                          <button onClick={() => setRunsModal(pb)}><HistoryOutlined /></button>
+                        </Tooltip>
+                        <Tooltip title="Düzenle">
+                          <button onClick={() => openEdit(pb)}><EditOutlined /></button>
+                        </Tooltip>
+                        <Popconfirm title="Bu playbook silinsin mi?" okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
+                          onConfirm={() => deleteMutation.mutate(pb.id)}>
+                          <button title="Sil"><DeleteOutlined /></button>
+                        </Popconfirm>
+                      </span>
+                    </td>
+                  </tr>
+                )
+              })}
+              {!isLoading && playbooks.length === 0 && (
+                <tr><td colSpan={6} style={{ textAlign: 'center', padding: 30, color: 'var(--fg-3)' }}>
+                  Henüz playbook yok — <button className="nm-btn ghost" style={{ height: 24, fontSize: 11, padding: '0 10px', marginLeft: 4 }}
+                    onClick={openCreate}>+ Yeni Playbook</button>
+                </td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Create/Edit Drawer */}
