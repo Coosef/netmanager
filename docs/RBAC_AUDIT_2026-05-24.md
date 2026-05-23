@@ -213,10 +213,30 @@ flowchart TD
 
 ---
 
-## 5. Sana sorum
+## 5. Kararlar (kullanıcı onayı — 2026-05-24)
 
-1. **P5 (Org Admin scope)** — "Mevcut: kendi org'undaki tüm lokasyonlara otomatik" mi, **"Sıkı: Org Admin de `user_locations` ile sınırlı"** mı?
-2. **F1-F5 sırasına onay veriyor musun?** F1 (bug fix) hemen ben yapıp pushyalım, gerisi F2'den itibaren onayın gelene kadar bekleyeyim mi?
-3. **Tasarım batch'ini (B2.2 VLAN ve sonrası)** F1-F5 bitene kadar dondurayım mı?
+1. **P5 — Org Admin scope = MEVCUT.** Kullanıcı sözüyle: *"sadece süper admin bütün sistemi görür ve yönetir. org admin sadece kendi organizasyonu içerisinde olan lokasyonları yönetebilir başka org veya lokasyonları göremez ve yönetemez"* — bu zaten mevcut backend davranışı:
+   - **Super Admin** RLS bypass — her org + her lokasyon
+   - **Org Admin** RLS `organization_id = user.org_id` ile başka org'a hiç erişemez; kendi org'undaki tüm lokasyonları görür (`is_org_wide(user)` true).
+   - **Location Admin** ve **Viewer** `user_locations` üzerinden somut lokasyon(lar)a atanır.
 
-Cevaplarına göre todo'yu güncelleyip implementasyona geçiyorum.
+   UI'da bu artık net gösteriliyor (F3 sweep).
+2. **F1 → F2 → F3 → F4 → F5 sırasına onay** — her biri tek commit. ✅ Tamamı uygulandı.
+3. **Tasarım batch (B2.2 VLAN ve sonrası) F6'ya kadar dondu.** F6'dan sonra devam.
+
+## 6. Sonuç (outcome map)
+
+| # | Madde | Commit | Smoke / sonuç |
+|---|---|---|---|
+| F1 | `User.role` setter + legacy normalisation | `240de0d` | 6/6 ye&#x15F;il (PATCH /users/{id}, lokasyon atama, eski role değerleri otomatik 4-role'e map'lendi) |
+| F2 | Frontend rol enum hizalama (8→4) + `normalizeRole()` simetrisi | `f33f2f7` | tsc 55 hata → 0; `setAuth` + `onRehydrateStorage` eski localStorage'i temizliyor |
+| F3 | UI metin sweep: 'Tenant seçin' → 'Organizasyon seçin', 3-satır renkli rol açıklaması, loc_role truncation fix | `540c12c` | tsc 0; 4 locale dosyasından ölü `tenant_placeholder` silindi |
+| F4 | Yetki Yönetimi sayfası 4-role uyumu: ROLE_LABEL/COLOR + `isFullAccessRole`/`isManagedRole` helper'ları + 3-durum selected-user paneli | `020b7ee` | tsc 0; `SEÇİLİ KULLANICI` crit-pulse artık doğru çalışıyor |
+| F5 | Org oluşturma UI: `createOrg()` client + SuperAdmin "Yeni Organizasyon" modal; provisioner soft-fail (SAVEPOINT + InsufficientPrivilege catch) | `117de5a` | 5/5 ye&#x15F;il (org+admin atomik oluşturuldu, yeni admin login + org_admin, duplicate slug 400, bad slug 400) |
+
+## 7. Bilinen taşırma noktaları (sonraki turlarda)
+
+- **`tenant_provisioner` per-org schema**: Faz 7 RLS sonrası fiili olarak kullanılmıyor; tamamen kaldırılabilir veya migration-only user'a izin verilirse aktif edilebilir. F5'te soft-fail ile geçici kapatıldı.
+- **`SystemRole.MEMBER` deprecated alias**: backend setter'da `member → viewer` map'leniyor, gerçek MEMBER üyesi olan satırlar bir gün migration ile `viewer`'a güncellenebilir.
+- **Permission Set sayfası `assignments` listesi**: şu an sadece var olan permission set'i gösteriyor; "yeni lokasyona yetki seti ata" akışında lokasyon dropdown'ı daraltılabilir (kullanıcının `user_locations`'ı ile sınırlı). Bu kapsam genişletmesi sonraki tur.
+- **F6 outcome güncellemesi**: bu doc — done.
