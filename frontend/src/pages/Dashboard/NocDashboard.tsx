@@ -173,7 +173,7 @@ export default function NocDashboard() {
           olay olduğunda kaydırır; yoksa sabit "olay yok" mesajı. */}
       <div className="nm-ticker">
         <div className="nm-ticker-label">
-          <span className="nm-status-dot ok"></span>
+          <span className="nm-status-dot ok pulse"></span>
           CANLI AKIŞ
         </div>
         <div className="nm-ticker-track" style={liveEvents.length === 0 ? { animation: 'none' } : undefined}>
@@ -359,13 +359,16 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
         <Card title="Olay Akışı" pill={{ label: `24sa · ${events24h}`, kind: 'accent' }} span="span-12" onTitle={() => navigate('/monitor')}>
           {liveEvents.length === 0 ? <Empty>Son 30 dakikada olay yok</Empty> :
             liveEvents.slice(0, 7).map((e, i) => (
-              <div key={i} className="nm-row" style={{ gridTemplateColumns: 'auto auto 1fr' }}>
+              // nm-fadein → yeni olay geldikçe yumuşak fade-in
+              <div key={e.id || i} className="nm-row nm-fadein" style={{ gridTemplateColumns: 'auto auto 1fr auto' }}>
                 <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10.5 }}>{dayjs(e.created_at).format('HH:mm:ss')}</span>
                 <span className={`nm-pill ${sevPill(e.severity)}`}>{e.severity}</span>
                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-0)' }}>{e.device_hostname || '—'}</span>
                   <span style={{ color: 'var(--fg-2)', marginLeft: 8, fontSize: 11.5 }}>{e.title}</span>
                 </span>
+                {/* Kritik açık olay → LED blink (sağda küçük yanıp sönen) */}
+                {e.severity === 'critical' && !e.acknowledged && <span className="nm-led-crit" title="kritik" />}
               </div>
             ))}
         </Card>
@@ -384,7 +387,8 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
                     <div className="ip">{svc.total_device_count} cihaz</div>
                   </div>
                   {svc.impact_pct > 0 ? <span className={`nm-chip ${st}`}>{svc.impact_pct}% etki</span> : <span className="nm-chip ok">stabil</span>}
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: svc.impact_pct > 0 ? `var(--${st})` : 'var(--ok)' }} />
+                  {/* Etkilenen servis → kırmızı pulse; stabil → yeşil pulse */}
+                  <span className={`nm-status-dot ${svc.impact_pct > 0 ? `${st} pulse` : 'ok pulse'}`} />
                 </div>
               )
             })}
@@ -428,7 +432,8 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
           {!agents.length ? <Empty>Agent yok</Empty> :
             agents.slice(0, 5).map((a: any) => (
               <div key={a.name || a.id} className="nm-row" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: a.status === 'online' ? 'var(--ok)' : 'var(--crit)', boxShadow: `0 0 6px var(--${a.status === 'online' ? 'ok' : 'crit'})` }} />
+                {/* Online status → pulse halo (canlı sinyal) */}
+                <span className={`nm-status-dot ${a.status === 'online' ? 'ok pulse' : 'crit'}`} />
                 <div style={{ minWidth: 0 }}>
                   <div className="host" style={{ fontSize: 12 }}>{a.name || a.hostname}</div>
                   <div className="ip">{a.managed_device_count ?? a.device_count ?? 0} cihaz</div>

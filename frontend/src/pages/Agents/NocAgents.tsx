@@ -175,7 +175,7 @@ export default function NocAgents() {
                 onClick={() => openDetail(a)} title="Detayları aç">
                 <div className="nm-card-hd">
                   <h3>
-                    <span className={`nm-status-dot ${ok ? 'ok' : 'crit'}`}></span>
+                    <span className={`nm-status-dot ${ok ? 'ok pulse' : 'crit'}`}></span>
                     {a.name}
                     {a.version && <span className="nm-pill mono" style={{ fontSize: 9.5 }}>{a.version}</span>}
                   </h3>

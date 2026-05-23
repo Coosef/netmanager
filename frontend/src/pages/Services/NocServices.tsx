@@ -278,7 +278,7 @@ function ServiceCard({ svc, impact, onClick }:
               Sahibi · <span style={{ color: 'var(--fg-1)' }}>{svc.business_owner || '—'}</span>
             </div>
           </div>
-          <span className={`nm-status-dot ${st === 'unknown' ? '' : st}`}></span>
+          <span className={`nm-status-dot ${st === 'unknown' ? '' : `${st} pulse`}`}></span>
         </div>
         {svc.description && (
           <div style={{
@@ -335,7 +335,7 @@ function ServiceDetailDrawer({ service, impact, onClose, onEdit, onDelete }: {
               {tier} · {TIER_LABEL[service.priority] || service.priority || '—'} · Sahibi {service.business_owner || '—'}
             </div>
             <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <span className={`nm-status-dot ${st === 'unknown' ? '' : st}`}></span>
+              <span className={`nm-status-dot ${st === 'unknown' ? '' : `${st} pulse`}`}></span>
               <span style={{ fontSize: 12.5 }}>{stLabel}</span>
               {impact && impact.impact_pct > 0 && (
                 <span className="nm-pill crit" style={{ marginLeft: 4 }}>{Math.round(impact.impact_pct)}% etki</span>

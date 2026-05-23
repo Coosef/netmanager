@@ -384,7 +384,8 @@ function RackCard({ rack, detail, active, onSelect, onDelete }:
   return (
     <div className={`nm-rack-card ${active ? 'active' : ''}`} onClick={onSelect} style={{ cursor: 'pointer' }}>
       <div className="hd">
-        <span className={`nm-status-dot ${status === 'empty' ? '' : status}`}></span>
+        {/* Sağlıklı rack → yeşil pulse, kritik → kırmızı pulse */}
+        <span className={`nm-status-dot ${status === 'empty' ? '' : `${status} pulse`}`}></span>
         <span className="name">{rack.rack_name}</span>
         <span className="meta">{rack.used_u}/{rack.total_u}U</span>
         <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: 4 }}>

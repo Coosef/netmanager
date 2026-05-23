@@ -1298,7 +1298,8 @@ function NocDeviceTable({
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                      <span className={`nm-status-dot ${st.dot}`}></span>
+                      {/* Online → yeşil pulse, crit → kırmızı pulse (1.2s hızlı) */}
+                      <span className={`nm-status-dot ${st.dot}${st.dot === 'ok' || st.dot === 'crit' ? ' pulse' : ''}`}></span>
                       <div>
                         <div style={{ fontSize: 11.5, color: st.cls ? `var(--${st.cls})` : 'var(--fg-1)' }}>{st.label}</div>
                         <div style={{ fontSize: 10, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>

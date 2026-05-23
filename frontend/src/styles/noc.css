@@ -352,6 +352,12 @@
   display: flex; flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  /* Yumuşak hover geçişi — kart border'ı + subtle elevation */
+  transition: border-color .18s ease, box-shadow .22s ease, transform .14s ease;
+}
+.nm-card:hover {
+  border-color: var(--accent-line, var(--accent));
+  box-shadow: 0 4px 18px rgba(0,0,0,0.18);
 }
 .nm-card-hd {
   display: flex; align-items: center; gap: 10px;
@@ -426,6 +432,15 @@
   overflow: hidden;
   display: flex; flex-direction: column; gap: 6px;
   min-height: 96px;
+  transition: border-color .18s ease, transform .14s ease, box-shadow .22s ease;
+}
+.nm-kpi:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.22);
+}
+/* KPI value count-up illusion — value değişince smooth fade in */
+.nm-kpi-value {
+  transition: color .25s ease;
 }
 .nm-kpi-label {
   display: flex; align-items: center; gap: 6px;
@@ -1381,6 +1396,48 @@
 .nm-status-dot.warn { background: var(--warn); }
 .nm-status-dot.crit { background: var(--crit); }
 .nm-status-dot.offline { background: var(--fg-3); }
+
+/* Pulse modifier — status dot'a halo animasyonu ekler.
+   .nm-status-dot.ok.pulse  → yeşil pulse (canlı)
+   .nm-status-dot.crit.pulse → kırmızı pulse (kritik alarm)
+   .nm-status-dot.warn.pulse → sarı pulse (uyarı) */
+.nm-status-dot.pulse {
+  box-shadow: 0 0 0 0 currentColor;
+  animation: nm-dotpulse 1.8s ease-out infinite;
+}
+.nm-status-dot.ok.pulse   { color: oklch(0.78 0.16 145 / 0.5); }
+.nm-status-dot.warn.pulse { color: oklch(0.80 0.16 75 / 0.5); }
+.nm-status-dot.crit.pulse { color: oklch(0.70 0.20 25 / 0.55); animation-duration: 1.2s; }
+@keyframes nm-dotpulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; }
+  70%  { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* LED blink — küçük kritik göstergeler için (örn. live event card).
+   Karanlık tema'da yanıp sönen kırmızı LED. */
+.nm-led-crit {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--crit);
+  box-shadow: 0 0 4px var(--crit);
+  animation: nm-blink 1.1s ease-in-out infinite;
+}
+.nm-led-warn {
+  display: inline-block;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 4px var(--warn);
+  animation: nm-blink 1.8s ease-in-out infinite;
+}
+/* Yumuşak fade-in (yeni içerik gelince) */
+@keyframes nm-fadeIn {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.nm-fadein { animation: nm-fadeIn 0.32s ease both; }
 
 .nm-vendor {
   font-family: var(--font-mono);
