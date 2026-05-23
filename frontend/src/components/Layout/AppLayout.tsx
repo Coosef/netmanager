@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import TopNav from './TopNav'
 import AppHeader from './Header'
 import LocationGate from './LocationGate'
 import CommandPalette from '@/components/CommandPalette'
@@ -81,8 +82,14 @@ function AppLayoutInner() {
     <div className={`nm-app-shell ${isDark ? '' : 'theme-light'}`} style={{ height: '100vh', overflow: 'hidden' }}>
       <style>{LAYOUT_CSS}</style>
       <div className={`nm-root menu-${menuPosition}`}>
+        {/* menu=side iken Sidebar (sol), menu=top iken Sidebar gizleniyor
+            (.menu-top .nm-sidebar { display: none } noc.css'te) ve TopNav
+            üstte yatay dropdown'larla geliyor. AppHeader iki modda da var. */}
         <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
-        <div className="nm-main" style={{ gridTemplateRows: 'auto 1fr' }}>
+        <div className="nm-main" style={{
+          gridTemplateRows: menuPosition === 'top' ? 'auto auto 1fr' : 'auto 1fr',
+        }}>
+          {menuPosition === 'top' && <TopNav />}
           <AppHeader
             onOpenSearch={() => setPaletteOpen(true)}
             onOpenMobileNav={() => setMobileNavOpen(true)}

@@ -13,6 +13,52 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 
 export type Density = 'compact' | 'regular' | 'spacious'
 export type MenuPosition = 'side' | 'top'
+export type ViewVariant = 'workspace' | 'mission' | 'editorial'
+
+// Hazır layout preset'leri — Operatör / Network Admin / Yönetici / NOC Duvarı.
+// Her biri density/menu/view/accent kombinasyonu uygular.
+export interface PresetLayout {
+  id: string
+  name: string
+  sub: string
+  config: Partial<{
+    density: Density
+    menuPosition: MenuPosition
+    viewVariant: ViewVariant
+    accent: string
+  }>
+}
+export const PRESET_LAYOUTS: PresetLayout[] = [
+  {
+    id: 'operator', name: 'Operatör', sub: 'Olay akışı + topoloji ön planda',
+    config: { density: 'regular', menuPosition: 'side', viewVariant: 'workspace', accent: '#22d3c5' },
+  },
+  {
+    id: 'admin', name: 'Network Admin', sub: 'Risk, drift, onaylar, uyumluluk',
+    config: { density: 'compact', menuPosition: 'side', viewVariant: 'workspace', accent: '#3b82f6' },
+  },
+  {
+    id: 'exec', name: 'Yönetici', sub: 'Editorial brief — günlük özet',
+    config: { density: 'spacious', menuPosition: 'top', viewVariant: 'editorial', accent: '#a3e635' },
+  },
+  {
+    id: 'wall', name: 'NOC Duvarı', sub: 'Mission control — duvar ekranı',
+    config: { density: 'compact', menuPosition: 'top', viewVariant: 'mission', accent: '#f97316' },
+  },
+]
+
+// Kullanıcının kaydettiği custom layout'lar — localStorage'da array.
+export interface SavedLayout {
+  id: string
+  name: string
+  ts: number
+  config: {
+    density: Density
+    menuPosition: MenuPosition
+    viewVariant: ViewVariant
+    accent: string
+  }
+}
 
 interface CustomizeCtx {
   density: Density
@@ -21,9 +67,17 @@ interface CustomizeCtx {
   setMenuPosition: (p: MenuPosition) => void
   accent: string                              // hex string, örn. "#22d3c5"
   setAccent: (hex: string) => void
+  viewVariant: ViewVariant
+  setViewVariant: (v: ViewVariant) => void
   soundEnabled: boolean
   setSoundEnabled: (v: boolean) => void
   playBeep: () => void                        // kritik alarm geldiğinde useAlarmWatcher çağırır
+  editMode: boolean
+  setEditMode: (v: boolean) => void
+  savedLayouts: SavedLayout[]
+  saveLayout: (name: string) => void
+  applyLayout: (id: string) => void          // saved veya preset id
+  deleteLayout: (id: string) => void
   reset: () => void
 }
 
@@ -32,6 +86,7 @@ const DEFAULT_ACCENT = '#22d3c5'
 const DEFAULT_DENSITY: Density = 'regular'
 const DEFAULT_MENU: MenuPosition = 'side'
 const DEFAULT_SOUND = false                   // varsayılan sessiz — kullanıcı isteyince açar
+const DEFAULT_VIEW: ViewVariant = 'workspace'
 
 // Önceden tanımlı renk paletleri — kullanıcı custom hex de girebilir.
 export const ACCENT_PRESETS: { name: string; hex: string }[] = [
@@ -52,9 +107,17 @@ const CustomizeContext = createContext<CustomizeCtx>({
   setMenuPosition: () => {},
   accent: DEFAULT_ACCENT,
   setAccent: () => {},
+  viewVariant: DEFAULT_VIEW,
+  setViewVariant: () => {},
   soundEnabled: DEFAULT_SOUND,
   setSoundEnabled: () => {},
   playBeep: () => {},
+  editMode: false,
+  setEditMode: () => {},
+  savedLayouts: [],
+  saveLayout: () => {},
+  applyLayout: () => {},
+  deleteLayout: () => {},
   reset: () => {},
 })
 
@@ -62,6 +125,8 @@ const LS_DENSITY = 'nm-customize-density'
 const LS_MENU = 'nm-customize-menu'
 const LS_ACCENT = 'nm-customize-accent'
 const LS_SOUND = 'nm-customize-sound'
+const LS_VIEW = 'nm-customize-view'
+const LS_SAVED = 'nm-customize-saved'
 
 function loadDensity(): Density {
   const v = localStorage.getItem(LS_DENSITY)
@@ -77,6 +142,18 @@ function loadAccent(): string {
 }
 function loadSound(): boolean {
   return localStorage.getItem(LS_SOUND) === 'on'
+}
+function loadView(): ViewVariant {
+  const v = localStorage.getItem(LS_VIEW)
+  return v === 'mission' || v === 'editorial' ? v : DEFAULT_VIEW
+}
+function loadSaved(): SavedLayout[] {
+  try {
+    const v = localStorage.getItem(LS_SAVED)
+    if (!v) return []
+    const arr = JSON.parse(v)
+    return Array.isArray(arr) ? arr : []
+  } catch { return [] }
 }
 
 // Web Audio API beep — mockup commandk.jsx'ten port. Kritik alarm
@@ -116,6 +193,9 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const [menuPosition, setMenuState] = useState<MenuPosition>(loadMenu)
   const [accent, setAccentState] = useState<string>(loadAccent)
   const [soundEnabled, setSoundState] = useState<boolean>(loadSound)
+  const [viewVariant, setViewState] = useState<ViewVariant>(loadView)
+  const [editMode, setEditModeState] = useState<boolean>(false)
+  const [savedLayouts, setSavedLayouts] = useState<SavedLayout[]>(loadSaved)
 
   // density class — sadece bir tane aktif olacak şekilde body'e uygula.
   useEffect(() => {
@@ -150,13 +230,72 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(LS_SOUND, soundEnabled ? 'on' : 'off')
   }, [soundEnabled])
 
+  // viewVariant persistence + body class (Dashboard rewrite'ı geldiğinde
+  // workspace/mission/editorial layout'ları seçecek).
+  useEffect(() => {
+    localStorage.setItem(LS_VIEW, viewVariant)
+    document.body.classList.remove('view-workspace', 'view-mission', 'view-editorial')
+    document.body.classList.add(`view-${viewVariant}`)
+  }, [viewVariant])
+
+  // editMode body class — noc.css'te .nm-root.edit-mode .nm-card pattern'i
+  // zaten var (Dashboard widget drag handle gibi feature'lar açar).
+  useEffect(() => {
+    document.body.classList.toggle('edit-mode', editMode)
+  }, [editMode])
+
+  // saved layouts persistence
+  useEffect(() => {
+    try { localStorage.setItem(LS_SAVED, JSON.stringify(savedLayouts)) } catch { /* quota */ }
+  }, [savedLayouts])
+
   const playBeep = () => { if (soundEnabled) playAlertBeep() }
+
+  // Bir preset veya saved layout uygula — id'ye bakar.
+  const applyLayout = (id: string) => {
+    const preset = PRESET_LAYOUTS.find((p) => p.id === id)
+    if (preset) {
+      const c = preset.config
+      if (c.density) setDensityState(c.density)
+      if (c.menuPosition) setMenuState(c.menuPosition)
+      if (c.viewVariant) setViewState(c.viewVariant)
+      if (c.accent) setAccentState(c.accent)
+      return
+    }
+    const saved = savedLayouts.find((s) => s.id === id)
+    if (saved) {
+      setDensityState(saved.config.density)
+      setMenuState(saved.config.menuPosition)
+      setViewState(saved.config.viewVariant)
+      setAccentState(saved.config.accent)
+    }
+  }
+
+  // Mevcut config'i isimli olarak kaydet.
+  const saveLayout = (name: string) => {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setSavedLayouts((prev) => [
+      ...prev.filter((s) => s.name.toLowerCase() !== trimmed.toLowerCase()),
+      {
+        id: `s${Date.now()}`,
+        name: trimmed,
+        ts: Date.now(),
+        config: { density, menuPosition, viewVariant, accent },
+      },
+    ])
+  }
+  const deleteLayout = (id: string) => {
+    setSavedLayouts((prev) => prev.filter((s) => s.id !== id))
+  }
 
   const reset = () => {
     setDensityState(DEFAULT_DENSITY)
     setMenuState(DEFAULT_MENU)
     setAccentState(DEFAULT_ACCENT)
     setSoundState(DEFAULT_SOUND)
+    setViewState(DEFAULT_VIEW)
+    setEditModeState(false)
   }
 
   return (
@@ -164,8 +303,11 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
       density, setDensity: setDensityState,
       menuPosition, setMenuPosition: setMenuState,
       accent, setAccent: setAccentState,
+      viewVariant, setViewVariant: setViewState,
       soundEnabled, setSoundEnabled: setSoundState,
       playBeep,
+      editMode, setEditMode: setEditModeState,
+      savedLayouts, saveLayout, applyLayout, deleteLayout,
       reset,
     }}>
       {children}
