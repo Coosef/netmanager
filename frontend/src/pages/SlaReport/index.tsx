@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
-  Typography, Table, Tag, Select, Space, Tooltip, Progress, Spin, Button,
+  Typography, Table, Tag, Space, Tooltip, Progress, Spin,
 } from 'antd'
 import {
-  RiseOutlined, ArrowUpOutlined, ArrowDownOutlined, WarningOutlined,
+  WarningOutlined,
   FileExcelOutlined, CheckCircleOutlined, CloseCircleOutlined, BarChartOutlined,
 } from '@ant-design/icons'
 import {
@@ -342,93 +342,71 @@ export default function SlaReportPage() {
   const hasCompliance = true
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{SLA_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#3b82f620' : C.border}`,
-        borderLeft: '4px solid #3b82f6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#3b82f620', border: '1px solid #3b82f630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <RiseOutlined style={{ color: '#3b82f6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>SLA & Uptime Raporu</div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Cihaz bazlı uptime analizi · Satıra tıkla → günlük grafik</div>
-          </div>
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Operasyon</span><span>SLA &amp; Uptime</span></div>
+          <h1 className="nm-page-title">
+            SLA &amp; Uptime Raporu
+            {fleet && <span className={`nm-pill mono ${fleet.avg_uptime_pct >= 99 ? 'ok' : fleet.avg_uptime_pct >= 95 ? 'warn' : 'crit'}`}>%{fleet.avg_uptime_pct.toFixed(2)} ort.</span>}
+          </h1>
+          <div className="nm-page-sub">Cihaz başına uptime, downtime, SLA policy uyumluluğu — satıra tıkla → günlük grafik.</div>
         </div>
-        <Space>
-          <Button
-            icon={<FileExcelOutlined />}
-            style={{ color: '#22c55e', borderColor: '#22c55e' }}
-            disabled={!report?.devices?.length}
-            size="small"
+        <div className="nm-page-actions">
+          {[7, 14, 30, 60, 90].map((d) => (
+            <button key={d} className={`nm-btn ${windowDays === d ? 'primary' : 'ghost'}`}
+              onClick={() => setWindowDays(d)} style={{ height: 28, fontSize: 11, padding: '0 10px' }}>
+              {d}g
+            </button>
+          ))}
+          <button className="nm-btn ghost" disabled={!report?.devices?.length}
             onClick={() => report?.devices && exportToExcel([{
               name: 'SLA Raporu',
               data: report.devices.map((d) => ({
-                'Hostname': d.hostname,
-                'IP': d.ip,
-                'Vendor': d.vendor || '',
+                'Hostname': d.hostname, 'IP': d.ip, 'Vendor': d.vendor || '',
                 'Konum': d.location || '',
                 [`Uptime % (${windowDays}g)`]: d.uptime_pct,
                 'Downtime (dk)': d.downtime_minutes,
               })),
-            }], `sla_raporu_${windowDays}g`)}
-          >
-            Excel
-          </Button>
-          <Select
-            value={windowDays}
-            onChange={setWindowDays}
-            size="small"
-            style={{ width: 140 }}
-            options={[
-              { value: 7, label: 'Son 7 gün' },
-              { value: 14, label: 'Son 14 gün' },
-              { value: 30, label: 'Son 30 gün' },
-              { value: 60, label: 'Son 60 gün' },
-              { value: 90, label: 'Son 90 gün' },
-            ]}
-          />
-        </Space>
+            }], `sla_raporu_${windowDays}g`)}>
+            <FileExcelOutlined /> Excel
+          </button>
+        </div>
       </div>
 
-      {/* Fleet stat cards */}
       {fleet && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {[
-            { label: 'Ortalama Uptime', value: `%${fleet.avg_uptime_pct.toFixed(2)}`, color: uptimeColor(fleet.avg_uptime_pct), icon: <RiseOutlined /> },
-            { label: '≥%99 Uptime', value: `${fleet.above_99} / ${fleet.total}`, color: '#22c55e', icon: <ArrowUpOutlined /> },
-            { label: '%95–99 Uptime', value: `${fleet.above_95} cihaz`, color: '#f59e0b', icon: <ArrowUpOutlined /> },
-            { label: '<%95 Uptime', value: `${fleet.below_95} cihaz`, color: fleet.below_95 > 0 ? '#ef4444' : '#64748b', icon: <ArrowDownOutlined /> },
-          ].map((s) => (
-            <div key={s.label} style={{
-              flex: 1, minWidth: 120,
-              background: isDark ? `linear-gradient(135deg, ${s.color}0d 0%, ${C.bg} 60%)` : C.bg,
-              border: `1px solid ${isDark ? s.color + '28' : C.border}`,
-              borderTop: isDark ? `2px solid ${s.color}55` : `2px solid ${s.color}`,
-              borderRadius: 10, padding: '12px 16px',
-              display: 'flex', alignItems: 'center', gap: 10,
-            }}>
-              <div style={{ width: 32, height: 32, borderRadius: 8, background: isDark ? `${s.color}20` : `${s.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <span style={{ color: s.color, fontSize: 14 }}>{s.icon}</span>
-              </div>
-              <div>
-                <div style={{ color: s.color, fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{s.value}</div>
-                <div style={{ color: C.muted, fontSize: 10, marginTop: 2 }}>{s.label}</div>
-              </div>
-            </div>
-          ))}
+        <div className="nm-statbar">
+          <div className={`nm-stat ${fleet.avg_uptime_pct >= 99 ? 'ok' : fleet.avg_uptime_pct >= 95 ? 'warn' : 'crit'}`}>
+            <div className="nm-stat-label">Ortalama Uptime</div>
+            <div className="nm-stat-val">%{fleet.avg_uptime_pct.toFixed(2)}</div>
+            <div className="nm-stat-delta">son {windowDays} gün</div>
+          </div>
+          <div className="nm-stat ok">
+            <div className="nm-stat-label">≥ %99</div>
+            <div className="nm-stat-val">{fleet.above_99}<small>/ {fleet.total}</small></div>
+            <div className="nm-stat-delta">hedef üstü</div>
+          </div>
+          <div className="nm-stat warn">
+            <div className="nm-stat-label">%95–99</div>
+            <div className="nm-stat-val">{fleet.above_95}</div>
+            <div className="nm-stat-delta">izlemede</div>
+          </div>
+          <div className="nm-stat crit">
+            <div className="nm-stat-label">&lt; %95</div>
+            <div className="nm-stat-val">{fleet.below_95}</div>
+            <div className="nm-stat-delta">hedef altı</div>
+          </div>
+          <div className="nm-stat">
+            <div className="nm-stat-label">Toplam Cihaz</div>
+            <div className="nm-stat-val">{fleet.total}</div>
+          </div>
+          <div className="nm-stat">
+            <div className="nm-stat-label">Toplam Downtime</div>
+            <div className="nm-stat-val">{Math.round((report?.devices?.reduce((s, d) => s + d.downtime_minutes, 0) ?? 0) / 60)}<small>sa</small></div>
+            <div className="nm-stat-delta">{windowDays}g toplam</div>
+          </div>
         </div>
       )}
 
