@@ -1,10 +1,12 @@
-// LoginPage — Charon-style gold/dark login (mockup Charon Login.html, Charon
-// branded). 2-step flow: (1) credentials → /auth/login, (2) MFA OTP (backend
-// MFA henüz yok; step 2 sadece backend `mfa_required: true` döndürdüğünde aktif
-// olur — şimdi placeholder/hazır).
+// LoginPage — Charon-style gold/dark login. 2-step flow:
+//   (1) credentials → /auth/login
+//   (2) MFA OTP    → /auth/mfa/verify    (only if user has MFA enabled;
+//                                          backend returns mfa_required + challenge_token)
+// Step 2 supports TOTP and 'recovery' fallback.
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
+import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
 
@@ -276,13 +278,15 @@ const CSS = `
 `
 
 type Step = 1 | 2 | 3
-type MfaMethod = 'app' | 'email' | 'sms'
+// Backend method ids: 'totp' (Google Auth / Microsoft / Authy / 1Password)
+// and 'recovery' (one-shot codes). UI groups TOTP-class apps under 'app'
+// for the user-facing copy; the wire value sent to /auth/mfa/verify is
+// 'totp' or 'recovery'.
+type MfaMethod = 'totp' | 'recovery' | 'email' | 'sms'
 
-// Backend henüz MFA döndürmüyor. Future-ready: login response'unda
-// `mfa_required: true` + `methods: ['app','email']` + `default_method`
-// gelirse step 2'ye geçilir. Şimdi sadece görsel.
 interface MfaChallenge {
   required: boolean
+  challengeToken?: string
   methods?: MfaMethod[]
   defaultMethod?: MfaMethod
   maskedEmail?: string
@@ -298,7 +302,10 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [mfa, setMfa] = useState<MfaChallenge>({ required: false })
-  const [mfaMethod, setMfaMethod] = useState<MfaMethod>('app')
+  // Recovery codes are 11 chars (XXXXX-XXXXX) — separate textbox UX from
+  // the 6-digit OTP grid so the user doesn't fight the per-cell input.
+  const [recoveryCode, setRecoveryCode] = useState('')
+  const [useRecovery, setUseRecovery] = useState(false)
   const [timer, setTimer] = useState(30)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
 
@@ -320,32 +327,41 @@ export default function LoginPage() {
     return () => clearInterval(id)
   }, [step])
 
+  const finalizeSession = (res: TokenResponse) => {
+    setAuth(
+      res.access_token,
+      { id: res.user_id, username: res.username, role: res.role as any,
+        system_role: (res.system_role as any) ?? 'member', org_id: res.org_id },
+      res.permissions,
+    )
+    navigate('/')
+  }
+
   const submitStep1 = async (e?: React.FormEvent) => {
     e?.preventDefault()
     if (!username.trim() || !password) { setError(t('login.error')); return }
     setLoading(true); setError('')
     try {
       const res = await authApi.login(username, password)
-      // Future MFA: response.mfa_required varsa step 2'ye geç.
-      const challenge = (res as any).mfa_required
-      if (challenge) {
+      if ('mfa_required' in res && res.mfa_required) {
+        // Backend method ids are 'totp' / 'recovery'; UI defaults to TOTP.
+        const methods = (res.mfa_methods?.length ? res.mfa_methods : ['totp']) as MfaMethod[]
+        const def = (res.mfa_default_method || methods[0] || 'totp') as MfaMethod
         setMfa({
           required: true,
-          methods: (res as any).mfa_methods || ['app'],
-          defaultMethod: (res as any).mfa_default_method || 'app',
-          maskedEmail: (res as any).masked_email,
+          challengeToken: res.challenge_token,
+          methods,
+          defaultMethod: def,
+          maskedEmail: res.masked_email ?? undefined,
         })
-        setMfaMethod((res as any).mfa_default_method || 'app')
+        setOtp(['', '', '', '', '', ''])
+        setRecoveryCode('')
+        setUseRecovery(false)
         setStep(2)
+      } else if ('access_token' in res) {
+        finalizeSession(res)
       } else {
-        // Direkt giriş
-        setAuth(
-          res.access_token,
-          { id: res.user_id, username: res.username, role: res.role as any,
-            system_role: (res.system_role as any) ?? 'member', org_id: res.org_id },
-          res.permissions,
-        )
-        navigate('/')
+        setError(t('login.error'))
       }
     } catch {
       setError(t('login.error'))
@@ -353,13 +369,27 @@ export default function LoginPage() {
   }
 
   const submitStep2 = async () => {
-    const code = otp.join('')
-    if (code.length !== 6) { setError('6 haneli kod girin'); return }
+    if (!mfa.challengeToken) { setError('Doğrulama oturumu yok — tekrar giriş yapın'); return }
+    const code = useRecovery ? recoveryCode.trim() : otp.join('')
+    const method: 'totp' | 'recovery' = useRecovery ? 'recovery' : 'totp'
+    if (!useRecovery && code.length !== 6) { setError('6 haneli kod girin'); return }
+    if (useRecovery && code.replace(/[-\s]/g, '').length < 8) { setError('Kurtarma kodunu eksiksiz girin'); return }
     setLoading(true); setError('')
     try {
-      // Future: authApi.verifyMfa(challengeToken, code, method)
-      // Şu an backend desteklemiyor — placeholder.
-      setError('MFA backend desteği henüz hazır değil — Step 1 tek başına çalışır.')
+      const res = await authApi.verifyMfa(mfa.challengeToken, code, method)
+      finalizeSession(res)
+    } catch (err: any) {
+      // 401 — bad code / expired challenge. Reset OTP cells so retry feels fresh.
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail
+      if (status === 401 && detail?.toLowerCase?.().includes('challenge')) {
+        setError('Doğrulama süresi doldu — tekrar giriş yapın')
+        setStep(1)
+        setMfa({ required: false })
+      } else {
+        setError(detail || 'Geçersiz kod')
+        if (!useRecovery) setOtp(['', '', '', '', '', ''])
+      }
     } finally { setLoading(false) }
   }
 
@@ -497,54 +527,70 @@ export default function LoginPage() {
                 <div className="charon-step-label">— Adım 2 / 2 · Doğrulama —</div>
                 <h2 className="charon-title">Kimliğinizi doğrulayın</h2>
                 <p className="charon-sub">
-                  {mfaMethod === 'app' && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
-                  {mfaMethod === 'email' && <><strong style={{ color: 'var(--c-fg)' }}>{mfa.maskedEmail || 'e-posta'}</strong> adresine gönderilen kodu girin.</>}
+                  {!useRecovery && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
+                  {useRecovery && <>Tek-kullanımlık <strong style={{ color: 'var(--c-fg)' }}>kurtarma kodunuzu</strong> girin (XXXXX-XXXXX).</>}
                 </p>
 
                 {error && <div className="charon-err">{error}</div>}
 
                 <div className="charon-mfa-info">
                   <div className="ico">
-                    {mfaMethod === 'app' && (
+                    {!useRecovery && (
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                         <rect x="5" y="2" width="14" height="20" rx="2" /><path d="M9 7h6M12 18v.01" />
                       </svg>
                     )}
-                    {mfaMethod === 'email' && (
+                    {useRecovery && (
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 8l9 6 9-6" />
+                        <path d="M12 2l3 6 6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z" />
                       </svg>
                     )}
                   </div>
                   <div className="info">
-                    <div className="name">{mfaMethod === 'app' ? 'Authenticator App' : 'E-posta'}</div>
-                    <div className="sub">{mfaMethod === 'app' ? 'Google / Microsoft / Authy / 1Password' : (mfa.maskedEmail || '—')}</div>
+                    <div className="name">{useRecovery ? 'Kurtarma Kodu' : 'Authenticator App'}</div>
+                    <div className="sub">{useRecovery ? 'Tek kullanımlık · MFA kayıt sırasında verildi' : 'Google · Microsoft · Authy · 1Password'}</div>
                   </div>
-                  {(mfa.methods?.length ?? 0) > 1 && (
-                    <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
-                      onClick={() => setMfaMethod(mfaMethod === 'app' ? 'email' : 'app')}>
-                      Değiştir
-                    </span>
-                  )}
+                  <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
+                    onClick={() => { setUseRecovery((v) => !v); setError('') }}>
+                    {useRecovery ? 'Authenticator' : 'Kurtarma'}
+                  </span>
                 </div>
 
-                <div className="charon-otp-row">
-                  {otp.map((d, i) => (
-                    <input key={i}
-                      ref={(el) => { otpRefs.current[i] = el }}
-                      className="charon-otp-input"
-                      type="text" inputMode="numeric" maxLength={1}
-                      value={d} onChange={(e) => onOtpChange(i, e.target.value)}
-                      onKeyDown={(e) => onOtpKey(i, e)} autoFocus={i === 0} />
-                  ))}
-                </div>
+                {!useRecovery ? (
+                  <div className="charon-otp-row">
+                    {otp.map((d, i) => (
+                      <input key={i}
+                        ref={(el) => { otpRefs.current[i] = el }}
+                        className="charon-otp-input"
+                        type="text" inputMode="numeric" maxLength={1}
+                        value={d} onChange={(e) => onOtpChange(i, e.target.value)}
+                        onKeyDown={(e) => onOtpKey(i, e)} autoFocus={i === 0} />
+                    ))}
+                  </div>
+                ) : (
+                  <input
+                    className="charon-input"
+                    style={{ padding: '0 12px', textAlign: 'center', fontFamily: 'IBM Plex Mono', letterSpacing: '0.2em', fontSize: 15, textTransform: 'uppercase' }}
+                    value={recoveryCode}
+                    onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+                    placeholder="XXXXX-XXXXX"
+                    maxLength={13}
+                    autoFocus
+                  />
+                )}
 
-                <div className="charon-resend">
-                  <span>{timer > 0 ? 'Kod gelmedi mi?' : <a href="#" onClick={(e) => { e.preventDefault(); setTimer(30) }} style={{ color: 'var(--c-gold)' }}>Tekrar gönder</a>}</span>
-                  {timer > 0 && <span className="timer">{`00:${String(timer).padStart(2, '0')}`}</span>}
-                </div>
+                {!useRecovery && (
+                  <div className="charon-resend">
+                    <span>Kod 30 sn'de bir yenilenir.</span>
+                    {timer > 0 && <span className="timer">{`00:${String(timer).padStart(2, '0')}`}</span>}
+                  </div>
+                )}
+                {useRecovery && <div style={{ height: 12 }} />}
 
-                <button type="button" className="charon-btn-primary" disabled={loading || otp.join('').length !== 6}
+                <button type="button" className="charon-btn-primary"
+                  disabled={loading || (useRecovery
+                    ? recoveryCode.replace(/[-\s]/g, '').length < 8
+                    : otp.join('').length !== 6)}
                   onClick={submitStep2}>
                   {loading ? 'DOĞRULANIYOR…' : 'DOĞRULA VE GEÇ'}
                   {!loading && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">

@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -87,6 +87,25 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    # ── Multi-factor auth (Faz NM-MFA) ───────────────────────────────────────
+    # TOTP only for the first cut (RFC 6238) — covers Google Authenticator,
+    # Microsoft Authenticator, Authy and 1Password. Email + SMS land later as
+    # additional methods stored in mfa_methods.
+    #
+    # Secret is stored Fernet-encrypted (see core.security encrypt/decrypt);
+    # the pending_secret column carries the not-yet-confirmed enrollment
+    # secret so a half-finished setup doesn't lock the user out. Recovery
+    # codes are bcrypt-hashed and single-use; consuming one removes it from
+    # the list so the count visibly drops in the UI.
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_totp_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    mfa_pending_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # CSV: 'totp' | 'totp,email' — primary first. Frontend picks default.
+    mfa_methods: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # List[str] of bcrypt hashes; popped on use.
+    mfa_recovery_codes: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    mfa_enrolled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
     def has_permission(self, permission: str) -> bool:
         """Simple permission check driven by the user's system role.

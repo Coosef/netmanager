@@ -79,6 +79,38 @@ export interface TokenResponse {
   permissions?: Permissions
 }
 
+/** Returned by /auth/login when the user has MFA enabled. No access_token
+ *  — client must call /auth/mfa/verify with the challenge_token + OTP. */
+export interface MfaChallengeResponse {
+  mfa_required: true
+  challenge_token: string
+  mfa_methods: string[]
+  mfa_default_method: string
+  masked_email?: string | null
+}
+
+/** Discriminated union — login may return either a real session or an
+ *  MFA challenge depending on whether the user has 2FA on. */
+export type LoginResult = TokenResponse | MfaChallengeResponse
+
+export interface MfaStatus {
+  mfa_enabled: boolean
+  methods: string[]
+  recovery_codes_remaining: number
+  enrolled_at?: string | null
+}
+
+export interface MfaEnrollResponse {
+  secret: string
+  otpauth_uri: string
+  issuer: string
+}
+
+export interface MfaConfirmResponse {
+  mfa_enabled: true
+  recovery_codes: string[]
+}
+
 export interface Organization {
   id: number
   name: string
