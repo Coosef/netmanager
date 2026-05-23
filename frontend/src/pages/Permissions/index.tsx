@@ -273,30 +273,45 @@ export default function PermissionsPage() {
     setEditName(ps.name)
   }
 
+  // RBAC F4 — 4-role colour/label map; aligned with SYSTEM_ROLE_OPTIONS
+  // in @/types. Legacy aliases (admin, location_*, org_viewer, operator,
+  // member) point at the same colour as their normalised target so older
+  // rows still render correctly.
   const ROLE_COLOR: Record<string, string> = {
-    super_admin: '#ef4444',
-    org_admin: '#3b82f6',
-    member: t.isDark ? '#475569' : '#64748b',
+    super_admin:    '#ef4444',
+    org_admin:      '#f97316',  admin:             '#f97316',
+    location_admin: '#06b6d4',  location_manager:  '#06b6d4',  location_operator: '#06b6d4',
+    viewer:         '#22c55e',  location_viewer:   '#22c55e',  org_viewer:        '#22c55e',
+                                operator:          '#22c55e',  member:            t.isDark ? '#475569' : '#64748b',
   }
   const ROLE_LABEL: Record<string, string> = {
-    super_admin: 'Süper Admin',
-    org_admin: 'Yönetici',
-    member: 'Üye',
+    super_admin:    'Süper Admin',
+    org_admin:      'Org Admin',         admin:             'Org Admin',
+    location_admin: 'Lokasyon Admin',    location_manager:  'Lokasyon Admin',
+                                         location_operator: 'Lokasyon Admin',
+    viewer:         'Görüntüleyici',     location_viewer:   'Görüntüleyici',
+    org_viewer:     'Görüntüleyici',     operator:          'Görüntüleyici',
+    member:         'Üye',  // pre-Faz7 alias — legacy data only
   }
 
+  // The 4 roles that get all permissions automatically via system_role —
+  // permission_set assignments are only meaningful for the rest.
+  const isFullAccessRole = (r?: string) => r === 'super_admin' || r === 'org_admin'
+  // Roles that need explicit per-location permission_set assignments to do
+  // anything beyond their default read scope.
+  const isManagedRole = (r?: string) => r === 'location_admin' || r === 'viewer'
+
   // ── Real-data stats for the NOC stat bar ──────────────────────────────
-  // Members with NO assignment = "yetkisiz" — they cannot reach anything in
-  // their own org (real risk signal). Super-admins + org-admins bypass the
-  // permission set system entirely (info pill).
+  // Managed roles with NO assignment = "yetkisiz" — they cannot reach
+  // anything beyond defaults in their org. Super + org admins bypass the
+  // permission set system entirely (full-access info pill).
   const stats = useMemo(() => {
     const totalUsers = users.length
-    const members = users.filter((u) => u.system_role === 'member').length
-    const fullAccess = users.filter((u) =>
-      u.system_role === 'super_admin' || u.system_role === 'org_admin',
-    ).length
+    const managed = users.filter((u) => isManagedRole(u.system_role)).length
+    const fullAccess = users.filter((u) => isFullAccessRole(u.system_role)).length
     return {
       totalUsers,
-      members,
+      members: managed,   // kept name for stat-bar binding below
       fullAccess,
       orgSets: orgPermSets.length,
       globalTemplates: globalPermSets.length,
@@ -356,14 +371,14 @@ export default function PermissionsPage() {
           <div className="nm-stat-val">{stats.fullAccess}</div>
           <div className="nm-stat-delta">süper + org admin</div>
         </div>
-        <div className={`nm-stat ${selectedUser && selectedUser.system_role === 'member' && assignments.length === 0 ? 'crit' : ''}`}>
+        <div className={`nm-stat ${selectedUser && isManagedRole(selectedUser.system_role) && assignments.length === 0 ? 'crit' : ''}`}>
           <div className="nm-stat-label">SEÇİLİ KULLANICI</div>
           <div className="nm-stat-val" style={{ fontSize: selectedUser ? 14 : 22 }}>
             {selectedUser ? selectedUser.username : '—'}
           </div>
           <div className="nm-stat-delta">
             {selectedUser
-              ? (selectedUser.system_role !== 'member'
+              ? (isFullAccessRole(selectedUser.system_role)
                   ? 'rol-tabanlı tam yetki'
                   : `${assignments.length} atama`)
               : 'soldan seçin'}
@@ -453,7 +468,7 @@ export default function PermissionsPage() {
                   <Text style={{ color: t.textPrimary, fontWeight: 700, fontSize: 16 }}>{selectedUser.username}</Text>
                   <Text style={{ color: t.textMuted, fontSize: 12, marginLeft: 8 }}>{selectedUser.email}</Text>
                 </div>
-                {canEdit && selectedUser.system_role === 'member' && (
+                {canEdit && isManagedRole(selectedUser.system_role) && (
                   <Button
                     type="primary"
                     icon={<SafetyOutlined />}
@@ -465,11 +480,19 @@ export default function PermissionsPage() {
                 )}
               </div>
 
-              {selectedUser.system_role !== 'member' ? (
+              {isFullAccessRole(selectedUser.system_role) ? (
                 <div style={{ background: t.cardBg2, borderRadius: 8, padding: '12px 16px', border: `1px solid ${t.border}` }}>
                   <CheckCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
                   <Text style={{ color: '#f59e0b' }}>
-                    {selectedUser.system_role === 'super_admin' ? 'Süper Admin — tüm yetkiler otomatik' : 'Org Yöneticisi — tüm yetkiler otomatik'}
+                    {selectedUser.system_role === 'super_admin'
+                      ? 'Süper Admin — platform genelinde tüm yetkiler otomatik (RLS bypass)'
+                      : 'Org Admin — kendi organizasyonu içinde tüm yetkiler otomatik'}
+                  </Text>
+                </div>
+              ) : !isManagedRole(selectedUser.system_role) ? (
+                <div style={{ background: t.cardBg2, borderRadius: 8, padding: '12px 16px', border: `1px solid ${t.border}` }}>
+                  <Text style={{ color: t.textMuted }}>
+                    Bilinmeyen rol: <code>{selectedUser.system_role}</code> — bu kullanıcı için yetki seti yönetilemiyor.
                   </Text>
                 </div>
               ) : (
