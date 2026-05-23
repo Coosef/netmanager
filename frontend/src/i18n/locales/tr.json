@@ -458,7 +458,6 @@
     "password_reset_error": "Şifre sıfırlama başarısız",
     "reset_btn": "Şifreyi Sıfırla",
     "organization": "Organizasyon",
-    "tenant_placeholder": "Tenant seçin",
     "subtitle": "Kullanıcı hesapları ve erişim rolleri",
     "active": "Aktif",
     "inactive": "Pasif"

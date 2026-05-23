@@ -557,15 +557,19 @@ export default function UsersPage() {
                       <>
                         <div style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>Organizasyon</div>
                         <Form.Item name="organization_id" style={{ marginBottom: 16 }}>
-                          <Select options={tenantOptions} allowClear placeholder={t('users.tenant_placeholder')} />
+                          <Select options={tenantOptions} allowClear placeholder="Organizasyon seçin" />
                         </Form.Item>
                         <Divider style={{ margin: '0 0 16px', borderColor: C.border }} />
                       </>
                     )}
-                    <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>
-                      Kullanıcının erişebileceği lokasyonları ve rolünü belirleyin.
+                    <div style={{ color: C.muted, fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
+                      Kullanıcının erişebileceği lokasyonları ve oradaki rolünü belirleyin.
                       <br />
-                      <span style={{ color: '#f59e0b' }}>Admin ve Org Viewer rolleri tüm lokasyonlara otomatik erişir.</span>
+                      <span style={{ color: '#22c55e' }}>• <strong>Süper Admin</strong> tüm organizasyonların tüm lokasyonlarına erişir (atama gerekmez).</span>
+                      <br />
+                      <span style={{ color: '#f97316' }}>• <strong>Org Admin</strong> kendi organizasyonunun tüm lokasyonlarına otomatik erişir.</span>
+                      <br />
+                      <span style={{ color: '#06b6d4' }}>• <strong>Lokasyon Admin</strong> ve <strong>Görüntüleyici</strong> için aşağıdan lokasyon atayın — atanmamış lokasyonu göremez.</span>
                     </div>
 
                     {/* Add location */}
@@ -620,7 +624,8 @@ export default function UsersPage() {
                                 value={a.loc_role}
                                 onChange={(v) => updateLocRole(a.location_id, v)}
                                 size="small"
-                                style={{ width: 155 }}
+                                style={{ width: 180 }}
+                                popupMatchSelectWidth={false}
                                 options={LOC_ROLE_OPTIONS}
                               />
                               <Button size="small" type="text" danger icon={<MinusCircleOutlined />}
