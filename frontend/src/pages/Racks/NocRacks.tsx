@@ -8,11 +8,59 @@
 // item, remove device placement) is wired to real endpoints. Detailed
 // drag-drop / port panel from the legacy page is preserved in git and
 // reachable as a later iteration.
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { App, Modal, Input, InputNumber, Popconfirm, Tag, Select } from 'antd'
 import { DeleteOutlined, AppstoreOutlined, HddOutlined, PlusOutlined } from '@ant-design/icons'
 import { racksApi, type RackSummary, type RackDetail, type RackDeviceSummary, type RackItem } from '@/api/racks'
+
+// ── Cabling (mockup pages-racks.jsx "Kablolama") ──────────────────────────
+// Cihazlar arası port-to-port kablolama. Backend'de henüz cable modeli yok,
+// bu sürüm localStorage tabanlı (rack adına göre key — browser-per-user).
+// İleride backend cable endpoint'i geldiğinde aynı arayüz buraya bağlanır.
+type CableKind = 'cat6' | 'fiber' | 'power' | 'dac' | 'serial'
+const CABLE_COLORS: Record<CableKind, string> = {
+  cat6:   '#22c55e',
+  fiber:  '#0ea5e9',
+  power:  '#f97316',
+  dac:    '#a855f7',
+  serial: '#eab308',
+}
+const CABLE_KINDS: CableKind[] = ['cat6', 'fiber', 'power', 'dac', 'serial']
+const CABLE_SPEEDS = ['100M', '1G', '10G', '25G', '40G', '100G']
+
+interface Cable {
+  id: string
+  from: { deviceId: number; port: string }
+  to:   { deviceId: number; port: string }
+  kind: CableKind
+  speed: string
+}
+
+// Port count per device — backend ne yazık ki cihazın physical port sayısını
+// bilmiyor (SNMP/LLDP envanteri ayrı), bu yüzden device_type'a göre makul
+// default. Patch panel/KVM gibi item'lar şimdilik kablolamaya dahil değil
+// (mockup da öyle: sadece devices). Gerek olursa kullanıcı geri bildiriminde
+// override eklenir.
+const portCountForDevice = (d: RackDeviceSummary): number => {
+  switch ((d.device_type || '').toLowerCase()) {
+    case 'router':   return 24
+    case 'firewall': return 8
+    case 'switch':   return 48
+    case 'ap':       return 1
+    case 'server':   return 4
+    case 'storage':  return 16
+    default:         return 0
+  }
+}
+
+const CABLE_LS_KEY = (rackName: string) => `nm_cables_v1:${rackName}`
+const loadCables = (rackName: string): Cable[] => {
+  try { const raw = localStorage.getItem(CABLE_LS_KEY(rackName)); return raw ? JSON.parse(raw) : [] } catch { return [] }
+}
+const saveCables = (rackName: string, cables: Cable[]) => {
+  try { localStorage.setItem(CABLE_LS_KEY(rackName), JSON.stringify(cables)) } catch { /* quota or disabled */ }
+}
 
 type DevStatus = 'ok' | 'warn' | 'crit' | 'offline'
 const STATUS_OF = (d: RackDeviceSummary): DevStatus => {
@@ -60,11 +108,24 @@ export default function NocRacks() {
     refetchInterval: 60000,
   })
   const [active, setActive] = useState<string | null>(null)
-  const [tab, setTab] = useState<'devices' | 'items'>('devices')
+  const [tab, setTab] = useState<'devices' | 'cables' | 'items'>('devices')
   const [addOpen, setAddOpen] = useState(false)
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null)
   // Boş U'ya tıklandığında açılan "Cihaz Yerleştir" modali için seçilen U.
   const [placeAtU, setPlaceAtU] = useState<{ u: number; maxHeight: number } | null>(null)
+
+  // Kablolar — aktif rack için localStorage'dan yüklenir, her değişimde
+  // yazılır. Rack değiştiğinde yeniden load. setCablesAndSave callback'i
+  // race önlemek için load/save'i tek yere bağlar.
+  const [cables, setCables] = useState<Cable[]>([])
+  useEffect(() => { if (active) setCables(loadCables(active)) }, [active])
+  const setCablesAndSave = useCallback((next: Cable[] | ((c: Cable[]) => Cable[])) => {
+    setCables((prev) => {
+      const out = typeof next === 'function' ? (next as (c: Cable[]) => Cable[])(prev) : next
+      if (active) saveCables(active, out)
+      return out
+    })
+  }, [active])
 
   // Auto-activate first rack once the list arrives.
   if (active == null && racks.length > 0) {
@@ -264,17 +325,27 @@ export default function NocRacks() {
               <button className={`nm-btn ${tab === 'devices' ? 'primary' : 'ghost'}`} onClick={() => setTab('devices')}>
                 Cihazlar <span className="nm-pill mono" style={{ marginLeft: 4 }}>{activeDetail.devices.length}</span>
               </button>
+              <button className={`nm-btn ${tab === 'cables' ? 'primary' : 'ghost'}`} onClick={() => setTab('cables')}>
+                Kablolama <span className="nm-pill mono" style={{ marginLeft: 4 }}>{cables.length}</span>
+              </button>
               <button className={`nm-btn ${tab === 'items' ? 'primary' : 'ghost'}`} onClick={() => setTab('items')}>
                 Items <span className="nm-pill mono" style={{ marginLeft: 4 }}>{activeDetail.items.length}</span>
               </button>
             </div>
 
-            {tab === 'devices' ? (
+            {tab === 'devices' && (
               <DeviceList detail={activeDetail}
                 selectedDeviceId={selectedDeviceId}
                 onSelect={(id) => setSelectedDeviceId(id)}
                 onRemove={(id) => { removePlacementMut.mutate(id); if (selectedDeviceId === id) setSelectedDeviceId(null) }} />
-            ) : (
+            )}
+            {tab === 'cables' && (
+              <CablingPanel detail={activeDetail}
+                selectedDeviceId={selectedDeviceId}
+                onSelectDevice={(id) => setSelectedDeviceId(id)}
+                cables={cables} setCables={setCablesAndSave} />
+            )}
+            {tab === 'items' && (
               <ItemList detail={activeDetail} onRemove={(itemId) => deleteItemMut.mutate({ rackName: activeDetail.rack_name, itemId })} />
             )}
           </div>
@@ -527,6 +598,225 @@ function ItemList({ detail, onRemove }: { detail: RackDetail; onRemove: (itemId:
           </tbody>
         </table>
       )}
+    </>
+  )
+}
+
+// ── Cabling panel (mockup Kablolama tab) ──────────────────────────────────
+// İki durum:
+// (a) Hiç cihaz seçili değilse — boş kutu (yönlendirme) + TÜM KABLOLAR listesi.
+// (b) Bir cihaz seçildiyse — o cihazın port haritası + KABLO türü/hız seçici
+//     + port grid + BAĞLANTILAR listesi. Port-to-port linking: bir porta tıkla
+//     → "linking" durumuna gir → başka cihaz seç → onun portuna tıkla → kablo
+//     oluşur. Aynı porta ikinci tıklayışta linking iptal olur.
+function CablingPanel({
+  detail, selectedDeviceId, onSelectDevice, cables, setCables,
+}: {
+  detail: RackDetail
+  selectedDeviceId: number | null
+  onSelectDevice: (id: number | null) => void
+  cables: Cable[]
+  setCables: (next: Cable[] | ((c: Cable[]) => Cable[])) => void
+}) {
+  const [linking, setLinking] = useState<{ deviceId: number; deviceName: string; port: string } | null>(null)
+  const [kind, setKind] = useState<CableKind>('cat6')
+  const [speed, setSpeed] = useState('1G')
+
+  const dev = detail.devices.find((d) => d.id === selectedDeviceId) || null
+  const ports = dev ? portCountForDevice(dev) : 0
+  const devCables = useMemo(
+    () => (dev ? cables.filter((c) => c.from.deviceId === dev.id || c.to.deviceId === dev.id) : []),
+    [cables, dev],
+  )
+  const portCable = useCallback(
+    (devId: number, p: string) => cables.find((c) =>
+      (c.from.deviceId === devId && c.from.port === p) ||
+      (c.to.deviceId === devId && c.to.port === p),
+    ),
+    [cables],
+  )
+
+  const startOrComplete = (port: string) => {
+    if (!dev) return
+    // Aynı porta ikinci kez tık → iptal.
+    if (linking && linking.deviceId === dev.id && linking.port === port) { setLinking(null); return }
+    // Bu port zaten doluysa: doluyu seçmek == linking iptal etmez, sadece görsel.
+    const existing = portCable(dev.id, port)
+    if (existing && !linking) return
+    // Linking yoksa: source seç.
+    if (!linking) { setLinking({ deviceId: dev.id, deviceName: dev.hostname, port }); return }
+    // Linking var, farklı cihazda boş porta tıklandı → kabloyu oluştur.
+    if (linking.deviceId !== dev.id && !existing) {
+      const newCable: Cable = {
+        id: `c${Date.now()}`,
+        from: { deviceId: linking.deviceId, port: linking.port },
+        to:   { deviceId: dev.id, port },
+        kind, speed,
+      }
+      setCables((prev) => [...prev, newCable])
+      setLinking(null)
+    }
+  }
+
+  const removeCable = (id: string) => setCables((prev) => prev.filter((c) => c.id !== id))
+
+  // ── Empty state: TÜM KABLOLAR listesi ──
+  if (!dev) {
+    return (
+      <>
+        <div className="nm-drawer-section-hd" style={{ padding: '8px 0 8px' }}>Kablolama</div>
+        <div style={{
+          padding: '40px 20px', textAlign: 'center', border: '1px dashed var(--line)',
+          borderRadius: 10, color: 'var(--fg-2)', fontSize: 13, marginBottom: 18,
+        }}>
+          Bir cihaz seç → port haritası bu panelde açılır.
+        </div>
+
+        <div className="nm-drawer-section-hd" style={{ padding: '0 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span>TÜM KABLOLAR</span>
+          <span className="mono" style={{ color: 'var(--fg-3)' }}>· {cables.length}</span>
+        </div>
+        {cables.length === 0 && (
+          <div style={{ color: 'var(--fg-3)', fontSize: 12, padding: '10px 0' }}>Henüz kablo kaydı yok.</div>
+        )}
+        {cables.map((c) => {
+          const a = detail.devices.find((d) => d.id === c.from.deviceId)
+          const b = detail.devices.find((d) => d.id === c.to.deviceId)
+          if (!a || !b) return null
+          return (
+            <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid var(--line-soft)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: CABLE_COLORS[c.kind] }}></span>
+              <span className="mono" style={{ fontSize: 11.5 }}>{a.hostname}<span style={{ color: 'var(--fg-3)' }}>:{c.from.port}</span></span>
+              <span style={{ color: 'var(--fg-3)' }}>↔</span>
+              <span className="mono" style={{ fontSize: 11.5 }}>{b.hostname}<span style={{ color: 'var(--fg-3)' }}>:{c.to.port}</span></span>
+              <span className="nm-pill mono" style={{ marginLeft: 'auto', fontSize: 10 }}>{c.kind.toUpperCase()} · {c.speed}</span>
+              <button className="nm-btn ghost" style={{ height: 22, fontSize: 11, padding: '0 8px' }}
+                onClick={() => removeCable(c.id)}>×</button>
+            </div>
+          )
+        })}
+      </>
+    )
+  }
+
+  // ── Device selected: port map ──
+  return (
+    <>
+      <div className="nm-drawer-section-hd" style={{ padding: '8px 0 6px' }}>
+        {dev.hostname.toUpperCase()} <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>· PORT HARİTASI</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 11.5, color: 'var(--fg-2)' }}>
+        <span>{dev.device_type || 'cihaz'}</span>
+        <span>·</span>
+        <span>{ports} port</span>
+        <span>·</span>
+        <span>{devCables.length} kablo</span>
+        <button className="nm-btn ghost" style={{ height: 24, fontSize: 11, marginLeft: 'auto' }}
+          onClick={() => onSelectDevice(null)}>← Cihazlar</button>
+      </div>
+
+      {linking && (
+        <div style={{
+          padding: 10, background: 'var(--accent-soft)', borderRadius: 8,
+          border: '1px solid var(--accent-line, var(--accent))', marginBottom: 12, fontSize: 12,
+          color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          🔗 <strong className="mono">{linking.deviceName}:{linking.port}</strong>
+          <span style={{ color: 'var(--fg-2)' }}>seçildi → kabloyu bağlamak için başka bir cihazın portuna tıkla.</span>
+          <button className="nm-btn ghost" style={{ height: 22, fontSize: 11, marginLeft: 'auto' }}
+            onClick={() => setLinking(null)}>İptal</button>
+        </div>
+      )}
+
+      {/* Kablo türü + hız */}
+      <div className="nm-rack-toolbar" style={{ marginBottom: 12, fontSize: 11, flexWrap: 'wrap' }}>
+        <span style={{ alignSelf: 'center', color: 'var(--fg-3)', fontFamily: 'var(--font-mono)', fontSize: 10, marginRight: 4 }}>KABLO:</span>
+        {CABLE_KINDS.map((k) => (
+          <button key={k} className={`nm-btn ${kind === k ? 'primary' : 'ghost'}`}
+            style={{ height: 24, fontSize: 11, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
+            onClick={() => setKind(k)}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: CABLE_COLORS[k], display: 'inline-block' }}></span>
+            {k}
+          </button>
+        ))}
+        <Select<string> value={speed} onChange={setSpeed} size="small"
+          style={{ width: 80, marginLeft: 8 }}
+          options={CABLE_SPEEDS.map((s) => ({ value: s, label: s }))} />
+      </div>
+
+      {/* Port grid */}
+      {ports > 0 ? (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: `repeat(${Math.min(ports, 24)}, 1fr)`,
+          gap: 4, marginBottom: 16,
+        }}>
+          {Array.from({ length: ports }).map((_, i) => {
+            const portNum = String(i + 1)
+            const c = portCable(dev.id, portNum)
+            const isLinking = linking && linking.deviceId === dev.id && linking.port === portNum
+            const color = c ? CABLE_COLORS[c.kind] : 'var(--line)'
+            const bg = c ? `${CABLE_COLORS[c.kind]}25` : 'var(--bg-2)'
+            return (
+              <div key={portNum}
+                onClick={() => startOrComplete(portNum)}
+                title={c ? `bağlı: ${c.kind} ${c.speed}` : `boş port ${portNum}`}
+                style={{
+                  aspectRatio: '1',
+                  border: `1.5px solid ${isLinking ? 'var(--accent)' : color}`,
+                  borderRadius: 4,
+                  background: isLinking ? 'var(--accent-soft)' : bg,
+                  color: c ? CABLE_COLORS[c.kind] : 'var(--fg-3)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 9.5,
+                  display: 'grid',
+                  placeItems: 'center',
+                  cursor: 'pointer',
+                  position: 'relative',
+                  minHeight: 28,
+                  ...(isLinking && { boxShadow: '0 0 0 2px var(--accent-soft)' }),
+                }}>
+                {portNum}
+                {c && <span style={{
+                  position: 'absolute', top: 2, right: 2,
+                  width: 4, height: 4, borderRadius: '50%',
+                  background: CABLE_COLORS[c.kind],
+                }}></span>}
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)', border: '1px dashed var(--line)', borderRadius: 8, fontSize: 12, marginBottom: 12 }}>
+          Bu cihaz tipi için port tanımı yok ({dev.device_type || '—'}).
+          <div style={{ marginTop: 6, fontSize: 10.5 }}>Router/switch/firewall/AP gibi network cihazları için port haritası vardır.</div>
+        </div>
+      )}
+
+      {/* Bağlantılar */}
+      <div className="nm-drawer-section-hd" style={{ padding: '4px 0 8px' }}>BAĞLANTILAR</div>
+      {devCables.length === 0 && (
+        <div style={{ color: 'var(--fg-3)', fontSize: 12 }}>Henüz kablo bağlantısı yok. Yukarıdan bir porta tıkla.</div>
+      )}
+      {devCables.map((c) => {
+        const isFrom = c.from.deviceId === dev.id
+        const ourPort = isFrom ? c.from.port : c.to.port
+        const other = isFrom ? c.to : c.from
+        const otherDev = detail.devices.find((d) => d.id === other.deviceId)
+        return (
+          <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--line-soft)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: CABLE_COLORS[c.kind] }}></span>
+            <span className="mono" style={{ fontSize: 11.5 }}>port {ourPort}</span>
+            <span style={{ color: 'var(--fg-3)' }}>↔</span>
+            <span className="mono" style={{ fontSize: 11.5, fontWeight: 500 }}>
+              {otherDev?.hostname || '?'}<span style={{ color: 'var(--fg-3)' }}>:{other.port}</span>
+            </span>
+            <span className="nm-pill mono" style={{ marginLeft: 'auto', fontSize: 10 }}>{c.kind.toUpperCase()} {c.speed}</span>
+            <button className="nm-btn ghost" style={{ height: 22, fontSize: 11, padding: '0 8px' }}
+              onClick={() => removeCable(c.id)}>×</button>
+          </div>
+        )
+      })}
     </>
   )
 }
