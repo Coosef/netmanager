@@ -161,7 +161,7 @@ function exportTopologyAsHtml(graph: import('@/api/topology').TopologyGraph) {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NetManager Topoloji - ${exportDate}</title>
+<title>Charon Topoloji - ${exportDate}</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.29.2/cytoscape.min.js"><\/script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -201,7 +201,7 @@ select option{background:#0f172a}
 <body>
 <div id="sidebar">
   <div class="sidebar-header">
-    <h1>⬡ NetManager Topoloji</h1>
+    <h1>⬡ Charon Topoloji</h1>
     <p>Dışa aktarıldı: ${exportDate}</p>
   </div>
   <div id="stats-bar">

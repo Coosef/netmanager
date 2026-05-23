@@ -600,7 +600,7 @@ export default function PlaybooksPage() {
                             />
                           </Form.Item>
                           <Form.Item {...rest} name={[name, 'subject']} label="Konu" style={{ marginBottom: 8 }}>
-                            <Input placeholder="[NetManager] Playbook çalıştı" />
+                            <Input placeholder="[Charon] Playbook çalıştı" />
                           </Form.Item>
                           <Form.Item {...rest} name={[name, 'message']} label="Mesaj ({hostname} ve {ip} kullanabilirsiniz)" style={{ marginBottom: 8 }}>
                             <Input.TextArea rows={2} placeholder="{hostname} cihazında playbook tamamlandı." />

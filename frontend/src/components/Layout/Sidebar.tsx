@@ -17,14 +17,14 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const isMobile = useIsMobile()
   const NAV_GROUPS = useNavGroups()
 
-  const initials = (user?.username ?? 'NM').slice(0, 2).toUpperCase()
+  const initials = (user?.username ?? 'CH').slice(0, 2).toUpperCase()
 
   const nav = (
     <aside className="nm-sidebar" style={{ height: '100%' }}>
       <div className="nm-brand" onClick={() => { navigate('/'); if (isMobile) onMobileClose?.() }} style={{ cursor: 'pointer' }}>
         <div className="nm-brand-mark" />
         <div className="nm-brand-name">
-          NetManager
+          Charon
           <small>universal cloud</small>
         </div>
         {isMobile && (
@@ -62,7 +62,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         <div className="nm-avatar">{initials}</div>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--fg-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {user?.username ?? 'NetManager'}
+            {user?.username ?? 'Charon'}
           </div>
           <small>{user?.role ?? ''}</small>
         </div>

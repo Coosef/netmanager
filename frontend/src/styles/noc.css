@@ -1,4 +1,4 @@
-/* NetManager — Design System Tokens & Base */
+/* Charon — Design System Tokens & Base */
 /* IBM Plex Sans + IBM Plex Mono */
 
 :root {
@@ -1438,6 +1438,21 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 .nm-fadein { animation: nm-fadeIn 0.32s ease both; }
+
+/* CountUp flash — sayı değişince kısa renkli ışıma (yeşil ▲ / kırmızı ▼). */
+.nm-countup { display: inline-block; }
+.nm-countup.flash-up   { animation: nm-flash-up   0.9s ease-out; }
+.nm-countup.flash-down { animation: nm-flash-down 0.9s ease-out; }
+@keyframes nm-flash-up {
+  0%   { text-shadow: 0 0 0 transparent; }
+  18%  { text-shadow: 0 0 14px oklch(0.78 0.16 145 / 0.85); }
+  100% { text-shadow: 0 0 0 transparent; }
+}
+@keyframes nm-flash-down {
+  0%   { text-shadow: 0 0 0 transparent; }
+  18%  { text-shadow: 0 0 14px oklch(0.70 0.20 25 / 0.85); }
+  100% { text-shadow: 0 0 0 transparent; }
+}
 
 .nm-vendor {
   font-family: var(--font-mono);

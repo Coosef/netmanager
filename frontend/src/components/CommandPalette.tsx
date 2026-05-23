@@ -216,7 +216,7 @@ export default function CommandPalette({ open, onClose, onAction, isDark, soundE
           <span><kbd>↑↓</kbd> gez</span>
           <span><kbd>↵</kbd> seç</span>
           <span><kbd>esc</kbd> kapat</span>
-          <span style={{ marginLeft: 'auto', color: 'var(--accent)' }}>NetManager · ⌘K</span>
+          <span style={{ marginLeft: 'auto', color: 'var(--accent)' }}>Charon · ⌘K</span>
         </div>
       </div>
     </div>

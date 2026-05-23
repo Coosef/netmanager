@@ -18,7 +18,7 @@ export default function TopNav() {
       <div className="nm-brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
         <div className="nm-brand-mark" style={{ width: 24, height: 24, flexShrink: 0 }} />
         <div className="nm-brand-name" style={{ fontWeight: 600, fontSize: 14, color: 'var(--fg-0)' }}>
-          NetManager
+          Charon
         </div>
       </div>
 

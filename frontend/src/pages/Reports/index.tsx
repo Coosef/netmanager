@@ -182,7 +182,7 @@ function exportExecutiveSummary(s: ReportSummary) {
 <html lang="tr">
 <head>
 <meta charset="UTF-8">
-<title>NetManager — Yönetici Özet Raporu ${dateStr}</title>
+<title>Charon — Yönetici Özet Raporu ${dateStr}</title>
 <style>
   @page { margin: 18mm 15mm; size: A4 portrait; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -299,7 +299,7 @@ function exportExecutiveSummary(s: ReportSummary) {
   </table>
 
   <div class="footer">
-    <span>NetManager Ağ Görünürlük Platformu — Otomatik oluşturuldu</span>
+    <span>Charon Ağ Görünürlük Platformu — Otomatik oluşturuldu</span>
     <span>${dateStr} ${timeStr}</span>
   </div>
 </div>

@@ -1,4 +1,4 @@
-// LoginPage — Charon-style gold/dark login (mockup Charon Login.html, NetManager
+// LoginPage — Charon-style gold/dark login (mockup Charon Login.html, Charon
 // branded). 2-step flow: (1) credentials → /auth/login, (2) MFA OTP (backend
 // MFA henüz yok; step 2 sadece backend `mfa_required: true` döndürdüğünde aktif
 // olur — şimdi placeholder/hazır).
@@ -401,7 +401,7 @@ export default function LoginPage() {
               <circle cx="20" cy="20" r="1.5" fill="#d4a86a" />
             </svg>
           </div>
-          <h1 className="charon-brand-name">NETMANAGER</h1>
+          <h1 className="charon-brand-name">CHARON</h1>
           <div className="charon-brand-tagline">Universal Network Intelligence</div>
         </div>
 
@@ -558,7 +558,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <div className="charon-footer-line">
-          NetManager <span className="sep">·</span> Universal Network Intelligence <span className="sep">·</span> © 2026
+          Charon <span className="sep">·</span> Universal Network Intelligence <span className="sep">·</span> © 2026
         </div>
       </div>
     </>

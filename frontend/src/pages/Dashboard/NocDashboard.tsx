@@ -24,8 +24,10 @@ import { approvalsApi } from '@/api/approvals'
 import { backupSchedulesApi } from '@/api/backupSchedules'
 import { devicesApi } from '@/api/devices'
 import { useEventStream } from '@/hooks/useEventStream'
+import { useQueryClient } from '@tanstack/react-query'
 import { useSite } from '@/contexts/SiteContext'
 import { useCustomize, ALL_WIDGETS } from '@/contexts/CustomizeContext'
+import CountUp from '@/components/CountUp'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -45,18 +47,22 @@ function MiniSpark({ data, color = 'var(--accent)', w = 130, h = 36 }: { data: n
   )
 }
 
-function Kpi({ label, value, unit, delta, dir, status, spark, sparkColor, pulse }: {
+function Kpi({ label, value, unit, delta, dir, status, spark, sparkColor, pulse, decimals }: {
   label: string; value: string | number; unit?: string; delta?: string
   dir?: 'up' | 'down' | 'flat'; status?: 'crit' | 'ok' | 'info'; spark?: number[]; sparkColor?: string
-  pulse?: boolean  // kritik durumda kart kenarı pulse animasyonu
+  pulse?: boolean
+  decimals?: number  // CountUp ondalık (örn. SLA için 1)
 }) {
   const accent = status === 'crit' ? 'var(--crit)' : status === 'ok' ? 'var(--ok)' : status === 'info' ? 'var(--info)' : 'var(--fg-0)'
+  const isNum = typeof value === 'number'
   return (
     <div className={`nm-kpi ${pulse ? 'crit-pulse' : ''}`}
       style={{ borderTop: `2px solid ${accent}` }}>
       <div className="nm-kpi-label">{label}</div>
       <div className="nm-kpi-value" style={{ color: accent }}>
-        {value}{unit && <small>{unit}</small>}
+        {isNum
+          ? <CountUp value={value as number} decimals={decimals} unit={unit} />
+          : <>{value}{unit && <small>{unit}</small>}</>}
       </div>
       {delta && (
         <div className="nm-kpi-delta">
@@ -129,24 +135,44 @@ const WIDGET_SPAN: Record<string, string> = {
 
 export default function NocDashboard() {
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const { activeSite } = useSite()
   const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget, viewVariant } = useCustomize()
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
 
-  const { data: s } = useQuery({ queryKey: ['monitor-stats', activeSite], queryFn: () => monitorApi.getStats({ site: activeSite || undefined }), refetchInterval: 30000 })
-  const { data: tasksData } = useQuery({ queryKey: ['tasks-recent'], queryFn: () => tasksApi.list({ limit: 6 }), refetchInterval: 15000 })
-  const { data: agentsData } = useQuery({ queryKey: ['agents-list'], queryFn: agentsApi.list, refetchInterval: 30000 })
-  const { data: slaFleet } = useQuery({ queryKey: ['sla-fleet-summary'], queryFn: () => slaApi.getFleetSummary(30), refetchInterval: 300000 })
-  const { data: fleetRisk } = useQuery({ queryKey: ['fleet-risk'], queryFn: () => intelligenceApi.getFleetRisk(10), refetchInterval: 300000 })
-  const { data: fleetImpact } = useQuery({ queryKey: ['fleet-impact-summary'], queryFn: servicesApi.getFleetImpact, refetchInterval: 120000 })
-  const { data: anomalyData } = useQuery({ queryKey: ['behavior-anomalies'], queryFn: () => intelligenceApi.getAnomalies(24, 30), refetchInterval: 120000 })
-  const { data: approvalCount } = useQuery({ queryKey: ['approval-pending-count'], queryFn: approvalsApi.pendingCount, refetchInterval: 30000 })
-  // Drift / probes / vendors — yeni widget'lar için
-  const { data: driftReport } = useQuery({ queryKey: ['dashboard-drift'], queryFn: () => backupSchedulesApi.driftReport({ limit: 6 }), refetchInterval: 300000 })
-  const { data: devicesData } = useQuery({ queryKey: ['dashboard-devices-vendors'], queryFn: () => devicesApi.list({ limit: 1000 }), refetchInterval: 120000 })
+  // Live polling: refetchInterval düşürüldü (30s → 10s on critical queries)
+  // + refetchOnWindowFocus default true → kullanıcı sayfaya geri dönünce
+  // hemen güncelliyor. Ayrıca aşağıdaki SSE subscriber'ı device_online/
+  // device_offline event'lerinde monitor-stats'ı invalidate ediyor —
+  // böylece polling beklemeden cihaz sayısı anında değişiyor.
+  const { data: s } = useQuery({ queryKey: ['monitor-stats', activeSite], queryFn: () => monitorApi.getStats({ site: activeSite || undefined }), refetchInterval: 10000 })
+  const { data: tasksData } = useQuery({ queryKey: ['tasks-recent'], queryFn: () => tasksApi.list({ limit: 6 }), refetchInterval: 10000 })
+  const { data: agentsData } = useQuery({ queryKey: ['agents-list'], queryFn: agentsApi.list, refetchInterval: 10000 })
+  const { data: slaFleet } = useQuery({ queryKey: ['sla-fleet-summary'], queryFn: () => slaApi.getFleetSummary(30), refetchInterval: 60000 })
+  const { data: fleetRisk } = useQuery({ queryKey: ['fleet-risk'], queryFn: () => intelligenceApi.getFleetRisk(10), refetchInterval: 60000 })
+  const { data: fleetImpact } = useQuery({ queryKey: ['fleet-impact-summary'], queryFn: servicesApi.getFleetImpact, refetchInterval: 30000 })
+  const { data: anomalyData } = useQuery({ queryKey: ['behavior-anomalies'], queryFn: () => intelligenceApi.getAnomalies(24, 30), refetchInterval: 30000 })
+  const { data: approvalCount } = useQuery({ queryKey: ['approval-pending-count'], queryFn: approvalsApi.pendingCount, refetchInterval: 15000 })
+  const { data: driftReport } = useQuery({ queryKey: ['dashboard-drift'], queryFn: () => backupSchedulesApi.driftReport({ limit: 6 }), refetchInterval: 60000 })
+  const { data: devicesData } = useQuery({ queryKey: ['dashboard-devices-vendors'], queryFn: () => devicesApi.list({ limit: 1000 }), refetchInterval: 60000 })
 
   useEventStream({
-    onEvent: (ev: NetworkEvent) => setLiveEvents((prev) => [ev, ...prev].slice(0, 30)),
+    onEvent: (ev: NetworkEvent) => {
+      setLiveEvents((prev) => [ev, ...prev].slice(0, 30))
+      // Cihaz durumu değişen event'lerde stat query'lerini hemen invalidate
+      // → polling beklemeden ÇEVRİMİÇİ/ÇEVRİMDIŞI sayısı güncellenir.
+      const type = ev.event_type
+      if (type === 'device_offline' || type === 'device_online' || type === 'agent_outage'
+          || type === 'agent_online' || type === 'agent_offline') {
+        qc.invalidateQueries({ queryKey: ['monitor-stats'] })
+        qc.invalidateQueries({ queryKey: ['agents-list'] })
+      }
+      if (type === 'config_drift' || type === 'backup_failure') {
+        qc.invalidateQueries({ queryKey: ['dashboard-drift'] })
+      }
+      // Her event monitor-stats events_24h sayacını arttırır → sayaç da live.
+      qc.invalidateQueries({ queryKey: ['monitor-stats'] })
+    },
   })
 
   const now = useClock()
@@ -744,12 +770,15 @@ function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
 function VitalSign({ label, value, unit, foot, kind }:
   { label: string; value: string | number; unit?: string; foot?: React.ReactNode; kind?: 'ok' | 'warn' | 'crit' | 'info' }) {
   const color = kind === 'crit' ? 'var(--crit)' : kind === 'warn' ? 'var(--warn)' : kind === 'ok' ? 'var(--ok)' : kind === 'info' ? 'var(--info)' : 'var(--fg-0)'
+  const isNum = typeof value === 'number'
   return (
     <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--line-soft)' }}>
       <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)',
         textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 6 }}>{label}</div>
       <div style={{ fontSize: 44, fontWeight: 500, lineHeight: 1, color }}>
-        {value}{unit && <small style={{ fontSize: 16, color: 'var(--fg-3)' }}>{unit}</small>}
+        {isNum
+          ? <CountUp value={value as number} unit={unit} />
+          : <>{value}{unit && <small style={{ fontSize: 16, color: 'var(--fg-3)' }}>{unit}</small>}</>}
       </div>
       {foot && <div style={{ fontSize: 11, color: 'var(--fg-2)', marginTop: 8 }}>{foot}</div>}
     </div>
@@ -813,7 +842,7 @@ function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
             {events24h}<small style={{ fontSize: 14, color: 'var(--fg-3)' }}>olay</small>
           </div>
           <div className="nm-edit-meta" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--fg-3)', marginTop: 20, fontFamily: 'var(--font-mono)' }}>
-            <span>Otomatik özet</span><span>·</span><span>NetManager Intelligence</span>
+            <span>Otomatik özet</span><span>·</span><span>Charon Intelligence</span>
             <span style={{ marginLeft: 'auto' }}>▲ canlı</span>
           </div>
         </div>

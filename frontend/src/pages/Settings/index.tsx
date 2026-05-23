@@ -1131,7 +1131,7 @@ function SnmpConfigTab() {
         type="warning"
         showIcon
         message="Ruijie community string kuralı"
-        description='Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: "NetManager1"'
+        description='Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: "Charon1"'
         style={{ marginBottom: 8 }}
       />
 
@@ -1148,9 +1148,9 @@ function SnmpConfigTab() {
           label="SNMP Community String"
           name="community"
           rules={[{ required: true, message: 'Gerekli' }]}
-          extra='Ruijie için büyük harf + küçük harf + rakam gerekli — örn. "NetManager1"'
+          extra='Ruijie için büyük harf + küçük harf + rakam gerekli — örn. "Charon1"'
         >
-          <Input placeholder="NetManager1" />
+          <Input placeholder="Charon1" />
         </Form.Item>
         <Form.Item label="Versiyon" name="version" initialValue="v2c">
           <Select options={[
@@ -2147,7 +2147,7 @@ export default function SettingsPage() {
           <div className="nm-crumbs"><span>Yönetim</span><span>{t('settings.title')}</span></div>
           <h1 className="nm-page-title">
             {t('settings.title')}
-            <span className="nm-pill mono">NetManager v1.0</span>
+            <span className="nm-pill mono">Charon v1.0</span>
           </h1>
           <div className="nm-page-sub">Genel ayarlar · bildirim kanalları · uyarı kuralları · SLA politikaları · kimlik & token yönetimi.</div>
         </div>

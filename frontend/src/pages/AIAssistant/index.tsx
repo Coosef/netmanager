@@ -81,7 +81,7 @@ function buildSuggested(
     case 'troubleshoot':
       return [
         offline > 0
-          ? { label: `${offline} offline cihaz — adım adım çöz`, q: `${offline} cihaz offline. Olay zaman çizelgesine bakarak kök nedeni bul ve NetManager üzerinden adım adım çözüm yolunu göster.` }
+          ? { label: `${offline} offline cihaz — adım adım çöz`, q: `${offline} cihaz offline. Olay zaman çizelgesine bakarak kök nedeni bul ve Charon üzerinden adım adım çözüm yolunu göster.` }
           : { label: 'Periyodik bağlantı kopmaları', q: 'Son 24 saatte tekrarlayan bağlantı kopması yaşayan cihazlar var mı?' },
         { label: 'VLAN yapılandırma sorunu', q: 'VLAN yapılandırmasında tutarsızlık veya yanlış atama var mı? Etkilenen cihazlar hangileri?' },
         { label: 'STP / loop riski', q: 'Spanning-tree anomalisi veya loop riski var mı? Hangi portları kontrol etmeliyim?' },
@@ -304,7 +304,7 @@ export default function AIAssistantPage() {
     const dateStr = now.toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' })
     const timeStr = now.toLocaleTimeString('tr-TR')
 
-    let md = `# NetManager AI Analiz Raporu\n\n`
+    let md = `# Charon AI Analiz Raporu\n\n`
     md += `| | |\n|---|---|\n`
     md += `| **Tarih** | ${dateStr} ${timeStr} |\n`
     md += `| **Mod** | ${currentMode.icon} ${currentMode.label} |\n`
@@ -323,7 +323,7 @@ export default function AIAssistantPage() {
       md += `---\n\n`
     })
 
-    md += `*NetManager tarafından oluşturuldu — ${now.toISOString()}*\n`
+    md += `*Charon tarafından oluşturuldu — ${now.toISOString()}*\n`
 
     const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
     const url = URL.createObjectURL(blob)
