@@ -1,12 +1,10 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Alert, Badge, Button, Card, Col, Modal, Row, Spin, Table, Tag, Tooltip, Typography } from 'antd'
+import { Alert, Button, Modal, Spin, Tag, Tooltip } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined, DiffOutlined, ReloadOutlined, WarningOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { backupSchedulesApi, type DriftDiff, type DriftItem } from '@/api/backupSchedules'
 import { useTheme } from '@/contexts/ThemeContext'
-
-const { Title, Text } = Typography
 
 // ── Inline diff helpers ───────────────────────────────────────────────────────
 type DiffEntry = { type: 'same' | 'added' | 'removed'; text: string; lineA: number | null; lineB: number | null }
@@ -92,28 +90,6 @@ function DiffModal({ open, onClose, diff, hostname, isDark }: {
   )
 }
 
-function StatCard({ label, value, color, icon, isDark }: {
-  label: string; value: number; color: string; icon: React.ReactNode; isDark: boolean
-}) {
-  return (
-    <Card
-      size="small"
-      style={{
-        background: isDark ? 'rgba(14,30,56,0.7)' : '#fff',
-        border: `1px solid ${isDark ? '#1a3458' : '#e2e8f0'}`,
-        borderRadius: 10,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div style={{ fontSize: 28, color }}>{icon}</div>
-        <div>
-          <div style={{ fontSize: 26, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
-          <div style={{ fontSize: 12, color: isDark ? '#64748b' : '#94a3b8', marginTop: 2 }}>{label}</div>
-        </div>
-      </div>
-    </Card>
-  )
-}
 
 export default function ConfigDriftPage() {
   const { isDark } = useTheme()
@@ -138,188 +114,116 @@ export default function ConfigDriftPage() {
     staleTime: 60_000,
   })
 
-  const columns = [
-    {
-      title: 'Cihaz',
-      dataIndex: 'hostname',
-      key: 'hostname',
-      render: (v: string, r: DriftItem) => (
-        <div>
-          <Text strong style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>{v}</Text>
-          {r.ip && <div style={{ fontSize: 11, color: '#64748b' }}>{r.ip}</div>}
-        </div>
-      ),
-    },
-    {
-      title: 'Vendor',
-      dataIndex: 'vendor',
-      key: 'vendor',
-      width: 110,
-      render: (v: string) => v ? <Tag>{v}</Tag> : <Text type="secondary">—</Text>,
-    },
-    {
-      title: 'Lokasyon',
-      dataIndex: 'site',
-      key: 'site',
-      width: 140,
-      render: (v: string) => v || <Text type="secondary">—</Text>,
-    },
-    {
-      title: 'Cihaz Durumu',
-      dataIndex: 'device_status',
-      key: 'device_status',
-      width: 120,
-      render: (v: string) => {
-        const color = v === 'online' ? 'success' : v === 'offline' ? 'error' : 'default'
-        return <Badge status={color as any} text={v || '—'} />
-      },
-    },
-    {
-      title: 'Drift Sebebi',
-      dataIndex: 'reason',
-      key: 'reason',
-      width: 150,
-      render: (v: string) =>
-        v === 'hash_mismatch'
-          ? <Tag color="warning" icon={<WarningOutlined />}>Config Değişmiş</Tag>
-          : <Tag color="error" icon={<CloseCircleOutlined />}>Backup Yok</Tag>,
-    },
-    {
-      title: 'Son Backup',
-      dataIndex: 'latest_backup_at',
-      key: 'latest_backup_at',
-      width: 160,
-      render: (v: string) =>
-        v
-          ? <Tooltip title={dayjs(v).format('DD.MM.YYYY HH:mm:ss')}>
-              <Text style={{ fontSize: 12 }}>{dayjs(v).fromNow()}</Text>
-            </Tooltip>
-          : <Text type="secondary">Hiç yedeklenmemiş</Text>,
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 100,
-      render: (_: unknown, r: DriftItem) =>
-        r.reason === 'hash_mismatch' ? (
-          <Button
-            size="small"
-            icon={<DiffOutlined />}
-            onClick={() => openDiff(r)}
-          >
-            Diff
-          </Button>
-        ) : null,
-    },
-  ]
-
-  const bg = isDark ? '#030c1e' : '#f0f4f8'
-  const cardBg = isDark ? 'rgba(14,30,56,0.7)' : '#fff'
-  const border = isDark ? '#1a3458' : '#e2e8f0'
+  const items = data?.items ?? []
+  const changed = (data?.drift_count ?? 0) - (data?.no_backup_count ?? 0)
 
   return (
-    <div style={{ padding: '20px 24px', background: bg, minHeight: '100%' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0, color: isDark ? '#e2e8f0' : '#1e293b' }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Operasyon</span><span>Config Drift</span></div>
+          <h1 className="nm-page-title">
             Config Drift Raporu
-          </Title>
-          <Text style={{ color: '#64748b', fontSize: 13 }}>
-            Golden config'den sapma gösteren cihazlar
-          </Text>
+            {data && data.drift_count > 0 && <span className="nm-pill warn">{data.drift_count} sapma</span>}
+          </h1>
+          <div className="nm-page-sub">
+            Altın baseline'dan sapma gösteren cihazlar — config değişmiş veya hiç yedeklenmemiş.
+          </div>
         </div>
-        <Button
-          icon={<ReloadOutlined />}
-          loading={isFetching}
-          onClick={() => refetch()}
-        >
-          Yenile
-        </Button>
+        <div className="nm-page-actions">
+          <button className="nm-btn ghost" onClick={() => refetch()} disabled={isFetching}>
+            <ReloadOutlined spin={isFetching} /> Tekrar Tara
+          </button>
+        </div>
       </div>
 
-      {isLoading ? (
-        <div style={{ textAlign: 'center', padding: 60 }}>
-          <Spin size="large" />
+      {data && (
+        <div className="nm-statbar">
+          <div className="nm-stat"><div className="nm-stat-label">Altın Baseline</div><div className="nm-stat-val">{data.total_with_golden}</div><div className="nm-stat-delta">golden işaretli</div></div>
+          <div className="nm-stat ok"><div className="nm-stat-label">Temiz</div><div className="nm-stat-val">{data.clean_count}<small>/ {data.total_with_golden}</small></div><div className="nm-stat-delta">drift yok</div></div>
+          <div className="nm-stat warn"><div className="nm-stat-label">Config Değişmiş</div><div className="nm-stat-val">{changed}</div><div className="nm-stat-delta">hash mismatch</div></div>
+          <div className="nm-stat crit"><div className="nm-stat-label">Backup Yok</div><div className="nm-stat-val">{data.no_backup_count}</div><div className="nm-stat-delta">hiç yedeklenmemiş</div></div>
+          <div className="nm-stat warn"><div className="nm-stat-label">Drift Toplam</div><div className="nm-stat-val">{data.drift_count}</div></div>
+          <div className="nm-stat"><div className="nm-stat-label">Tarama</div><div className="nm-stat-val mono" style={{ fontSize: 18 }}>{isFetching ? '…' : 'OK'}</div><div className="nm-stat-delta">son: az önce</div></div>
         </div>
-      ) : !data || data.total_with_golden === 0 ? (
-        <Alert
-          type="info"
-          message="Golden Config Bulunamadı"
-          description="Drift tespiti için cihazların golden config'i işaretlenmiş olması gerekir. Yedekleme Merkezi'nden bir backup'ı 'Golden' olarak işaretleyin."
-          showIcon
-        />
-      ) : (
-        <>
-          <Row gutter={16} style={{ marginBottom: 20 }}>
-            <Col span={6}>
-              <StatCard
-                label="Golden Config Olan"
-                value={data.total_with_golden}
-                color="#3b82f6"
-                icon={<CheckCircleOutlined />}
-                isDark={isDark}
-              />
-            </Col>
-            <Col span={6}>
-              <StatCard
-                label="Temiz (Drift Yok)"
-                value={data.clean_count}
-                color="#22c55e"
-                icon={<CheckCircleOutlined />}
-                isDark={isDark}
-              />
-            </Col>
-            <Col span={6}>
-              <StatCard
-                label="Config Değişmiş"
-                value={data.drift_count - data.no_backup_count}
-                color="#f59e0b"
-                icon={<WarningOutlined />}
-                isDark={isDark}
-              />
-            </Col>
-            <Col span={6}>
-              <StatCard
-                label="Backup Yok"
-                value={data.no_backup_count}
-                color="#ef4444"
-                icon={<CloseCircleOutlined />}
-                isDark={isDark}
-              />
-            </Col>
-          </Row>
+      )}
 
-          {data.drift_count === 0 ? (
-            <Alert
-              type="success"
-              message="Tüm cihazlar temiz — drift tespit edilmedi"
-              showIcon
-              icon={<CheckCircleOutlined />}
-            />
-          ) : (
-            <Card
-              title={
-                <span style={{ color: isDark ? '#e2e8f0' : '#1e293b' }}>
-                  Drift Tespit Edilen Cihazlar
-                  <Tag color="error" style={{ marginLeft: 8 }}>{data.drift_count}</Tag>
-                </span>
-              }
-              style={{ background: cardBg, border: `1px solid ${border}` }}
-              styles={{ header: { background: isDark ? 'rgba(14,30,56,0.5)' : '#f8fafc', borderBottom: `1px solid ${border}` } }}
-            >
-              <Table
-                dataSource={data.items}
-                columns={columns}
-                rowKey="device_id"
-                size="small"
-                pagination={{ pageSize: 20, showSizeChanger: true }}
-                rowClassName={(r) =>
-                  r.reason === 'no_backup' ? 'drift-row-critical' : 'drift-row-warning'
-                }
-              />
-            </Card>
-          )}
-        </>
+      {isLoading ? (
+        <div style={{ padding: 60, textAlign: 'center' }}><Spin size="large" /></div>
+      ) : !data || data.total_with_golden === 0 ? (
+        <Alert type="info" showIcon style={{ marginTop: 12 }}
+          message="Altın baseline yok"
+          description="Drift tespiti için cihazların golden config'i işaretlenmiş olması gerekir. Yedekleme Merkezi'nden bir backup'ı 'Golden' olarak işaretleyin." />
+      ) : data.drift_count === 0 ? (
+        <Alert type="success" showIcon icon={<CheckCircleOutlined />}
+          message="Tüm cihazlar temiz — drift tespit edilmedi" style={{ marginTop: 12 }} />
+      ) : (
+        <div className="nm-table-wrap">
+          <div className="nm-table-toolbar">
+            <span className="count"><em>{items.length}</em> cihazda config sapması</span>
+            <span style={{ color: 'var(--fg-3)', marginLeft: 'auto', fontSize: 11 }}>
+              {isFetching ? 'Yükleniyor…' : ' '}
+            </span>
+          </div>
+          <div style={{ overflow: 'auto' }}>
+            <table className="nm-table">
+              <thead>
+                <tr>
+                  <th>Cihaz</th>
+                  <th>Vendor</th>
+                  <th>Lokasyon</th>
+                  <th>Durum</th>
+                  <th>Sebep</th>
+                  <th>Son Backup</th>
+                  <th className="col-actions"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((r) => {
+                  const isHashMismatch = r.reason === 'hash_mismatch'
+                  return (
+                    <tr key={r.device_id}>
+                      <td>
+                        <div className="nm-host">{r.hostname}</div>
+                        {r.ip && <div className="nm-host-ip">{r.ip}</div>}
+                      </td>
+                      <td>{r.vendor ? <span className="nm-pill">{r.vendor}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
+                      <td style={{ fontSize: 11.5 }}>{r.site || <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
+                      <td>
+                        <span className={`nm-pill ${r.device_status === 'online' ? 'ok' : r.device_status === 'offline' ? 'crit' : ''}`}>
+                          {r.device_status || '—'}
+                        </span>
+                      </td>
+                      <td>
+                        {isHashMismatch ? (
+                          <span className="nm-pill warn"><WarningOutlined /> Config Değişmiş</span>
+                        ) : (
+                          <span className="nm-pill crit"><CloseCircleOutlined /> Backup Yok</span>
+                        )}
+                      </td>
+                      <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                        {r.latest_backup_at ? (
+                          <Tooltip title={dayjs(r.latest_backup_at).format('DD.MM.YYYY HH:mm:ss')}>
+                            {dayjs(r.latest_backup_at).fromNow()}
+                          </Tooltip>
+                        ) : 'Hiç yedeklenmemiş'}
+                      </td>
+                      <td className="col-actions">
+                        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                          {isHashMismatch && (
+                            <Tooltip title="Diff göster">
+                              <button onClick={() => openDiff(r)}><DiffOutlined /></button>
+                            </Tooltip>
+                          )}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       <DiffModal
