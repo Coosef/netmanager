@@ -21,15 +21,15 @@ NOC look; `.theme-light` flips the design vars.
 | # | Page | Route | Mockup | Status |
 |---|------|-------|--------|--------|
 | — | Shell (sidebar/topbar/grid) | — | shell.jsx | ✅ `6953cca` |
-| — | Theme tokens (dark NOC + IBM Plex) | — | styles.css | ✅ `6953cca` |
+| — | Theme tokens (dark NOC + IBM Plex) | — | styles.css | 🟡 partial — base tokens var, light tema + Özelleştir paneli + accent picker bekliyor (Phase 2) |
 | — | Topology | /topology-next | pages-topology.jsx | ✅ `6953cca` |
-| — | Dashboard | / | dashboard.jsx + widgets.jsx | ✅ `a6cdf51` |
-| 1 | Cihazlar (Devices) | /devices | pages-devices.jsx · Cihazlar.html | 🟡 `10c4491` header+statbar (table→nm-table pending) |
-| 2 | Uyarılar (/monitor) | /monitor | pages-alerts.jsx · Uyarilar.html | 🟡 header+statbar |
+| — | Dashboard | / | dashboard.jsx + widgets.jsx | 🟡 partial — temel widget grid var, mockup'taki "Özelleştir" paneli + drag-drop + saved-layouts + ⌘K eksik (Phase 2) |
+| 1 | Cihazlar (Devices) | /devices | pages-devices.jsx · Cihazlar.html | ✅ FULL (nm-table inner rebuild, row click → detail drawer, real data + actions) `9d30dcc` |
+| 2 | Uyarılar (/monitor) | /monitor | pages-alerts.jsx · Uyarilar.html | ✅ FULL (incident-style event cards + 6-stat + severity filter, real monitorApi) `2a5ed18` |
 | 3 | Canlı İzleme (Monitor) | /monitor | pages-monitor.jsx · Canli Izleme.html | ⏳ |
-| 4 | Servisler (Services) | /services | Servisler.html | 🟡 header |
-| 5 | Kabinler (Racks) | /racks | pages-racks.jsx · Kabinler.html | 🟡 header |
-| 6 | Ajanlar (Agents) | /agents | Ajanlar.html · pages-rest.jsx | ✅ FULL (card grid + 6-stat, real data) |
+| 4 | Servisler (Services) | /services | Servisler.html | ✅ FULL (card grid + 6-stat + detail drawer + Transfer device picker, real impact) `dfb3491` |
+| 5 | Kabinler (Racks) | /racks | pages-racks.jsx · Kabinler.html | ✅ FULL (rack grid + 6-stat + U-elevation + Cihazlar/Items tabs, real data) `4b61ffe` |
+| 6 | Ajanlar (Agents) | /agents | Ajanlar.html · pages-rest.jsx | ✅ FULL (card grid + 6-stat + detail modal, real data) `d04c484` |
 | 7 | Playbooklar | /playbooks | Playbooklar.html | ⏳ |
 | 8 | Otomasyon | /automation? | Otomasyon.html | ⏳ |
 | 9 | Config Drift | /config-drift | Config Drift.html | ⏳ |

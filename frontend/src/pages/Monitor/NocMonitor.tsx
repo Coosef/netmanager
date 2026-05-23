@@ -12,9 +12,11 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Modal, Select, Popconfirm, Descriptions, Empty } from 'antd'
-import { SyncOutlined, BellOutlined, ClearOutlined, DownloadOutlined, CheckOutlined, FilterOutlined } from '@ant-design/icons'
+import { SyncOutlined, BellOutlined, ClearOutlined, DownloadOutlined, CheckOutlined, FilterOutlined, ArrowRightOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import { useSite } from '@/contexts/SiteContext'
+import { buildEventDetail, TYPE_LABELS } from './eventExplainer'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -288,31 +290,91 @@ function EventCard({ ev, onDetail, onAck }: { ev: NetworkEvent; onDetail: () => 
 }
 
 // ── Detail modal ──────────────────────────────────────────────────────────
+// Eski Monitor sayfasından gelen buildEventDetail explainer'ı kullanır:
+// her olay tipi için "ne oldu" özeti + tipe özel detay/öneri/komut satırları
+// + ilgili sayfalara link butonları (MAC/ARP, Topoloji, Playbook'lar, vb).
 function EventDetailModal({ ev, onClose, onAck }:
   { ev: NetworkEvent | null; onClose: () => void; onAck: (id: number) => void }) {
+  const navigate = useNavigate()
   if (!ev) return null
   const sevKey = (ev.severity in SEV_CLS ? ev.severity : 'info') as SevKey
   const isOpen = !ev.acknowledged
+  const detail = buildEventDetail(ev)
+  const typeLabel = TYPE_LABELS[ev.event_type] || ev.event_type
   return (
-    <Modal open onCancel={onClose} title={`#${ev.id} — ${ev.title}`} width={720}
+    <Modal open onCancel={onClose} title={
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+        {detail.icon}
+        <span>#{ev.id} — {ev.title}</span>
+      </span>
+    } width={760}
       footer={
         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
           <button className="nm-btn ghost" onClick={onClose}>Kapat</button>
           {isOpen && <button className="nm-btn primary" onClick={() => onAck(ev.id)}><CheckOutlined /> Onayla</button>}
         </div>
       }>
-      <Descriptions column={2} bordered size="small" style={{ marginBottom: 12 }}>
-        <Descriptions.Item label="Olay Türü"><code>{ev.event_type}</code></Descriptions.Item>
+      {/* "Ne oldu" özeti */}
+      <div style={{
+        padding: '10px 14px',
+        background: 'var(--accent-soft)',
+        border: '1px solid var(--accent)',
+        borderRadius: 8,
+        marginBottom: 14,
+        fontSize: 13, lineHeight: 1.55, color: 'var(--fg-0)',
+      }}>
+        {detail.what}
+      </div>
+
+      {/* Genel meta */}
+      <Descriptions column={2} bordered size="small" style={{ marginBottom: 14 }}>
+        <Descriptions.Item label="Olay Türü"><code>{typeLabel}</code></Descriptions.Item>
         <Descriptions.Item label="Önem">
           <span className={`nm-pill ${SEV_CLS[sevKey]}`}>{SEV_LABEL[sevKey]}</span>
         </Descriptions.Item>
         <Descriptions.Item label="Cihaz">{ev.device_hostname || '—'}</Descriptions.Item>
         <Descriptions.Item label="Cihaz ID" className="mono">{ev.device_id ?? '—'}</Descriptions.Item>
-        <Descriptions.Item label="Oluştu" span={2}>{dayjs(ev.created_at).format('YYYY-MM-DD HH:mm:ss')} · {dayjs(ev.created_at).fromNow()}</Descriptions.Item>
+        <Descriptions.Item label="Oluştu" span={2}>
+          {dayjs(ev.created_at).format('YYYY-MM-DD HH:mm:ss')} · {dayjs(ev.created_at).fromNow()}
+        </Descriptions.Item>
         <Descriptions.Item label="Durum" span={2}>
           {isOpen ? <span className="nm-pill warn">AÇIK</span> : <span className="nm-pill ok">ONAYLI</span>}
         </Descriptions.Item>
       </Descriptions>
+
+      {/* Tipe özel detay satırları + öneri/komut (explainer'dan) */}
+      {detail.rows.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Detay &amp; Öneri</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: 14, border: '1px solid var(--line-soft)', borderRadius: 6, overflow: 'hidden' }}>
+            <tbody>
+              {detail.rows.map((r, i) => (
+                <tr key={i} style={{ borderBottom: i < detail.rows.length - 1 ? '1px solid var(--line-soft)' : 'none' }}>
+                  <td style={{ width: 140, padding: '8px 12px', fontSize: 12, color: 'var(--fg-3)', background: 'var(--bg-2)', verticalAlign: 'top' }}>{r.label}</td>
+                  <td style={{ padding: '8px 12px', fontSize: 12.5, color: 'var(--fg-0)' }}>{r.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
+
+      {/* İlgili sayfalara hızlı linkler (explainer'dan) */}
+      {detail.links.length > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>İlgili Sayfalar</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+            {detail.links.map((l, i) => (
+              <button key={i} className="nm-btn ghost" style={{ height: 28, fontSize: 11.5, padding: '0 12px', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                onClick={() => { navigate(l.path); onClose() }}>
+                {l.icon} {l.label} <ArrowRightOutlined style={{ fontSize: 10, opacity: 0.7 }} />
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Ham mesaj (varsa) */}
       {ev.message && (
         <>
           <div style={{ fontSize: 11, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Mesaj</div>
@@ -321,13 +383,17 @@ function EventDetailModal({ ev, onClose, onAck }:
           </div>
         </>
       )}
+
+      {/* Ham JSON (debug/destek için) */}
       {ev.details && Object.keys(ev.details).length > 0 && (
-        <>
-          <div style={{ fontSize: 11, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>Ek Bilgi</div>
-          <pre style={{ fontSize: 11.5, color: 'var(--fg-1)', padding: '10px 12px', background: 'var(--bg-2)', border: '1px solid var(--line-soft)', borderRadius: 6, overflow: 'auto', maxHeight: 260 }}>
+        <details style={{ marginBottom: 6 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 11, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.06em', padding: '4px 0' }}>
+            Ham JSON (debug)
+          </summary>
+          <pre style={{ fontSize: 11, color: 'var(--fg-1)', padding: '10px 12px', background: 'var(--bg-2)', border: '1px solid var(--line-soft)', borderRadius: 6, overflow: 'auto', maxHeight: 260, marginTop: 6 }}>
             {JSON.stringify(ev.details, null, 2)}
           </pre>
-        </>
+        </details>
       )}
     </Modal>
   )
