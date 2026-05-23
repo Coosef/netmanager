@@ -10,8 +10,8 @@
 // reachable as a later iteration.
 import { useMemo, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Modal, Input, InputNumber, Popconfirm, Tag } from 'antd'
-import { DeleteOutlined, AppstoreOutlined, HddOutlined } from '@ant-design/icons'
+import { App, Modal, Input, InputNumber, Popconfirm, Tag, Select } from 'antd'
+import { DeleteOutlined, AppstoreOutlined, HddOutlined, PlusOutlined } from '@ant-design/icons'
 import { racksApi, type RackSummary, type RackDetail, type RackDeviceSummary, type RackItem } from '@/api/racks'
 
 type DevStatus = 'ok' | 'warn' | 'crit' | 'offline'
@@ -62,6 +62,9 @@ export default function NocRacks() {
   const [active, setActive] = useState<string | null>(null)
   const [tab, setTab] = useState<'devices' | 'items'>('devices')
   const [addOpen, setAddOpen] = useState(false)
+  const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null)
+  // Boş U'ya tıklandığında açılan "Cihaz Yerleştir" modali için seçilen U.
+  const [placeAtU, setPlaceAtU] = useState<{ u: number; maxHeight: number } | null>(null)
 
   // Auto-activate first rack once the list arrives.
   if (active == null && racks.length > 0) {
@@ -142,6 +145,18 @@ export default function NocRacks() {
     },
     onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Silinemedi'),
   })
+  const placeMut = useMutation({
+    mutationFn: (vars: { deviceId: number; rack_name: string; rack_unit: number; rack_height: number }) =>
+      racksApi.setPlacement(vars.deviceId, vars.rack_name, vars.rack_unit, vars.rack_height),
+    onSuccess: () => {
+      if (active) qc.invalidateQueries({ queryKey: ['rack-detail', active] })
+      qc.invalidateQueries({ queryKey: ['racks-list'] })
+      qc.invalidateQueries({ queryKey: ['rack-unassigned'] })
+      setPlaceAtU(null)
+      message.success('Cihaz kabine yerleştirildi')
+    },
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Yerleştirilemedi'),
+  })
 
   return (
     <div className="nm-page" style={{ padding: '4px 2px' }}>
@@ -197,8 +212,14 @@ export default function NocRacks() {
                   {activeDetail.devices.length} cihaz · {activeDetail.items.length} item · {activeDetail.total_u}U
                 </div>
               </div>
+              <div style={{ marginLeft: 'auto', fontSize: 10.5, color: 'var(--fg-3)' }}>
+                Boş U'ya tıkla → cihaz yerleştir
+              </div>
             </div>
-            <RackFrame detail={activeDetail} />
+            <RackFrame detail={activeDetail}
+              selectedDeviceId={selectedDeviceId}
+              onSelectDevice={(id) => setSelectedDeviceId(id)}
+              onClickEmpty={(u, maxHeight) => setPlaceAtU({ u, maxHeight })} />
           </div>
 
           <div className="nm-rack-rule">
@@ -212,7 +233,10 @@ export default function NocRacks() {
             </div>
 
             {tab === 'devices' ? (
-              <DeviceList detail={activeDetail} onRemove={(id) => removePlacementMut.mutate(id)} />
+              <DeviceList detail={activeDetail}
+                selectedDeviceId={selectedDeviceId}
+                onSelect={(id) => setSelectedDeviceId(id)}
+                onRemove={(id) => { removePlacementMut.mutate(id); if (selectedDeviceId === id) setSelectedDeviceId(null) }} />
             ) : (
               <ItemList detail={activeDetail} onRemove={(itemId) => deleteItemMut.mutate({ rackName: activeDetail.rack_name, itemId })} />
             )}
@@ -222,6 +246,15 @@ export default function NocRacks() {
 
       <AddRackModal open={addOpen} onClose={() => setAddOpen(false)}
         onSubmit={(v) => createMut.mutate(v)} loading={createMut.isPending} />
+
+      {placeAtU && activeDetail && (
+        <PlaceDeviceModal open onClose={() => setPlaceAtU(null)}
+          rackName={activeDetail.rack_name} u={placeAtU.u} maxHeight={placeAtU.maxHeight}
+          loading={placeMut.isPending}
+          onSubmit={(deviceId, height) => placeMut.mutate({
+            deviceId, rack_name: activeDetail.rack_name, rack_unit: placeAtU.u, rack_height: height,
+          })} />
+      )}
     </div>
   )
 }
@@ -258,7 +291,16 @@ function RackCard({ rack, detail, active, onSelect, onDelete }:
 }
 
 // ── Full U-elevation frame ────────────────────────────────────────────────
-function RackFrame({ detail }: { detail: RackDetail }) {
+// U1 yukarıda (kullanıcı tercihi — diagram/inventory konvansiyonu, fiziksel
+// rack tersine olsa da). Frame'in CSS `column-reverse` default'unu inline
+// flexDirection: 'column' ile override ediyoruz; iteration u=1..N olarak
+// kalıyor → DOM[0]=U1 görsel olarak en üstte.
+function RackFrame({ detail, selectedDeviceId, onSelectDevice, onClickEmpty }: {
+  detail: RackDetail
+  selectedDeviceId: number | null
+  onSelectDevice: (id: number) => void
+  onClickEmpty: (u: number, maxHeight: number) => void
+}) {
   const totalU = detail.total_u
   type Slot = { kind: 'dev'; dev: RackDeviceSummary } | { kind: 'item'; item: RackItem } | { kind: 'empty' } | { kind: 'continuation' }
   const slots: Slot[] = Array.from({ length: totalU }, () => ({ kind: 'empty' }))
@@ -279,24 +321,39 @@ function RackFrame({ detail }: { detail: RackDetail }) {
     }
   }
 
+  // Bir U'dan başlayarak kaç ardışık boş U var? (cihaz ekleme yüksekliği için)
+  const emptyRunFrom = (startIdx: number): number => {
+    let n = 0
+    for (let i = startIdx; i < totalU; i++) {
+      if (slots[i].kind === 'empty') n++; else break
+    }
+    return n
+  }
+
+  const UH = 18 // bir U için baz yükseklik (px) — okunaklılık için 14→18
+
   return (
-    <div className="nm-rack-frame" style={{ paddingLeft: 36 }}>
+    <div className="nm-rack-frame" style={{ paddingLeft: 36, flexDirection: 'column', minHeight: 0 }}>
       {slots.map((slot, idx) => {
         const u = idx + 1
         if (slot.kind === 'continuation') return null
         if (slot.kind === 'empty') {
+          const maxH = emptyRunFrom(idx)
           return (
-            <div key={u} className="nm-rack-u empty" title={`U${u} — boş`}>
+            <div key={u} className="nm-rack-u empty" title={`U${u} — boş (tıkla → cihaz yerleştir)`}
+              onClick={() => onClickEmpty(u, maxH)} style={{ height: UH }}>
               <span className="u-num">U{u}</span>
-              <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>boş</span>
+              <span style={{ fontSize: 10, color: 'var(--fg-3)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <PlusOutlined style={{ fontSize: 9 }} /> ekle
+              </span>
             </div>
           )
         }
         if (slot.kind === 'item') {
           const h = slot.item.unit_height || 1
           return (
-            <div key={u} className="nm-rack-u dev" style={h > 1 ? { height: 14 * h + (h - 1) } : undefined}
-              title={`${slot.item.label} · ${h}U`}>
+            <div key={u} className="nm-rack-u dev" style={{ height: UH * h + (h - 1) }}
+              title={`${slot.item.label} · ${h}U · ${slot.item.item_type}`}>
               <span className="u-num">U{u}</span>
               <span className="vbar" style={{ background: 'var(--info)' }}></span>
               <span style={{ marginLeft: 8, marginRight: 'auto' }}>{slot.item.label}</span>
@@ -307,14 +364,15 @@ function RackFrame({ detail }: { detail: RackDetail }) {
         const d = slot.dev
         const st = STATUS_OF(d)
         const h = d.rack_height || 1
-        const cls = `nm-rack-u dev status-${st} u${h}`
+        const isActive = selectedDeviceId === d.id
         return (
-          <div key={u} className={cls}
-            style={h > 2 && h !== 4 ? { height: 14 * h + (h - 1) } : undefined}
+          <div key={u} className={`nm-rack-u dev status-${st}${isActive ? ' active' : ''}`}
+            style={{ height: UH * h + (h - 1) }}
+            onClick={() => onSelectDevice(d.id)}
             title={`${d.hostname} · ${d.ip_address} · ${h}U`}>
             <span className="u-num">U{u}</span>
             <span className="vbar"></span>
-            <span style={{ marginLeft: 8, marginRight: 'auto' }}>{d.hostname}</span>
+            <span style={{ marginLeft: 8, marginRight: 'auto', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{d.hostname}</span>
             <span className="mono" style={{ fontSize: 9.5, color: 'var(--fg-3)', marginRight: 8 }}>{h}U · {d.vendor || '—'}</span>
             <span className="leds">
               {Array(4).fill(null).map((_, i) => {
@@ -333,14 +391,16 @@ function RackFrame({ detail }: { detail: RackDetail }) {
 }
 
 // ── Device list tab ───────────────────────────────────────────────────────
-function DeviceList({ detail, onRemove }: { detail: RackDetail; onRemove: (id: number) => void }) {
-  const devs = [...detail.devices].sort((a, b) => b.rack_unit - a.rack_unit)
+function DeviceList({ detail, selectedDeviceId, onSelect, onRemove }:
+  { detail: RackDetail; selectedDeviceId: number | null; onSelect: (id: number) => void; onRemove: (id: number) => void }) {
+  // U numarası küçükten büyüğe (U1 üstte konvansiyonuna uyumlu).
+  const devs = [...detail.devices].sort((a, b) => a.rack_unit - b.rack_unit)
   return (
     <>
       <div className="nm-drawer-section-hd" style={{ padding: '8px 0 12px' }}>Cihaz Listesi · {devs.length}</div>
       {devs.length === 0 ? (
         <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 12, border: '1px dashed var(--line)', borderRadius: 8 }}>
-          Bu kabinde henüz cihaz yok. Cihaz Yönetimi'nden bir cihaza rack/U ataması yap.
+          Bu kabinde henüz cihaz yok. Sol taraftaki boş U'lardan birine tıkla → cihaz yerleştir.
         </div>
       ) : (
         <table className="nm-table">
@@ -348,8 +408,13 @@ function DeviceList({ detail, onRemove }: { detail: RackDetail; onRemove: (id: n
           <tbody>
             {devs.map((d) => {
               const st = STATUS_OF(d)
+              const sel = selectedDeviceId === d.id
               return (
-                <tr key={d.id}>
+                <tr key={d.id} className={sel ? 'selected' : ''} style={{ cursor: 'pointer' }}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button')) return
+                    onSelect(d.id)
+                  }}>
                   <td className="mono">U{d.rack_unit}<small style={{ color: 'var(--fg-3)' }}> · {d.rack_height}U</small></td>
                   <td>
                     <div className="nm-host">{d.hostname}</div>
@@ -365,7 +430,8 @@ function DeviceList({ detail, onRemove }: { detail: RackDetail; onRemove: (id: n
                     <Popconfirm title="Yerleşimi kaldır?" description="Cihaz silinmez — sadece rack yerleşimi temizlenir."
                       okText="Çıkar" cancelText="İptal" okButtonProps={{ danger: true }}
                       onConfirm={() => onRemove(d.id)}>
-                      <button className="nm-btn ghost" style={{ height: 24, fontSize: 11 }} title="Kabinden çıkar">
+                      <button className="nm-btn ghost" style={{ height: 24, fontSize: 11 }} title="Kabinden çıkar"
+                        onClick={(e) => e.stopPropagation()}>
                         <DeleteOutlined />
                       </button>
                     </Popconfirm>
@@ -417,6 +483,56 @@ function ItemList({ detail, onRemove }: { detail: RackDetail; onRemove: (itemId:
         </table>
       )}
     </>
+  )
+}
+
+// ── Place device modal ────────────────────────────────────────────────────
+// Boş U'ya tıklanınca: atanmamış cihazlardan birini seç + yükseklik (1U/2U/4U)
+// ver → racksApi.setPlacement çağrılır. Cihaz oluşturmaz, mevcut envanterden
+// yerleştirme yapar (mockup'taki katalog/özel ürün ekleme bizim sistemde
+// "Cihaz Yönetimi" sayfasından — orada eklenmiş henüz yerleştirilmemiş
+// cihazlar burada gözüküyor).
+function PlaceDeviceModal({ open, onClose, rackName, u, maxHeight, loading, onSubmit }:
+  { open: boolean; onClose: () => void; rackName: string; u: number; maxHeight: number; loading: boolean
+    onSubmit: (deviceId: number, height: number) => void }) {
+  const { data: unassigned = [], isLoading } = useQuery({
+    queryKey: ['rack-unassigned'],
+    queryFn: () => racksApi.unassigned(),
+    enabled: open,
+  })
+  const [deviceId, setDeviceId] = useState<number | undefined>(undefined)
+  const [height, setHeight] = useState<number>(1)
+  const submit = () => { if (deviceId != null) onSubmit(deviceId, Math.max(1, Math.min(maxHeight, height))) }
+  return (
+    <Modal open={open} onCancel={onClose} onOk={submit} okText="Yerleştir" cancelText="İptal"
+      title={`${rackName} · U${u} — Cihaz Yerleştir`} confirmLoading={loading}
+      okButtonProps={{ disabled: deviceId == null }}
+      afterClose={() => { setDeviceId(undefined); setHeight(1) }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ fontSize: 12, color: 'var(--fg-2)' }}>
+          U{u} pozisyonu için max <strong>{maxHeight}U</strong> ardışık boşluk var.
+          Yerleştirilecek cihaz, "Cihazlar" sayfasında mevcut ama henüz hiçbir kabine atanmamış olmalı
+          ({unassigned.length} aday bulundu).
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Cihaz</div>
+          <Select<number> showSearch placeholder={isLoading ? 'Yükleniyor…' : 'Atanmamış cihazlardan seç…'}
+            value={deviceId} onChange={setDeviceId} loading={isLoading} style={{ width: '100%' }}
+            options={unassigned.map((d) => ({
+              value: d.id,
+              label: `${d.hostname} — ${d.ip_address}${d.vendor ? ' · ' + d.vendor : ''}${d.model ? ' · ' + d.model : ''}`,
+            }))}
+            filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
+            notFoundContent={isLoading ? 'Yükleniyor…' : 'Atanmamış cihaz bulunamadı'} />
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Yükseklik</span>
+          <InputNumber min={1} max={maxHeight} value={height}
+            onChange={(v) => setHeight(typeof v === 'number' ? v : 1)} style={{ width: 100 }} />
+          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>U (1–{maxHeight})</span>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
