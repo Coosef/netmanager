@@ -2,19 +2,19 @@
 /* IBM Plex Sans + IBM Plex Mono */
 
 :root {
-  /* Dark theme (default) — kullanıcı geri bildirimine göre lacivert tonlar
-     yerine daha nötr koyu gri/siyaha yakın. Chroma 0.012→0.004 düşürüldü
-     (mavi tini neredeyse kaldırıldı) ve genel lightness biraz koyulaştı. */
-  --bg-0: oklch(0.13 0.004 250);          /* page bg — neredeyse siyah */
-  --bg-1: oklch(0.16 0.005 250);          /* card bg */
-  --bg-2: oklch(0.19 0.005 250);          /* hover/elevated */
-  --bg-3: oklch(0.23 0.006 250);          /* inputs/sunken */
-  --line: oklch(0.28 0.005 250 / 0.6);    /* border */
-  --line-soft: oklch(0.25 0.005 250 / 0.4);
+  /* Dark theme (default) — netmanager/project/styles.css'ten birebir.
+     Kullanıcı geri bildirimine göre orijinal tasarım değerlerine geri
+     döndü; subtle slate-blue tinted dark slate. */
+  --bg-0: oklch(0.16 0.012 250);          /* page bg */
+  --bg-1: oklch(0.19 0.014 250);          /* card bg */
+  --bg-2: oklch(0.22 0.014 250);          /* hover/elevated */
+  --bg-3: oklch(0.26 0.014 250);          /* inputs/sunken */
+  --line: oklch(0.30 0.012 250 / 0.6);    /* border */
+  --line-soft: oklch(0.28 0.012 250 / 0.4);
   --fg-0: oklch(0.96 0.005 250);          /* primary text */
-  --fg-1: oklch(0.82 0.006 250);          /* secondary */
-  --fg-2: oklch(0.62 0.008 250);          /* tertiary */
-  --fg-3: oklch(0.48 0.008 250);          /* muted */
+  --fg-1: oklch(0.82 0.008 250);          /* secondary */
+  --fg-2: oklch(0.62 0.012 250);          /* tertiary */
+  --fg-3: oklch(0.48 0.012 250);          /* muted */
 
   /* Accent (teal) */
   --accent: oklch(0.80 0.14 175);
@@ -672,7 +672,8 @@
 .nm-gauge.ok > span { background: var(--ok); }
 
 /* edge-pulse on active critical */
-.nm-card.crit-pulse {
+.nm-card.crit-pulse,
+.nm-kpi.crit-pulse {
   border-color: var(--crit);
   box-shadow: 0 0 0 0 var(--crit-soft);
   animation: nm-cardpulse 2s ease-out infinite;

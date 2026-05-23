@@ -45,13 +45,15 @@ function MiniSpark({ data, color = 'var(--accent)', w = 130, h = 36 }: { data: n
   )
 }
 
-function Kpi({ label, value, unit, delta, dir, status, spark, sparkColor }: {
+function Kpi({ label, value, unit, delta, dir, status, spark, sparkColor, pulse }: {
   label: string; value: string | number; unit?: string; delta?: string
   dir?: 'up' | 'down' | 'flat'; status?: 'crit' | 'ok' | 'info'; spark?: number[]; sparkColor?: string
+  pulse?: boolean  // kritik durumda kart kenarı pulse animasyonu
 }) {
   const accent = status === 'crit' ? 'var(--crit)' : status === 'ok' ? 'var(--ok)' : status === 'info' ? 'var(--info)' : 'var(--fg-0)'
   return (
-    <div className="nm-kpi" style={{ borderTop: `2px solid ${accent}` }}>
+    <div className={`nm-kpi ${pulse ? 'crit-pulse' : ''}`}
+      style={{ borderTop: `2px solid ${accent}` }}>
       <div className="nm-kpi-label">{label}</div>
       <div className="nm-kpi-value" style={{ color: accent }}>
         {value}{unit && <small>{unit}</small>}
@@ -167,29 +169,47 @@ export default function NocDashboard() {
 
   return (
     <div style={{ padding: 2 }}>
-      {/* live ticker */}
+      {/* live ticker — sürekli akan ticker (noc.css nm-tick animation),
+          olay olduğunda kaydırır; yoksa sabit "olay yok" mesajı. */}
       <div className="nm-ticker">
-        <div className="nm-ticker-label">CANLI AKIŞ</div>
-        <div className="nm-ticker-track" style={{ animation: 'none' }}>
+        <div className="nm-ticker-label">
+          <span className="nm-status-dot ok"></span>
+          CANLI AKIŞ
+        </div>
+        <div className="nm-ticker-track" style={liveEvents.length === 0 ? { animation: 'none' } : undefined}>
           {liveEvents.length === 0 ? (
             <span className="nm-ticker-item"><span style={{ color: 'var(--fg-3)' }}>Son 30 dakikada olay yok</span></span>
-          ) : liveEvents.slice(0, 12).map((e, i) => (
-            <span key={i} className="nm-ticker-item">
-              <span className="ts" style={{ color: 'var(--fg-3)' }}>{dayjs(e.created_at).format('HH:mm:ss')}</span>
-              <span className={`sev ${sevPill(e.severity)}`}>{(e.severity || '').toUpperCase()}</span>
-              <span className="host" style={{ color: 'var(--fg-1)' }}>{e.device_hostname || '—'}</span>
-              <span className="msg" style={{ color: 'var(--fg-2)' }}>{e.title}</span>
-            </span>
-          ))}
+          ) : (
+            <>
+              {liveEvents.slice(0, 12).map((e, i) => (
+                <span key={i} className="nm-ticker-item">
+                  <span className="ts" style={{ color: 'var(--fg-3)' }}>{dayjs(e.created_at).format('HH:mm:ss')}</span>
+                  <span className={`sev ${sevPill(e.severity)}`}>{(e.severity || '').toUpperCase()}</span>
+                  <span className="host" style={{ color: 'var(--fg-1)' }}>{e.device_hostname || '—'}</span>
+                  <span className="msg" style={{ color: 'var(--fg-2)' }}>{e.title}</span>
+                </span>
+              ))}
+              {/* loop için ikinci kopya (translateX -50% nm-tick) */}
+              {liveEvents.slice(0, 12).map((e, i) => (
+                <span key={`dup-${i}`} className="nm-ticker-item">
+                  <span className="ts" style={{ color: 'var(--fg-3)' }}>{dayjs(e.created_at).format('HH:mm:ss')}</span>
+                  <span className={`sev ${sevPill(e.severity)}`}>{(e.severity || '').toUpperCase()}</span>
+                  <span className="host" style={{ color: 'var(--fg-1)' }}>{e.device_hostname || '—'}</span>
+                  <span className="msg" style={{ color: 'var(--fg-2)' }}>{e.title}</span>
+                </span>
+              ))}
+            </>
+          )}
         </div>
       </div>
 
       {/* KPI hero */}
       <div className="nm-hero">
-        <Kpi label="ÇEVRİMDIŞI" value={offline} unit={`/ ${total}`} status="crit"
-          delta={`${online} online`} dir="flat" spark={eventsTrend} sparkColor="var(--crit)" />
-        <Kpi label="AKTİF UYARI" value={unacked} status="crit"
-          delta="onaylanmamış" dir="flat" />
+        <Kpi label="ÇEVRİMİÇİ" value={online} unit={`/ ${total}`} status="ok"
+          delta={`${offline} çevrimdışı`} dir={offline > 0 ? 'down' : 'flat'}
+          spark={eventsTrend} sparkColor="var(--ok)" />
+        <Kpi label="AKTİF UYARI" value={unacked} status={unacked > 0 ? 'crit' : 'ok'}
+          delta="onaylanmamış" dir="flat" pulse={unacked > 0} />
         <Kpi label="24SA OLAY" value={events24h} delta="son 24 saat" dir="down"
           spark={eventsTrend} sparkColor="var(--accent)" />
         <Kpi label="AVAILABILITY" value={availPct ?? '—'} unit={availPct != null ? '%' : ''} status="ok"

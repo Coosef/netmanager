@@ -77,20 +77,20 @@ const queryClient = new QueryClient({
 // T8.4 — dark theme retuned to the NOC design palette (canvas #070b18,
 // panels #0e1729, borders #1c2538, teal accent #22d3c5) + IBM Plex Sans.
 const NOC_FONT = "'IBM Plex Sans', system-ui, -apple-system, sans-serif"
-// Dark tokens — kullanıcı geri bildirimine göre lacivert tonlar yerine
-// nötr koyu gri/siyaha yakın renkler (noc.css'in :root --bg-X tokenleriyle
-// senkron). Eski navy '#070b18'/'#0e1729' yerine '#131418'/'#1a1c20' vb.
+// Dark tokens — netmanager/project/styles.css'ten oklch değerlerinin
+// yaklaşık hex karşılıkları. noc.css'in :root --bg-X tokenleriyle senkron.
+// oklch(0.16 0.012 250) ≈ #21262e (page); 0.19/0.22/0.26 katman.
 const DARK_TOKENS = {
   algorithm: theme.darkAlgorithm,
   token: {
     colorPrimary: '#3b82f6',
     colorInfo: '#22d3c5',
-    colorBgBase: '#131418',
-    colorBgContainer: '#1a1c20',
-    colorBgElevated: '#1a1c20',
-    colorBgLayout: '#131418',
-    colorBorder: '#2a2c30',
-    colorBorderSecondary: '#22242a',
+    colorBgBase: '#21262e',
+    colorBgContainer: '#272d36',
+    colorBgElevated: '#272d36',
+    colorBgLayout: '#21262e',
+    colorBorder: '#3b4250',
+    colorBorderSecondary: '#323843',
     colorText: '#e5e7eb',
     colorTextSecondary: '#9ca3af',
     colorTextTertiary: '#6b7280',
@@ -98,21 +98,21 @@ const DARK_TOKENS = {
     fontFamily: NOC_FONT,
   },
   components: {
-    Layout: { siderBg: '#161719', headerBg: '#161719', bodyBg: '#131418' },
+    Layout: { siderBg: '#272d36', headerBg: '#272d36', bodyBg: '#21262e' },
     Menu: {
-      darkItemBg: '#161719', darkSubMenuItemBg: '#161719',
+      darkItemBg: '#272d36', darkSubMenuItemBg: '#272d36',
       darkItemSelectedBg: 'rgba(59,130,246,0.20)', darkItemSelectedColor: '#60a5fa',
-      darkItemHoverBg: '#1e2025',
+      darkItemHoverBg: '#2d343f',
     },
-    Card: { colorBgContainer: '#1a1c20', colorBorderSecondary: '#2a2c30' },
-    Table: { colorBgContainer: '#1a1c20', headerBg: '#16181c', rowHoverBg: '#23262d' },
-    Modal: { contentBg: '#1a1c20', headerBg: '#1a1c20', footerBg: '#1a1c20' },
-    Drawer: { colorBgElevated: '#1a1c20' },
-    Select: { colorBgContainer: '#1a1c20', colorBgElevated: '#1a1c20' },
-    Input: { colorBgContainer: '#1a1c20', colorBorder: '#2a2c30' },
-    Tabs: { colorBorderSecondary: '#2a2c30' },
-    Popover: { colorBgElevated: '#1a1c20' },
-    Tooltip: { colorBgSpotlight: '#2a2c30' },
+    Card: { colorBgContainer: '#272d36', colorBorderSecondary: '#3b4250' },
+    Table: { colorBgContainer: '#272d36', headerBg: '#21262e', rowHoverBg: '#2d343f' },
+    Modal: { contentBg: '#272d36', headerBg: '#272d36', footerBg: '#272d36' },
+    Drawer: { colorBgElevated: '#272d36' },
+    Select: { colorBgContainer: '#272d36', colorBgElevated: '#272d36' },
+    Input: { colorBgContainer: '#272d36', colorBorder: '#3b4250' },
+    Tabs: { colorBorderSecondary: '#3b4250' },
+    Popover: { colorBgElevated: '#272d36' },
+    Tooltip: { colorBgSpotlight: '#3b4250' },
     Segmented: { itemSelectedBg: '#3b82f6' },
   },
 }
@@ -159,14 +159,15 @@ function PermRoute({ children, module, action }: { children: React.ReactNode; mo
   return can(module, action) ? <>{children}</> : <Navigate to="/" replace />
 }
 
-// GLOBAL_CSS_DARK — DARK_TOKENS ile aynı palet (nötr koyu gri/siyah);
-// eski lacivert tonları (#070b18/#0e1729) yenisiyle değiştirildi.
+// GLOBAL_CSS_DARK — DARK_TOKENS ile aynı palet. Orijinal NOC tasarımı
+// (netmanager styles.css) oklch(0.16/0.19/0.22/0.26 0.012-0.014 250)
+// → hex #21262e / #272d36 / #2d343f / #353d49.
 const GLOBAL_CSS_DARK = `
   :root { color-scheme: dark; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #131418; }
-  ::-webkit-scrollbar-thumb { background: #2a2c30; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #3a3c42; }
+  ::-webkit-scrollbar-track { background: #21262e; }
+  ::-webkit-scrollbar-thumb { background: #3b4250; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4a5263; }
   ::selection { background: #22d3c540; color: #e5e7eb; }
   .ant-card { transition: box-shadow 0.2s, border-color 0.2s; }
   .ant-card:hover { box-shadow: 0 4px 20px rgba(34,211,197,0.08) !important; }
@@ -176,15 +177,15 @@ const GLOBAL_CSS_DARK = `
   .ant-table-placeholder .ant-empty-description { color: #6b7280 !important; }
   .ant-table-placeholder .ant-empty-image svg { opacity: 0.25; }
   .ant-table-placeholder td { border-bottom: none !important; }
-  .perm-user-row td { border-bottom: 1px solid #22242a !important; }
+  .perm-user-row td { border-bottom: 1px solid #323843 !important; }
   .perm-user-row:last-child td { border-bottom: none !important; }
-  .ant-modal-content { background: #1a1c20 !important; border: 1px solid #2a2c30 !important; }
-  .ant-modal-header { background: #1a1c20 !important; border-bottom: 1px solid #2a2c30 !important; }
-  .ant-modal-footer { border-top: 1px solid #2a2c30 !important; }
+  .ant-modal-content { background: #272d36 !important; border: 1px solid #3b4250 !important; }
+  .ant-modal-header { background: #272d36 !important; border-bottom: 1px solid #3b4250 !important; }
+  .ant-modal-footer { border-top: 1px solid #3b4250 !important; }
   .ant-modal-title { color: #e5e7eb !important; }
-  .ant-select-dropdown { background: #1a1c20 !important; border: 1px solid #2a2c30 !important; }
+  .ant-select-dropdown { background: #272d36 !important; border: 1px solid #3b4250 !important; }
   .ant-select-item { color: #9ca3af !important; }
-  .ant-select-item-option-active { background: #23262d !important; }
+  .ant-select-item-option-active { background: #2d343f !important; }
   .ant-select-item-option-selected { background: #1d4ed820 !important; color: #60a5fa !important; }
   .ant-select-dropdown .ant-empty-description { color: #6b7280 !important; }
 `
