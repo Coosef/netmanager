@@ -1619,6 +1619,11 @@ async def test_device_connection(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    # RBAC F7 — opens a real SSH session against the device (creds verified
+    # on the box). VIEWER role has read-only intent; require `device:connect`.
+    if not current_user.has_permission("device:connect"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     device = await _get_device_scoped(db, device_id, current_user)
     result = await ssh_manager.test_connection(device)
     await log_action(
@@ -1644,6 +1649,11 @@ async def fetch_device_info(
     current_user: CurrentUser = None,
 ):
     """SSH ile bağlanıp show version çıktısını parse ederek model/firmware/seri no günceller."""
+    # RBAC F7 — SSH session + writes back to the device row. VIEWER must
+    # not trigger this (the agent + device get a live connect attempt).
+    if not current_user.has_permission("device:connect"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     device = await _get_device_scoped(db, device_id, current_user)
     result = await ssh_manager.execute_command(device, "show version")
     if not result.success:
@@ -1808,7 +1818,10 @@ async def run_show_command(
     - Config-altering commands require confirm=true in the request body.
     - Every execution (command + full output) is written to the audit log.
     """
-    if not current_user.has_permission("config:view"):
+    # RBAC F7 — running ANY command (even `show`) opens a live SSH session
+    # against the box. Plain `config:view` is too weak — that's granted to
+    # VIEWER for reading stored configs. Gate this on `device:connect`.
+    if not current_user.has_permission("device:connect"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     body = await request.json()
@@ -2110,7 +2123,11 @@ async def take_backup(
     current_user: CurrentUser = None,
 ):
     """Immediately SSH and take a config backup for this device."""
-    if not current_user.has_permission("config:view"):
+    # RBAC F7 — was guarded by `config:view` (VIEWER has it). A backup
+    # opens a live SSH session and writes a file artefact + audit row —
+    # mutating semantics. Correct permission is `config:backup` (granted
+    # to LOCATION_ADMIN / ORG_ADMIN / SUPER_ADMIN, not VIEWER).
+    if not current_user.has_permission("config:backup"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     device = await _get_device_scoped(db, device_id, current_user)
