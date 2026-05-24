@@ -25,6 +25,7 @@ import TasksPage from '@/pages/Tasks'
 import UsersPage from '@/pages/Users'
 import AuditLogPage from '@/pages/AuditLog'
 import MonitorPage from '@/pages/Monitor'
+import LiveMonitorPage from '@/pages/LiveMonitor'
 import TopologyPage from '@/pages/Topology'
 import TopologyV2Page from '@/pages/TopologyV2'
 import { featureFlags } from '@/config/featureFlags'
@@ -254,6 +255,7 @@ function ThemedApp() {
               <Route path="topology-next" element={<TopologyV2Page />} />
               <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
+              <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
               <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
               <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />

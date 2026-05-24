@@ -39,7 +39,7 @@ export interface NavGroup {
 const MODULE_MAP: Record<string, [string, string]> = {
   '/devices': ['devices', 'view'], '/topology': ['topology', 'view'],
   '/ipam': ['ipam', 'view'], '/backups': ['config_backups', 'view'],
-  '/monitor': ['monitoring', 'view'], '/incidents': ['monitoring', 'view'],
+  '/monitor': ['monitoring', 'view'], '/live': ['monitoring', 'view'], '/incidents': ['monitoring', 'view'],
   '/escalation-rules': ['monitoring', 'view'], '/bandwidth': ['monitoring', 'view'],
   '/mac-arp': ['monitoring', 'view'], '/security-audit': ['monitoring', 'view'],
   '/asset-lifecycle': ['monitoring', 'view'], '/tasks': ['tasks', 'view'],
@@ -114,6 +114,7 @@ export function useNavGroups(): NavGroup[] {
       label: t('nav_group.monitoring'),
       items: [
         { key: '/monitor', icon: <AlertOutlined />, label: t('nav.monitor'), badge: true, badgeCount: unacked },
+        { key: '/live', icon: <ThunderboltOutlined />, label: 'Canlı İzleme', minRole: 'viewer' },
         { key: '/intelligence', icon: <BugOutlined />, label: 'Ağ Analitik', minRole: 'viewer' },
         { key: '/alert-rules', icon: <AlertOutlined />, label: t('nav.alert_rules'), minRole: 'org_admin' },
         { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth'), minRole: 'viewer' },
