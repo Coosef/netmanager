@@ -4,7 +4,7 @@ import {
   Tooltip, Upload, Tag, Spin,
 } from 'antd'
 import {
-  PlusOutlined, DeleteOutlined, EditOutlined,
+  DeleteOutlined, EditOutlined,
   HddOutlined, AppstoreOutlined, UnorderedListOutlined,
   SearchOutlined, SaveOutlined, FolderOpenOutlined,
   UploadOutlined, CloseOutlined, ZoomInOutlined,
@@ -910,19 +910,76 @@ export default function FloorPlanPage() {
   const persist = useCallback((updated: FpStore) => { setStore(updated); saveStore(updated) }, [])
   const updatePlan = useCallback((p: FloorPlan) => persist({ ...store, [p.id]: p }), [store, persist])
 
-  const handleNewPlan = () => {
-    const name = newName.trim(); if (!name) return
+  // Shared create path used by the drawer's "Oluştur" button + the empty-state
+  // quick-create buttons. Returns the new plan id (null if name blank).
+  const createPlan = useCallback((kind: 'image' | 'map', name: string): string | null => {
+    const trimmed = name.trim()
+    if (!trimmed) return null
     const id = `fp${Date.now()}`
     const plan: FloorPlan = {
-      id, name, kind: newKind,
+      id, name: trimmed, kind,
       imageDataUrl: null,
       nodes: [], rackNodes: [], edges: [],
-      ...(newKind === 'map' ? { mapCenter: [41.0082, 28.9784] as [number, number], mapZoom: 11 } : {}),
+      ...(kind === 'map' ? { mapCenter: [41.0082, 28.9784] as [number, number], mapZoom: 11 } : {}),
     }
     persist({ ...store, [id]: plan })
-    setActiveId(id); setNewName('')
-    message.success(`"${name}" oluşturuldu (${newKind === 'map' ? 'Harita' : 'Görsel'})`)
+    setActiveId(id)
+    message.success(`"${trimmed}" oluşturuldu (${kind === 'map' ? 'Harita' : 'Görsel'})`)
+    return id
+  }, [store, persist, message])
+
+  const handleNewPlan = () => {
+    if (createPlan(newKind, newName)) setNewName('')
   }
+
+  // Empty-state quick create — auto-name (kullanıcı sonradan rename edebilir
+  // ileride yapılırsa); şimdilik 'Harita 1' / 'Görsel 1' gibi sıralı isim.
+  const quickCreate = (kind: 'image' | 'map') => {
+    const existing = Object.values(store).filter(p => (p.kind ?? 'image') === kind).length
+    const label = kind === 'map' ? 'Harita' : 'Görsel'
+    createPlan(kind, `${label} ${existing + 1}`)
+  }
+
+  // Toggle the active plan's kind. Node coords are stored differently per kind
+  // (% vs lat/lng), so swapping with markers in place would land them in
+  // nonsense positions — confirm first and reset nodes/edges if user agrees.
+  const switchPlanKind = useCallback((newKindV: 'image' | 'map') => {
+    if (!activePlan) return
+    const curKind = activePlan.kind ?? 'image'
+    if (curKind === newKindV) return
+    const hasContent = activePlan.nodes.length + activePlan.rackNodes.length + activePlan.edges.length > 0
+
+    const apply = () => {
+      const next: FloorPlan = {
+        ...activePlan,
+        kind: newKindV,
+        // Coord systems are incompatible; reset placements on a kind switch
+        // when the user opted in (or there was nothing to lose).
+        nodes: [], rackNodes: [], edges: [],
+        ...(newKindV === 'map'
+          ? { mapCenter: activePlan.mapCenter ?? [41.0082, 28.9784] as [number, number],
+              mapZoom:   activePlan.mapZoom ?? 11,
+              imageDataUrl: null }
+          : {}),
+      }
+      updatePlan(next)
+      message.success(`Tür değiştirildi: ${newKindV === 'map' ? 'Harita' : 'Görsel'}`)
+    }
+
+    if (!hasContent) { apply(); return }
+    // Use the antd App modal so the confirm dialog matches the rest of the app.
+    // We pull it lazily to avoid importing Modal at module top.
+    import('antd').then(({ Modal }) => {
+      Modal.confirm({
+        title: 'Türü değiştir?',
+        content: `Bu planda ${activePlan.nodes.length} cihaz · ${activePlan.rackNodes.length} kabin · ${activePlan.edges.length} bağlantı var. Tür değişince koordinatlar uyumsuz olacağı için yerleştirmeler sıfırlanır. Devam edilsin mi?`,
+        okText: 'Evet, türü değiştir',
+        cancelText: 'Vazgeç',
+        okButtonProps: { danger: true },
+        onOk: apply,
+      })
+    })
+  }, [activePlan, updatePlan, message])
   const handleDeletePlan = (id: string) => {
     const { [id]: _, ...rest } = store
     persist(rest)
@@ -978,8 +1035,38 @@ export default function FloorPlanPage() {
           </div>
           <Select size="small" style={{ width: '100%' }} value={activeId ?? undefined}
             placeholder="Plan seç…" onChange={setActiveId}
-            options={Object.values(store).map(p => ({ label: p.name, value: p.id }))} />
+            options={Object.values(store).map(p => ({
+              label: `${(p.kind ?? 'image') === 'map' ? '🌐' : '🏢'} ${p.name}`,
+              value: p.id,
+            }))} />
         </div>
+
+        {/* Kind toggle — aktif plan'ın görünüm türü.
+            switchPlanKind: node varsa Modal.confirm açar, sıfırlama uyarısı verir. */}
+        {activePlan && (
+          <div style={{ padding: '6px 6px 0', display: 'flex', gap: 4 }}>
+            {([
+              { value: 'image' as const, icon: <FileImageOutlined />, label: 'Görsel', accent: '#3b82f6' },
+              { value: 'map' as const,   icon: <EnvironmentOutlined />, label: 'Harita', accent: '#22c55e' },
+            ]).map(opt => {
+              const active = (activePlan.kind ?? 'image') === opt.value
+              return (
+                <button key={opt.value}
+                  onClick={() => switchPlanKind(opt.value)}
+                  title={active ? `${opt.label} (aktif)` : `${opt.label}'e geç`}
+                  style={{
+                    flex: 1, padding: '6px 0', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                    borderRadius: 6, border: `1.5px solid ${active ? opt.accent : C.border}`,
+                    background: active ? opt.accent + '22' : 'transparent',
+                    color: active ? opt.accent : C.muted,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5,
+                  }}>
+                  {opt.icon}{opt.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
 
         {/* Mode buttons */}
         <div style={{ padding: '6px 6px 0', display: 'flex', gap: 4 }}>
@@ -1154,10 +1241,45 @@ export default function FloorPlanPage() {
             />
           )
         ) : (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-            <Empty description={<span style={{ color: C.muted }}>Henüz harita yok</span>} />
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setLayoutDrawerOpen(true)}>
-              Yeni Harita
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 20 }}>
+            <Empty description={<span style={{ color: C.muted }}>Henüz plan yok — bir tür seç</span>} />
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => quickCreate('image')}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  padding: '20px 28px', minWidth: 200, cursor: 'pointer',
+                  borderRadius: 10, border: `1.5px solid #3b82f6`,
+                  background: isDark ? 'rgba(59,130,246,0.10)' : 'rgba(59,130,246,0.06)',
+                  color: '#3b82f6',
+                }}
+              >
+                <FileImageOutlined style={{ fontSize: 28 }} />
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Yeni Görsel Planı</div>
+                <div style={{ fontSize: 11, color: C.muted, textAlign: 'center', maxWidth: 180 }}>
+                  Kendi kat planı PNG'nizi yükleyip üstüne cihaz/kabin yerleştirin
+                </div>
+              </button>
+              <button
+                onClick={() => quickCreate('map')}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  padding: '20px 28px', minWidth: 200, cursor: 'pointer',
+                  borderRadius: 10, border: `1.5px solid #22c55e`,
+                  background: isDark ? 'rgba(34,197,94,0.10)' : 'rgba(34,197,94,0.06)',
+                  color: '#22c55e',
+                }}
+              >
+                <EnvironmentOutlined style={{ fontSize: 28 }} />
+                <div style={{ fontSize: 14, fontWeight: 700 }}>Yeni Harita</div>
+                <div style={{ fontSize: 11, color: C.muted, textAlign: 'center', maxWidth: 180 }}>
+                  OpenStreetMap üzerine gerçek koordinatlarla yerleştirin
+                </div>
+              </button>
+            </div>
+            <Button size="small" type="text" icon={<FolderOpenOutlined />}
+              onClick={() => setLayoutDrawerOpen(true)} style={{ color: C.muted }}>
+              Var olan planları yönet
             </Button>
           </div>
         )}
