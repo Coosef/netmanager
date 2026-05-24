@@ -9,6 +9,7 @@ import {
   SearchOutlined, SaveOutlined, FolderOpenOutlined,
   UploadOutlined, CloseOutlined, ZoomInOutlined,
   ZoomOutOutlined, FullscreenOutlined,
+  EnvironmentOutlined, FileImageOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
@@ -17,6 +18,13 @@ import type { Device } from '@/types'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import { useEventStream } from '@/hooks/useEventStream'
+
+// T8.4 — Leaflet world-map view (Harita türü). Old image floor plans still
+// work; this opt-in mode swaps the canvas for an OSM tile layer with
+// draggable device/rack markers persisted as lat/lng.
+import { MapContainer, TileLayer, Marker, Polyline, Tooltip as LMTooltip, useMap } from 'react-leaflet'
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
 
 // ── Canvas constants ──────────────────────────────────────────────────────────
 const CANVAS_W = 1400
@@ -43,23 +51,29 @@ interface FpNode {
   ip_address: string
   vendor: string
   status: string
-  x: number   // % of CANVAS_W
-  y: number   // % of CANVAS_H
+  x: number   // 'image' plan: % of CANVAS_W       · 'map' plan: latitude
+  y: number   // 'image' plan: % of CANVAS_H       · 'map' plan: longitude
 }
 interface FpRackNode {
   id: string
   rackName: string
-  x: number
+  x: number   // same dual-meaning as FpNode.x
   y: number
 }
 interface FpEdge { id: string; from: string; to: string }
 interface FloorPlan {
   id: string
   name: string
+  /** T8.4 — 'image' (default; user-uploaded floor plan PNG) or 'map'
+   *  (Leaflet/OpenStreetMap). Old plans without `kind` are read as 'image'. */
+  kind?: 'image' | 'map'
   imageDataUrl: string | null
   nodes: FpNode[]
   rackNodes: FpRackNode[]
   edges: FpEdge[]
+  /** Map plans persist the last-seen view so re-opens land where you left. */
+  mapCenter?: [number, number]   // [lat, lng]
+  mapZoom?: number
 }
 type FpStore = Record<string, FloorPlan>
 
@@ -412,6 +426,280 @@ function FloorCanvas({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: 
   )
 }
 
+// ── Leaflet world-map view (Harita türü) ─────────────────────────────────────
+// react-leaflet v4 + OpenStreetMap tiles. Markers (cihaz/kabin) are dragged
+// inside the map; coordinates persist as lat/lng on the same FpNode.x / .y
+// fields (dual-meaning by plan.kind). Sidebar items are dropped onto the map
+// container — Leaflet's `mouseEventToLatLng` resolves the screen-coord drop
+// point to a geographic position.
+//
+// Defaults to Istanbul if a plan has no saved center. Tile layer respects
+// theme: light = OSM standard, dark = CartoDB dark_all (free, no API key).
+
+// Default Leaflet markers ship with absolute URLs that 404 in our Vite build;
+// reset the icon prototype to use inline SVG circles via CSS class so we
+// don't depend on the bundled asset URLs.
+delete (L.Icon.Default.prototype as { _getIconUrl?: unknown })._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl:       'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl:     'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+})
+
+function makeDeviceIcon(vendor: string, status: string, hostname: string): L.DivIcon {
+  const vc = VENDOR_COLORS[vendor] || VENDOR_COLORS.other
+  const sc = STATUS_COLORS[status] || '#f59e0b'
+  const glow = status === 'online' ? `box-shadow:0 0 6px ${sc};` : ''
+  return L.divIcon({
+    className: 'nm-map-marker',
+    html: `
+      <div style="position:relative;width:34px;height:34px;background:white;border:2.5px solid ${vc};border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.35)">
+        <div style="width:10px;height:10px;border-radius:50%;background:${sc};${glow}"></div>
+        <div style="position:absolute;bottom:-1px;right:-1px;width:10px;height:10px;border-radius:50%;background:${vc};border:2px solid white"></div>
+      </div>
+      <div style="position:absolute;top:-22px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;font-weight:700;background:rgba(15,23,42,0.85);color:#f1f5f9;padding:1px 6px;border-radius:4px;font-family:system-ui">${hostname}</div>
+    `,
+    iconSize: [34, 34],
+    iconAnchor: [17, 17],
+  })
+}
+function makeRackIcon(rackName: string): L.DivIcon {
+  return L.divIcon({
+    className: 'nm-map-marker',
+    html: `
+      <div style="position:relative;width:36px;height:42px;background:#7c3aed18;border:2.5px solid #7c3aed;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:4px 5px;box-shadow:0 2px 10px rgba(0,0,0,0.35)">
+        <div style="width:24px;height:5px;background:#7c3aed;border-radius:2px;opacity:0.9"></div>
+        <div style="width:24px;height:5px;background:#7c3aed;border-radius:2px;opacity:0.75"></div>
+        <div style="width:24px;height:5px;background:#7c3aed;border-radius:2px;opacity:0.6"></div>
+        <div style="width:24px;height:5px;background:#7c3aed;border-radius:2px;opacity:0.45"></div>
+      </div>
+      <div style="position:absolute;top:-22px;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:11px;font-weight:700;background:rgba(15,23,42,0.85);color:#f1f5f9;padding:1px 6px;border-radius:4px;font-family:system-ui">${rackName}</div>
+    `,
+    iconSize: [36, 42],
+    iconAnchor: [18, 21],
+  })
+}
+
+// react-leaflet doesn't expose drop events; we install a native dragover/drop
+// listener on the map container via a child component that gets the map ref.
+function MapDropTarget({ onDrop }: { onDrop: (e: DragEvent, latlng: L.LatLng) => void }) {
+  const map = useMap()
+  const handlerRef = useRef<((e: DragEvent) => void) | null>(null)
+  const overRef    = useRef<((e: DragEvent) => void) | null>(null)
+  useMemo(() => {
+    const container = map.getContainer()
+    const onOver = (e: DragEvent) => { e.preventDefault() }
+    const onDropEvt = (e: DragEvent) => {
+      e.preventDefault()
+      const rect = container.getBoundingClientRect()
+      const latlng = map.mouseEventToLatLng({ clientX: e.clientX, clientY: e.clientY } as unknown as MouseEvent)
+      // rect unused but kept readable for future bounds clamping
+      void rect
+      onDrop(e, latlng)
+    }
+    container.addEventListener('dragover', onOver)
+    container.addEventListener('drop', onDropEvt)
+    handlerRef.current = onDropEvt
+    overRef.current    = onOver
+    return () => {
+      container.removeEventListener('dragover', onOver)
+      container.removeEventListener('drop', onDropEvt)
+    }
+    // map identity changes per plan switch (the keyed re-mount), so this
+    // memo only needs to run once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map])
+  return null
+}
+
+// Reports view changes (pan/zoom) back to the parent so we can persist the
+// last-seen center/zoom in localStorage.
+function MapViewSync({ onChange }: { onChange: (center: [number, number], zoom: number) => void }) {
+  const map = useMap()
+  useMemo(() => {
+    const fire = () => {
+      const c = map.getCenter()
+      onChange([c.lat, c.lng], map.getZoom())
+    }
+    map.on('moveend', fire)
+    map.on('zoomend', fire)
+    return () => {
+      map.off('moveend', fire)
+      map.off('zoomend', fire)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map])
+  return null
+}
+
+interface MapViewProps {
+  plan: FloorPlan
+  mode: 'place' | 'connect' | 'erase'
+  isDark: boolean
+  onUpdate: (p: FloorPlan) => void
+  onClickRack: (rackName: string) => void
+  liveStatus?: Record<number, string>
+}
+
+function FloorMap({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: MapViewProps) {
+  const center: [number, number] = plan.mapCenter ?? [41.0082, 28.9784]  // Istanbul default
+  const zoom = plan.mapZoom ?? 11
+  const tileUrl = isDark
+    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+    : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+  const attribution = isDark
+    ? '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+    : '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+
+  const [connecting, setConnecting] = useState<string | null>(null)
+
+  // Drop from sidebar onto the map → create node at the geographic point.
+  const handleDrop = useCallback((e: DragEvent, latlng: L.LatLng) => {
+    const devData = e.dataTransfer?.getData('application/fp-device')
+    if (devData) {
+      const d: Device = JSON.parse(devData)
+      if (plan.nodes.some(n => n.deviceId === d.id)) return
+      onUpdate({
+        ...plan,
+        nodes: [...plan.nodes, {
+          id: `fn${Date.now()}`, deviceId: d.id, hostname: d.hostname,
+          ip_address: d.ip_address, vendor: d.vendor, status: d.status,
+          x: latlng.lat, y: latlng.lng,
+        }],
+      })
+      return
+    }
+    const rackData = e.dataTransfer?.getData('application/fp-rack')
+    if (rackData) {
+      const rackName: string = JSON.parse(rackData)
+      if (plan.rackNodes.some(r => r.rackName === rackName)) return
+      onUpdate({
+        ...plan,
+        rackNodes: [...plan.rackNodes, {
+          id: `fr${Date.now()}`, rackName, x: latlng.lat, y: latlng.lng,
+        }],
+      })
+    }
+  }, [plan, onUpdate])
+
+  const handleViewChange = useCallback((c: [number, number], z: number) => {
+    onUpdate({ ...plan, mapCenter: c, mapZoom: z })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.id])
+
+  // Build a lookup map for polyline endpoints (lat/lng), keyed on node id.
+  const latLngById: Record<string, [number, number]> = {}
+  plan.nodes.forEach(n => { latLngById[n.id] = [n.x, n.y] })
+  plan.rackNodes.forEach(r => { latLngById[r.id] = [r.x, r.y] })
+
+  const handleNodeClick = (id: string, nodeType: 'device' | 'rack', rackName?: string) => {
+    if (mode === 'erase') {
+      if (nodeType === 'device')
+        onUpdate({ ...plan, nodes: plan.nodes.filter(n => n.id !== id), edges: plan.edges.filter(ed => ed.from !== id && ed.to !== id) })
+      else
+        onUpdate({ ...plan, rackNodes: plan.rackNodes.filter(r => r.id !== id), edges: plan.edges.filter(ed => ed.from !== id && ed.to !== id) })
+      return
+    }
+    if (mode === 'connect') {
+      if (!connecting) { setConnecting(id); return }
+      if (connecting !== id) {
+        const dup = plan.edges.some(ed => (ed.from === connecting && ed.to === id) || (ed.from === id && ed.to === connecting))
+        if (!dup) onUpdate({ ...plan, edges: [...plan.edges, { id: `fe${Date.now()}`, from: connecting, to: id }] })
+      }
+      setConnecting(null)
+      return
+    }
+    if (nodeType === 'rack' && rackName) onClickRack(rackName)
+  }
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {mode === 'connect' && connecting && (
+        <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
+          background: '#22c55e', color: 'white', padding: '6px 16px', borderRadius: 20,
+          fontSize: 12, fontWeight: 600, zIndex: 1000, whiteSpace: 'nowrap', pointerEvents: 'none',
+          boxShadow: '0 2px 12px rgba(34,197,94,0.5)' }}>
+          🔗 Hedef marker'a tıkla
+        </div>
+      )}
+      <MapContainer
+        center={center}
+        zoom={zoom}
+        style={{ width: '100%', height: '100%' }}
+        scrollWheelZoom
+      >
+        <TileLayer url={tileUrl} attribution={attribution} />
+        <MapDropTarget onDrop={handleDrop} />
+        <MapViewSync onChange={handleViewChange} />
+
+        {/* Edges — polylines between any two markers */}
+        {plan.edges.map(edge => {
+          const a = latLngById[edge.from]
+          const b = latLngById[edge.to]
+          if (!a || !b) return null
+          return (
+            <Polyline
+              key={edge.id}
+              positions={[a, b]}
+              pathOptions={{
+                color: mode === 'erase' ? '#ef4444' : '#3b82f6',
+                weight: 2.5, dashArray: '8 5', opacity: 0.85,
+              }}
+              eventHandlers={{
+                click: () => { if (mode === 'erase') onUpdate({ ...plan, edges: plan.edges.filter(e => e.id !== edge.id) }) },
+              }}
+            />
+          )
+        })}
+
+        {/* Device markers — draggable in 'place' mode */}
+        {plan.nodes.map(n => {
+          const effStatus = liveStatus?.[n.deviceId] ?? n.status
+          return (
+            <Marker
+              key={n.id}
+              position={[n.x, n.y]}
+              icon={makeDeviceIcon(n.vendor, effStatus, n.hostname)}
+              draggable={mode === 'place'}
+              eventHandlers={{
+                click: () => handleNodeClick(n.id, 'device'),
+                dragend: (e) => {
+                  const ll = (e.target as L.Marker).getLatLng()
+                  onUpdate({ ...plan, nodes: plan.nodes.map(x => x.id === n.id ? { ...x, x: ll.lat, y: ll.lng } : x) })
+                },
+              }}
+            >
+              <LMTooltip direction="top" offset={[0, -22]} opacity={0.95}>
+                <div style={{ fontSize: 11 }}>
+                  <strong>{n.hostname}</strong> · {n.ip_address}
+                  <div style={{ color: '#94a3b8' }}>{effStatus}</div>
+                </div>
+              </LMTooltip>
+            </Marker>
+          )
+        })}
+
+        {/* Rack markers — draggable + click → detail */}
+        {plan.rackNodes.map(r => (
+          <Marker
+            key={r.id}
+            position={[r.x, r.y]}
+            icon={makeRackIcon(r.rackName)}
+            draggable={mode === 'place'}
+            eventHandlers={{
+              click: () => handleNodeClick(r.id, 'rack', r.rackName),
+              dragend: (e) => {
+                const ll = (e.target as L.Marker).getLatLng()
+                onUpdate({ ...plan, rackNodes: plan.rackNodes.map(x => x.id === r.id ? { ...x, x: ll.lat, y: ll.lng } : x) })
+              },
+            }}
+          />
+        ))}
+      </MapContainer>
+    </div>
+  )
+}
+
 // ── Rack detail panel ─────────────────────────────────────────────────────────
 function RackDetailPanel({ rackName, isDark, onClose }: {
   rackName: string; isDark: boolean; onClose: () => void
@@ -578,6 +866,7 @@ export default function FloorPlanPage() {
   const [mode, setMode] = useState<'place' | 'connect' | 'erase'>('place')
   const [layoutDrawerOpen, setLayoutDrawerOpen] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newKind, setNewKind] = useState<'image' | 'map'>('image')
   const [deviceSearch, setDeviceSearch] = useState('')
   const [sidebarTab, setSidebarTab] = useState<'devices' | 'racks'>('devices')
   const [gridView, setGridView] = useState(false)
@@ -624,10 +913,15 @@ export default function FloorPlanPage() {
   const handleNewPlan = () => {
     const name = newName.trim(); if (!name) return
     const id = `fp${Date.now()}`
-    const plan: FloorPlan = { id, name, imageDataUrl: null, nodes: [], rackNodes: [], edges: [] }
+    const plan: FloorPlan = {
+      id, name, kind: newKind,
+      imageDataUrl: null,
+      nodes: [], rackNodes: [], edges: [],
+      ...(newKind === 'map' ? { mapCenter: [41.0082, 28.9784] as [number, number], mapZoom: 11 } : {}),
+    }
     persist({ ...store, [id]: plan })
     setActiveId(id); setNewName('')
-    message.success(`"${name}" oluşturuldu`)
+    message.success(`"${name}" oluşturuldu (${newKind === 'map' ? 'Harita' : 'Görsel'})`)
   }
   const handleDeletePlan = (id: string) => {
     const { [id]: _, ...rest } = store
@@ -695,7 +989,7 @@ export default function FloorPlanPage() {
         </div>
 
         {/* Image upload */}
-        {activePlan && (
+        {activePlan && activePlan.kind !== 'map' && (
           <div style={{ padding: '4px 6px', display: 'flex', gap: 4, borderBottom: `1px solid ${C.border}` }}>
             <Upload showUploadList={false} accept="image/*" beforeUpload={handleImageUpload}>
               <Button size="small" icon={<UploadOutlined />} style={{ fontSize: 10 }}>
@@ -707,6 +1001,13 @@ export default function FloorPlanPage() {
                 <Button size="small" icon={<CloseOutlined />} danger onClick={() => updatePlan({ ...activePlan, imageDataUrl: null })} />
               </Tooltip>
             )}
+          </div>
+        )}
+        {activePlan && activePlan.kind === 'map' && (
+          <div style={{ padding: '4px 8px', borderBottom: `1px solid ${C.border}`,
+            fontSize: 10, color: C.muted, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <EnvironmentOutlined style={{ color: '#22c55e' }} />
+            <span>Dünya haritası — cihaz/kabini sürükleyip harita üzerine bırakın</span>
           </div>
         )}
 
@@ -832,14 +1133,26 @@ export default function FloorPlanPage() {
       {/* ── Canvas area ─────────────────────────────────────────────────────── */}
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
         {activePlan ? (
-          <FloorCanvas
-            plan={activePlan}
-            mode={mode}
-            isDark={isDark}
-            onUpdate={updatePlan}
-            onClickRack={setSelectedRack}
-            liveStatus={liveStatus}
-          />
+          activePlan.kind === 'map' ? (
+            <FloorMap
+              key={activePlan.id}
+              plan={activePlan}
+              mode={mode}
+              isDark={isDark}
+              onUpdate={updatePlan}
+              onClickRack={setSelectedRack}
+              liveStatus={liveStatus}
+            />
+          ) : (
+            <FloorCanvas
+              plan={activePlan}
+              mode={mode}
+              isDark={isDark}
+              onUpdate={updatePlan}
+              onClickRack={setSelectedRack}
+              liveStatus={liveStatus}
+            />
+          )
         ) : (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
             <Empty description={<span style={{ color: C.muted }}>Henüz harita yok</span>} />
@@ -859,36 +1172,72 @@ export default function FloorPlanPage() {
 
       {/* ── Plans management drawer ──────────────────────────────────────────── */}
       <Drawer title="Haritalar" open={layoutDrawerOpen} onClose={() => setLayoutDrawerOpen(false)}
-        width={320} styles={{ body: { padding: '12px 16px' } }}>
+        width={340} styles={{ body: { padding: '12px 16px' } }}>
+        {/* Tür seçimi — Görsel (kat planı PNG yükle) vs Harita (dünya haritası). */}
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          {([
+            { value: 'image' as const, icon: <FileImageOutlined />, label: 'Görsel', hint: 'Kat planı PNG yükle' },
+            { value: 'map' as const,   icon: <EnvironmentOutlined />, label: 'Harita', hint: 'OpenStreetMap üzerine yerleştir' },
+          ]).map(opt => {
+            const active = newKind === opt.value
+            const accent = opt.value === 'map' ? '#22c55e' : '#3b82f6'
+            return (
+              <button key={opt.value} onClick={() => setNewKind(opt.value)}
+                style={{
+                  flex: 1, padding: '8px 10px', cursor: 'pointer',
+                  borderRadius: 8, border: `1.5px solid ${active ? accent : C.border}`,
+                  background: active ? accent + '18' : 'transparent',
+                  color: active ? accent : C.muted,
+                  display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+                  textAlign: 'left',
+                }}>
+                <span style={{ fontSize: 13, fontWeight: 700, display: 'flex', gap: 6, alignItems: 'center' }}>
+                  {opt.icon}{opt.label}
+                </span>
+                <span style={{ fontSize: 10.5, opacity: 0.85 }}>{opt.hint}</span>
+              </button>
+            )
+          })}
+        </div>
+
         <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
-          <Input placeholder="Yeni harita adı…" value={newName}
+          <Input placeholder={newKind === 'map' ? 'Yeni harita adı (örn. İstanbul Şubeler)…' : 'Yeni kat planı adı…'}
+            value={newName}
             onChange={e => setNewName(e.target.value)} onPressEnter={handleNewPlan} />
           <Button type="primary" icon={<SaveOutlined />} onClick={handleNewPlan}>Oluştur</Button>
         </Space.Compact>
 
         {Object.values(store).length === 0 && <Empty description="Henüz harita yok" style={{ marginTop: 32 }} />}
 
-        {Object.values(store).map(plan => (
-          <div key={plan.id}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8,
-              marginBottom: 6, border: `1px solid ${activeId === plan.id ? '#3b82f6' : C.border}`,
-              background: activeId === plan.id ? (isDark ? 'rgba(59,130,246,0.1)' : 'rgba(59,130,246,0.05)') : C.card,
-              cursor: 'pointer' }}
-            onClick={() => { setActiveId(plan.id); setLayoutDrawerOpen(false) }}
-          >
-            <span style={{ fontSize: 18 }}>🏢</span>
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <div style={{ fontWeight: 600, fontSize: 13, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{plan.name}</div>
-              <div style={{ fontSize: 11, color: C.muted }}>
-                {plan.nodes.length} cihaz · {plan.rackNodes.length} kabin · {plan.edges.length} bağlantı
-                {plan.imageDataUrl ? ' · Görsel var' : ''}
+        {Object.values(store).map(plan => {
+          const isMap = plan.kind === 'map'
+          return (
+            <div key={plan.id}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', borderRadius: 8,
+                marginBottom: 6, border: `1px solid ${activeId === plan.id ? '#3b82f6' : C.border}`,
+                background: activeId === plan.id ? (isDark ? 'rgba(59,130,246,0.1)' : 'rgba(59,130,246,0.05)') : C.card,
+                cursor: 'pointer' }}
+              onClick={() => { setActiveId(plan.id); setLayoutDrawerOpen(false) }}
+            >
+              <span style={{ fontSize: 18 }}>{isMap ? '🌐' : '🏢'}</span>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {plan.name}
+                  <Tag style={{ marginLeft: 6, fontSize: 9, padding: '0 4px' }} color={isMap ? 'green' : 'blue'}>
+                    {isMap ? 'Harita' : 'Görsel'}
+                  </Tag>
+                </div>
+                <div style={{ fontSize: 11, color: C.muted }}>
+                  {plan.nodes.length} cihaz · {plan.rackNodes.length} kabin · {plan.edges.length} bağlantı
+                  {!isMap && plan.imageDataUrl ? ' · Görsel var' : ''}
+                </div>
               </div>
+              <Popconfirm title="Bu planı sil?" onConfirm={e => { e?.stopPropagation(); handleDeletePlan(plan.id) }} okText="Sil" cancelText="İptal">
+                <Button size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
+              </Popconfirm>
             </div>
-            <Popconfirm title="Bu planı sil?" onConfirm={e => { e?.stopPropagation(); handleDeletePlan(plan.id) }} okText="Sil" cancelText="İptal">
-              <Button size="small" danger icon={<DeleteOutlined />} onClick={e => e.stopPropagation()} />
-            </Popconfirm>
-          </div>
-        ))}
+          )
+        })}
       </Drawer>
     </div>
   )
