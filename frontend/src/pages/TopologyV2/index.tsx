@@ -792,7 +792,9 @@ export default function TopologyV2Page() {
             onClick={() => setShowGhost((v) => !v)} />
           <FilterToggle on={showWireless} color={C.green} label="📶 Wireless"
             onClick={() => setShowWireless((v) => !v)} />
-          <Link to="/topology" style={{ fontSize: 11, color: C.sub, marginLeft: 4 }}>Klasik →</Link>
+          {/* T4.6 — after the cutover /topology renders V2, so the
+              classic-page escape hatch is /topology-classic. */}
+          <Link to="/topology-classic" style={{ fontSize: 11, color: C.sub, marginLeft: 4 }}>Klasik →</Link>
           <span style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             {LAYER_LEGEND.map(([label, color]) => (
               <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: C.sub, fontSize: 11 }}>

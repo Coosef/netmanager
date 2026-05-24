@@ -27,6 +27,7 @@ import AuditLogPage from '@/pages/AuditLog'
 import MonitorPage from '@/pages/Monitor'
 import TopologyPage from '@/pages/Topology'
 import TopologyV2Page from '@/pages/TopologyV2'
+import { featureFlags } from '@/config/featureFlags'
 import LldpInventoryPage from '@/pages/LldpInventory'
 import AgentsPage from '@/pages/Agents'
 import ReportsPage from '@/pages/Reports'
@@ -240,7 +241,16 @@ function ThemedApp() {
               <Route index element={<DashboardPage />} />
               <Route path="devices" element={<DevicesPage />} />
               <Route path="tasks" element={<TasksPage />} />
-              <Route path="topology" element={<TopologyPage />} />
+              {/* T4.6 cutover — V2 canonical at /topology when the flag is on.
+                  /topology-classic is a permanent kill-switch / escape hatch:
+                  the legacy React Flow page is always reachable by URL even
+                  when the flag flips on, so operators with muscle memory
+                  can still get the old view if V2 surfaces an unexpected
+                  issue. /topology-next stays as the explicit "next" alias
+                  so any deep links still work. */}
+              <Route path="topology"
+                element={featureFlags.topologyV2Canonical ? <TopologyV2Page /> : <TopologyPage />} />
+              <Route path="topology-classic" element={<TopologyPage />} />
               <Route path="topology-next" element={<TopologyV2Page />} />
               <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />

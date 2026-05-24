@@ -86,8 +86,12 @@ export function useNavGroups(): NavGroup[] {
       label: t('nav_group.main'),
       items: [
         { key: '/', icon: <DashboardOutlined />, label: t('nav.dashboard') },
+        // T4.6 cutover — when V2 is canonical the primary 'Topoloji'
+        // entry already routes to V2 (App.tsx route swap), so the
+        // separate '/topology-next' chip is redundant; only show it
+        // when V2 exists but isn't canonical yet (mid-rollout).
         { key: '/topology', icon: <ApartmentOutlined />, label: t('nav.topology') },
-        ...(featureFlags.topologyV2
+        ...(featureFlags.topologyV2 && !featureFlags.topologyV2Canonical
           ? [{ key: '/topology-next', icon: <ThunderboltOutlined />, label: 'Topology · Gold' }]
           : []),
         { key: '/devices', icon: <LaptopOutlined />, label: t('nav.devices') },
