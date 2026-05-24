@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { approvalsApi, type ApprovalRequest } from '@/api/approvals'
 import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
+import NmEmpty from '@/components/NmEmpty'
 import dayjs from 'dayjs'
 
 const RISK_HEX: Record<string, string> = { high: '#ef4444', medium: '#f59e0b', low: '#22c55e' }
@@ -193,12 +194,16 @@ export default function ApprovalsPage() {
             <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)' }}>Yükleniyor…</div>
           )}
           {!isLoading && items.length === 0 && (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--fg-3)' }}>
-              <CheckCircleOutlined style={{ fontSize: 32, opacity: 0.4, display: 'block', margin: '0 auto 8px' }} />
-              {statusFilter
+            <NmEmpty
+              icon={<CheckCircleOutlined />}
+              title={statusFilter
                 ? `'${STATUS_LABEL[statusFilter] ?? statusFilter}' durumunda talep yok`
                 : 'Onay talebi yok — sakin liman'}
-            </div>
+              description={statusFilter
+                ? 'Filtreyi değiştirerek di&#x11F;er durumlardaki talepleri görebilirsin.'
+                : 'Komut onay&#x131; gerektiren bir i&#x15F;lem ba&#x15F;lat&#x131;ld&#x131;&#x11F;&#x131;nda burada görünecek.'}
+              tone={statusFilter ? 'neutral' : 'ok'}
+            />
           )}
           {!isLoading && items.length > 0 && (
             <div className="nm-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: 12 }}>

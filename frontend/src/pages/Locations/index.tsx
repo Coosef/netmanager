@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { locationsApi, type Location } from '@/api/locations'
 import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
+import NmEmpty from '@/components/NmEmpty'
 import dayjs from 'dayjs'
 
 const DEFAULT_COLORS = [
@@ -214,10 +215,18 @@ export default function LocationsPage() {
             <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)' }}>Yükleniyor…</div>
           )}
           {!isLoading && items.length === 0 && (
-            <div style={{ padding: 40, textAlign: 'center', color: 'var(--fg-3)' }}>
-              <EnvironmentOutlined style={{ fontSize: 32, opacity: 0.4, display: 'block', margin: '0 auto 8px' }} />
-              Henüz lokasyon eklenmemiş — "Yeni Lokasyon" butonunu kullan&#x131;n
-            </div>
+            <NmEmpty
+              icon={<EnvironmentOutlined />}
+              title="Henüz lokasyon eklenmemiş"
+              description={canMutate
+                ? '&#x130;lk lokasyonu olu&#x15F;turmak için yukar&#x131;daki "Yeni Lokasyon" butonunu kullan&#x131;n. Her cihaz bir lokasyona bağl&#x131;d&#x131;r — kapsam baz&#x131;n&#x131;z burada başlar.'
+                : 'Bu organizasyonda henüz lokasyon tan&#x131;mlanmam&#x131;ş.'}
+              action={canMutate ? (
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                  Yeni Lokasyon
+                </Button>
+              ) : undefined}
+            />
           )}
           {!isLoading && items.length > 0 && (
             <div className="nm-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
