@@ -3513,3 +3513,46 @@
   }
   .nm-page-hd > .ant-space > * { flex: 1; min-width: 0; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * B3.4 — z-index tier documentation + antd interoperability fix
+ *
+ * Mevcut tier'lar (yüksekten düşüğe):
+ *   1100+   antd Tooltip / Popover  (varsayılan 1070-1080 — bizimkiler değiştirilmedi)
+ *   1050    antd Dropdown / Select dropdown  (varsayılan)
+ *   1001    .cp-panel (Customize) · .nm-drawer (NOC drawer'lar)
+ *   1000    antd Modal · antd Drawer · nm-iso modal grupları
+ *   960     .nm-modal-confirm backdrop
+ *   950     .nm-modal backdrop · .nm-noc-wall topbar
+ *   900     .nm-header (sticky AppHeader)
+ *   801     .nm-sidebar (mobile drawer açıkken)
+ *   800     .nm-sidebar (desktop default)
+ *   200     .nm-tn-dropdown (TopNav dropdown menü)
+ *   150     .nm-tn-group (TopNav grup container)
+ *   100     antd Modal'a göre LOW — sidebar arkası alanlar
+ *   1-10    local stacking (kart hover lift, status dot vs.)
+ *
+ * Kural: Yeni bir overlay/dropdown eklerken bu tier listesini güncelleyin.
+ * Antd default'larıyla (Tooltip:1070, Popover:1080, Dropdown:1050) bizim
+ * custom 950-1001 aralığımız arasında bilinçli boşluk var — antd
+ * dropdown'ı her zaman bizim modal/drawer'ımızın ÜSTÜNDE açılır, ki
+ * Select / DatePicker / Cascader inside a Drawer doğru render olsun.
+ *
+ * Defensive: Custom nm-modal içinde açılan antd Select dropdown
+ * varsayılan 1050 > nm-modal 950 olduğu için zaten doğru çalışıyor.
+ * .nm-tn-dropdown 200 → AppHeader 900'in altında olduğu için TopNav
+ * dropdown'ı sticky header'ın gölgesinde kalmasın diye 950'ye çekiyoruz
+ * sadece TopNav menüsünün AppHeader üstüne çıkması gerekirken — şu
+ * anki davranış doğru çünkü TopNav AppHeader'ın IÇINDE render oluyor.
+ * ────────────────────────────────────────────────────────────────── */
+
+/* Antd Select / DatePicker dropdown'unun custom .nm-drawer / .cp-panel
+ * içinde açıldığında üstünde kalması — antd default 1050 ≥ 1001 zaten
+ * çalışıyor, ama defensive: portal'a çıkmayan inline dropdown senaryosu
+ * için override koruması. Mevcut sayfada break yok, sadece guard. */
+.nm-drawer .ant-select-dropdown,
+.nm-drawer .ant-picker-dropdown,
+.cp-panel .ant-select-dropdown,
+.cp-panel .ant-picker-dropdown {
+  z-index: 1100 !important;
+}
