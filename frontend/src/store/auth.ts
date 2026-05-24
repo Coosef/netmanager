@@ -24,6 +24,10 @@ interface AuthState {
   logout: () => void
   // Permission-based checks
   can: (module: string, action: string) => boolean
+  // RBAC F8 — convenience for any mutating action (edit/create/delete/
+  // push/run/backup/connect on a module). Symmetric with backend default
+  // grant maps (SYSTEM_ROLE_PERMISSIONS in app/models/user.py).
+  canMutate: (module: string) => boolean
   // System role checks (4-role model)
   isSuperAdmin: () => boolean
   isOrgAdmin: () => boolean
@@ -37,6 +41,30 @@ interface AuthState {
 
 // 4-role privilege hierarchy (lowest → highest).
 const ROLE_ORDER: SystemRole[] = ['viewer', 'location_admin', 'org_admin', 'super_admin']
+
+// RBAC F8 — symmetric with backend SYSTEM_ROLE_PERMISSIONS
+// (backend/app/models/user.py). Used by can() when the permissions
+// object is loaded but doesn't carry an explicit entry for a module —
+// we fall back to the role default rather than blindly allowing.
+//
+// The grant function returns true if (module, action) is allowed by the
+// role's default permission set. Mutating actions on a "managed" module
+// (devices, config, tasks, …) require location_admin or higher; viewer
+// only ever sees 'view'.
+const DEFAULT_ROLE_GRANTS: Record<SystemRole, (module: string, action: string) => boolean> = {
+  super_admin: () => true,
+  org_admin:   () => true,                    // backend grants "*" effectively for our UI guards
+  location_admin: (module, action) => {
+    // Action-set mirrors backend LOCATION_ADMIN list (device:create/edit/
+    // connect/move; config:push/backup/restore; task:create; …). NOT in
+    // the set: device:delete, user:*, locations:*, settings:*, permissions:*.
+    if (action === 'view') return true
+    if (['users', 'locations', 'settings', 'permissions'].includes(module)) return false
+    if (module === 'devices' && action === 'delete') return false
+    return true
+  },
+  viewer: (_module, action) => action === 'view',
+}
 
 // Map any legacy / loose value to a live SystemRole. Mirrors the backend
 // User.role setter (backend/app/models/user.py) so frontend and backend
@@ -85,13 +113,31 @@ export const useAuthStore = create<AuthState>()(
         // their RLS already restricts which rows they see, so action-level
         // checks are unnecessary here.
         if (user.system_role === 'super_admin' || user.system_role === 'org_admin') return true
-        // Location Admin and Viewer: respect the permissions object if loaded;
-        // permissive fallback while it's still loading so the UI doesn't
-        // briefly disable everything on first paint.
+        // Location Admin and Viewer: respect the permissions object if
+        // loaded. RBAC F8 — for mutating actions we DEFAULT-DENY when the
+        // permissions object is missing; for read actions ('view') we
+        // permit so a page doesn't blank on first paint while perms load.
         const perms = get().permissions
-        if (!perms) return true
+        const isMutating = action !== 'view'
+        if (!perms) return !isMutating
         const val = (perms.modules?.[module] as Record<string, boolean> | undefined)?.[action]
-        return val !== false
+        // If a per-module entry doesn't exist, fall back to role-default:
+        // viewer = view-only; location_admin gets edit but not delete.
+        if (val !== undefined) return val
+        return DEFAULT_ROLE_GRANTS[user.system_role]?.(module, action) ?? false
+      },
+
+      canMutate: (module: string) => {
+        const sr = get().user?.system_role
+        if (!sr) return false
+        if (sr === 'super_admin' || sr === 'org_admin') return true
+        if (sr === 'viewer') return false
+        // location_admin: mutating verbs allowed for everything except
+        // user / locations / settings management — those are org-admin scope.
+        if (sr === 'location_admin') {
+          return !['users', 'locations', 'settings', 'permissions'].includes(module)
+        }
+        return false
       },
 
       isSuperAdmin: () => get().user?.system_role === 'super_admin',
