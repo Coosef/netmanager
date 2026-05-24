@@ -573,13 +573,22 @@ export default function DevicesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<Device | null>(null)
   const [detailDevice, setDetailDevice] = useState<Device | null>(null)
-  // Faz 8 Phase G — the device move action is shown only to roles that
-  // actually hold the device:move capability (admin / location_manager /
-  // super_admin). The backend re-checks regardless.
-  const moveRole = useAuthStore((s) => s.user?.role)
-  const canMoveDevice = ['super_admin', 'admin', 'location_manager'].includes(
-    moveRole ?? '',
-  )
+  // RBAC F9 — single source for mutating action visibility. Mirrors backend
+  // `device:*` grant map (SYSTEM_ROLE_PERMISSIONS). Viewer sees no
+  // mutating button at all; location_admin sees edit/connect/move but
+  // not delete; org_admin/super_admin see everything.
+  const can = useAuthStore((s) => s.can)
+  const canEdit    = useAuthStore((s) => s.can('devices', 'edit'))
+  const canCreate  = useAuthStore((s) => s.can('devices', 'create'))
+  const canDelete  = useAuthStore((s) => s.can('devices', 'delete'))
+  const canConnect = useAuthStore((s) => s.can('devices', 'connect'))
+  const canMoveDevice = useAuthStore((s) => s.can('devices', 'move'))
+  // Bulk operations (CSV import, sihirbaz, group profile, bulk fetch) —
+  // mutate many devices at once; gate on the strictest verb (`edit`).
+  const canBulk = canEdit
+  // `can` is referenced from inside JSX too (drawer actions); silence the
+  // unused-var warning while keeping the destructured handle.
+  void can
   const [moveDevice, setMoveDevice] = useState<Device | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkCredOpen, setBulkCredOpen] = useState(false)
@@ -788,7 +797,7 @@ export default function DevicesPage() {
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <Space wrap>
-          {hasSelection && (
+          {hasSelection && canBulk && (
             <>
               <Tag color="blue" style={{ padding: '4px 10px', fontSize: 13 }}>{t('devices.selected', { count: selectedRowKeys.length })}</Tag>
               <Button icon={<TagOutlined />} onClick={() => setBulkTagOpen(true)} style={{ borderColor: '#13c2c2', color: '#008080' }}>
@@ -857,21 +866,31 @@ export default function DevicesPage() {
               CSV Dışa Aktar
             </Button>
           </Tooltip>
-          <Tooltip title="CSV ile Toplu İçe Aktar">
-            <Button icon={<UploadOutlined />} onClick={() => { setCsvFile(null); setCsvResult(null); setCsvImportOpen(true) }}>
-              CSV İçe Aktar
-            </Button>
-          </Tooltip>
-          <Tooltip title="Adım adım rehberli ekleme">
-            <Button icon={<ThunderboltOutlined />} onClick={() => setWizardOpen(true)}>Sihirbaz</Button>
-          </Tooltip>
-          <Tooltip title="Site/katman/topolojiye göre otomatik grup önerileri">
-            <Button icon={<ApartmentOutlined />} onClick={() => setAutoGroupOpen(true)}>Otomatik Grupla</Button>
-          </Tooltip>
-          <Tooltip title="Gruptaki tüm cihazlara toplu credential profil ata">
-            <Button icon={<KeyOutlined />} onClick={() => setGroupProfileOpen(true)}>Gruba Profil Ata</Button>
-          </Tooltip>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditDevice(null); setDrawerOpen(true) }}>{t('devices.add')}</Button>
+          {canBulk && (
+            <Tooltip title="CSV ile Toplu İçe Aktar">
+              <Button icon={<UploadOutlined />} onClick={() => { setCsvFile(null); setCsvResult(null); setCsvImportOpen(true) }}>
+                CSV İçe Aktar
+              </Button>
+            </Tooltip>
+          )}
+          {canCreate && (
+            <Tooltip title="Adım adım rehberli ekleme">
+              <Button icon={<ThunderboltOutlined />} onClick={() => setWizardOpen(true)}>Sihirbaz</Button>
+            </Tooltip>
+          )}
+          {canBulk && (
+            <Tooltip title="Site/katman/topolojiye göre otomatik grup önerileri">
+              <Button icon={<ApartmentOutlined />} onClick={() => setAutoGroupOpen(true)}>Otomatik Grupla</Button>
+            </Tooltip>
+          )}
+          {canBulk && (
+            <Tooltip title="Gruptaki tüm cihazlara toplu credential profil ata">
+              <Button icon={<KeyOutlined />} onClick={() => setGroupProfileOpen(true)}>Gruba Profil Ata</Button>
+            </Tooltip>
+          )}
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditDevice(null); setDrawerOpen(true) }}>{t('devices.add')}</Button>
+          )}
           <Button.Group>
             <Tooltip title="Tablo Görünümü">
               <Button
@@ -934,6 +953,9 @@ export default function DevicesPage() {
           testingId={testMutation.isPending ? (testMutation.variables as number | undefined) : undefined}
           fetchingId={fetchInfoMutation.isPending ? (fetchInfoMutation.variables as number | undefined) : undefined}
           canMove={canMoveDevice}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          canConnect={canConnect}
         />
       )}
 
@@ -1199,7 +1221,7 @@ function NocDeviceTable({
   items, total, loading, page, pageSize, onPage,
   selected, onSelect,
   onDetail, onEdit, onTest, onMove, onFetchInfo, onDelete,
-  testingId, fetchingId, canMove,
+  testingId, fetchingId, canMove, canEdit, canDelete, canConnect,
 }: {
   items: Device[]
   total: number
@@ -1217,7 +1239,13 @@ function NocDeviceTable({
   onDelete: (d: Device) => void
   testingId?: number
   fetchingId?: number
+  // RBAC F9 — visibility flags per action verb. Viewer gets all false;
+  // location_admin gets edit+connect+move (NOT delete); org_admin /
+  // super_admin get all true. Mirrors backend SYSTEM_ROLE_PERMISSIONS.
   canMove: boolean
+  canEdit: boolean
+  canDelete: boolean
+  canConnect: boolean
 }) {
   const selectedSet = new Set(selected)
   const allChecked = items.length > 0 && items.every((d) => selectedSet.has(d.id))
@@ -1337,18 +1365,34 @@ function NocDeviceTable({
                   <td className="col-actions">
                     <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
                       <Tooltip title="Detay"><button onClick={() => onDetail(d)}><EyeOutlined /></button></Tooltip>
-                      <Tooltip title="SSH Terminal (yeni sekme)">
-                        <button onClick={() => window.open(`/ssh/${d.id}?hostname=${encodeURIComponent(d.hostname)}&ip=${encodeURIComponent(d.ip_address)}`, '_blank', 'noopener,noreferrer')}>
-                          <CodeOutlined style={{ color: 'var(--ok)' }} />
-                        </button>
-                      </Tooltip>
-                      <Tooltip title="SSH Bağlantı Testi"><button onClick={() => onTest(d)} disabled={testingId === d.id}><ThunderboltOutlined /></button></Tooltip>
-                      <Tooltip title="Cihazdan Bilgi Çek"><button onClick={() => onFetchInfo(d)} disabled={fetchingId === d.id}><ReloadOutlined /></button></Tooltip>
-                      <Tooltip title="Düzenle"><button onClick={() => onEdit(d)}><EditOutlined /></button></Tooltip>
-                      {canMove && <Tooltip title="Lokasyon Taşı"><button onClick={() => onMove(d)}><SwapOutlined /></button></Tooltip>}
-                      <Popconfirm title="Cihaz silinsin mi?" okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }} onConfirm={() => onDelete(d)}>
-                        <button title="Sil"><DeleteOutlined /></button>
-                      </Popconfirm>
+                      {canConnect && (
+                        <Tooltip title="SSH Terminal (yeni sekme)">
+                          <button onClick={() => window.open(`/ssh/${d.id}?hostname=${encodeURIComponent(d.hostname)}&ip=${encodeURIComponent(d.ip_address)}`, '_blank', 'noopener,noreferrer')}>
+                            <CodeOutlined style={{ color: 'var(--ok)' }} />
+                          </button>
+                        </Tooltip>
+                      )}
+                      {canConnect && (
+                        <Tooltip title="SSH Bağlantı Testi">
+                          <button onClick={() => onTest(d)} disabled={testingId === d.id}><ThunderboltOutlined /></button>
+                        </Tooltip>
+                      )}
+                      {canConnect && (
+                        <Tooltip title="Cihazdan Bilgi Çek">
+                          <button onClick={() => onFetchInfo(d)} disabled={fetchingId === d.id}><ReloadOutlined /></button>
+                        </Tooltip>
+                      )}
+                      {canEdit && (
+                        <Tooltip title="Düzenle"><button onClick={() => onEdit(d)}><EditOutlined /></button></Tooltip>
+                      )}
+                      {canMove && (
+                        <Tooltip title="Lokasyon Taşı"><button onClick={() => onMove(d)}><SwapOutlined /></button></Tooltip>
+                      )}
+                      {canDelete && (
+                        <Popconfirm title="Cihaz silinsin mi?" okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }} onConfirm={() => onDelete(d)}>
+                          <button title="Sil"><DeleteOutlined /></button>
+                        </Popconfirm>
+                      )}
                     </span>
                   </td>
                 </tr>
