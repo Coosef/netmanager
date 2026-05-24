@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { approvalsApi, type ApprovalRequest } from '@/api/approvals'
+import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
 
@@ -33,6 +34,10 @@ const STATUS_LABEL: Record<string, string> = {
 export default function ApprovalsPage() {
   const qc = useQueryClient()
   const { isDark } = useTheme()
+  // RBAC F10 — viewer + location_admin görür ama review edemez. Backend
+  // 'approval:review' permission'ı org_admin + location_admin verir, ama
+  // location_admin sadece atandığı lokasyondaki istekleri görür (RLS).
+  const canReview = useAuthStore((s) => s.can('approvals', 'review'))
   const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
   const [detailModal, setDetailModal] = useState<ApprovalRequest | null>(null)
   const [rejectNote, setRejectNote] = useState('')
@@ -207,6 +212,7 @@ export default function ApprovalsPage() {
                   onDetail={() => setDetailModal(r)}
                   approveLoading={approveMutation.isPending}
                   cancelLoading={cancelMutation.isPending}
+                  canReview={canReview}
                 />
               ))}
             </div>
@@ -253,7 +259,7 @@ export default function ApprovalsPage() {
 // ─── Approval card ───────────────────────────────────────────────────────────
 
 function ApprovalCard({
-  r, onApprove, onReject, onCancel, onDetail, approveLoading, cancelLoading,
+  r, onApprove, onReject, onCancel, onDetail, approveLoading, cancelLoading, canReview,
 }: {
   r: ApprovalRequest
   onApprove: () => void
@@ -262,6 +268,9 @@ function ApprovalCard({
   onDetail: () => void
   approveLoading: boolean
   cancelLoading: boolean
+  // RBAC F10 — false ⇒ Onayla / Reddet / İptal buttons hidden; viewer
+  // only sees Detay.
+  canReview: boolean
 }) {
   const riskColor = RISK_HEX[r.risk_level] || 'var(--fg-3)'
   const statusColor = STATUS_HEX[r.status] || 'var(--fg-3)'
@@ -333,7 +342,7 @@ function ApprovalCard({
         padding: '8px 12px', borderTop: '1px solid var(--border-0)',
         background: 'var(--bg-2)',
       }}>
-        {isPending && (
+        {isPending && canReview && (
           <>
             <Popconfirm
               title={<>Komut cihazda çalıştırılacak.<br />Onaylıyor musunuz?</>}
@@ -353,6 +362,11 @@ function ApprovalCard({
                 loading={cancelLoading} onClick={onCancel} />
             </Tooltip>
           </>
+        )}
+        {isPending && !canReview && (
+          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+            Onaylama yetkiniz yok — sadece görüntüleme.
+          </span>
         )}
         <span style={{ flex: 1 }} />
         <Button size="small" type="text" icon={<EyeOutlined />} onClick={onDetail}>

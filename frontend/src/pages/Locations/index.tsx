@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { locationsApi, type Location } from '@/api/locations'
+import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
 
@@ -32,6 +33,10 @@ export default function LocationsPage() {
   const { message } = App.useApp()
   const { isDark } = useTheme()
   const qc = useQueryClient()
+
+  // RBAC F10 — locations are org-admin scope; viewer/location_admin see
+  // the list but cannot mutate. Backend require_system_role enforces.
+  const canMutate = useAuthStore((s) => s.canMutate('locations'))
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Location | null>(null)
@@ -156,9 +161,11 @@ export default function LocationsPage() {
           <Tooltip title="Yenile">
             <Button icon={<ReloadOutlined />} onClick={() => refetch()} />
           </Tooltip>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            Yeni Lokasyon
-          </Button>
+          {canMutate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              Yeni Lokasyon
+            </Button>
+          )}
         </div>
       </div>
 
@@ -220,6 +227,7 @@ export default function LocationsPage() {
                   loc={loc}
                   onEdit={openEdit}
                   onDelete={(id) => deleteMutation.mutate(id)}
+                  canMutate={canMutate}
                 />
               ))}
             </div>
@@ -318,8 +326,8 @@ export default function LocationsPage() {
 }
 
 function LocationCard({
-  loc, onEdit, onDelete,
-}: { loc: Location; onEdit: (l: Location) => void; onDelete: (id: number) => void }) {
+  loc, onEdit, onDelete, canMutate,
+}: { loc: Location; onEdit: (l: Location) => void; onDelete: (id: number) => void; canMutate: boolean }) {
   const color = loc.color || '#3b82f6'
   const status = loc.device_count === 0 ? 'empty' : loc.device_count === 1 ? 'fragile' : 'ok'
 
@@ -390,23 +398,27 @@ function LocationCard({
         <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }} className="mono">
           {dayjs(loc.created_at).format('DD.MM.YYYY')}
         </span>
-        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
-          <Tooltip title="Düzenle">
-            <button onClick={() => onEdit(loc)}><EditOutlined /></button>
-          </Tooltip>
-          <Popconfirm
-            title="Lokasyonu sil"
-            description={loc.device_count > 0
-              ? `${loc.device_count} cihazın site alanı temizlenecek. Emin misiniz?`
-              : 'Bu lokasyonu silmek istediğinize emin misiniz?'}
-            okText="Sil"
-            cancelText="İptal"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => onDelete(loc.id)}
-          >
-            <button><DeleteOutlined style={{ color: 'var(--crit)' }} /></button>
-          </Popconfirm>
-        </span>
+        {canMutate ? (
+          <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+            <Tooltip title="Düzenle">
+              <button onClick={() => onEdit(loc)}><EditOutlined /></button>
+            </Tooltip>
+            <Popconfirm
+              title="Lokasyonu sil"
+              description={loc.device_count > 0
+                ? `${loc.device_count} cihazın site alanı temizlenecek. Emin misiniz?`
+                : 'Bu lokasyonu silmek istediğinize emin misiniz?'}
+              okText="Sil"
+              cancelText="İptal"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => onDelete(loc.id)}
+            >
+              <button><DeleteOutlined style={{ color: 'var(--crit)' }} /></button>
+            </Popconfirm>
+          </span>
+        ) : (
+          <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>salt-okuma</span>
+        )}
       </div>
     </div>
   )

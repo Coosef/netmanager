@@ -42,15 +42,20 @@ interface AuthState {
 // 4-role privilege hierarchy (lowest → highest).
 const ROLE_ORDER: SystemRole[] = ['viewer', 'location_admin', 'org_admin', 'super_admin']
 
-// RBAC F8 — symmetric with backend SYSTEM_ROLE_PERMISSIONS
+// RBAC F8 + F10 — symmetric with backend SYSTEM_ROLE_PERMISSIONS
 // (backend/app/models/user.py). Used by can() when the permissions
 // object is loaded but doesn't carry an explicit entry for a module —
 // we fall back to the role default rather than blindly allowing.
 //
-// The grant function returns true if (module, action) is allowed by the
-// role's default permission set. Mutating actions on a "managed" module
-// (devices, config, tasks, …) require location_admin or higher; viewer
-// only ever sees 'view'.
+// VIEWER scope (matches backend list exactly): device:view, config:view,
+// task:view, audit:view, monitor:view. Anything else — settings, users,
+// locations, agents, ipam, approvals, permissions, reports, playbooks —
+// is org-admin scope and the viewer must be denied even at the
+// /<route> level (`PermRoute action="view"` runs can() here).
+const VIEWER_VIEW_MODULES = new Set([
+  'devices', 'config_backups', 'monitoring', 'monitor',
+  'tasks', 'audit_logs', 'topology',
+])
 const DEFAULT_ROLE_GRANTS: Record<SystemRole, (module: string, action: string) => boolean> = {
   super_admin: () => true,
   org_admin:   () => true,                    // backend grants "*" effectively for our UI guards
@@ -63,7 +68,7 @@ const DEFAULT_ROLE_GRANTS: Record<SystemRole, (module: string, action: string) =
     if (module === 'devices' && action === 'delete') return false
     return true
   },
-  viewer: (_module, action) => action === 'view',
+  viewer: (module, action) => action === 'view' && VIEWER_VIEW_MODULES.has(module),
 }
 
 // Map any legacy / loose value to a live SystemRole. Mirrors the backend

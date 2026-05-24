@@ -74,6 +74,9 @@ export default function UsersPage() {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { user: currentUser, isSuperAdmin } = useAuthStore()
+  // RBAC F10 — `users` module = org-admin scope. Viewer / location_admin
+  // see the list but cannot create / edit / delete / reset / invite.
+  const canMutateUsers = useAuthStore((s) => s.canMutate('users'))
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const isSA = isSuperAdmin()
@@ -277,13 +280,17 @@ export default function UsersPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <Button icon={<MailOutlined />}
-            onClick={() => { inviteForm.resetFields(); setLastInviteLink(null); setInviteModalOpen(true) }}>
-            Davet Oluştur
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>
-            {t('users.add')}
-          </Button>
+          {canMutateUsers && (
+            <Button icon={<MailOutlined />}
+              onClick={() => { inviteForm.resetFields(); setLastInviteLink(null); setInviteModalOpen(true) }}>
+              Davet Oluştur
+            </Button>
+          )}
+          {canMutateUsers && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>
+              {t('users.add')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -407,28 +414,32 @@ export default function UsersPage() {
                         : <span style={{ color: 'var(--fg-3)' }}>—</span>}
                     </td>
                     <td className="col-actions">
-                      <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
-                        <Tooltip title={t('common.edit')}>
-                          <button onClick={() => openDrawer(r, 'general')}><EditOutlined /></button>
-                        </Tooltip>
-                        <Tooltip title="Org & Lokasyonlar">
-                          <button onClick={() => openDrawer(r, 'locations')}><EnvironmentOutlined /></button>
-                        </Tooltip>
-                        <Tooltip title={t('users.reset_password')}>
-                          <button onClick={() => { setResetUser(r); resetForm.resetFields() }}>
-                            <KeyOutlined style={{ color: 'var(--warn)' }} />
-                          </button>
-                        </Tooltip>
-                        <Popconfirm
-                          title={t('users.delete_confirm', { name: r.username })}
-                          disabled={isProtected}
-                          onConfirm={() => deleteMutation.mutate(r.id)}
-                        >
-                          <button disabled={isProtected}>
-                            <DeleteOutlined style={{ color: isProtected ? 'var(--fg-3)' : 'var(--crit)' }} />
-                          </button>
-                        </Popconfirm>
-                      </span>
+                      {canMutateUsers ? (
+                        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                          <Tooltip title={t('common.edit')}>
+                            <button onClick={() => openDrawer(r, 'general')}><EditOutlined /></button>
+                          </Tooltip>
+                          <Tooltip title="Org & Lokasyonlar">
+                            <button onClick={() => openDrawer(r, 'locations')}><EnvironmentOutlined /></button>
+                          </Tooltip>
+                          <Tooltip title={t('users.reset_password')}>
+                            <button onClick={() => { setResetUser(r); resetForm.resetFields() }}>
+                              <KeyOutlined style={{ color: 'var(--warn)' }} />
+                            </button>
+                          </Tooltip>
+                          <Popconfirm
+                            title={t('users.delete_confirm', { name: r.username })}
+                            disabled={isProtected}
+                            onConfirm={() => deleteMutation.mutate(r.id)}
+                          >
+                            <button disabled={isProtected}>
+                              <DeleteOutlined style={{ color: isProtected ? 'var(--fg-3)' : 'var(--crit)' }} />
+                            </button>
+                          </Popconfirm>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>—</span>
+                      )}
                     </td>
                   </tr>
                 )
@@ -697,20 +708,24 @@ export default function UsersPage() {
                       )}
                     </td>
                     <td className="col-actions">
-                      <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
-                        {!rec.is_used && !rec.is_expired && (
-                          <Tooltip title="Linki Kopyala">
-                            <button onClick={() => message.info('Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun')}>
-                              <LinkOutlined />
-                            </button>
-                          </Tooltip>
-                        )}
-                        <Popconfirm title="Daveti iptal et?" onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
-                          <Tooltip title="İptal Et">
-                            <button><StopOutlined style={{ color: 'var(--crit)' }} /></button>
-                          </Tooltip>
-                        </Popconfirm>
-                      </span>
+                      {canMutateUsers ? (
+                        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                          {!rec.is_used && !rec.is_expired && (
+                            <Tooltip title="Linki Kopyala">
+                              <button onClick={() => message.info('Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun')}>
+                                <LinkOutlined />
+                              </button>
+                            </Tooltip>
+                          )}
+                          <Popconfirm title="Daveti iptal et?" onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
+                            <Tooltip title="İptal Et">
+                              <button><StopOutlined style={{ color: 'var(--crit)' }} /></button>
+                            </Tooltip>
+                          </Popconfirm>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>—</span>
+                      )}
                     </td>
                   </tr>
                 )
