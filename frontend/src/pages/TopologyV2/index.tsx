@@ -12,11 +12,13 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Alert, Button, Empty, Segmented, Spin, Tag, Tooltip, Badge } from 'antd'
+import { Alert, Button, Segmented, Spin, Tag, Tooltip, Badge } from 'antd'
+import { useAuthStore } from '@/store/auth'
+import NmEmpty from '@/components/NmEmpty'
 import {
   ReloadOutlined, FullscreenOutlined, FullscreenExitOutlined,
   ThunderboltOutlined, CloseOutlined, WarningOutlined, DesktopOutlined,
-  AimOutlined, SearchOutlined, ExportOutlined,
+  AimOutlined, SearchOutlined, ExportOutlined, ApartmentOutlined,
 } from '@ant-design/icons'
 import { useSite } from '@/contexts/SiteContext'
 import { useTopologyGraphV2 } from './api'
@@ -72,6 +74,11 @@ interface Engine { model: TopologyModel; locationId: number | null }
 
 export default function TopologyV2Page() {
   const { activeLocationId } = useSite()
+  // RBAC T4.1 — Keşfet / Tümünü Keşfet trigger live SSH discovery sweep
+  // (Mutating). Read-only view (cihaz listesi, blast radius, anomalies)
+  // is allowed for viewer; only Discover CTAs are gated. Backend
+  // re-enforces via require_system_role on /topology/discover*.
+  const canDiscover = useAuthStore((s) => s.can('topology', 'create'))
 
   // ── T8.3.A perf scaffolding ─────────────────────────────────────────────
   // Resolve `?stress=N&scenario=…&perf=1` once at mount. The flag also
@@ -604,8 +611,11 @@ export default function TopologyV2Page() {
             <Segmented size="small" value={viewMode}
               onChange={(v) => setViewMode(v as '2d' | '3d')}
               options={[{ label: '2D', value: '2d' }, { label: '3D', value: '3d' }]} />
-            <Tooltip title="Yeniden keşfet">
-              <Button size="small" icon={<ReloadOutlined />} onClick={() => void refetch()}>Keşfet</Button>
+            <Tooltip title={canDiscover ? 'Yeniden keşfet (LLDP/CDP sweep)' : 'Keşif yetkiniz yok — yalnızca org-admin ve üzeri'}>
+              <Button size="small" icon={<ReloadOutlined />} onClick={() => void refetch()}
+                disabled={!canDiscover}>
+                Keşfet
+              </Button>
             </Tooltip>
             <Tooltip title="Sunum modu — NOC duvar ekranı">
               <Button size="small" type={presentation ? 'primary' : 'default'}
@@ -708,15 +718,28 @@ export default function TopologyV2Page() {
           )}
           {isError && (
             <Centered>
-              <Alert type="error" showIcon message="Topoloji yüklenemedi"
-                description={(error as Error)?.message}
-                action={<Button size="small" onClick={() => void refetch()}>Yeniden dene</Button>} />
+              <NmEmpty
+                icon={<WarningOutlined />}
+                title="Topoloji yüklenemedi"
+                description={(error as Error)?.message ?? 'Bilinmeyen hata'}
+                action={<Button size="small" onClick={() => void refetch()}>Yeniden dene</Button>}
+                tone="crit"
+              />
             </Centered>
           )}
           {engine && engine.model.deviceCount === 0 && !isLoading && (
             <Centered>
-              <Empty image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={<span style={{ color: C.sub }}>Bu kapsamda cihaz yok</span>} />
+              <NmEmpty
+                icon={<ApartmentOutlined />}
+                title="Bu kapsamda cihaz yok"
+                description="Discover / Keşfet ile LLDP/CDP taramasını başlatın."
+                action={canDiscover && (
+                  <Button size="small" icon={<ReloadOutlined />} onClick={() => void refetch()}>
+                    Keşfet
+                  </Button>
+                )}
+                tone="neutral"
+              />
             </Centered>
           )}
 
@@ -796,9 +819,17 @@ export default function TopologyV2Page() {
 
             {/* KEŞIF */}
             <NocCard title="KEŞIF">
-              <button onClick={() => void refetch()} style={discoverBtn}>
-                <ReloadOutlined /> Tümünü Keşfet
-              </button>
+              {/* Tümünü Keşfet = canDiscover ('topology:create'); viewer
+                  gets a disabled state with explanation tooltip. */}
+              <Tooltip title={canDiscover ? '' : 'Keşif yetkiniz yok — yalnızca org-admin ve üzeri'}>
+                <button
+                  onClick={() => canDiscover && void refetch()}
+                  style={{ ...discoverBtn, opacity: canDiscover ? 1 : 0.45, cursor: canDiscover ? 'pointer' : 'not-allowed' }}
+                  disabled={!canDiscover}
+                >
+                  <ReloadOutlined /> Tümünü Keşfet
+                </button>
+              </Tooltip>
               <button onClick={jumpToIncident} style={{ ...secondaryBtn, color: C.orange, borderColor: 'rgba(249,115,22,0.4)' }}>
                 <ThunderboltOutlined /> Anomaliye Odaklan
               </button>
