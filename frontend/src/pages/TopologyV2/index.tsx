@@ -146,6 +146,10 @@ export default function TopologyV2Page() {
   const [fullscreen, setFullscreen] = useState(false)
   const [presentation, setPresentation] = useState(false)
   const [prefsLoaded, setPrefsLoaded] = useState(false)
+  // T4.3 wall mode — idle timer fades the bottom status bar after 8 s of
+  // no mouse activity in presentation mode. Mousemove restores it within
+  // one rAF. Default unhidden so the page never starts in idle state.
+  const [chromeIdle, setChromeIdle] = useState(false)
   // T8.4 NOC design — tool rail mode + hostname/IP search box.
   const [tool, setTool] = useState<'select' | 'pan'>('select')
   const [search, setSearch] = useState('')
@@ -160,12 +164,53 @@ export default function TopologyV2Page() {
     if (p.overlayLayers?.length) {
       setOverlayLayers(new Set(p.overlayLayers as OverlayLayer[]))
     }
+    // T4.3 — restore wallMode from persisted prefs but let the URL win.
+    if (p.wallMode) setPresentation(true)
     setPrefsLoaded(true)
   }, [])
   useEffect(() => {
     if (!prefsLoaded) return
-    saveUiPrefs({ viewMode, layoutMode, overlayLayers: [...overlayLayers] })
-  }, [prefsLoaded, viewMode, layoutMode, overlayLayers])
+    saveUiPrefs({
+      viewMode, layoutMode,
+      overlayLayers: [...overlayLayers],
+      wallMode: presentation,
+    })
+  }, [prefsLoaded, viewMode, layoutMode, overlayLayers, presentation])
+
+  // ── T4.3 ?wall=1 URL parameter — kiosk / NOC display deep-link ──────────
+  // Reads the param once at mount; sets presentation + requests true
+  // browser fullscreen. Idempotent — running twice does nothing extra.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('wall') !== '1') return
+    setPresentation(true)
+    // Defer one frame so the root mounts before requesting fullscreen
+    // (Safari rejects requestFullscreen during initial render).
+    requestAnimationFrame(() => {
+      void rootRef.current?.requestFullscreen?.().catch(() => undefined)
+    })
+  }, [])
+
+  // ── T4.3 idle fade — in presentation mode, dim the status bar after
+  //    8 s of no mouse movement; restore instantly on any move. ─────────
+  useEffect(() => {
+    if (!presentation) { setChromeIdle(false); return }
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const onMove = () => {
+      setChromeIdle(false)
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => setChromeIdle(true), 8000)
+    }
+    onMove() // start the timer
+    window.addEventListener('mousemove', onMove, { passive: true })
+    window.addEventListener('keydown', onMove)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('keydown', onMove)
+      if (timer) clearTimeout(timer)
+    }
+  }, [presentation])
 
   // ── T8.3.C perf test handles — engine ref (declared early; the install
   //    `useEffect` lives further down, after `handleEvent`, so the
@@ -1035,12 +1080,16 @@ export default function TopologyV2Page() {
         )}
       </div>
 
-      {/* ── BOTTOM STATUS BAR ──────────────────────────────────────────── */}
+      {/* ── BOTTOM STATUS BAR — T4.3 idle fade in wall mode ──────────────── */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 26, flexShrink: 0,
         padding: chrome ? '9px 18px' : '5px 14px',
         background: C.panel, border: `1px solid ${C.border}`, borderRadius: chrome ? 8 : 0,
         fontSize: 11.5,
+        // Wall-mode idle → status bar dims to a sliver but stays readable.
+        // Mouse move (handled by the page-level idle effect) restores it.
+        opacity: presentation && chromeIdle ? 0.22 : 1,
+        transition: 'opacity 0.5s ease',
       }}>
         <StatusFig label="Node" value={topoStats.nodes.toLocaleString()} color={C.teal} />
         <StatusFig label="Bağlantı" value={topoStats.links.toLocaleString()} color={C.teal} />
@@ -1054,6 +1103,32 @@ export default function TopologyV2Page() {
           {engine && <span style={{ fontFamily: MONO }}>graph v{engine.model.graphVersion}</span>}
         </span>
       </div>
+
+      {/* ── T4.3 — Always-visible 'Exit Wall' pill in presentation mode.
+           Without this the user has no way out (header is hidden). ─────── */}
+      {presentation && (
+        <button
+          onClick={() => {
+            setPresentation(false)
+            if (document.fullscreenElement) void document.exitFullscreen()
+          }}
+          style={{
+            position: 'fixed', top: 12, right: 12, zIndex: 9999,
+            background: 'rgba(14,23,41,0.85)', color: C.text,
+            border: `1px solid ${C.border}`, borderRadius: 999,
+            padding: '6px 14px', fontSize: 11, fontFamily: MONO,
+            letterSpacing: '0.08em', cursor: 'pointer',
+            backdropFilter: 'blur(12px)',
+            // Soft 0.4 base / 1.0 on hover so it doesn't fight the canvas.
+            opacity: chromeIdle ? 0.18 : 0.55,
+            transition: 'opacity 0.35s ease',
+          }}
+          onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+          onMouseLeave={(e) => (e.currentTarget.style.opacity = chromeIdle ? '0.18' : '0.55')}
+        >
+          <CloseOutlined /> WALL MODE — &#xC7;IKI&#x15E;
+        </button>
+      )}
 
       {/* ── SELECTED NODE DETAIL (floating) ───────────────────────────── */}
       {node && (
