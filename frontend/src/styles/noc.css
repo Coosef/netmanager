@@ -3398,3 +3398,65 @@
   .nm-navitem { padding: 10px 10px; }
 }
 
+
+/* ─────────────────────────────────────────────────────────────────────
+ * RBAC F11 / B3.2 — focus-visible + interactive-stat polish
+ *
+ * Hover'lar zaten .nm-card / .nm-table / .nm-navitem / .nm-iconbtn /
+ * .nm-kpi üzerinde tanımlı; burası eksik üç parça için additive sweep:
+ *   1) Tüm interaktif öğelerde keyboard focus halkasi (Tab kullananlar
+ *      için a11y temel gereksinimi).
+ *   2) .nm-statbar .nm-stat — tıklanabilir tile'lar için hover lift.
+ *   3) .nm-pill — interaktif pill'ler (filter chip vs.) için subtle bg.
+ * ────────────────────────────────────────────────────────────────── */
+
+/* 1. Keyboard focus halkası — fareyle tıklamada görünmez, Tab/Shift+Tab
+ *    ile gelindiğinde 2px accent halka. Hover üzerine bindirilebilir. */
+.nm-btn:focus-visible,
+.nm-iconbtn:focus-visible,
+.nm-navitem:focus-visible,
+.nm-rowact button:focus-visible,
+.nm-table tbody tr:focus-visible,
+.nm-card-x:focus-visible,
+.nm-pill:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  z-index: 1;  /* halka kart border'ının üstüne çıksın */
+}
+
+/* 2. Stat tile hover — sadece role/tabIndex ile interaktif olanlarda. */
+.nm-statbar .nm-stat[role="button"],
+.nm-statbar .nm-stat[tabindex] {
+  cursor: pointer;
+  transition: border-color .15s, background .15s, transform .12s;
+}
+.nm-statbar .nm-stat[role="button"]:hover,
+.nm-statbar .nm-stat[tabindex]:hover {
+  border-color: var(--accent);
+  background: var(--bg-2);
+  transform: translateY(-1px);
+}
+
+/* 3. Tıklanabilir pill (filter chip / action toggle) — cursor + subtle
+ *    background-tint. Default pill'i etkilemez (statik pill'lerde
+ *    onClick yok ya da role yok). */
+.nm-pill[role="button"],
+.nm-pill[onclick],
+.nm-pill.clickable {
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+.nm-pill[role="button"]:hover,
+.nm-pill[onclick]:hover,
+.nm-pill.clickable:hover {
+  background: var(--bg-2);
+  border-color: var(--accent);
+  color: var(--fg-0);
+}
+
+/* nm-rowact icon buttons — odakta bir tık daha belirgin background;
+ *    fare hover'ı zaten var (transparent → bg-2). */
+.nm-rowact button:focus-visible {
+  background: var(--bg-2);
+  border-radius: 4px;
+}
