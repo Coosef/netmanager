@@ -20,6 +20,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import {
+  RateMeter,
   wsPathForLocation,
   isTopologyFrame,
   nextBackoffDelay,
@@ -105,5 +106,57 @@ describe('nextBackoffDelay', () => {
     for (let i = 1; i < seq.length; i++) {
       expect(seq[i]).toBeGreaterThanOrEqual(seq[i - 1])
     }
+  })
+})
+
+describe('RateMeter (T4.4 backpressure)', () => {
+  it('default window is 2 s and threshold 200 ev/s', () => {
+    const m = new RateMeter()
+    expect(m.windowMs).toBe(2000)
+    expect(m.thresholdEventsPerSec).toBe(200)
+  })
+
+  it('reports zero rate when no events have been recorded', () => {
+    expect(new RateMeter().rate(1000)).toBe(0)
+  })
+
+  it('rate = (events in window) / window_secs', () => {
+    const m = new RateMeter(1000)  // 1-second window
+    for (let t = 0; t < 50; t++) m.record(t * 10)  // 50 events over 500 ms
+    // All 50 fall in [0..490], at t=500 the window is [-500..500], rate = 50 / 1
+    expect(m.rate(500)).toBe(50)
+  })
+
+  it('drops events outside the window (sliding behaviour)', () => {
+    const m = new RateMeter(1000)
+    // 100 events at t=0..99 then nothing
+    for (let t = 0; t < 100; t++) m.record(t)
+    // At t=5000 every sample is older than 1 s → rate must be 0
+    m.record(5000) // also adds 5000 itself
+    expect(m.rate(5000)).toBe(1)
+  })
+
+  it('isOverThreshold trips when rate ≥ threshold', () => {
+    const m = new RateMeter(1000, 10)  // 10 ev/s threshold
+    for (let t = 0; t < 9; t++) m.record(t)
+    expect(m.isOverThreshold(9)).toBe(false)  // 9 ev in last 1s ⇒ 9/s
+    m.record(10)
+    expect(m.isOverThreshold(10)).toBe(true)  // 10 ev in last 1s ⇒ 10/s
+  })
+
+  it('reset() empties the window so the meter is idle again', () => {
+    const m = new RateMeter(1000, 5)
+    for (let t = 0; t < 10; t++) m.record(t)
+    expect(m.isOverThreshold(10)).toBe(true)
+    m.reset()
+    expect(m.rate(10)).toBe(0)
+  })
+
+  it('the 200/2s default trips at 400 events in 2 s but not at 399', () => {
+    const m = new RateMeter()
+    for (let t = 0; t < 399; t++) m.record(t * 5)  // 399 events over 1995 ms
+    expect(m.isOverThreshold(1995)).toBe(false)   // 399 / 2 = 199.5
+    m.record(2000)
+    expect(m.isOverThreshold(2000)).toBe(true)    // 400 / 2 = 200 ⇒ trip
   })
 })

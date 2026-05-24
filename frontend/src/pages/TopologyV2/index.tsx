@@ -337,12 +337,36 @@ export default function TopologyV2Page() {
     }
   }, [])
 
+  // T4.4 — backpressure. When the realtime feed crosses 200 ev/s over
+  // a 2 s window, drop the socket and fall back to polling for 30 s; a
+  // banner tells the operator what happened. Auto-recovers when the
+  // timer fires (the socket re-opens and resyncs by graph_version).
+  const [backpressure, setBackpressure] = useState<{ rate: number; at: number } | null>(null)
+  const rtEnabled = !!engine && !backpressure
   const { status: rtStatus } = useTopologyRealtime({
-    enabled: !!engine,
+    enabled: rtEnabled,
     locationId: activeLocationId,
     onEvent: handleEvent,
     onReconnect: scheduleRefetch,
+    onBackpressure: (rate) => {
+      setBackpressure({ rate, at: Date.now() })
+    },
   })
+  // Auto-recover 30 s after a trip — long enough for the burst to subside
+  // (most discovery sweeps land in <10 s on 1k devices).
+  useEffect(() => {
+    if (!backpressure) return
+    const id = setTimeout(() => setBackpressure(null), 30_000)
+    return () => clearTimeout(id)
+  }, [backpressure])
+  // While the WS is dropped, run a faster manual poll (every 15 s) so the
+  // graph isn't stuck on the existing 60 s safety-net poll for half a
+  // minute. We call the same refetch the safety-net would call.
+  useEffect(() => {
+    if (!backpressure) return
+    const id = setInterval(() => { void refetch() }, 15_000)
+    return () => clearInterval(id)
+  }, [backpressure, refetch])
 
   // ── T8.3.C testHandles install ───────────────────────────────────────────
   // `handleEvent` is captured via a ref so the install's `useEffect` can
@@ -849,6 +873,24 @@ export default function TopologyV2Page() {
                 tone="neutral"
               />
             </Centered>
+          )}
+
+          {/* T4.4 backpressure banner — WS feed cut due to event flood */}
+          {backpressure && chrome && (
+            <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', maxWidth: 540, zIndex: 60 }}>
+              <Alert type="warning" showIcon icon={<WarningOutlined />}
+                message={`Olay seli — canl&#x131; ak&#x131;&#x15F; ge&#xE7;ici durduruldu (${Math.round(backpressure.rate)} ev/sn)`}
+                description={
+                  <div style={{ fontSize: 12 }}>
+                    <div>Topoloji 15 sn'de bir yenileniyor. WebSocket 30 sn sonra otomatik geri açılır.</div>
+                    <div style={{ color: C.sub, marginTop: 4 }}>
+                      {`E&#x15F;ik: 200 ev/sn ${'·'} pencere: 2 sn`}
+                    </div>
+                  </div>
+                }
+                action={<Button size="small" onClick={() => setBackpressure(null)}>&#x15E;imdi a&#xE7;</Button>}
+                closable onClose={() => setBackpressure(null)} />
+            </div>
           )}
 
           {/* drift banner */}
