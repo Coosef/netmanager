@@ -1175,8 +1175,19 @@ async def agent_websocket(
     agent.total_connections = (agent.total_connections or 0) + 1
     await db.commit()
 
-    # Emit online event if agent was previously offline
+    # Emit online event if agent was previously offline.
+    # T8.4 hotfix — the `db.commit()` above ended the txn that held our
+    # `set_config(..., is_local := true)` GUCs, so when the NetworkEvent
+    # INSERT runs below the RLS WITH CHECK (`organization_id = current_org_id`)
+    # has no current_org_id to compare against and the row is rejected. Re-set
+    # the GUCs on the new txn before emitting.
     if was_offline:
+        await db.execute(_sql_text(
+            "SELECT set_config('app.is_super_admin','off',true),"
+            "       set_config('app.current_org_id', :o, true),"
+            "       set_config('app.current_location_id', :l, true)"
+        ), {"o": str(agent.organization_id),
+            "l": str(agent.location_id) if agent.location_id is not None else ''})
         await _emit_agent_event(db, agent, "agent_online")
         await db.commit()
 
@@ -1303,8 +1314,14 @@ async def agent_websocket(
         except Exception:
             pass
 
-        # Emit offline event
+        # Emit offline event — same GUC-reset issue as the online path above.
         try:
+            await db.execute(_sql_text(
+                "SELECT set_config('app.is_super_admin','off',true),"
+                "       set_config('app.current_org_id', :o, true),"
+                "       set_config('app.current_location_id', :l, true)"
+            ), {"o": str(agent.organization_id),
+                "l": str(agent.location_id) if agent.location_id is not None else ''})
             await _emit_agent_event(db, agent, "agent_offline")
             await db.commit()
         except Exception:

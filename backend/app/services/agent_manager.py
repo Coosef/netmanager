@@ -1297,9 +1297,23 @@ class AgentManager:
         block_reason: Optional[str],
         request_id: Optional[str],
     ):
+        # T8.4 hotfix — Faz 8 fail-closed scoping rejected this insert because
+        # the worker session has no RLS context and the _scoping.py parent-FK
+        # lookup on the `agents` table also reads through RLS (returns 0 rows
+        # under an unscoped session). We resolve the agent's org/location
+        # ourselves (in-memory meta first, then a super-admin DB lookup for
+        # cold-start cases) and stamp the row explicitly.
         try:
             from app.core.database import make_worker_session
             from app.models.agent_command_log import AgentCommandLog
+
+            org_id, loc_id = await self._resolve_agent_scope(agent_id)
+            if org_id is None:
+                # Agent not in DB (orphaned WS session) — drop the audit row
+                # silently; scoping would reject the insert anyway.
+                log.debug("Command log dropped: agent %s has no org scope", agent_id)
+                return
+
             async with make_worker_session()() as db:
                 entry = AgentCommandLog(
                     agent_id=agent_id,
@@ -1312,11 +1326,45 @@ class AgentManager:
                     blocked=blocked,
                     block_reason=block_reason,
                     request_id=request_id,
+                    organization_id=org_id,
+                    location_id=loc_id,
                 )
                 db.add(entry)
                 await db.commit()
         except Exception as e:
             log.debug(f"Command log persist error: {e}")
+
+    async def _resolve_agent_scope(self, agent_id: str) -> tuple[Optional[int], Optional[int]]:
+        """Return (organization_id, location_id) for an agent.
+
+        Hot path: the WS-connect handler stamped these into ``self._meta`` on
+        accept; no DB round-trip needed. Cold path (worker process / agent
+        connected on a different replica): a super-admin DB lookup so RLS
+        doesn't hide the agent row from us.
+        """
+        cached = self._meta.get(agent_id) or {}
+        org = cached.get("organization_id")
+        loc = cached.get("location_id")
+        if org is not None:
+            return org, loc
+
+        try:
+            from sqlalchemy import text as _sql_text
+            from app.core.database import make_worker_session
+            async with make_worker_session()() as db:
+                await db.execute(_sql_text("SELECT set_config('app.is_super_admin','on',true)"))
+                row = (await db.execute(_sql_text(
+                    "SELECT organization_id, location_id FROM agents WHERE id = :a"
+                ), {"a": agent_id})).first()
+            if row is not None:
+                # Warm the cache for subsequent log writes on this process.
+                self._meta.setdefault(agent_id, {}).update(
+                    {"organization_id": row[0], "location_id": row[1]}
+                )
+                return row[0], row[1]
+        except Exception as e:
+            log.debug(f"Agent scope resolve failed for {agent_id}: {e}")
+        return None, None
 
     # ── Latency tracking ──────────────────────────────────────────────────────
 
@@ -1335,10 +1383,20 @@ class AgentManager:
             pass
 
     async def _persist_latency(self, agent_id: str, device_id: int, latency_ms: float, success: bool):
+        # T8.4 hotfix — AgentDeviceLatency is NOT NULL on organization_id /
+        # location_id. The worker session has no RLS context; stamp the
+        # agent's scope explicitly (cached in _meta from WS connect, with a
+        # super-admin DB fallback).
         try:
             from sqlalchemy.dialects.postgresql import insert
             from app.core.database import make_worker_session
             from app.models.agent_latency import AgentDeviceLatency
+
+            org_id, loc_id = await self._resolve_agent_scope(agent_id)
+            if org_id is None:
+                log.debug("Latency dropped: agent %s has no org scope", agent_id)
+                return
+
             async with make_worker_session()() as db:
                 stmt = (
                     insert(AgentDeviceLatency)
@@ -1348,6 +1406,8 @@ class AgentManager:
                         latency_ms=latency_ms,
                         success=success,
                         measured_at=datetime.now(timezone.utc),
+                        organization_id=org_id,
+                        location_id=loc_id,
                     )
                     .on_conflict_do_update(
                         constraint="uq_agent_device",
