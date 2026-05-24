@@ -177,6 +177,10 @@ export interface Device {
   ssh_username: string
   ssh_port: number
   agent_id?: string | null
+  // RBAC F11 — populated by backend with a superadmin-context lookup so
+  // even cross-location agents resolve their human name + live status.
+  agent_name?: string | null
+  agent_status?: string | null
   status: 'online' | 'offline' | 'unknown' | 'unreachable'
   last_seen?: string
   last_backup?: string

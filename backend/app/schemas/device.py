@@ -146,6 +146,15 @@ class DeviceResponse(BaseModel):
     availability_7d:   Optional[float] = None
     mtbf_hours:        Optional[float] = None
     experience_score:  Optional[float] = None
+    # RBAC F11 — populated by the endpoint via a LEFT JOIN on agents so
+    # the UI can always render the agent's human name + status, even when
+    # the agent lives in a location the caller cannot directly enumerate
+    # (e.g. a viewer who has read-access to a cross-loc device whose
+    # owning agent is in another sandbox). Both fields are None when the
+    # device has no agent_id, the agent row is missing, or the join was
+    # skipped (older endpoints).
+    agent_name:   Optional[str] = None
+    agent_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -167,6 +176,9 @@ class DeviceResponse(BaseModel):
             "snmp_v3_username", "snmp_v3_auth_protocol", "snmp_v3_priv_protocol",
             "group_id", "credential_profile_id", "created_at", "updated_at",
             "availability_24h", "availability_7d", "mtbf_hours", "experience_score",
+            # F11 — surface only if the endpoint joined and stashed them
+            # on the ORM object as transient attributes.
+            "agent_name", "agent_status",
         ]
         result = {f: getattr(data, f, None) for f in fields}
         result["snmp_community_set"] = bool(getattr(data, "snmp_community", None))

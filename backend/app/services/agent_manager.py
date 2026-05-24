@@ -385,9 +385,15 @@ class AgentManager:
                 reason=(f"device org/location ({d_org}/{d_loc}) outside "
                         f"agent session sandbox ({scope[0]}/{scope[1]})"),
             )
+            # RBAC F11 — Turkish, action-guidance message. The raw English
+            # 'Cross-location ssh_command rejected for device 105 — not in
+            # the agent's location' confused operators. Tell the user
+            # exactly which agent + location pair the device needs.
             raise AgentScopeError(
-                f"Cross-location {operation} rejected for device "
-                f"{getattr(device, 'id', None)} — not in the agent's location."
+                f"Cihaz #{getattr(device, 'id', None)} bu agent'ın "
+                f"lokasyonunda değil. Atanmış agent farklı bir lokasyona "
+                f"bağlı (cihaz: loc={d_loc}, agent oturumu: loc={scope[1]}). "
+                f"Doğru lokasyondaki agent atanmalı."
             )
 
     # ── Device status reporting ───────────────────────────────────────────────

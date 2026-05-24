@@ -578,10 +578,33 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
             <Descriptions.Item label="Proxy Agent">
               {(() => {
                 if (!currentDevice.agent_id) return <Tag color="default">Direkt SSH</Tag>
-                const ag = agents.find(a => a.id === currentDevice.agent_id)
-                return ag
-                  ? <Space size={4}><RobotOutlined /><span>{ag.name}</span><Tag color={ag.status === 'online' ? 'success' : 'error'}>{ag.status}</Tag></Space>
-                  : <Tag color="warning">Agent bulunamadı ({currentDevice.agent_id})</Tag>
+                // RBAC F11 — backend now ships agent_name + agent_status
+                // resolved under a superadmin context, so the name renders
+                // even when the agent lives in a location the caller can't
+                // see. Fall back to the cached agents list only if the
+                // backend didn't ship them (older endpoints), and finally
+                // to a friendlier 'erişim dışı' line — never the raw id.
+                const name = currentDevice.agent_name
+                  || agents.find((a) => a.id === currentDevice.agent_id)?.name
+                const status = currentDevice.agent_status
+                  || agents.find((a) => a.id === currentDevice.agent_id)?.status
+                if (name) {
+                  return (
+                    <Space size={4}>
+                      <RobotOutlined />
+                      <span>{name}</span>
+                      {status && (
+                        <Tag color={status === 'online' ? 'success' : 'error'}>{status}</Tag>
+                      )}
+                    </Space>
+                  )
+                }
+                // Last resort — should be rare after F11.
+                return (
+                  <Tooltip title={`Agent kimliği: ${currentDevice.agent_id}`}>
+                    <Tag color="default">Agent · görünürlük dışı</Tag>
+                  </Tooltip>
+                )
               })()}
             </Descriptions.Item>
             <Descriptions.Item label="Durum">

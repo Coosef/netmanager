@@ -309,6 +309,38 @@ async def _get_device_scoped(db: AsyncSession, device_id: int, current_user) -> 
     return device
 
 
+async def _enrich_agent_display(db: AsyncSession, devices: list[Device]) -> None:
+    """RBAC F11 — populate transient agent_name + agent_status on each
+    device so DeviceResponse renders the agent's HUMAN name instead of
+    the raw `a0d7lspjjerg` short id. A location-scoped viewer may have
+    a device pinned to an agent that lives in another location they
+    can't see (e.g. an agent serving Belek while the user is assigned
+    only to Manavgat); the lookup runs under superadmin_context so the
+    display name resolves regardless. We never disclose the agent's
+    location / hostname — only `name` and `status` — so this stays a
+    purely cosmetic enrichment, not a data-leak vector."""
+    ids = {d.agent_id for d in devices if d.agent_id}
+    if not ids:
+        return
+    from app.core.org_context import superadmin_context
+    from app.core.rls import apply_rls_context
+    from app.models.agent import Agent  # local import — avoids circulars
+
+    with superadmin_context():
+        await apply_rls_context(db)
+        rows = (await db.execute(
+            select(Agent.id, Agent.name, Agent.status).where(Agent.id.in_(ids))
+        )).all()
+    name_map = {row[0]: (row[1], row[2]) for row in rows}
+    for d in devices:
+        if d.agent_id and d.agent_id in name_map:
+            name, status = name_map[d.agent_id]
+            # Stash as transient attributes; DeviceResponse._mask_snmp_community
+            # picks them up via getattr().
+            setattr(d, "agent_name", name)
+            setattr(d, "agent_status", status)
+
+
 # ── Devices ─────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=dict)
@@ -358,6 +390,9 @@ async def list_devices(
 
     result = await db.execute(query.order_by(Device.hostname).offset(skip).limit(limit))
     devices = result.scalars().all()
+
+    # RBAC F11 — enrich agent display name + status before serialising.
+    await _enrich_agent_display(db, list(devices))
 
     return {
         "total": total,
@@ -968,7 +1003,10 @@ async def bulk_tag_devices(
 
 @router.get("/{device_id}", response_model=DeviceResponse)
 async def get_device(device_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = None):
-    return await _get_device_scoped(db, device_id, current_user)
+    device = await _get_device_scoped(db, device_id, current_user)
+    # F11 — fill agent_name / agent_status (transient) before serialisation
+    await _enrich_agent_display(db, [device])
+    return device
 
 
 @router.patch("/{device_id}", response_model=DeviceResponse)
