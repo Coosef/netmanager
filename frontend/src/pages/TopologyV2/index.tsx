@@ -21,6 +21,7 @@ import {
   AimOutlined, SearchOutlined, ExportOutlined, ApartmentOutlined,
 } from '@ant-design/icons'
 import { useSite } from '@/contexts/SiteContext'
+import { topologyApi } from '@/api/topology'
 import { useTopologyGraphV2 } from './api'
 import { buildTopologyModel, type TopologyModel } from './graphModel'
 import { diffAndPatch, applyTopologyEvent, ingestStrategy, type TopologyEvent } from './patch'
@@ -451,6 +452,64 @@ export default function TopologyV2Page() {
     setSelected({ id: target, kind: attr.nodeKind, label: attr.label, raw: attr.raw })
   }, [])
 
+  // ── T4.2 backend wires ────────────────────────────────────────────────────
+  // BLAST RADIUS — frontend computes a BFS focus locally (instant feedback);
+  // backend computes the authoritative count + `is_critical` flag on its own
+  // graph view. We surface BOTH so a Loc Admin can spot the discrepancy
+  // (e.g. their location-scoped graph misses cross-org neighbours that the
+  // backend still counts under the same org).
+  type BlastRadius = Awaited<ReturnType<typeof topologyApi.getBlastRadius>>
+  const [blast, setBlast] = useState<BlastRadius | null>(null)
+  const [blastLoading, setBlastLoading] = useState(false)
+  useEffect(() => {
+    setBlast(null)
+    if (!selected || selected.kind !== 'device') return
+    const deviceId = Number(selected.id.replace(/^[a-z]+:/, ''))
+    if (!Number.isFinite(deviceId)) return
+    let aborted = false
+    setBlastLoading(true)
+    topologyApi.getBlastRadius(deviceId)
+      .then((res) => { if (!aborted) setBlast(res) })
+      .catch(() => { if (!aborted) setBlast(null) })
+      .finally(() => { if (!aborted) setBlastLoading(false) })
+    return () => { aborted = true }
+  }, [selected])
+
+  // OLAY MODU — pull anomaly list once on toggle, then N/P cycle through
+  // their device_ids. The local overlay model already flags threat/heat
+  // nodes; this is the authoritative server list for the cycle index.
+  type Anomalies = Awaited<ReturnType<typeof topologyApi.getAnomalies>>
+  const [incidentMode, setIncidentMode] = useState(false)
+  const [anomalies, setAnomalies] = useState<Anomalies | null>(null)
+  const [anomalyIdx, setAnomalyIdx] = useState(0)
+  useEffect(() => {
+    if (!incidentMode) { setAnomalies(null); return }
+    let aborted = false
+    topologyApi.getAnomalies()
+      .then((res) => { if (!aborted) { setAnomalies(res); setAnomalyIdx(0) } })
+      .catch(() => { if (!aborted) setAnomalies(null) })
+    return () => { aborted = true }
+  }, [incidentMode])
+
+  const cycleIncident = useCallback((direction: 'next' | 'prev') => {
+    const list = anomalies?.anomalies ?? []
+    const eng = engineRef.current
+    if (!eng || list.length === 0) return
+    setAnomalyIdx((prev) => {
+      const total = list.length
+      const next = direction === 'next' ? (prev + 1) % total : (prev - 1 + total) % total
+      const a = list[next]
+      if (a?.device_id) {
+        const nodeId = `device:${a.device_id}`
+        if (eng.model.graph.hasNode(nodeId)) {
+          const attr = eng.model.graph.getNodeAttributes(nodeId)
+          setSelected({ id: nodeId, kind: attr.nodeKind, label: attr.label, raw: attr.raw })
+        }
+      }
+      return next
+    })
+  }, [anomalies])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName
@@ -466,12 +525,16 @@ export default function TopologyV2Page() {
           setViewMode((v) => (v === '2d' ? '3d' : v))
           break
         case 'incidentFocus': jumpToIncident(); break
+        case 'cycleIncident':
+          // N/P only work if Olay Modu is on and the list loaded.
+          if (incidentMode) cycleIncident(action.direction)
+          break
         case 'clear': setSelected(null); break
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [toggleFullscreen, jumpToIncident])
+  }, [toggleFullscreen, jumpToIncident, incidentMode, cycleIncident])
 
   const rtBadge = useMemo(() => {
     const map = { open: 'success', connecting: 'processing', closed: 'error' } as const
@@ -836,6 +899,81 @@ export default function TopologyV2Page() {
               <button onClick={exportSnapshot} style={secondaryBtn}>
                 <ExportOutlined /> JSON Dışa Aktar
               </button>
+            </NocCard>
+
+            {/* SEÇILI CIHAZ — T4.2: backend blast-radius + local focus.
+                Görünür yalnız bir cihaz seçildiğinde. */}
+            {selected && selected.kind === 'device' && (
+              <NocCard title="SEÇILI CIHAZ">
+                <div style={{ fontSize: 13, fontWeight: 600, color: C.text, marginBottom: 8 }}>
+                  {selected.label}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                  <div style={{ background: C.panel, padding: '6px 9px', borderRadius: 6, border: `1px solid ${C.border}` }}>
+                    <div style={{ ...crumb, fontSize: 9 }}>YEREL ODAK</div>
+                    <div style={{ fontSize: 18, color: C.teal, fontWeight: 700 }}>
+                      {focusSet?.nodes.size ?? '—'}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.sub }}>frontend BFS</div>
+                  </div>
+                  <div style={{
+                    background: C.panel, padding: '6px 9px', borderRadius: 6,
+                    border: `1px solid ${blast?.is_critical ? C.red : C.border}`,
+                  }}>
+                    <div style={{ ...crumb, fontSize: 9 }}>PATLAMA YARIÇAPI</div>
+                    <div style={{
+                      fontSize: 18, fontWeight: 700,
+                      color: blast?.is_critical ? C.red : C.text,
+                    }}>
+                      {blastLoading ? '…' : blast?.affected_count ?? '—'}
+                    </div>
+                    <div style={{ fontSize: 10, color: C.sub }}>
+                      {blast ? `${blast.direct_neighbors} doğrudan komşu` : 'backend doğrulama'}
+                    </div>
+                  </div>
+                </div>
+                {blast?.is_critical && (
+                  <div style={{
+                    fontSize: 11, color: C.red, padding: '4px 8px',
+                    background: 'rgba(239,68,68,0.10)', borderRadius: 4,
+                  }}>
+                    <WarningOutlined /> Kritik cihaz — düşmesi {blast.affected_count} cihazı etkiler.
+                  </div>
+                )}
+              </NocCard>
+            )}
+
+            {/* OLAY MODU — T4.2: backend anomaly list + N/P key cycle.
+                Toggle, list once-fetch on enable, cycle through with N/P. */}
+            <NocCard title="OLAY MODU">
+              <button
+                onClick={() => setIncidentMode((v) => !v)}
+                style={{ ...secondaryBtn,
+                  color: incidentMode ? C.orange : C.text,
+                  borderColor: incidentMode ? 'rgba(249,115,22,0.5)' : C.border,
+                  background: incidentMode ? 'rgba(249,115,22,0.10)' : 'transparent',
+                }}>
+                <AimOutlined /> {incidentMode ? 'Aç&#x131;k' : 'Kapal&#x131;'}
+              </button>
+              {incidentMode && anomalies && (
+                <div style={{ marginTop: 8, fontSize: 11, color: C.sub }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span>{anomalies.count} olay</span>
+                    {anomalies.warning_count > 0 && (
+                      <span style={{ color: C.orange }}>{anomalies.warning_count} uyar&#x131;</span>
+                    )}
+                  </div>
+                  {anomalies.anomalies.length > 0 && (
+                    <div style={{ marginTop: 4, color: C.text, fontSize: 12 }}>
+                      {anomalyIdx + 1} / {anomalies.anomalies.length} &#xB7;{' '}
+                      <span style={{ color: C.sub }}>{anomalies.anomalies[anomalyIdx]?.message}</span>
+                    </div>
+                  )}
+                  <div style={{ marginTop: 6, fontSize: 10, color: C.muted }}>
+                    N sonraki &#xB7; P &#xF6;nceki
+                  </div>
+                </div>
+              )}
             </NocCard>
 
             {/* İSTİHBARAT — overlay layers + tactical hints */}

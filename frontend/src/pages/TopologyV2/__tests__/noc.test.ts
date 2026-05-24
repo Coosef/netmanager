@@ -25,11 +25,14 @@ describe('keyboardAction', () => {
     expect(keyboardAction('c')).toEqual({ kind: 'layout', layout: 'cluster' })
     expect(keyboardAction('o')).toEqual({ kind: 'layout', layout: 'orbit' })
     expect(keyboardAction('i')).toEqual({ kind: 'incidentFocus' })
+    expect(keyboardAction('n')).toEqual({ kind: 'cycleIncident', direction: 'next' })
+    expect(keyboardAction('p')).toEqual({ kind: 'cycleIncident', direction: 'prev' })
     expect(keyboardAction('Escape')).toEqual({ kind: 'clear' })
   })
   it('is case-insensitive', () => {
     expect(keyboardAction('F')).toEqual({ kind: 'fullscreen' })
     expect(keyboardAction('C')).toEqual({ kind: 'layout', layout: 'cluster' })
+    expect(keyboardAction('N')).toEqual({ kind: 'cycleIncident', direction: 'next' })
   })
   it('returns null for an unbound key', () => {
     expect(keyboardAction('x')).toBeNull()
