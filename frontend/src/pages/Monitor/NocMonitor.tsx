@@ -242,12 +242,21 @@ function EventCard({ ev, onDetail, onAck }: { ev: NetworkEvent; onDetail: () => 
   return (
     <div className="nm-card" onClick={onDetail} style={{ cursor: 'pointer', padding: 0 }}>
       <div style={{ padding: '14px 18px', display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 14, alignItems: 'flex-start' }}>
-        {/* Severity stripe — açık olaylar (acked değil) için kritik/uyarı stripe pulse */}
-        <div style={{
-          width: 4, alignSelf: 'stretch', borderRadius: 2,
-          background: `var(--${sevCls})`,
-          ...(isOpen && sevCls === 'crit' ? { animation: 'nm-edgepulse 1.5s ease-in-out infinite' } : {}),
-        }}></div>
+        {/* Severity stripe — açık (acked değil) crit/warn olaylar için glow + pulse.
+            T8.4: kullanıcı isteği ile turuncu (warn) da kırmızı (crit) gibi nabız
+            atıyor. Animation süreleri farklı (crit 1.4s daha hızlı / warn 1.9s)
+            ki yan yana durunca crit hep daha ön planda hissedilsin. */}
+        <div
+          className={
+            isOpen && (sevCls === 'crit' || sevCls === 'warn')
+              ? `nm-sev-stripe nm-sev-stripe-${sevCls}`
+              : 'nm-sev-stripe'
+          }
+          style={{
+            width: 4, alignSelf: 'stretch', borderRadius: 2,
+            background: `var(--${sevCls})`,
+          }}
+        />
 
         {/* Body */}
         <div style={{ minWidth: 0 }}>

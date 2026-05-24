@@ -10,7 +10,7 @@ import {
   AppstoreOutlined, UnorderedListOutlined, DownOutlined, RightOutlined,
   ApiOutlined, SaveOutlined,
 } from '@ant-design/icons'
-import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
@@ -66,21 +66,48 @@ interface DeviceSummaryRow {
   error: string | null
 }
 
+/**
+ * T8.4 perf — tek HTTP batch (cache hit'ler anında, miss'ler sunucuda
+ * paralel SSH). Eski N x useQueries pattern'i tarayıcının 6-paralel
+ * limitini aşamıyordu; ilk yüklemede 60+ switch için ~60 sn'lik kuyruk
+ * oluşuyordu. Şimdi tek istek, en yavaş SSH süresi kadar bekliyor.
+ *
+ * useQueries de kaldırıldı çünkü iki sistem aynı queryKey'i kullansa
+ * cache tutarlılığı bozulur — port-assignment tab'ı hala /vlans tek-cihaz
+ * endpoint'ini ['device-vlans', id] ile çekiyor, batch sonucu da o key'e
+ * yazılıyor (qc.setQueryData) → ikisi aynı cache'i paylaşır.
+ */
 function useAllDeviceVlans(devices: Device[]) {
-  const results = useQueries({
-    queries: devices.map((d) => ({
-      queryKey: ['device-vlans', d.id],
-      queryFn: () => devicesApi.getVlans(d.id),
-      staleTime: 120_000,
-      retry: 0,
-    })),
+  const qc = useQueryClient()
+  const ids = useMemo(() => devices.map((d) => d.id).sort((a, b) => a - b), [devices])
+  const cacheKey = ids.join(',')
+
+  const { data, isFetching } = useQuery({
+    // Cache key id-set'e bağlı; SiteContext değişirse devices değişir → re-fetch.
+    queryKey: ['device-vlans-batch', cacheKey],
+    queryFn: async () => {
+      if (ids.length === 0) return { items: {}, fetched: 0, from_cache: 0, errors: 0 }
+      const res = await devicesApi.getVlansBatch(ids)
+      // Per-device cache'i de doldur ki port-assignment tab tek-cihaz
+      // getVlans çağırınca yeni round-trip yapmasın.
+      for (const [didStr, payload] of Object.entries(res.items)) {
+        qc.setQueryData(['device-vlans', Number(didStr)], payload)
+      }
+      return res
+    },
+    staleTime: 120_000,
+    retry: 0,
   })
-  return devices.map((d, i) => ({
-    device: d,
-    vlans: results[i]?.data?.vlans || [],
-    loading: results[i]?.isLoading ?? false,
-    error: results[i]?.data?.error || (results[i]?.isError ? 'SSH bağlantı hatası' : null),
-  }))
+
+  return devices.map((d) => {
+    const item = data?.items?.[String(d.id)]
+    return {
+      device: d,
+      vlans: item?.vlans || [],
+      loading: isFetching && !item,
+      error: item?.error || (!item && !isFetching && data ? 'Yanıt yok' : null),
+    }
+  })
 }
 
 export default function VlanManagementPage() {
@@ -166,6 +193,7 @@ export default function VlanManagementPage() {
       devicesApi.deleteVlan(deviceId, vlanId),
     onSuccess: (_, { deviceId }) => {
       qc.invalidateQueries({ queryKey: ['device-vlans', deviceId] })
+      qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
     },
   })
 
@@ -267,6 +295,7 @@ export default function VlanManagementPage() {
           await devicesApi.deleteVlan(deviceId, values.vlan_id)
         }
         qc.invalidateQueries({ queryKey: ['device-vlans', deviceId] })
+        qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
         ok++
       } catch {
         fail++
@@ -463,7 +492,11 @@ export default function VlanManagementPage() {
         <Space>
           <Button
             icon={<SyncOutlined />}
-            onClick={() => allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))}
+            onClick={() => {
+              // T8.4 batch — tek invalidate, sunucu force=true ile cache'i atlar.
+              qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
+              allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))
+            }}
           >
             Tümünü Yenile
           </Button>

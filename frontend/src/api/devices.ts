@@ -70,6 +70,18 @@ export const devicesApi = {
       `/devices/${id}/vlans`, { params: force ? { force: true } : undefined }
     ).then((r) => r.data),
 
+  // T8.4 perf — tek HTTP call ile N cihaz için VLAN listesi. Cache hit'ler
+  // anında, miss'ler backend'de asyncio.gather ile paralel SSH. Browser'ın
+  // 6-paralel concurrent connection limitini aşar, VLAN sayfası ilk açılışı
+  // 60+ switch'te ~60 sn → ~12 sn (en yavaş SSH süresi) düşer.
+  getVlansBatch: (deviceIds: number[], force = false) =>
+    client.post<{
+      items: Record<string, { success: boolean; vlans: Vlan[]; error?: string }>
+      fetched: number
+      from_cache: number
+      errors: number
+    }>('/devices/vlans-batch', { device_ids: deviceIds, force }).then((r) => r.data),
+
   createVlan: (id: number, vlan_id: number, name: string) =>
     client.post<{ success: boolean; error?: string }>(
       `/devices/${id}/vlans`, { vlan_id, name }

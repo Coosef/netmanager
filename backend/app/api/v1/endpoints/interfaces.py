@@ -413,6 +413,98 @@ async def get_vlans(
     return response
 
 
+# ─── VLAN batch (T8.4 perf) ─────────────────────────────────────────────────
+# Tek HTTP call ile birden fazla cihazın VLAN listesi. Cache hit'ler anında,
+# cache miss'ler sunucuda asyncio.gather ile paralel SSH atılır (tarayıcının
+# 6-paralel concurrent connection limitini aşar). VLAN sayfası 60+ switch'i
+# tek istekle çekebilir → ilk yükleme 1 round-trip + en yavaş cihazın
+# SSH süresi (eskiden N × round-trip).
+
+@router.post("/vlans-batch")
+async def get_vlans_batch(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("config:view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    import asyncio
+    body = await request.json()
+    raw_ids = body.get("device_ids", [])
+    force = bool(body.get("force", False))
+    try:
+        device_ids = [int(x) for x in raw_ids]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="device_ids must be a list of integers")
+    if not device_ids:
+        return {"items": {}, "fetched": 0, "from_cache": 0, "errors": 0}
+    if len(device_ids) > 200:
+        raise HTTPException(status_code=400, detail="device_ids capped at 200 per batch")
+
+    # 1) RLS-scoped device fetch — un-authorized IDs silently drop.
+    devices = (await db.execute(
+        select(Device).where(Device.id.in_(device_ids))
+    )).scalars().all()
+    dev_by_id = {d.id: d for d in devices}
+
+    # 2) Cache-first pass.
+    items: dict[str, dict] = {}
+    from_cache = 0
+    misses: list[Device] = []
+    for did in device_ids:
+        dev = dev_by_id.get(did)
+        if not dev:
+            items[str(did)] = {"success": False, "vlans": [], "error": "Cihaz bulunamadı"}
+            continue
+        ck = _scoped_cache_key(did, "vlans")
+        cached = _cache_get(ck) if not force else None
+        if cached:
+            items[str(did)] = cached
+            from_cache += 1
+        else:
+            misses.append(dev)
+
+    # 3) Parallel SSH for misses (per-device timeout, gather-with-exceptions).
+    async def fetch_one(dev: Device) -> tuple[int, dict]:
+        try:
+            result = await asyncio.wait_for(
+                ssh_manager.execute_command(dev, _vlan_cmd(dev.os_type)),
+                timeout=12.0,
+            )
+        except asyncio.TimeoutError:
+            return dev.id, {"success": False, "vlans": [], "error": "SSH zaman aşımı (12s)"}
+        except Exception as exc:
+            return dev.id, {"success": False, "vlans": [], "error": str(exc)[:200]}
+        if not result.success:
+            return dev.id, {"success": False, "vlans": [], "error": result.error}
+        resp = {
+            "success": True,
+            "vlans": _parse_vlans(result.output, dev.os_type),
+            "raw": result.output,
+            "fetched_at": time.time(),
+            "cached": False,
+        }
+        try:
+            _cache_set(_scoped_cache_key(dev.id, "vlans"), {**resp, "cached": True}, _VLAN_CACHE_TTL)
+        except Exception:
+            pass
+        return dev.id, resp
+
+    if misses:
+        results = await asyncio.gather(*(fetch_one(d) for d in misses), return_exceptions=False)
+        for did, resp in results:
+            items[str(did)] = resp
+
+    errors = sum(1 for v in items.values() if not v.get("success"))
+    return {
+        "items": items,
+        "fetched": len(misses),
+        "from_cache": from_cache,
+        "errors": errors,
+    }
+
+
 @router.post("/{device_id}/vlans")
 async def create_vlan(
     device_id: int,

@@ -177,19 +177,31 @@ async def config_drift_report(
     tenant_id: Optional[int] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
+    include_clean: bool = Query(False, description="Include devices whose latest matches the golden baseline"),
 ):
     """
     Compare each device's latest backup hash against its golden config hash.
     Returns devices with drift (hash mismatch) and summary stats.
+
+    T8.4 — `include_clean=true` ile temiz (eşleşen) cihazlar da items
+    listesine eklenir, böylece UI "baseline detay" görünümü
+    (hangi cihaz hangi tarihte baseline işaretlendi, son backup ne zaman
+    yapıldı, hash kısa) gösterebilir.
     """
     tf = tenant_id or (current_user.tenant_id if hasattr(current_user, "tenant_id") else None)
 
-    # Golden baselines per device
-    golden_q = select(ConfigBackup.device_id, ConfigBackup.config_hash.label("golden_hash")).where(ConfigBackup.is_golden == True)
+    # Golden baselines per device (id + hash + created_at — clean rows want timestamp too).
+    golden_q = select(
+        ConfigBackup.device_id,
+        ConfigBackup.config_hash.label("golden_hash"),
+        ConfigBackup.created_at.label("golden_at"),
+        ConfigBackup.id.label("golden_id"),
+    ).where(ConfigBackup.is_golden == True)
     if tf:
         golden_q = golden_q.where(ConfigBackup.tenant_id == tf)
     golden_rows = (await db.execute(golden_q)).fetchall()
     golden_map = {r[0]: r[1] for r in golden_rows}
+    golden_meta = {r[0]: {"golden_at": r[2].isoformat() if r[2] else None, "golden_id": r[3]} for r in golden_rows}
 
     if not golden_map:
         return {
@@ -222,7 +234,7 @@ async def config_drift_report(
     dev_map = {r[0]: r for r in device_rows}
 
     drift_items = []
-    clean_count = 0
+    clean_items = []
     no_backup_count = 0
 
     for device_id, golden_hash in golden_map.items():
@@ -232,6 +244,7 @@ async def config_drift_report(
         vendor = dev[3] if dev else None
         site = dev[4] if dev else None
         status = dev[5] if dev else None
+        gmeta = golden_meta.get(device_id, {})
 
         if device_id not in latest_map:
             no_backup_count += 1
@@ -240,25 +253,35 @@ async def config_drift_report(
                 "vendor": vendor, "site": site, "device_status": status,
                 "drift": True, "reason": "no_backup",
                 "latest_backup_at": None, "backup_id": None,
+                "golden_at": gmeta.get("golden_at"),
+                "golden_id": gmeta.get("golden_id"),
+                "golden_hash_short": (golden_hash or "")[:12],
             })
         else:
             _, latest_hash, latest_at, backup_id = latest_map[device_id]
             has_drift = latest_hash != golden_hash
+            entry = {
+                "device_id": device_id, "hostname": hostname, "ip": ip,
+                "vendor": vendor, "site": site, "device_status": status,
+                "latest_backup_at": latest_at.isoformat(),
+                "backup_id": backup_id,
+                "golden_at": gmeta.get("golden_at"),
+                "golden_id": gmeta.get("golden_id"),
+                "golden_hash_short": (golden_hash or "")[:12],
+                "latest_hash_short": (latest_hash or "")[:12],
+            }
             if has_drift:
-                drift_items.append({
-                    "device_id": device_id, "hostname": hostname, "ip": ip,
-                    "vendor": vendor, "site": site, "device_status": status,
-                    "drift": True, "reason": "hash_mismatch",
-                    "latest_backup_at": latest_at.isoformat(), "backup_id": backup_id,
-                })
+                drift_items.append({**entry, "drift": True, "reason": "hash_mismatch"})
             else:
-                clean_count += 1
+                clean_items.append({**entry, "drift": False, "reason": "clean"})
 
+    clean_count = len(clean_items)
     total_with_golden = len(golden_map)
     drift_count = len(drift_items)
 
-    # Pagination over drift items
-    paginated = drift_items[skip: skip + limit]
+    # Pagination over the chosen item set.
+    all_items = drift_items + clean_items if include_clean else drift_items
+    paginated = all_items[skip: skip + limit]
 
     return {
         "total_with_golden": total_with_golden,
@@ -266,7 +289,8 @@ async def config_drift_report(
         "clean_count": clean_count,
         "no_backup_count": no_backup_count,
         "items": paginated,
-        "total": drift_count,
+        "total": len(all_items),
+        "include_clean": include_clean,
     }
 
 

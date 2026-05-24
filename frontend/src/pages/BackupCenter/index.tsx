@@ -680,7 +680,21 @@ export default function BackupCenterPage() {
       setSelectedIds([])
       setActiveTaskId(res.task_id)
     },
-    onError: () => message.error('Yedekleme başlatılamadı'),
+    // T8.4 — backend `detail` veya `error` alanı varsa onu göster (eskiden
+    // "Yedekleme başlatılamadı" generic mesajı kullanıcıya nedenini
+    // söylemiyordu: SSH timeout? permission? cihaz offline? RLS rejection?).
+    onError: (e: any) => {
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.error ||
+        e?.message ||
+        'Yedekleme başlatılamadı'
+      const code = e?.response?.status
+      message.error(
+        code ? `Yedekleme başlatılamadı (HTTP ${code}): ${detail}` : `Yedekleme başlatılamadı: ${detail}`,
+        6,
+      )
+    },
   })
 
   const rows: BackupRow[] = useMemo(() => {

@@ -3558,6 +3558,42 @@
 }
 
 /* ─────────────────────────────────────────────────────────────────────
+ * T8.4 — Uyarılar severity stripe (sol dik çubuk)
+ *
+ * NocMonitor EventCard sol kenar stripe'ı için. Açık olaylarda crit (kırmızı)
+ * ve warn (turuncu) için aynı stilde glow + nabız atıyor. Kapalı /
+ * onaylanmış olaylar sade kalıyor. Crit nabız warn'dan biraz daha hızlı
+ * (1.4s vs 1.9s) ki yan yana durunca crit ön planda hissedilsin.
+ * ────────────────────────────────────────────────────────────────── */
+.nm-sev-stripe { transition: box-shadow 0.2s; }
+.nm-sev-stripe-crit {
+  animation: nmSevPulseCrit 1.4s ease-in-out infinite;
+}
+.nm-sev-stripe-warn {
+  animation: nmSevPulseWarn 1.9s ease-in-out infinite;
+}
+@keyframes nmSevPulseCrit {
+  0%, 100% {
+    box-shadow: 0 0 4px var(--crit), 0 0 0 0 rgba(239, 68, 68, 0.35);
+    opacity: 0.85;
+  }
+  50% {
+    box-shadow: 0 0 14px var(--crit), 0 0 22px rgba(239, 68, 68, 0.45);
+    opacity: 1;
+  }
+}
+@keyframes nmSevPulseWarn {
+  0%, 100% {
+    box-shadow: 0 0 4px var(--warn), 0 0 0 0 rgba(245, 158, 11, 0.30);
+    opacity: 0.85;
+  }
+  50% {
+    box-shadow: 0 0 12px var(--warn), 0 0 20px rgba(245, 158, 11, 0.40);
+    opacity: 1;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────
  * T8.4 — HUD tactical accents (TopologyV2)
  *
  * Netmanager/3D Topology Prototype.html'den iki "tactical" detay

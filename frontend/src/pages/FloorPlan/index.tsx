@@ -679,7 +679,7 @@ export default function FloorPlanPage() {
         {/* Plan selector */}
         <div style={{ padding: '10px 8px 6px', borderBottom: `1px solid ${C.border}` }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 6 }}>
-            <span style={{ fontSize: 12, fontWeight: 700, color: C.text, flex: 1 }}>Kat Planları</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: C.text, flex: 1 }}>Haritalar</span>
             <Button size="small" icon={<FolderOpenOutlined />} onClick={() => setLayoutDrawerOpen(true)} />
           </div>
           <Select size="small" style={{ width: '100%' }} value={activeId ?? undefined}
@@ -842,9 +842,9 @@ export default function FloorPlanPage() {
           />
         ) : (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
-            <Empty description={<span style={{ color: C.muted }}>Henüz kat planı yok</span>} />
+            <Empty description={<span style={{ color: C.muted }}>Henüz harita yok</span>} />
             <Button type="primary" icon={<PlusOutlined />} onClick={() => setLayoutDrawerOpen(true)}>
-              Yeni Kat Planı
+              Yeni Harita
             </Button>
           </div>
         )}
@@ -858,15 +858,15 @@ export default function FloorPlanPage() {
       )}
 
       {/* ── Plans management drawer ──────────────────────────────────────────── */}
-      <Drawer title="Kat Planları" open={layoutDrawerOpen} onClose={() => setLayoutDrawerOpen(false)}
+      <Drawer title="Haritalar" open={layoutDrawerOpen} onClose={() => setLayoutDrawerOpen(false)}
         width={320} styles={{ body: { padding: '12px 16px' } }}>
         <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
-          <Input placeholder="Yeni plan adı…" value={newName}
+          <Input placeholder="Yeni harita adı…" value={newName}
             onChange={e => setNewName(e.target.value)} onPressEnter={handleNewPlan} />
           <Button type="primary" icon={<SaveOutlined />} onClick={handleNewPlan}>Oluştur</Button>
         </Space.Compact>
 
-        {Object.values(store).length === 0 && <Empty description="Henüz kat planı yok" style={{ marginTop: 32 }} />}
+        {Object.values(store).length === 0 && <Empty description="Henüz harita yok" style={{ marginTop: 32 }} />}
 
         {Object.values(store).map(plan => (
           <div key={plan.id}

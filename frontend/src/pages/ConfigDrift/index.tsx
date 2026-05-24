@@ -108,9 +108,14 @@ export default function ConfigDriftPage() {
     finally { setDiffLoading(false) }
   }
 
+  // T8.4 — kullanıcı temiz cihazların da baseline detayını (golden ne zaman
+  // işaretlendi, son backup hangi tarih, hash kısa) görebilsin. Drift yokken
+  // sadece "her şey temiz" diyen boş sayfa yerine baseline envanteri görünür.
+  const [showAll, setShowAll] = useState(false)
+
   const { data, isLoading, refetch, isFetching } = useQuery({
-    queryKey: ['config-drift'],
-    queryFn: () => backupSchedulesApi.driftReport({ limit: 500 }),
+    queryKey: ['config-drift', showAll],
+    queryFn: () => backupSchedulesApi.driftReport({ limit: 500, include_clean: showAll }),
     staleTime: 60_000,
   })
 
@@ -131,6 +136,13 @@ export default function ConfigDriftPage() {
           </div>
         </div>
         <div className="nm-page-actions">
+          <button
+            className={`nm-btn ${showAll ? 'primary' : 'ghost'}`}
+            onClick={() => setShowAll((v) => !v)}
+            title="Drift olmayan (temiz) cihazların baseline detayını da listele"
+          >
+            {showAll ? '✓ Temizleri Göster' : 'Tüm Cihazları Göster'}
+          </button>
           <button className="nm-btn ghost" onClick={() => refetch()} disabled={isFetching}>
             <ReloadOutlined spin={isFetching} /> Tekrar Tara
           </button>
@@ -154,76 +166,110 @@ export default function ConfigDriftPage() {
         <Alert type="info" showIcon style={{ marginTop: 12 }}
           message="Altın baseline yok"
           description="Drift tespiti için cihazların golden config'i işaretlenmiş olması gerekir. Yedekleme Merkezi'nden bir backup'ı 'Golden' olarak işaretleyin." />
-      ) : data.drift_count === 0 ? (
-        <Alert type="success" showIcon icon={<CheckCircleOutlined />}
-          message="Tüm cihazlar temiz — drift tespit edilmedi" style={{ marginTop: 12 }} />
       ) : (
-        <div className="nm-table-wrap">
-          <div className="nm-table-toolbar">
-            <span className="count"><em>{items.length}</em> cihazda config sapması</span>
-            <span style={{ color: 'var(--fg-3)', marginLeft: 'auto', fontSize: 11 }}>
-              {isFetching ? 'Yükleniyor…' : ' '}
-            </span>
-          </div>
-          <div style={{ overflow: 'auto' }}>
-            <table className="nm-table">
-              <thead>
-                <tr>
-                  <th>Cihaz</th>
-                  <th>Vendor</th>
-                  <th>Lokasyon</th>
-                  <th>Durum</th>
-                  <th>Sebep</th>
-                  <th>Son Backup</th>
-                  <th className="col-actions"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((r) => {
-                  const isHashMismatch = r.reason === 'hash_mismatch'
-                  return (
-                    <tr key={r.device_id}>
-                      <td>
-                        <div className="nm-host">{r.hostname}</div>
-                        {r.ip && <div className="nm-host-ip">{r.ip}</div>}
-                      </td>
-                      <td>{r.vendor ? <span className="nm-pill">{r.vendor}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
-                      <td style={{ fontSize: 11.5 }}>{r.site || <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
-                      <td>
-                        <span className={`nm-pill ${r.device_status === 'online' ? 'ok' : r.device_status === 'offline' ? 'crit' : ''}`}>
-                          {r.device_status || '—'}
-                        </span>
-                      </td>
-                      <td>
-                        {isHashMismatch ? (
-                          <span className="nm-pill warn"><WarningOutlined /> Config Değişmiş</span>
-                        ) : (
-                          <span className="nm-pill crit"><CloseCircleOutlined /> Backup Yok</span>
-                        )}
-                      </td>
-                      <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                        {r.latest_backup_at ? (
-                          <Tooltip title={dayjs(r.latest_backup_at).format('DD.MM.YYYY HH:mm:ss')}>
-                            {dayjs(r.latest_backup_at).fromNow()}
-                          </Tooltip>
-                        ) : 'Hiç yedeklenmemiş'}
-                      </td>
-                      <td className="col-actions">
-                        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
-                          {isHashMismatch && (
-                            <Tooltip title="Diff göster">
-                              <button onClick={() => openDiff(r)}><DiffOutlined /></button>
-                            </Tooltip>
-                          )}
-                        </span>
-                      </td>
+        <>
+          {/* Drift yokken üstte sade success rozet — tablo aşağıda baseline detayını gösterir. */}
+          {data.drift_count === 0 && (
+            <Alert type="success" showIcon icon={<CheckCircleOutlined />}
+              message="Tüm cihazlar temiz — drift tespit edilmedi"
+              description={!showAll && 'Baseline detayı (golden tarihi, son backup, hash) için “Tüm Cihazları Göster” butonunu kullanın.'}
+              style={{ marginTop: 12, marginBottom: 12 }} />
+          )}
+
+          {items.length > 0 && (
+            <div className="nm-table-wrap">
+              <div className="nm-table-toolbar">
+                <span className="count">
+                  <em>{items.length}</em>{' '}
+                  {showAll
+                    ? `cihazın baseline detayı (${data.drift_count} drift / ${data.clean_count} temiz)`
+                    : 'cihazda config sapması'}
+                </span>
+                <span style={{ color: 'var(--fg-3)', marginLeft: 'auto', fontSize: 11 }}>
+                  {isFetching ? 'Yükleniyor…' : ' '}
+                </span>
+              </div>
+              <div style={{ overflow: 'auto' }}>
+                <table className="nm-table">
+                  <thead>
+                    <tr>
+                      <th>Cihaz</th>
+                      <th>Vendor</th>
+                      <th>Lokasyon</th>
+                      <th>Durum</th>
+                      <th>Sebep</th>
+                      <th>Baseline</th>
+                      <th>Son Backup</th>
+                      <th>Hash</th>
+                      <th className="col-actions"></th>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                  </thead>
+                  <tbody>
+                    {items.map((r) => {
+                      const isHashMismatch = r.reason === 'hash_mismatch'
+                      const isClean = r.reason === 'clean'
+                      const reasonCell = isHashMismatch ? (
+                        <span className="nm-pill warn"><WarningOutlined /> Config Değişmiş</span>
+                      ) : isClean ? (
+                        <span className="nm-pill ok"><CheckCircleOutlined /> Temiz</span>
+                      ) : (
+                        <span className="nm-pill crit"><CloseCircleOutlined /> Backup Yok</span>
+                      )
+                      return (
+                        <tr key={r.device_id}>
+                          <td>
+                            <div className="nm-host">{r.hostname}</div>
+                            {r.ip && <div className="nm-host-ip">{r.ip}</div>}
+                          </td>
+                          <td>{r.vendor ? <span className="nm-pill">{r.vendor}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
+                          <td style={{ fontSize: 11.5 }}>{r.site || <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
+                          <td>
+                            <span className={`nm-pill ${r.device_status === 'online' ? 'ok' : r.device_status === 'offline' ? 'crit' : ''}`}>
+                              {r.device_status || '—'}
+                            </span>
+                          </td>
+                          <td>{reasonCell}</td>
+                          <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                            {r.golden_at ? (
+                              <Tooltip title={dayjs(r.golden_at).format('DD.MM.YYYY HH:mm:ss')}>
+                                {dayjs(r.golden_at).format('DD.MM.YY HH:mm')}
+                              </Tooltip>
+                            ) : '—'}
+                          </td>
+                          <td className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                            {r.latest_backup_at ? (
+                              <Tooltip title={dayjs(r.latest_backup_at).format('DD.MM.YYYY HH:mm:ss')}>
+                                {dayjs(r.latest_backup_at).fromNow()}
+                              </Tooltip>
+                            ) : 'Hiç yedeklenmemiş'}
+                          </td>
+                          <td className="mono" style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>
+                            {r.golden_hash_short ? (
+                              <Tooltip title={`Golden: ${r.golden_hash_short} · Son: ${r.latest_hash_short || '—'}`}>
+                                <span style={{ color: isHashMismatch ? 'var(--warn)' : 'var(--fg-3)' }}>
+                                  {r.golden_hash_short}
+                                </span>
+                              </Tooltip>
+                            ) : '—'}
+                          </td>
+                          <td className="col-actions">
+                            <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                              {isHashMismatch && (
+                                <Tooltip title="Diff göster">
+                                  <button onClick={() => openDiff(r)}><DiffOutlined /></button>
+                                </Tooltip>
+                              )}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       <DiffModal
