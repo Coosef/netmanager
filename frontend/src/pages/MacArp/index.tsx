@@ -942,8 +942,10 @@ function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) 
 
 export default function MacArpPage() {
   const qc = useQueryClient()
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
+  const { isDark: _isDark } = useTheme()
+  // mkC / C no longer used at the page level (nm-* tokens carry it);
+  // tab sub-components still derive their own C.
+  void _isDark
   const [searchOpen, setSearchOpen] = useState(false)
   const [, setCollectModal] = useState(false)
 
@@ -967,34 +969,29 @@ export default function MacArpPage() {
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Toplama başarısız'),
   })
 
+  // Stats normalisation — stats may not be loaded yet on first paint.
+  const macCount = stats?.mac_entries ?? 0
+  const arpCount = stats?.arp_entries ?? 0
+  const coveredDevs = stats?.devices_with_mac_data ?? 0
+  // Heuristic for the freshness column — if we have any data at all the
+  // last collect ran successfully, otherwise the empty state speaks.
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{MAC_ARP_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#06b6d420' : C.border}`,
-        borderLeft: '4px solid #06b6d4',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#06b6d420', border: '1px solid #06b6d430',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <ApartmentOutlined style={{ color: '#06b6d4', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>Port Intelligence</div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Cihaz Envanteri · MAC Tablosu · ARP Tablosu · Port Özeti</div>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>Port Intelligence</span></div>
+          <h1 className="nm-page-title">
+            Port Intelligence
+            <span className="nm-pill mono">{macCount.toLocaleString()} MAC</span>
+            <span className="nm-pill mono">{arpCount.toLocaleString()} ARP</span>
+          </h1>
+          <div className="nm-page-sub">
+            Cihaz envanteri &#xB7; MAC adres tablosu &#xB7; ARP tablosu &#xB7;
+            port özeti &#xB7; MAC/IP arama tek panelde.
           </div>
         </div>
         <Space wrap>
@@ -1024,35 +1021,28 @@ export default function MacArpPage() {
         </Space>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: 'flex', gap: 10 }}>
-        {[
-          { label: 'MAC Kaydı', value: stats?.mac_entries ?? 0, icon: <TableOutlined />, color: '#3b82f6' },
-          { label: 'ARP Kaydı', value: stats?.arp_entries ?? 0, icon: <GlobalOutlined />, color: '#22c55e' },
-          { label: 'Veri Olan Cihaz', value: stats?.devices_with_mac_data ?? 0, icon: <ApartmentOutlined />, color: '#f59e0b' },
-        ].map((s) => (
-          <div key={s.label} style={{
-            flex: 1,
-            background: isDark ? `linear-gradient(135deg, ${s.color}0d 0%, ${C.bg} 60%)` : C.bg,
-            border: `1px solid ${isDark ? s.color + '28' : C.border}`,
-            borderTop: isDark ? `2px solid ${s.color}55` : `2px solid ${s.color}`,
-            borderRadius: 10,
-            padding: '12px 16px',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            <div style={{
-              width: 34, height: 34, borderRadius: 8,
-              background: isDark ? `${s.color}20` : `${s.color}15`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <span style={{ color: s.color, fontSize: 15 }}>{s.icon}</span>
-            </div>
-            <div>
-              <div style={{ color: s.color, fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{s.value.toLocaleString()}</div>
-              <div style={{ color: C.muted, fontSize: 10, marginTop: 2 }}>{s.label}</div>
-            </div>
-          </div>
-        ))}
+      {/* NOC stat bar — 4 KPIs */}
+      <div className="nm-statbar">
+        <div className={`nm-stat ${macCount > 0 ? 'ok' : 'warn'}`}>
+          <div className="nm-stat-label">MAC KAYDI</div>
+          <div className="nm-stat-val">{macCount.toLocaleString()}</div>
+          <div className="nm-stat-delta">switch portlar&#x131;</div>
+        </div>
+        <div className={`nm-stat ${arpCount > 0 ? 'ok' : 'warn'}`}>
+          <div className="nm-stat-label">ARP KAYDI</div>
+          <div className="nm-stat-val">{arpCount.toLocaleString()}</div>
+          <div className="nm-stat-delta">L3 IP→MAC eşleşmesi</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">VERİ OLAN CİHAZ</div>
+          <div className="nm-stat-val">{coveredDevs}</div>
+          <div className="nm-stat-delta">veri topland&#x131;</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">ORT. MAC / CİHAZ</div>
+          <div className="nm-stat-val">{coveredDevs > 0 ? Math.round(macCount / coveredDevs) : 0}</div>
+          <div className="nm-stat-delta">switch yoğunluğu</div>
+        </div>
       </div>
 
       {/* Tabs */}
