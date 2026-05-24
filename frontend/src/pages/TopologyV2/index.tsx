@@ -280,6 +280,19 @@ export default function TopologyV2Page() {
   const engineRefForEvents = useRef<Engine | null>(engine)
   engineRefForEvents.current = engine
 
+  // T4.5 — location epoch. Bumped on every activeLocationId change so a
+  // frame that arrives AFTER the user switches but BEFORE the new WS
+  // socket replaces the old one can be detected and dropped. Without
+  // this, a slow-flushing burst could patch the new location's graph
+  // with the old location's events. Backend RLS already prevents data
+  // *leak* — this prevents UI inconsistency (graph_version drift).
+  const locationEpochRef = useRef(0)
+  useEffect(() => {
+    locationEpochRef.current += 1
+    // Drop any queued events that belonged to the previous location.
+    eventQueueRef.current = []
+  }, [activeLocationId])
+
   const flushEvents = useCallback(() => {
     flushRafRef.current = null
     const events = eventQueueRef.current
@@ -287,6 +300,10 @@ export default function TopologyV2Page() {
     eventQueueRef.current = []
     const eng = engineRefForEvents.current
     if (!eng) return
+    // T4.5 — drop the whole batch if the active location moved while
+    // these events were sitting in the rAF queue. The engine will
+    // shortly rebuild from a fresh /graph?v=2 fetch.
+    if (eng.locationId !== activeLocationId) return
     let appliedCount = 0
     let driftEvent: TopologyEvent | null = null
     let needsRefetch = false
@@ -319,7 +336,7 @@ export default function TopologyV2Page() {
     if (driftEvent) setDrift(driftEvent)
     if (needsRefetch) scheduleRefetch()
     if (appliedCount > 0) setPatchSignal((v) => v + 1)
-  }, [scheduleRefetch])
+  }, [scheduleRefetch, activeLocationId])
 
   const handleEvent = useCallback((event: TopologyEvent) => {
     eventQueueRef.current.push(event)
