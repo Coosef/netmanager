@@ -3460,3 +3460,56 @@
   background: var(--bg-2);
   border-radius: 4px;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * B3.3 — mobil tap target + table overflow rötuşları
+ *
+ * Mevcut @media (max-width:1024px) ve (max-width:640px) bloklar zaten
+ * sidebar drawer / statbar / nm-table boyutlarını küçültüyor. Burada
+ * eksik iki şey:
+ *   1) Antd Table'lar nm-card içinde sıkışıp viewport overflow yapıyor —
+ *      kart içinde horizontal scroll olmalı, sayfa değil.
+ *   2) nm-rowact icon buton tap target'ı küçük (≈22px). Apple HIG +
+ *      Material 'mobil minimum 44×44'. Mobilde büyütüyoruz.
+ * ────────────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  /* 1. Tablo overflow — kart sınırı içinde scroll, sayfa değil. */
+  .nm-card .ant-table-wrapper,
+  .nm-card .nm-table-wrap,
+  .nm-card > div[style*="overflow-x"] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 2. Tap target — 32×32 minimum (compact NOC için makul ortayol;
+   *    44×44 sayfa düzenini bozardı, 32 hâlâ erişilebilir). */
+  .nm-rowact button {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 4px;
+  }
+
+  /* 3. Modal — mobile'da neredeyse full-width.
+   *    antd Modal width prop'unu literal alıyor; .ant-modal'a max-width
+   *    veriyoruz ki 700px modal mobilde 96vw olsun. */
+  .ant-modal {
+    max-width: calc(100vw - 24px) !important;
+    margin: 12px auto !important;
+  }
+  .ant-modal-body {
+    max-height: calc(100vh - 200px);
+    overflow-y: auto;
+  }
+
+  /* 4. Drawer extra header buttons (filter selects, sıralama vs.) —
+   *    küçük ekranda satır altına döküm. */
+  .ant-drawer-extra { flex-wrap: wrap; gap: 6px; }
+
+  /* 5. nm-page-hd action grup — küçük ekranda 100% genişlik + dağıt. */
+  .nm-page-hd > .ant-space {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .nm-page-hd > .ant-space > * { flex: 1; min-width: 0; }
+}
