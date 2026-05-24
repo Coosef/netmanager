@@ -3556,3 +3556,69 @@
 .cp-panel .ant-picker-dropdown {
   z-index: 1100 !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────────
+ * T8.4 — HUD tactical accents (TopologyV2)
+ *
+ * Netmanager/3D Topology Prototype.html'den iki "tactical" detay
+ * canvas üzerine taşındı:
+ *   - .nm-hud-corners — 4 köşeye L-bracket; render'a saygılı,
+ *     pointer-events:none, sub-pixel glow.
+ *   - .nm-hud-critical-banner — gerçek down/critical/açık-incident
+ *     sayısına göre ekranın üstünde nabız atan kırmızı şerit
+ *     (drift / backpressure banner'ları ile aynı z-tier ailesi,
+ *     onlardan 8px alttta dursun diye top:48).
+ *
+ * Sade tutuldu: prototip'teki Orbitron fontu + radar tepsisi yok,
+ * platform genel tipografisini bozmasın. Sadece konum + glow + nabız.
+ * ────────────────────────────────────────────────────────────────── */
+
+.nm-hud-stage { position: relative; }
+.nm-hud-stage > .nm-hud-bracket {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 1.5px solid rgba(34, 211, 197, 0.55);
+  pointer-events: none;
+  filter: drop-shadow(0 0 6px rgba(34, 211, 197, 0.35));
+  opacity: 0.6;
+  border-radius: 2px;
+  z-index: 5;
+}
+.nm-hud-stage > .nm-hud-bracket.tl { top: 10px;    left: 10px;   border-right: 0; border-bottom: 0; }
+.nm-hud-stage > .nm-hud-bracket.tr { top: 10px;    right: 10px;  border-left: 0;  border-bottom: 0; }
+.nm-hud-stage > .nm-hud-bracket.bl { bottom: 10px; left: 10px;   border-right: 0; border-top: 0; }
+.nm-hud-stage > .nm-hud-bracket.br { bottom: 10px; right: 10px;  border-left: 0;  border-top: 0; }
+
+.nm-hud-critical-banner {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;                                     /* drift/backpressure banner = 60 → onlara altta */
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 18px;
+  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: #ff3854;
+  background: rgba(255, 56, 84, 0.08);
+  border: 1px solid rgba(255, 56, 84, 0.4);
+  border-radius: 4px;
+  text-shadow: 0 0 10px rgba(255, 56, 84, 0.55);
+  box-shadow: 0 0 18px rgba(255, 56, 84, 0.18);
+  pointer-events: none;
+  animation: nmHudCritPulse 2.2s ease-in-out infinite;
+}
+.nm-hud-critical-banner .nm-hud-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #ff3854;
+  box-shadow: 0 0 8px #ff3854;
+}
+@keyframes nmHudCritPulse {
+  0%, 100% { opacity: 0.85; box-shadow: 0 0 18px rgba(255, 56, 84, 0.18); }
+  50%      { opacity: 1;    box-shadow: 0 0 26px rgba(255, 56, 84, 0.35); }
+}

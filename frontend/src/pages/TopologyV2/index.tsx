@@ -830,10 +830,21 @@ export default function TopologyV2Page() {
         )}
 
         {/* CENTER CANVAS */}
-        <div style={{
-          position: 'relative', minHeight: 0, borderRadius: chrome ? 10 : 0,
+        <div className="nm-hud-stage" style={{
+          minHeight: 0, borderRadius: chrome ? 10 : 0,
           overflow: 'hidden', border: chrome ? `1px solid ${C.border}` : 'none', background: C.bg,
         }}>
+          {/* T8.4 — tactical HUD corner brackets (cosmetic, pointer-events:none).
+              Yalnız chrome açıkken; NOC wall / fullscreen modu zaten kendi
+              minimal estetiğine sahip. */}
+          {chrome && (
+            <>
+              <span className="nm-hud-bracket tl" />
+              <span className="nm-hud-bracket tr" />
+              <span className="nm-hud-bracket bl" />
+              <span className="nm-hud-bracket br" />
+            </>
+          )}
           {/* subtle grid + vignette */}
           <div style={{
             position: 'absolute', inset: 0, pointerEvents: 'none',
@@ -892,6 +903,23 @@ export default function TopologyV2Page() {
                 tone="neutral"
               />
             </Centered>
+          )}
+
+          {/* T8.4 — tactical CRITICAL banner: real-data güdümlü.
+              `topoStats.down` (offline cihaz) + `topoStats.critical` (overlay
+              threats / unreachable) > 0 olduğunda tek satır kırmızı nabız.
+              Üstüne drift/backpressure (z:60) düşerse görünür kalır
+              (banner z:55 + 6px offset). Wall modunda gizlenir — wall
+              kendi minimal pill setine sahip. */}
+          {chrome && (topoStats.down > 0 || topoStats.critical > 0) && (
+            <div className="nm-hud-critical-banner">
+              <span className="nm-hud-dot" />
+              <span>
+                {topoStats.down > 0 && `${topoStats.down} CİHAZ DOWN`}
+                {topoStats.down > 0 && topoStats.critical > 0 && ' · '}
+                {topoStats.critical > 0 && `${topoStats.critical} KRİTİK`}
+              </span>
+            </div>
           )}
 
           {/* T4.4 backpressure banner — WS feed cut due to event flood */}
