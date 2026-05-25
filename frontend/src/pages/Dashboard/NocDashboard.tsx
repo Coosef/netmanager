@@ -55,8 +55,11 @@ function Kpi({ label, value, unit, delta, dir, status, spark, sparkColor, pulse,
 }) {
   const accent = status === 'crit' ? 'var(--crit)' : status === 'ok' ? 'var(--ok)' : status === 'info' ? 'var(--info)' : 'var(--fg-0)'
   const isNum = typeof value === 'number'
+  // T8.4 — status class'ı eklendi (CSS gradient bg + hover glow için).
+  // 'pulse=true' ise crit-pulse ile birlikte güçlü halo animasyon.
+  const statusClass = status === 'crit' ? 'crit' : status === 'ok' ? 'ok' : status === 'info' ? 'info' : ''
   return (
-    <div className={`nm-kpi ${pulse ? 'crit-pulse' : ''}`}
+    <div className={`nm-kpi ${statusClass} ${pulse ? 'crit-pulse' : ''}`}
       style={{ borderTop: `2px solid ${accent}` }}>
       <div className="nm-kpi-label">{label}</div>
       <div className="nm-kpi-value" style={{ color: accent }}>
@@ -131,6 +134,8 @@ const WIDGET_SPAN: Record<string, string> = {
   drift: 'span-4',
   probes: 'span-4',
   vendors: 'span-4',
+  // T8.4 — full-width activity heatmap; 24 hücre yatay görünsün diye 12 kolon.
+  activity: 'span-12',
 }
 
 export default function NocDashboard() {
@@ -391,7 +396,14 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     case 'topo':
       return (
         <Card title="Topoloji Önizleme" pill={{ label: `${offline} down`, kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => navigate('/topology-next')}>
-          <TopoMini online={online} offline={offline} total={total} />
+          <TopoMini online={online} offline={offline} total={total} devices={devicesData?.items} />
+        </Card>
+      )
+    case 'activity':
+      // T8.4 — 24h saat-bazında event yoğunluğu (heatmap strip)
+      return (
+        <Card title="Aktivite Yoğunluğu" pill={{ label: 'son 24sa' }} span="span-12" onTitle={() => navigate('/monitor')}>
+          <ActivityHeatStrip liveEvents={liveEvents} events24h={events24h} />
         </Card>
       )
     case 'events':
@@ -502,24 +514,64 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
           </div>
         </Card>
       )
-    case 'anomalies':
+    case 'anomalies': {
+      // T8.4 — kaynak fallback:
+      //   1) anom.events varsa onları kullan (intelligence anomaly stream)
+      //   2) yoksa risk.top_risky'den (risk skoruyla cihazlar) sıralı liste
+      //   3) ikisi de yoksa empty state
+      // Skor bar her satırda; öğeyi tıklayınca cihaz sayfasına gider.
+      const fromAnom = (anom?.events || []).map((e: any) => ({
+        kind: 'anomaly' as const,
+        hostname: e.device_hostname || '—',
+        device_id: e.device_id,
+        label: e.anomaly_type || e.type || 'anomali',
+        detail: e.description || e.detail || '',
+        score: Math.round(e.score ?? e.risk_score ?? 0),
+        ago: e.detected_at ? dayjs(e.detected_at).fromNow(true) : '',
+      }))
+      const fromRisk = (risk?.top_risky || []).map((d: any) => ({
+        kind: 'risk' as const,
+        hostname: d.hostname,
+        device_id: d.device_id ?? d.id,
+        label: d.top_reason || 'yüksek risk',
+        detail: d.ip_address ? `${d.ip_address}${d.vendor ? ' · ' + d.vendor : ''}` : (d.vendor || ''),
+        score: Math.round(d.risk_score ?? 0),
+        ago: '',
+      }))
+      const items = fromAnom.length > 0 ? fromAnom : fromRisk
+      const totalLabel = anom?.total ?? risk?.top_risky?.length ?? 0
       return (
-        <Card title="Anormal Davranış" pill={anom?.total ? { label: `${anom.total} son 24sa`, kind: 'warn' } : undefined} span="span-12" onTitle={() => navigate('/intelligence')}>
-          {!anom?.events?.length ? <Empty>Anomali yok</Empty> :
-            anom.events.slice(0, 5).map((evt: any, i: number) => (
-              <div key={i} className="nm-row" style={{ gridTemplateColumns: '1fr auto' }}>
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span className="mono" style={{ fontSize: 10.5, color: 'var(--warn)' }}>{evt.anomaly_type || evt.type || 'anomali'}</span>
-                    <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-0)' }}>{evt.device_hostname || '—'}</span>
+        <Card title="Anormal Davranış"
+          pill={totalLabel ? { label: `${totalLabel} ${fromAnom.length > 0 ? 'son 24sa' : 'risk'}`, kind: 'warn' } : undefined}
+          span="span-12"
+          onTitle={() => navigate('/intelligence')}>
+          {items.length === 0 ? <Empty>Anomali yok</Empty> :
+            items.slice(0, 5).map((it: any, i: number) => {
+              const cls = it.score >= 80 ? 'crit' : it.score >= 60 ? 'warn' : it.score >= 40 ? 'info' : 'ok'
+              return (
+                <div key={i} className="nm-row" style={{ gridTemplateColumns: '1fr auto auto', cursor: it.device_id ? 'pointer' : 'default' }}
+                  onClick={() => it.device_id && navigate(`/devices/${it.device_id}`)}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span className={`nm-pill ${cls}`} style={{ fontSize: 9.5 }}>{it.label}</span>
+                      <span className="mono" style={{ fontSize: 11.5, color: 'var(--fg-0)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.hostname}</span>
+                    </div>
+                    {it.detail && <div className="ip" style={{ marginTop: 2 }}>{it.detail}</div>}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>{evt.description || evt.detail || ''}</div>
+                  {it.score > 0 ? (
+                    <div className="nm-bar" style={{ width: 60 }}>
+                      <div style={{ width: `${Math.min(100, it.score)}%`, background: `var(--${cls})` }} />
+                    </div>
+                  ) : <span />}
+                  <span className="mono" style={{ fontSize: 10.5, color: `var(--${cls})`, fontWeight: 600, minWidth: 28, textAlign: 'right' }}>
+                    {it.score > 0 ? it.score : (it.ago || '—')}
+                  </span>
                 </div>
-                <span className="mono" style={{ fontSize: 10, color: 'var(--fg-3)' }}>{evt.detected_at ? dayjs(evt.detected_at).fromNow(true) : ''}</span>
-              </div>
-            ))}
+              )
+            })}
         </Card>
       )
+    }
     case 'drift':
       return (
         <Card title="Config Drift" pill={driftReport?.drift_count ? { label: `${driftReport.drift_count} sapma`, kind: 'warn' } : { label: 'temiz', kind: 'ok' }} span="span-12" onTitle={() => navigate('/config-drift')}>
@@ -596,20 +648,175 @@ function useClock() {
   return t
 }
 
-function TopoMini({ online, offline, total }: { online: number; offline: number; total: number }) {
-  return (
-    <div className="nm-topo" style={{ minHeight: 200 }}>
-      <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="mono" style={{ fontSize: 34, color: 'var(--accent)' }}>{total}</div>
-          <div style={{ fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.06em' }}>NODE · {online} online · {offline} down</div>
+function TopoMini({ online, offline, total, devices }: {
+  online: number; offline: number; total: number
+  devices?: any[]   // Device[] — varsa gerçek grid; yoksa placeholder
+}) {
+  // T8.4 — eski placeholder ("65 online · 6 down" yazısı) yerine gerçek
+  // cihaz grid'i. Her hücre bir cihaz; status'a göre renkli + hover
+  // hostname. Topology sayfasının minyatürü. devicesData prop ile gelir.
+  const items = (devices || []).slice(0, 70)  // 7x10 = 70 hücre
+  if (items.length === 0) {
+    return (
+      <div className="nm-topo" style={{ minHeight: 200 }}>
+        <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+          <div style={{ textAlign: 'center' }}>
+            <div className="mono" style={{ fontSize: 34, color: 'var(--accent)' }}>{total}</div>
+            <div style={{ fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.06em' }}>
+              NODE · {online} online · {offline} down
+            </div>
+          </div>
         </div>
       </div>
-      <div className="nm-legend" style={{ position: 'absolute', left: 8, bottom: 8 }}>
-        <span><span className="dot" style={{ background: 'var(--accent)' }} />core</span>
-        <span><span className="dot" style={{ background: 'var(--info)' }} />dist</span>
-        <span><span className="dot" style={{ background: 'var(--fg-1)' }} />access</span>
-        <span><span className="dot" style={{ background: 'var(--crit)' }} />down</span>
+    )
+  }
+  const dotColor = (d: any) => {
+    const s = (d.status || '').toLowerCase()
+    if (s === 'offline' || s === 'down') return 'var(--crit)'
+    if (s === 'unreachable' || s === 'unknown') return 'var(--warn)'
+    return 'var(--ok)'
+  }
+  const isOffline = (d: any) => {
+    const s = (d.status || '').toLowerCase()
+    return s === 'offline' || s === 'down'
+  }
+  return (
+    <div className="nm-topo" style={{ minHeight: 200, padding: 10, position: 'relative' }}>
+      {/* Sol-üst köşede özet sayı */}
+      <div style={{
+        position: 'absolute', top: 8, left: 12, zIndex: 2,
+        fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--fg-3)',
+        background: 'rgba(15,23,42,0.7)', padding: '2px 8px', borderRadius: 4,
+      }}>
+        {online} / {total} ONLINE · {offline} DOWN
+      </div>
+      {/* Grid */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(10, 1fr)',
+        gridAutoRows: '16px',
+        gap: 4,
+        height: '100%',
+        padding: '24px 6px 28px',
+      }}>
+        {items.map((d: any) => {
+          const color = dotColor(d)
+          const off = isOffline(d)
+          return (
+            <div
+              key={d.id ?? d.hostname}
+              title={`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}`}
+              style={{
+                background: color,
+                borderRadius: 3,
+                opacity: off ? 1 : 0.85,
+                animation: off ? 'nmKpiCritPulse 1.6s ease-in-out infinite' : undefined,
+                cursor: 'pointer',
+                transition: 'transform .12s',
+              }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1.15)' }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
+            />
+          )
+        })}
+        {/* Doldurulamayan hücreler için boş slot (görsel grid tutarlı) */}
+        {Array.from({ length: Math.max(0, 70 - items.length) }, (_, i) => (
+          <div key={`empty-${i}`} style={{
+            background: 'var(--bg-3)', borderRadius: 3, opacity: 0.35,
+          }} />
+        ))}
+      </div>
+      <div className="nm-legend" style={{ position: 'absolute', left: 12, bottom: 8 }}>
+        <span><span className="dot" style={{ background: 'var(--ok)' }} />online</span>
+        <span><span className="dot" style={{ background: 'var(--warn)' }} />unknown</span>
+        <span><span className="dot" style={{ background: 'var(--crit)' }} />offline</span>
+      </div>
+    </div>
+  )
+}
+
+// ── T8.4 — 24h Activity Heat Strip ──────────────────────────────────────────
+// liveEvents (son 200 olay) saat-bazında group by; her saat = bir hücre.
+// Severity ağırlık: critical=3, warning=2, info=1. Renk yoğunluğu intensity'ye
+// göre (sessiz=koyu mavi → ateşli=kırmızı). 'O an' kolonu pulse.
+function ActivityHeatStrip({ liveEvents, events24h }: { liveEvents: any[]; events24h: number }) {
+  const now = dayjs()
+  // 24 saat × 1 saatlik kova. liveEvents son ~30 dakika veriyor olabilir
+  // (refetchInterval=10s, polling penceresi), o yüzden tam saat dağılımı
+  // her zaman dolmaz. Mevcut event'leri timestamp'a göre kovaya at.
+  const buckets = Array(24).fill(0).map(() => ({ total: 0, crit: 0, warn: 0, info: 0 }))
+  for (const e of liveEvents || []) {
+    if (!e.created_at) continue
+    const hoursAgo = now.diff(dayjs(e.created_at), 'hour')
+    if (hoursAgo < 0 || hoursAgo > 23) continue
+    const idx = 23 - hoursAgo  // 0 = 24sa önce, 23 = şimdi
+    buckets[idx].total += 1
+    const sev = (e.severity || '').toLowerCase()
+    if (sev === 'critical') buckets[idx].crit += 1
+    else if (sev === 'warning') buckets[idx].warn += 1
+    else buckets[idx].info += 1
+  }
+  const maxTotal = Math.max(1, ...buckets.map(b => b.total))
+  const cellColor = (b: { total: number; crit: number; warn: number }) => {
+    if (b.total === 0) return 'var(--bg-3)'
+    if (b.crit > 0) return 'var(--crit)'
+    if (b.warn > 0) return 'var(--warn)'
+    return 'var(--info)'
+  }
+  const cellAlpha = (b: { total: number }) => {
+    if (b.total === 0) return 0.35
+    return 0.4 + 0.6 * (b.total / maxTotal)
+  }
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 3, height: 36, alignItems: 'stretch' }}>
+        {buckets.map((b, i) => {
+          const isNow = i === 23
+          const isCrit = b.crit > 0 && isNow
+          return (
+            <div key={i}
+              title={`-${23 - i}sa · ${b.total} olay (crit=${b.crit} warn=${b.warn} info=${b.info})`}
+              style={{
+                flex: 1,
+                background: cellColor(b),
+                opacity: cellAlpha(b),
+                borderRadius: 3,
+                animation: isCrit ? 'nmKpiCritPulse 1.4s ease-in-out infinite' : isNow ? 'nm-pulse 2s ease-in-out infinite' : undefined,
+                border: isNow ? '1px solid var(--accent)' : 'none',
+                cursor: 'help',
+              }} />
+          )
+        })}
+      </div>
+      <div style={{
+        display: 'flex', justifyContent: 'space-between',
+        fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-3)',
+        marginTop: 6, letterSpacing: '0.06em',
+      }}>
+        <span>-24SA</span>
+        <span>-18SA</span>
+        <span>-12SA</span>
+        <span>-6SA</span>
+        <span style={{ color: 'var(--accent)' }}>ŞİMDİ</span>
+      </div>
+      <div style={{
+        marginTop: 10, display: 'flex', gap: 18, fontSize: 11, color: 'var(--fg-2)',
+        alignItems: 'center',
+      }}>
+        <span><strong style={{ color: 'var(--fg-0)' }}>{events24h}</strong> olay (son 24sa)</span>
+        <span>·</span>
+        <span>en yüksek saat: <strong style={{ color: 'var(--fg-1)' }}>{maxTotal}</strong> olay</span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, background: 'var(--info)', borderRadius: 2 }} /> bilgi
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, background: 'var(--warn)', borderRadius: 2 }} /> uyarı
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            <span style={{ width: 8, height: 8, background: 'var(--crit)', borderRadius: 2 }} /> kritik
+          </span>
+        </span>
       </div>
     </div>
   )
