@@ -495,10 +495,22 @@ async def get_vlans_batch(
     }
 
 
-# ─── VLAN refresh — SSH paralel + DB snapshot update + diff ────────────────
-# Kullanıcı "Tümünü Yenile" dediğinde tetiklenir. Mevcut snapshot ile yeni
-# SSH sonucunu kıyaslayıp per-device diff (added/removed VLAN id'leri)
-# döndürür. Snapshot da güncellenir.
+# ─── VLAN refresh — STREAMING (NDJSON) + DB snapshot upsert + diff ────────
+# Kullanıcı "Tümünü Yenile" dediğinde tetiklenir. asyncio.as_completed ile
+# her cihaz tamamlandıkça frontend'e bir NDJSON satırı (newline-delimited
+# JSON) yazılır → UI canlı progress bar + son tamamlanan cihaz adı +
+# eklenen/silinen VLAN'ları anlık görür.
+#
+# Stream protokolü:
+#   {"type":"start","total":N,"fetched_at":"...","fetched_by":"..."}
+#   {"type":"device","device_id":X,"hostname":"...","status":"ok"|"error",
+#       "added":[...], "removed":[...], "error":"...", "completed":i}
+#   ... (N kere)
+#   {"type":"complete","diff_summary":{...},"items":{...}}
+#
+# T8.4 bug fix — pg_insert SQLAlchemy Core; ORM before_insert hook'u
+# bypass eder, organization_id otomatik dolmaz → NotNullViolation. Fix:
+# her insert'te dev.organization_id + dev.location_id explicit set.
 
 @router.post("/vlans-refresh")
 async def refresh_vlans_batch(
@@ -512,6 +524,7 @@ async def refresh_vlans_batch(
     import asyncio
     from app.models.device_vlan_snapshot import DeviceVlanSnapshot
     from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from fastapi.responses import StreamingResponse
 
     body = await request.json()
     raw_ids = body.get("device_ids", [])
@@ -520,17 +533,16 @@ async def refresh_vlans_batch(
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="device_ids must be a list of integers")
     if not device_ids:
-        return {"items": {}, "diff_summary": {"added": 0, "removed": 0,
-                "added_devices": 0, "removed_devices": 0, "errors": 0}}
+        raise HTTPException(status_code=400, detail="device_ids required")
     if len(device_ids) > 200:
         raise HTTPException(status_code=400, detail="device_ids capped at 200 per refresh")
 
+    # Pre-stream sync DB work (devices + old snapshots)
     devices = (await db.execute(
         select(Device).where(Device.id.in_(device_ids))
     )).scalars().all()
     dev_by_id = {d.id: d for d in devices}
 
-    # Mevcut snapshot (diff için)
     old_snaps = (await db.execute(
         select(DeviceVlanSnapshot).where(
             DeviceVlanSnapshot.device_id.in_(device_ids)
@@ -544,108 +556,144 @@ async def refresh_vlans_batch(
             except (TypeError, ValueError): pass
         old_vlan_ids[s.device_id] = vids
 
-    # Paralel SSH (mevcut vlans-batch pattern'i)
-    async def fetch_one(dev: Device) -> tuple[int, dict, list[int]]:
+    user_label = getattr(current_user, "username", None) or str(getattr(current_user, "id", "?"))
+    now = datetime.now(timezone.utc)
+
+    async def fetch_one(dev: Device) -> tuple[Device, dict, list[int]]:
         try:
             result = await asyncio.wait_for(
                 ssh_manager.execute_command(dev, _vlan_cmd(dev.os_type)),
                 timeout=12.0,
             )
         except asyncio.TimeoutError:
-            return dev.id, {"success": False, "error": "SSH zaman aşımı (12s)"}, []
+            return dev, {"success": False, "error": "SSH zaman aşımı (12s)"}, []
         except Exception as exc:
-            return dev.id, {"success": False, "error": str(exc)[:200]}, []
+            return dev, {"success": False, "error": str(exc)[:200]}, []
         if not result.success:
-            return dev.id, {"success": False, "error": result.error}, []
+            return dev, {"success": False, "error": result.error}, []
         parsed = _parse_vlans(result.output, dev.os_type)
         vids = sorted({int(v["id"]) for v in parsed if v.get("id") is not None})
-        return dev.id, {"success": True, "vlans": parsed}, vids
+        return dev, {"success": True, "vlans": parsed}, vids
 
     sem = asyncio.Semaphore(10)
     async def bounded(d):
         async with sem:
             return await fetch_one(d)
 
-    results = await asyncio.gather(*(bounded(d) for d in devices))
+    async def stream():
+        # Start event
+        yield json.dumps({
+            "type": "start", "total": len(devices),
+            "fetched_at": now.isoformat(), "fetched_by": user_label,
+        }) + "\n"
 
-    # Per-device diff hesapla + snapshot upsert + items payload
-    items: dict[str, dict] = {}
-    diff_summary = {
-        "added": 0, "removed": 0,
-        "added_devices": 0, "removed_devices": 0,
-        "errors": 0,
-    }
-    now = datetime.now(timezone.utc)
-    user_label = getattr(current_user, "username", None) or str(getattr(current_user, "id", "?"))
+        items: dict[str, dict] = {}
+        diff_summary = {
+            "added": 0, "removed": 0,
+            "added_devices": 0, "removed_devices": 0,
+            "errors": 0,
+        }
 
-    for did, payload, new_vids in results:
-        dev = dev_by_id.get(did)
-        if dev is None:
-            continue
-        old_set = old_vlan_ids.get(did, set())
-        new_set = set(new_vids)
-        added = sorted(new_set - old_set)
-        removed = sorted(old_set - new_set)
+        tasks = [asyncio.create_task(bounded(d)) for d in devices]
+        completed = 0
 
-        if not payload.get("success"):
-            # Hata — snapshot'u silmiyoruz (eski veri kalsın), sadece error yaz.
-            stmt = (
-                pg_insert(DeviceVlanSnapshot)
-                .values(
-                    device_id=did,
-                    vlans=[],
-                    error=payload.get("error", "unknown")[:255],
-                    fetched_at=now,
-                    fetched_by=user_label,
-                    # org/loc _scoping before_insert hook'tan device parent ile dolar
+        for coro in asyncio.as_completed(tasks):
+            try:
+                dev, payload, new_vids = await coro
+            except Exception as exc:
+                # asyncio.gather pattern altında bir task çökerse — sayım kayıt
+                completed += 1
+                yield json.dumps({
+                    "type": "device", "device_id": None, "hostname": "?",
+                    "status": "error", "error": str(exc)[:200],
+                    "added": [], "removed": [],
+                    "completed": completed, "total": len(devices),
+                }) + "\n"
+                diff_summary["errors"] += 1
+                continue
+
+            old_set = old_vlan_ids.get(dev.id, set())
+            new_set = set(new_vids)
+            added = sorted(new_set - old_set)
+            removed = sorted(old_set - new_set)
+
+            # T8.4 bug fix — Core insert ORM hook'u bypass eder; org/loc
+            # explicit set. dev.organization_id Faz 7'de NOT NULL.
+            org_id = dev.organization_id
+            loc_id = dev.location_id
+
+            if not payload.get("success"):
+                err_msg = (payload.get("error") or "unknown")[:255]
+                stmt = (
+                    pg_insert(DeviceVlanSnapshot)
+                    .values(
+                        device_id=dev.id, vlans=[], error=err_msg,
+                        fetched_at=now, fetched_by=user_label,
+                        organization_id=org_id, location_id=loc_id,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_device_vlan_snapshot_device",
+                        set_={"error": err_msg, "fetched_at": now, "fetched_by": user_label},
+                    )
                 )
-                .on_conflict_do_update(
-                    constraint="uq_device_vlan_snapshot_device",
-                    set_={"error": payload.get("error", "unknown")[:255],
-                          "fetched_at": now, "fetched_by": user_label},
+                await db.execute(stmt)
+                completed += 1
+                items[str(dev.id)] = {
+                    "success": False, "error": payload.get("error"),
+                    "hostname": dev.hostname, "added": [], "removed": [],
+                    "fetched_at": now.isoformat(),
+                }
+                diff_summary["errors"] += 1
+                yield json.dumps({
+                    "type": "device", "device_id": dev.id, "hostname": dev.hostname,
+                    "status": "error", "error": payload.get("error"),
+                    "added": [], "removed": [],
+                    "completed": completed, "total": len(devices),
+                }) + "\n"
+            else:
+                vlans_payload = payload.get("vlans", [])
+                stmt = (
+                    pg_insert(DeviceVlanSnapshot)
+                    .values(
+                        device_id=dev.id, vlans=vlans_payload, error=None,
+                        fetched_at=now, fetched_by=user_label,
+                        organization_id=org_id, location_id=loc_id,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_device_vlan_snapshot_device",
+                        set_={"vlans": vlans_payload, "error": None,
+                              "fetched_at": now, "fetched_by": user_label},
+                    )
                 )
-            )
-            await db.execute(stmt)
-            items[str(did)] = {
-                "success": False, "error": payload.get("error"),
-                "hostname": dev.hostname, "added": [], "removed": [], "fetched_at": now.isoformat(),
-            }
-            diff_summary["errors"] += 1
-        else:
-            stmt = (
-                pg_insert(DeviceVlanSnapshot)
-                .values(
-                    device_id=did,
-                    vlans=payload.get("vlans", []),
-                    error=None,
-                    fetched_at=now,
-                    fetched_by=user_label,
-                )
-                .on_conflict_do_update(
-                    constraint="uq_device_vlan_snapshot_device",
-                    set_={"vlans": payload.get("vlans", []), "error": None,
-                          "fetched_at": now, "fetched_by": user_label},
-                )
-            )
-            await db.execute(stmt)
-            items[str(did)] = {
-                "success": True, "hostname": dev.hostname,
-                "added": added, "removed": removed,
-                "fetched_at": now.isoformat(),
-            }
-            diff_summary["added"] += len(added)
-            diff_summary["removed"] += len(removed)
-            if added: diff_summary["added_devices"] += 1
-            if removed: diff_summary["removed_devices"] += 1
+                await db.execute(stmt)
+                completed += 1
+                items[str(dev.id)] = {
+                    "success": True, "hostname": dev.hostname,
+                    "added": added, "removed": removed,
+                    "fetched_at": now.isoformat(),
+                }
+                diff_summary["added"] += len(added)
+                diff_summary["removed"] += len(removed)
+                if added: diff_summary["added_devices"] += 1
+                if removed: diff_summary["removed_devices"] += 1
+                yield json.dumps({
+                    "type": "device", "device_id": dev.id, "hostname": dev.hostname,
+                    "status": "ok", "added": added, "removed": removed,
+                    "completed": completed, "total": len(devices),
+                }) + "\n"
 
-    await db.commit()
+        # Tek commit, tüm işlem sonunda
+        await db.commit()
 
-    return {
-        "items": items,
-        "diff_summary": diff_summary,
-        "fetched_at": now.isoformat(),
-        "fetched_by": user_label,
-    }
+        yield json.dumps({
+            "type": "complete",
+            "diff_summary": diff_summary,
+            "items": items,
+            "fetched_at": now.isoformat(),
+            "fetched_by": user_label,
+        }) + "\n"
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
 
 
 @router.post("/{device_id}/vlans")

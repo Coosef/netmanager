@@ -161,35 +161,71 @@ export default function VlanManagementPage() {
   const allDevices: Device[] = devicesData?.items || []
   const { rows: deviceVlans, meta: vlanMeta } = useAllDeviceVlans(allDevices)
 
-  // T8.4 v2 — "Tümünü Yenile" mutation. SSH paralel + DB snapshot upsert +
-  // per-device diff. Response diff_summary'i UI banner'a yansır.
+  // T8.4 v2 — "Tümünü Yenile" STREAMING. Backend NDJSON gönderir; her
+  // cihaz tamamlandıkça progress bar + son cihaz + diff state güncellenir.
   const [lastDiff, setLastDiff] = useState<{
     summary: { added: number; removed: number; added_devices: number; removed_devices: number; errors: number }
     items: Record<string, { hostname?: string; added: number[]; removed: number[]; error?: string }>
     fetched_at: string
   } | null>(null)
   const [diffBannerOpen, setDiffBannerOpen] = useState(false)
-  const refreshMutation = useMutation({
-    mutationFn: () => devicesApi.refreshVlansBatch(allDevices.map((d) => d.id)),
-    onSuccess: (res) => {
-      setLastDiff({ summary: res.diff_summary, items: res.items as any, fetched_at: res.fetched_at })
+  const [refreshProgress, setRefreshProgress] = useState<{
+    running: boolean
+    completed: number
+    total: number
+    lastHostname: string
+    lastStatus: 'ok' | 'error' | null
+    okCount: number
+    errCount: number
+  } | null>(null)
+
+  const runRefresh = async () => {
+    if (allDevices.length === 0) return
+    setRefreshProgress({
+      running: true, completed: 0, total: allDevices.length,
+      lastHostname: '', lastStatus: null, okCount: 0, errCount: 0,
+    })
+    setDiffBannerOpen(false)
+    try {
+      const final = await devicesApi.refreshVlansBatchStream(
+        allDevices.map((d) => d.id),
+        (ev) => {
+          if (ev.type === 'start') {
+            setRefreshProgress((p) => p && { ...p, total: ev.total })
+          } else if (ev.type === 'device') {
+            setRefreshProgress((p) => p && {
+              ...p,
+              completed: ev.completed,
+              total: ev.total,
+              lastHostname: ev.hostname || '?',
+              lastStatus: ev.status,
+              okCount: p.okCount + (ev.status === 'ok' ? 1 : 0),
+              errCount: p.errCount + (ev.status === 'error' ? 1 : 0),
+            })
+          }
+        },
+      )
+      setLastDiff({ summary: final.diff_summary, items: final.items, fetched_at: final.fetched_at })
       setDiffBannerOpen(true)
       qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
       allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))
-      const { added, removed, added_devices, removed_devices, errors } = res.diff_summary
+      const { added, removed, added_devices, removed_devices, errors } = final.diff_summary
       if (added === 0 && removed === 0 && errors === 0) {
         message.success(`Tarama tamam — değişiklik yok (${allDevices.length} cihaz)`)
       } else {
         message.info(
           `Tarama tamam — ${added_devices} cihazda ${added} VLAN eklendi, ${removed_devices} cihazda ${removed} silindi` +
-          (errors > 0 ? ` · ${errors} cihazda hata` : '')
+          (errors > 0 ? ` · ${errors} cihazda erişilemedi` : '')
         )
       }
-    },
-    onError: (e: any) => {
-      message.error(e?.response?.data?.detail || 'Yenileme başarısız')
-    },
-  })
+    } catch (e: any) {
+      message.error(e?.message || 'Yenileme başarısız')
+    } finally {
+      // Progress'i 1 sn sonra kapat (kullanıcı 100%'i görsün)
+      setTimeout(() => setRefreshProgress(null), 1200)
+    }
+  }
+  const refreshRunning = !!refreshProgress?.running
 
   // Port assignment tab queries
   const { data: portIfaceData, isLoading: portIfaceLoading } = useQuery({
@@ -550,12 +586,14 @@ export default function VlanManagementPage() {
         <Space>
           <Tooltip title="Tüm switch'lere SSH ile bağlanıp VLAN listesini tazeler, eklenen/silinen VLAN'ları raporlar. DB snapshot güncellenir.">
             <Button
-              icon={<SyncOutlined spin={refreshMutation.isPending} />}
+              icon={<SyncOutlined spin={refreshRunning} />}
               type={vlanMeta.missing > 0 ? 'primary' : 'default'}
-              loading={refreshMutation.isPending}
-              onClick={() => refreshMutation.mutate()}
+              loading={refreshRunning}
+              onClick={runRefresh}
             >
-              {refreshMutation.isPending ? `Tarıyor… (${allDevices.length} switch)` : 'Tümünü Yenile'}
+              {refreshRunning
+                ? `Tarıyor… ${refreshProgress?.completed ?? 0}/${refreshProgress?.total ?? allDevices.length}`
+                : 'Tümünü Yenile'}
             </Button>
           </Tooltip>
           {canMutate && (
@@ -580,6 +618,44 @@ export default function VlanManagementPage() {
           )}
         </Space>
       </div>
+
+      {/* T8.4 v2 — Streaming refresh progress bar. Backend NDJSON gönderir;
+          her cihaz tamamlandıkça completed sayısı + son cihaz adı + status
+          (ok/error) güncellenir. Kullanıcı kara delik beklemez. */}
+      {refreshProgress && (
+        <div className="nm-card" style={{ marginBottom: 12, padding: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <SyncOutlined spin={refreshProgress.running} style={{ color: 'var(--accent)', fontSize: 16 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                VLAN taraması ({refreshProgress.completed} / {refreshProgress.total})
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--fg-2)' }}>
+                Son cihaz: <span style={{ fontFamily: 'monospace', color: 'var(--fg-0)' }}>
+                  {refreshProgress.lastHostname || '—'}
+                </span>
+                {refreshProgress.lastStatus === 'ok' && (
+                  <Tag color="green" style={{ marginLeft: 6, fontSize: 10 }}>OK</Tag>
+                )}
+                {refreshProgress.lastStatus === 'error' && (
+                  <Tag color="red" style={{ marginLeft: 6, fontSize: 10 }}>HATA</Tag>
+                )}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, fontSize: 11, color: 'var(--fg-2)' }}>
+              <span>✓ <strong style={{ color: 'var(--ok)' }}>{refreshProgress.okCount}</strong></span>
+              <span>✗ <strong style={{ color: 'var(--crit)' }}>{refreshProgress.errCount}</strong></span>
+            </div>
+          </div>
+          <Progress
+            percent={refreshProgress.total > 0 ? Math.round((refreshProgress.completed / refreshProgress.total) * 100) : 0}
+            status={refreshProgress.running ? 'active' : 'success'}
+            strokeColor={refreshProgress.errCount > 0 ? { from: '#3b82f6', to: '#f59e0b' } : { from: '#3b82f6', to: '#22c55e' }}
+            showInfo={true}
+            format={(pct) => `${pct}%`}
+          />
+        </div>
+      )}
 
       {/* T8.4 v2 — Refresh sonrası diff banner. "Tümünü Yenile" çağrısı
           tamamlandığında: değişiklik varsa ekle/sil ozeti + hangi cihazlarda
