@@ -12,16 +12,25 @@ import {
   LockOutlined, UnlockOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { usersApi } from '@/api/users'
 import { superadminApi } from '@/api/superadmin'
 import { locationsApi } from '@/api/locations'
 import { invitesApi, type Invite } from '@/api/invites'
 import { useTheme } from '@/contexts/ThemeContext'
 import type { User } from '@/types'
-import { ROLE_OPTIONS, LOC_ROLE_OPTIONS } from '@/types'
+import { ROLE_OPTIONS } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
+
+// Drawer içindeki lokasyon ataması artık SADECE "hangi lokasyonları
+// görür" sorusunu yanıtlıyor. Gerçek yetki seviyesini `system_role`
+// belirliyor (org_admin / location_admin / viewer). Eski per-location
+// `loc_role` (manager/operator/viewer) runtime'da hiçbir yerde
+// okunmuyordu — UI'dan kaldırdık, schema BC için backend'e default
+// 'location_viewer' gönderiyoruz; ince ayar için /permissions matrisi.
+const LOC_BC_DEFAULT_ROLE = 'location_viewer'
 
 const USERS_CSS = `
 @keyframes usersRowIn {
@@ -120,10 +129,12 @@ export default function UsersPage() {
     createInviteMutation.mutate(vals)
   }
 
-  // Location assignments (now inside the main drawer)
-  const [locAssignments, setLocAssignments] = useState<{ location_id: number; loc_role: string }[]>([])
+  // Location assignments — sadece location_id listesi tutuyoruz, ekrana
+  // yalnızca lokasyon adı çıkıyor. Backend hâlâ {location_id, loc_role}
+  // tuple bekliyor (geriye dönük şema); onSubmit'te LOC_BC_DEFAULT_ROLE
+  // ile dolduruluyor.
+  const [locAssignments, setLocAssignments] = useState<{ location_id: number }[]>([])
   const [addLocId, setAddLocId] = useState<number | null>(null)
-  const [addLocRole, setAddLocRole] = useState('location_viewer')
 
   const { data: users, isLoading } = useQuery({
     queryKey: ['users'],
@@ -177,9 +188,8 @@ export default function UsersPage() {
 
   const openDrawer = (user?: User, tab = 'general') => {
     setEditUser(user ?? null)
-    setLocAssignments((user?.locations || []).map((l) => ({ location_id: l.location_id, loc_role: l.loc_role })))
+    setLocAssignments((user?.locations || []).map((l) => ({ location_id: l.location_id })))
     setAddLocId(null)
-    setAddLocRole('location_viewer')
     setDrawerTab(tab)
     setDrawerOpen(true)
   }
@@ -196,7 +206,12 @@ export default function UsersPage() {
         userId = (newUser as any).id
       }
       try {
-        await usersApi.setLocations(userId, locAssignments)
+        // BC: backend hâlâ loc_role tuple bekliyor; her satıra default
+        // ekliyoruz. Yetki gerçekte system_role tarafından sürülüyor.
+        await usersApi.setLocations(
+          userId,
+          locAssignments.map((a) => ({ ...a, loc_role: LOC_BC_DEFAULT_ROLE })),
+        )
       } catch (locErr: any) {
         const d = locErr?.response?.data?.detail
         message.error(typeof d === 'string' ? d : 'Lokasyon atamaları kaydedilemedi')
@@ -219,17 +234,12 @@ export default function UsersPage() {
     if (!addLocId) return
     const exists = locAssignments.find((a) => a.location_id === addLocId)
     if (exists) { message.warning('Bu lokasyon zaten eklenmiş'); return }
-    setLocAssignments([...locAssignments, { location_id: addLocId, loc_role: addLocRole }])
+    setLocAssignments([...locAssignments, { location_id: addLocId }])
     setAddLocId(null)
-    setAddLocRole('location_viewer')
   }
 
   const removeLocAssignment = (locId: number) => {
     setLocAssignments(locAssignments.filter((a) => a.location_id !== locId))
-  }
-
-  const updateLocRole = (locId: number, newRole: string) => {
-    setLocAssignments(locAssignments.map((a) => a.location_id === locId ? { ...a, loc_role: newRole } : a))
   }
 
   const userList = users || []
@@ -574,42 +584,37 @@ export default function UsersPage() {
                       </>
                     )}
                     <div style={{ color: C.muted, fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
-                      Kullanıcının erişebileceği lokasyonları ve oradaki rolünü belirleyin.
+                      Bu liste kullanıcının <strong>hangi lokasyonları görebileceğini</strong> belirler.
+                      Yetki seviyesini (yönetici/görüntüleyici) <em>Genel</em> sekmesindeki <strong>rol</strong> alanı verir.
                       <br />
                       <span style={{ color: '#22c55e' }}>• <strong>Süper Admin</strong> tüm organizasyonların tüm lokasyonlarına erişir (atama gerekmez).</span>
                       <br />
                       <span style={{ color: '#f97316' }}>• <strong>Org Admin</strong> kendi organizasyonunun tüm lokasyonlarına otomatik erişir.</span>
                       <br />
-                      <span style={{ color: '#06b6d4' }}>• <strong>Lokasyon Admin</strong> ve <strong>Görüntüleyici</strong> için aşağıdan lokasyon atayın — atanmamış lokasyonu göremez.</span>
+                      <span style={{ color: '#06b6d4' }}>• <strong>Lokasyon Admin</strong> ve <strong>Görüntüleyici</strong> sadece aşağıda atanmış lokasyonlara erişir.</span>
                     </div>
 
-                    {/* Add location */}
+                    {/* Add location — sadece location seç + Ekle */}
                     <div style={{
                       background: isDark ? '#0f172a' : '#f8fafc',
                       border: `1px solid ${C.border}`,
                       borderRadius: 8, padding: 12, marginBottom: 14,
                     }}>
                       <div style={{ color: C.text, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Lokasyon Ekle</div>
-                      <Select
-                        placeholder="Lokasyon seç"
-                        style={{ width: '100%', marginBottom: 8 }}
-                        value={addLocId}
-                        onChange={setAddLocId}
-                        options={locationOptions.filter((l) => !locAssignments.find((a) => a.location_id === l.value))}
-                        showSearch
-                        filterOption={(input, opt) => (opt?.label as string)?.toLowerCase().includes(input.toLowerCase())}
-                      />
-                      <Space style={{ width: '100%' }}>
+                      <Space.Compact style={{ width: '100%' }}>
                         <Select
-                          value={addLocRole}
-                          onChange={setAddLocRole}
-                          style={{ minWidth: 180 }}
-                          options={LOC_ROLE_OPTIONS}
+                          placeholder="Lokasyon seç"
+                          style={{ flex: 1 }}
+                          value={addLocId}
+                          onChange={setAddLocId}
+                          options={locationOptions.filter((l) => !locAssignments.find((a) => a.location_id === l.value))}
+                          showSearch
+                          filterOption={(input, opt) => (opt?.label as string)?.toLowerCase().includes(input.toLowerCase())}
                         />
-                        <Button type="primary" size="small" icon={<PlusOutlined />} onClick={addLocAssignment} disabled={!addLocId}>
+                        <Button type="primary" icon={<PlusOutlined />} onClick={addLocAssignment} disabled={!addLocId}>
                           Ekle
                         </Button>
-                      </Space>
+                      </Space.Compact>
                     </div>
 
                     <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
@@ -621,7 +626,6 @@ export default function UsersPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {locAssignments.map((a) => {
                           const locName = locNameMap[a.location_id] || `Lokasyon #${a.location_id}`
-                          const roleHex = a.loc_role === 'location_manager' ? '#06b6d4' : a.loc_role === 'location_operator' ? '#3b82f6' : '#22c55e'
                           return (
                             <div key={a.location_id} style={{
                               display: 'flex', alignItems: 'center', gap: 8,
@@ -629,16 +633,8 @@ export default function UsersPage() {
                               border: `1px solid ${C.border}`,
                               borderRadius: 6, padding: '7px 10px',
                             }}>
-                              <EnvironmentOutlined style={{ color: roleHex, flexShrink: 0 }} />
+                              <EnvironmentOutlined style={{ color: '#06b6d4', flexShrink: 0 }} />
                               <span style={{ flex: 1, color: C.text, fontSize: 13, fontWeight: 500 }}>{locName}</span>
-                              <Select
-                                value={a.loc_role}
-                                onChange={(v) => updateLocRole(a.location_id, v)}
-                                size="small"
-                                style={{ width: 180 }}
-                                popupMatchSelectWidth={false}
-                                options={LOC_ROLE_OPTIONS}
-                              />
                               <Button size="small" type="text" danger icon={<MinusCircleOutlined />}
                                 onClick={() => removeLocAssignment(a.location_id)} />
                             </div>
@@ -646,6 +642,16 @@ export default function UsersPage() {
                         })}
                       </div>
                     )}
+
+                    {/* İnce ayar köprüsü — modül × eylem matrisine yönlendir */}
+                    <Divider style={{ margin: '18px 0 10px', borderColor: C.border }} />
+                    <div style={{ color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+                      Daha ince ayar (modül × eylem) gerekiyorsa kullanıcıya{' '}
+                      <Link to="/permissions" onClick={() => setDrawerOpen(false)} style={{ color: 'var(--accent)' }}>
+                        Yetki Ayarları
+                      </Link>
+                      {' '}sayfasından özel bir yetki seti atayabilirsiniz.
+                    </div>
                   </div>
                 ),
               },
