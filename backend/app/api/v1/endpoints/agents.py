@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import re
 import secrets
@@ -1389,11 +1390,21 @@ async def agent_websocket(
                 # Auto-update: notify agent if its version is outdated
                 agent_ver = msg.get("version") or ""
                 def _ver(v): return tuple(int(x) for x in v.split(".") if x.isdigit())
+                _agent_logger = logging.getLogger("agent_manager")
+                _agent_logger.info(
+                    "agent hello: id=%s ver=%s platform=%s",
+                    agent_id, agent_ver, msg.get("platform"),
+                )
                 if agent_ver and _ver(agent_ver) < _ver(CURRENT_AGENT_VERSION):
                     try:
                         import base64 as _b64
                         _sp = Path(__file__).parents[4] / "agent_script" / "netmanager_agent.py"
                         _sc = _b64.b64encode(_sp.read_bytes()).decode() if _sp.exists() else None
+                        _agent_logger.info(
+                            "OTA notify: %s v%s -> v%s (script size: %dB)",
+                            agent_id, agent_ver, CURRENT_AGENT_VERSION,
+                            len(_sc) if _sc else 0,
+                        )
                         await asyncio.wait_for(
                             websocket.send_text(json.dumps({
                                 "type": "update_available",
@@ -1403,8 +1414,11 @@ async def agent_websocket(
                             })),
                             timeout=5,
                         )
-                    except Exception:
-                        pass
+                        _agent_logger.info("OTA notify sent: %s", agent_id)
+                    except Exception as _exc:
+                        _agent_logger.warning(
+                            "OTA notify FAILED for %s: %r", agent_id, _exc,
+                        )
 
                 # Push device list for health monitoring
                 asyncio.create_task(_push_device_sync_task(agent_id, db))
