@@ -330,13 +330,217 @@ function ResourceAssignTab({ orgs }: { orgs: OrganizationWithCounts[] }) {
   )
 }
 
+// ── T8.4 — LiveSessionsTab ──────────────────────────────────────────────────
+// Super admin için aktif oturumları listeler; tek tıkla revoke (force logout).
+// Polling 8 saniyede bir; "Kapat" tuşu Popconfirm ile onaylı. Kendi oturumunu
+// kapatamasın diye buton disabled (backend de bunu reddediyor).
+
+function LiveSessionsTab() {
+  const { isDark } = useTheme()
+  const { message } = App.useApp()
+  const qc = useQueryClient()
+  const [includeRevoked, setIncludeRevoked] = useState(false)
+
+  // Mevcut kullanıcı id'sini auth store yerine /auth/me query'sini reuse
+  // ederek alıyoruz — superadmin sayfasının import'larıyla uyumlu.
+  const { data: me } = useQuery({
+    queryKey: ['auth-me-for-sessions'],
+    queryFn: () => import('@/api/auth').then(m => m.authApi.me()),
+    staleTime: 60_000,
+  })
+
+  const { data, isLoading, refetch, isFetching } = useQuery({
+    queryKey: ['live-sessions', includeRevoked],
+    queryFn: () => superadminApi.listSessions({ include_revoked: includeRevoked, limit: 200 }),
+    refetchInterval: 8000,
+  })
+
+  const revokeMut = useMutation({
+    mutationFn: (id: number) => superadminApi.revokeSession(id),
+    onSuccess: () => {
+      message.success('Oturum kapatıldı')
+      qc.invalidateQueries({ queryKey: ['live-sessions'] })
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Kapatma başarısız'),
+  })
+
+  // User-Agent parse — basit: "Chrome on Mac" gibi etiket çıkar.
+  const parseUA = (ua: string | null): string => {
+    if (!ua) return '—'
+    let browser = 'Bilinmeyen'
+    let os = ''
+    if (/Edg\//.test(ua)) browser = 'Edge'
+    else if (/Chrome\//.test(ua)) browser = 'Chrome'
+    else if (/Firefox\//.test(ua)) browser = 'Firefox'
+    else if (/Safari\//.test(ua) && !/Chrome\//.test(ua)) browser = 'Safari'
+    if (/Mac OS X/.test(ua)) os = 'Mac'
+    else if (/Windows NT/.test(ua)) os = 'Windows'
+    else if (/Linux/.test(ua)) os = 'Linux'
+    else if (/Android/.test(ua)) os = 'Android'
+    else if (/iPhone|iPad/.test(ua)) os = 'iOS'
+    return os ? `${browser} · ${os}` : browser
+  }
+
+  const fromNow = (iso: string): string => {
+    const ms = Date.now() - new Date(iso).getTime()
+    const s = Math.floor(ms / 1000)
+    if (s < 60) return `${s}sn önce`
+    const m = Math.floor(s / 60)
+    if (m < 60) return `${m}dk önce`
+    const h = Math.floor(m / 60)
+    if (h < 24) return `${h}sa önce`
+    const d = Math.floor(h / 24)
+    return `${d}g önce`
+  }
+
+  const items = data?.items ?? []
+  const activeCount = items.filter(s => !s.revoked_at && !s.expired).length
+
+  const cardBg = isDark ? '#0e1e38' : '#ffffff'
+  const border = isDark ? '#1a3458' : '#e2e8f0'
+
+  return (
+    <div>
+      <div style={{
+        background: cardBg, border: `1px solid ${border}`, borderRadius: 10,
+        padding: '12px 16px', marginBottom: 14,
+        display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+      }}>
+        <Text strong style={{ fontSize: 14 }}>
+          <PoweroffOutlined style={{ color: '#22c55e', marginRight: 6 }} />
+          Canlı Oturumlar
+        </Text>
+        <Tag color="green">{activeCount} aktif</Tag>
+        {items.length !== activeCount && (
+          <Tag>{items.length} toplam</Tag>
+        )}
+        <Text type="secondary" style={{ fontSize: 11 }}>
+          {isFetching ? 'Güncelleniyor…' : '8 saniyede bir otomatik yenilenir'}
+        </Text>
+        <Space style={{ marginLeft: 'auto' }}>
+          <Button size="small"
+            type={includeRevoked ? 'primary' : 'default'}
+            onClick={() => setIncludeRevoked(v => !v)}>
+            {includeRevoked ? '✓ Kapatılanları göster' : 'Kapatılanları göster'}
+          </Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={() => refetch()}>
+            Yenile
+          </Button>
+        </Space>
+      </div>
+
+      <Table
+        size="small"
+        loading={isLoading}
+        dataSource={items}
+        rowKey="id"
+        pagination={{ pageSize: 25, showSizeChanger: false, showTotal: (n) => `${n} oturum` }}
+        rowClassName={(r) => r.revoked_at ? 'session-row-revoked' : ''}
+        columns={[
+          {
+            title: 'Kullanıcı',
+            key: 'user',
+            render: (_: unknown, r: any) => (
+              <div>
+                <div style={{ fontWeight: 600, fontFamily: 'monospace' }}>{r.username}</div>
+                {r.full_name && <div style={{ fontSize: 11, color: '#94a3b8' }}>{r.full_name}</div>}
+              </div>
+            ),
+          },
+          {
+            title: 'Rol',
+            dataIndex: 'role',
+            width: 140,
+            render: (r: string) => (
+              <Tag color={r === 'super_admin' ? 'purple' : r === 'org_admin' ? 'red' : r === 'location_admin' ? 'orange' : 'green'}>
+                {r === 'super_admin' ? 'Süper Yönetici'
+                  : r === 'org_admin' ? 'Org Yöneticisi'
+                  : r === 'location_admin' ? 'Lokasyon Yöneticisi'
+                  : r === 'viewer' ? 'Görüntüleyici' : r}
+              </Tag>
+            ),
+          },
+          { title: 'IP', dataIndex: 'ip', width: 130,
+            render: (v: string) => <span style={{ fontFamily: 'monospace', fontSize: 12 }}>{v || '—'}</span> },
+          { title: 'Tarayıcı / OS', dataIndex: 'user_agent', width: 160,
+            render: (v: string) => <Tooltip title={v || ''}><span style={{ fontSize: 12 }}>{parseUA(v)}</span></Tooltip> },
+          {
+            title: 'Giriş',
+            dataIndex: 'created_at',
+            width: 110,
+            render: (v: string) => (
+              <Tooltip title={new Date(v).toLocaleString('tr-TR')}>
+                <span style={{ fontSize: 12 }}>{fromNow(v)}</span>
+              </Tooltip>
+            ),
+          },
+          {
+            title: 'Son Aktivite',
+            dataIndex: 'last_activity',
+            width: 130,
+            render: (v: string, r: any) => {
+              const ms = Date.now() - new Date(v).getTime()
+              const stale = ms > 5 * 60 * 1000  // 5 dk
+              return (
+                <Tooltip title={new Date(v).toLocaleString('tr-TR')}>
+                  <span style={{ fontSize: 12, color: stale ? '#f59e0b' : '#22c55e' }}>
+                    {fromNow(v)}
+                    {!r.revoked_at && !r.expired && !stale && ' 🟢'}
+                  </span>
+                </Tooltip>
+              )
+            },
+          },
+          {
+            title: 'Durum',
+            key: 'status',
+            width: 100,
+            render: (_: unknown, r: any) => {
+              if (r.revoked_at) return <Tag color="red">Kapatıldı</Tag>
+              if (r.expired) return <Tag>Süresi Doldu</Tag>
+              return <Tag color="green">Aktif</Tag>
+            },
+          },
+          {
+            title: '',
+            key: 'actions',
+            width: 110,
+            render: (_: unknown, r: any) => {
+              const isSelf = me && r.user_id === me.id
+              if (r.revoked_at || r.expired) return <span style={{ color: '#94a3b8' }}>—</span>
+              if (isSelf) return <Tooltip title="Kendi oturumunuzu buradan kapatamazsınız"><span style={{ color: '#94a3b8', fontSize: 11 }}>Bu sizsiniz</span></Tooltip>
+              return (
+                <Popconfirm
+                  title="Oturumu kapat?"
+                  description={`${r.username} hemen logout olur.`}
+                  onConfirm={() => revokeMut.mutate(r.id)}
+                  okText="Kapat"
+                  cancelText="İptal"
+                  okButtonProps={{ danger: true }}>
+                  <Button size="small" danger icon={<PoweroffOutlined />}
+                    loading={revokeMut.isPending && revokeMut.variables === r.id}>
+                    Kapat
+                  </Button>
+                </Popconfirm>
+              )
+            },
+          },
+        ]}
+      />
+      <style>{`
+        .session-row-revoked { opacity: 0.55; }
+      `}</style>
+    </div>
+  )
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function SuperAdminPage() {
   const { isDark } = useTheme()
   const { message } = App.useApp()
   const qc = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'overview' | 'assign'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'assign' | 'sessions'>('overview')
   const [quotaModal, setQuotaModal] = useState<OrganizationWithCounts | null>(null)
   const [quotaForm] = Form.useForm()
 
@@ -535,10 +739,11 @@ export default function SuperAdminPage() {
         <Space>
           <Segmented
             value={activeTab}
-            onChange={(v) => setActiveTab(v as 'overview' | 'assign')}
+            onChange={(v) => setActiveTab(v as 'overview' | 'assign' | 'sessions')}
             options={[
               { label: <Space><GlobalOutlined />Genel Bakış</Space>, value: 'overview' },
               { label: <Space><SwapOutlined />Kaynak Atama</Space>, value: 'assign' },
+              { label: <Space><PoweroffOutlined />Canlı Oturumlar</Space>, value: 'sessions' },
             ]}
           />
           {activeTab === 'overview' && (
@@ -646,8 +851,10 @@ export default function SuperAdminPage() {
             />
           </div>
         </>
-      ) : (
+      ) : activeTab === 'assign' ? (
         <ResourceAssignTab orgs={orgs} />
+      ) : (
+        <LiveSessionsTab />
       )}
 
       {/* Quota edit modal */}

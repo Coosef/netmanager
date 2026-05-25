@@ -32,12 +32,29 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """T8.4 — JWT'ye `jti` (uuid) eklendi. Caller jti'yi caller'a verirse
+    UserSession kaydında aynı jti ile session yaratılır → revoke kontrolü
+    için get_current_user bu jti'yi tabloya bakar."""
+    import uuid as _uuid
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
         expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
+    # Caller jti vermediyse otomatik üret. Login flow `_build_token_response`
+    # explicit jti vererek session ile binding kurar; eski callerlar (testler,
+    # tek-seferlik token'lar) tabloya yazılmaz, sadece jti claim'i alır
+    # (revoke kontrolü session yoksa pas geçer — backward compat).
+    if "jti" not in to_encode:
+        to_encode["jti"] = _uuid.uuid4().hex
     to_encode.update({"exp": expire})
     return pyjwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+def new_jti() -> str:
+    """T8.4 — UserSession yaratmadan önce jti üret, sonra token ile birlikte
+    aynı jti'yi geç. Çift-uuid önler (sym aynı id)."""
+    import uuid as _uuid
+    return _uuid.uuid4().hex
 
 
 def decode_access_token(token: str) -> Optional[dict]:

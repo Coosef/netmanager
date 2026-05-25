@@ -170,4 +170,33 @@ export const superadminApi = {
    *  (`^[a-z0-9-]+$`) and provisions default permission sets. */
   createOrg: (payload: OrgCreatePayload) =>
     client.post<Organization>('/super-admin/orgs', payload).then((r) => r.data),
+
+  // T8.4 — Canlı Oturumlar (Live Sessions)
+  listSessions: (params?: { include_revoked?: boolean; limit?: number }) =>
+    client.get<{ items: SessionItem[]; total: number }>(
+      '/super-admin/sessions',
+      { params: params ?? {} },
+    ).then((r) => r.data),
+
+  revokeSession: (sessionId: number) =>
+    client.delete(`/super-admin/sessions/${sessionId}`),
+}
+
+// T8.4 — UserSession row shape (backend list_sessions response)
+export interface SessionItem {
+  id: number
+  jti: string
+  user_id: number
+  username: string
+  full_name: string | null
+  role: string
+  organization_id: number | null
+  ip: string | null
+  user_agent: string | null
+  created_at: string
+  last_activity: string
+  expires_at: string
+  expired: boolean
+  revoked_at: string | null
+  revoked_reason: string | null
 }

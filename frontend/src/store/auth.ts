@@ -109,7 +109,14 @@ export const useAuthStore = create<AuthState>()(
       setAuth: (token, user, permissions = null) =>
         set({ token, user: normalizeUser(user), permissions }),
 
-      logout: () => set({ token: null, user: null, permissions: null }),
+      logout: () => {
+        // T8.4 — best-effort server-side session revoke. Network hatası
+        // logout'u engellemez; local state her durumda temizlenir.
+        try {
+          import('@/api/auth').then(m => m.authApi.logout()).catch(() => {})
+        } catch { /* noop */ }
+        set({ token: null, user: null, permissions: null })
+      },
 
       can: (module: string, action: string) => {
         const user = get().user

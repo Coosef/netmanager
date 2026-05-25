@@ -19,8 +19,10 @@ from app.core.security import (
     create_mfa_challenge_token,
     decode_mfa_challenge_token,
     hash_password,
+    new_jti,
     verify_password,
 )
+from app.core.config import settings as _app_settings
 from app.models.invite_token import InviteToken
 from app.models.user import User, SystemRole
 from app.schemas.auth import (
@@ -37,12 +39,38 @@ router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
 
 
-async def _build_token_response(db: AsyncSession, user: User) -> TokenResponse:
-    """Build a TokenResponse enriched with the user's full permission set."""
+async def _build_token_response(
+    db: AsyncSession, user: User, request: Optional[Request] = None,
+) -> TokenResponse:
+    """Build a TokenResponse enriched with the user's full permission set.
+
+    T8.4 — Her login'de UserSession kaydı oluşturulur; JWT'nin jti claim'i
+    bu satırın anahtarıdır. Super admin "Canlı Oturumlar" panelinden
+    revoke edebilsin diye ip + user_agent de kaydedilir.
+    """
     from app.services.rbac.engine import permission_engine
+    from app.models.user_session import UserSession
     permissions = await permission_engine.get_permissions(db, user)
+
+    # T8.4 — jti + session create
+    jti = new_jti()
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(minutes=_app_settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    ip = None
+    user_agent = None
+    if request is not None:
+        ip = request.client.host if request.client else None
+        user_agent = (request.headers.get("user-agent") or None)
+        if user_agent and len(user_agent) > 512:
+            user_agent = user_agent[:512]
+    db.add(UserSession(
+        jti=jti, user_id=user.id, ip=ip, user_agent=user_agent,
+        created_at=now, last_activity=now, expires_at=expires_at,
+    ))
+    await db.commit()
+
     return TokenResponse(
-        access_token=create_access_token({"sub": str(user.id)}),
+        access_token=create_access_token({"sub": str(user.id), "jti": jti}),
         user_id=user.id,
         username=user.username,
         # M6 final drop — legacy `role` column gone; surface `system_role`
@@ -117,7 +145,7 @@ async def login(
     await db.commit()
     await db.refresh(user)
 
-    token_resp = await _build_token_response(db, user)
+    token_resp = await _build_token_response(db, user, request=request)
     await log_action(db, user, "login", request=request)
     return token_resp
 
@@ -180,12 +208,42 @@ async def mfa_verify(
     await db.commit()
     await db.refresh(user)
 
-    token_resp = await _build_token_response(db, user)
+    token_resp = await _build_token_response(db, user, request=request)
     audit_details: dict = {"method": method}
     if consumed_recovery:
         audit_details["recovery_codes_remaining"] = len(user.mfa_recovery_codes or [])
     await log_action(db, user, "login_mfa_success", details=audit_details, request=request)
     return token_resp
+
+
+@router.post("/logout", status_code=204)
+async def logout(
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """T8.4 — Server-side session revoke. Client localStorage'dan token'ı
+    silmeden önce çağırır; bu jti tabloda revoked_at=now olarak işaretlenir,
+    sonraki request'lerde get_current_user 401 döner. Best-effort: client
+    bağlanamazsa zaten localStorage temizleyip yeniden login flow başlar."""
+    from app.models.user_session import UserSession
+    from sqlalchemy import update as _update
+    auth_header = request.headers.get("Authorization") or ""
+    if auth_header.lower().startswith("bearer "):
+        from app.core.security import decode_access_token
+        payload = decode_access_token(auth_header.split(" ", 1)[1])
+        jti = (payload or {}).get("jti")
+        if jti:
+            await db.execute(
+                _update(UserSession)
+                .where(UserSession.jti == jti, UserSession.revoked_at.is_(None))
+                .values(revoked_at=datetime.now(timezone.utc),
+                        revoked_by_id=current_user.id,
+                        revoked_reason="logout")
+            )
+            await db.commit()
+    await log_action(db, current_user, "logout", request=request)
+    return None
 
 
 @router.get("/me", response_model=UserResponse)
@@ -270,4 +328,4 @@ async def accept_invite(
     await db.commit()
     await db.refresh(user)
 
-    return await _build_token_response(db, user)
+    return await _build_token_response(db, user, request=request)

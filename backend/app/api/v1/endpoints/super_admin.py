@@ -841,3 +841,82 @@ async def assign_resources(
         "org_id": payload.org_id,
         "org_name": org.name,
     }
+
+
+# ─── T8.4 — Canlı Oturumlar (Live Sessions) ─────────────────────────────────
+# Sadece super admin: tüm kullanıcıların aktif oturumlarını listeleyip
+# tek tıkla revoke (force logout). UserSession tablosu Faz 8 phase'leri ile
+# uyumlu (RLS yok — super admin endpoint gate'i tek koruma).
+
+@router.get("/sessions")
+async def list_sessions(
+    _: SuperAdminOnly,
+    db: AsyncSession = Depends(get_db),
+    include_revoked: bool = Query(False),
+    limit: int = Query(200, ge=1, le=500),
+):
+    from app.models.user_session import UserSession
+    from sqlalchemy import desc as _desc
+
+    q = select(UserSession, User).join(User, User.id == UserSession.user_id)
+    if not include_revoked:
+        q = q.where(UserSession.revoked_at.is_(None))
+    q = q.order_by(_desc(UserSession.last_activity)).limit(limit)
+    rows = (await db.execute(q)).all()
+
+    now = datetime.now(timezone.utc)
+    items = []
+    for sess, user in rows:
+        expired = sess.expires_at <= now
+        items.append({
+            "id": sess.id,
+            "jti": sess.jti,
+            "user_id": user.id,
+            "username": user.username,
+            "full_name": user.full_name,
+            "role": user.system_role,
+            "organization_id": user.organization_id,
+            "ip": sess.ip,
+            "user_agent": sess.user_agent,
+            "created_at": sess.created_at.isoformat(),
+            "last_activity": sess.last_activity.isoformat(),
+            "expires_at": sess.expires_at.isoformat(),
+            "expired": expired,
+            "revoked_at": sess.revoked_at.isoformat() if sess.revoked_at else None,
+            "revoked_reason": sess.revoked_reason,
+        })
+    return {"items": items, "total": len(items)}
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def revoke_session(
+    session_id: int,
+    request: Request,
+    current_user: SuperAdminOnly,
+    db: AsyncSession = Depends(get_db),
+):
+    """T8.4 — Super admin force-logout. revoked_at + revoked_by_id + reason
+    set. Sonraki request'te get_current_user 401 Session revoked döner."""
+    from app.models.user_session import UserSession
+
+    sess = (await db.execute(
+        select(UserSession).where(UserSession.id == session_id)
+    )).scalar_one_or_none()
+    if sess is None:
+        raise HTTPException(404, "Oturum bulunamadı")
+    if sess.revoked_at is not None:
+        return None  # Idempotent — zaten kapalı
+    if sess.user_id == current_user.id:
+        raise HTTPException(400, "Kendi oturumunuzu bu panelden kapatamazsınız (Çıkış yap menüsünü kullanın)")
+
+    sess.revoked_at = datetime.now(timezone.utc)
+    sess.revoked_by_id = current_user.id
+    sess.revoked_reason = "admin"
+    await db.commit()
+    await log_action(
+        db, current_user, "session_revoked",
+        "user_session", session_id,
+        details={"target_user_id": sess.user_id, "target_username": None},
+        request=request,
+    )
+    return None

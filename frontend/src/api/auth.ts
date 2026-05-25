@@ -28,4 +28,9 @@ export const authApi = {
     full_name?: string
   }) =>
     client.post<TokenResponse>('/auth/invite/accept', payload).then((r) => r.data),
+
+  /** T8.4 — server-side session revoke. Client localStorage'ı her
+   *  halükarda temizler; backend ek olarak jti'yi user_sessions tablosunda
+   *  revoked_at=now olarak işaretler → diğer tab'larda da invalid. */
+  logout: () => client.post('/auth/logout').catch(() => null),
 }
