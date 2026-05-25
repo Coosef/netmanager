@@ -523,6 +523,7 @@ async def refresh_vlans_batch(
 
     import asyncio
     from app.models.device_vlan_snapshot import DeviceVlanSnapshot
+    from app.models.network_baseline import NetworkBaseline
     from sqlalchemy.dialects.postgresql import insert as pg_insert
     from fastapi.responses import StreamingResponse
 
@@ -666,6 +667,36 @@ async def refresh_vlans_batch(
                     )
                 )
                 await db.execute(stmt)
+
+                # T8.4 anomaly-source-of-truth fix — kullanıcı "Tümünü Yenile"
+                # tetiklediğinde aldığımız canlı VLAN listesi yalnızca snapshot
+                # tablosuna gidiyordu; behavior_analytics_tasks.detect_anomalies
+                # ise NetworkBaseline.known_vlans'a bakıyor → günlük baseline
+                # task'ı geç kaldığı sürece "Switch konfigürasyonunda OLMAYAN
+                # VLAN" false-positive bağırıp duruyordu (prod'da VLAN 2416 →
+                # 24h içinde 286 fire/45 cihaz). Refresh artık baseline'ı da
+                # ground-truth olarak resetliyor: bir sonraki anomaly run'ı
+                # gerçekten DEĞİŞMİŞ olanı bağıracak, geçmiş eko değil.
+                baseline_stmt = (
+                    pg_insert(NetworkBaseline)
+                    .values(
+                        device_id=dev.id, metric_type="vlan_count",
+                        baseline_value=float(len(new_vids)), sample_count=1,
+                        known_vlans=new_vids, last_updated=now,
+                        organization_id=org_id, location_id=loc_id,
+                    )
+                    .on_conflict_do_update(
+                        constraint="uq_baseline_device_metric",
+                        set_={
+                            "baseline_value": float(len(new_vids)),
+                            "sample_count": NetworkBaseline.sample_count + 1,
+                            "known_vlans": new_vids,
+                            "last_updated": now,
+                        },
+                    )
+                )
+                await db.execute(baseline_stmt)
+
                 completed += 1
                 items[str(dev.id)] = {
                     "success": True, "hostname": dev.hostname,
