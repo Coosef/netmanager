@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.3.16"
+VERSION = "1.4.0"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -470,6 +470,85 @@ class _ParamikoDirectConn:
             self._transport.close()
         except Exception:
             pass
+
+
+# ── Interactive SSH shell (Faz T8.5 — terminal agent-relay) ────────────────
+# Backend WS endpoint artık doğrudan paramiko yerine agent'a relay yapıyor;
+# agent her aktif terminal için bir paramiko interactive shell tutar ve
+# tuşlamaları/çıktıyı backend ile çift yönlü taşır.
+#   session_id (backend tarafından üretilir) → {ssh, chan, reader_task}
+# Browser kapanırsa backend "ssh_shell_close" yollar; agent host kapansa
+# WS tarafı handle eder (reader task cancel + paramiko close finally'de).
+_shells: dict = {}
+
+
+def _shell_open_sync(msg: dict):
+    """Paramiko ile cihaza bağlan + invoke_shell. Sync (executor'da çağrılır).
+    Net hata mesajı için NetmikoAuthenticationException benzeri sınıflandırma
+    yapılmıyor — exception string'i backend'e olduğu gibi gider."""
+    import paramiko
+    host = msg["device_ip"]
+    port = int(msg.get("ssh_port") or 22)
+    username = msg["ssh_username"]
+    password = msg.get("ssh_password", "")
+    cols = int(msg.get("cols") or 80)
+    rows = int(msg.get("rows") or 24)
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(
+        host, port=port, username=username, password=password,
+        timeout=15, look_for_keys=False, allow_agent=False,
+    )
+    # xterm-256color: renkli prompt + vim/htop için uygun
+    chan = ssh.invoke_shell(term="xterm-256color", width=cols, height=rows)
+    # Non-blocking read; reader_task recv_ready() ile poll eder
+    chan.settimeout(0.0)
+    return ssh, chan
+
+
+async def _shell_reader(session_id: str, channel, ws, loop):
+    """Per-shell background reader. channel.recv → backend'e ssh_shell_output
+    (base64 binary safe). Channel kapanırsa veya recv 0 dönerse temizlik
+    yapıp ssh_shell_closed bildirimi gönderir."""
+    try:
+        while not channel.closed:
+            if channel.recv_ready():
+                try:
+                    data = await loop.run_in_executor(None, lambda: channel.recv(4096))
+                except Exception:
+                    break
+                if not data:
+                    break
+                try:
+                    await ws.send(json.dumps({
+                        "type": "ssh_shell_output",
+                        "session_id": session_id,
+                        "data": base64.b64encode(data).decode("ascii"),
+                    }))
+                except Exception:
+                    # WS koptu — reader'ı bitir, finally cleanup eder
+                    break
+            else:
+                await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        log.warning("shell reader [{}] hata: {}".format(session_id[:8], exc))
+    finally:
+        try:
+            await ws.send(json.dumps({
+                "type": "ssh_shell_closed",
+                "session_id": session_id,
+            }))
+        except Exception:
+            pass
+        s = _shells.pop(session_id, None)
+        if s:
+            try: s["chan"].close()
+            except Exception: pass
+            try: s["ssh"].close()
+            except Exception: pass
 
 
 def _connect_keyboard_interactive(params: dict) -> _ParamikoDirectConn:
@@ -1490,6 +1569,73 @@ async def handle_message(ws, msg, loop):
             })
 
         asyncio.create_task(_stream_task())
+
+    # Faz T8.5 — Interactive SSH terminal (agent-relay)
+    # Backend WS endpoint /ws/ssh/{device_id} artık paramiko'yu kendisi
+    # açmıyor; bu cihaza erişimi olan agent'a şu mesajları gönderiyor:
+    #   ssh_shell_open    → bu agent paramiko bağlanır, channel açar
+    #   ssh_shell_input   → tuşlamaları channel'a yazar
+    #   ssh_shell_resize  → terminal boyutu değiştir
+    #   ssh_shell_close   → session kapanır
+    # Agent her şey için tek WS bağlantısı kullanır; output base64 binary-safe.
+    elif t == "ssh_shell_open":
+        session_id = msg.get("session_id") or rid
+        log.info("shell open -> {}:{} (session={})".format(
+            msg.get("device_ip"), msg.get("ssh_port", 22), session_id[:8]))
+        try:
+            ssh, chan = await loop.run_in_executor(None, _shell_open_sync, msg)
+            reader = asyncio.create_task(_shell_reader(session_id, chan, ws, loop))
+            _shells[session_id] = {"ssh": ssh, "chan": chan, "reader": reader}
+            await _send({
+                "type": "ssh_shell_opened",
+                "session_id": session_id,
+                "request_id": rid,
+                "success": True,
+            })
+        except Exception as exc:
+            log.warning("shell open hata: {}".format(exc))
+            await _send({
+                "type": "ssh_shell_opened",
+                "session_id": session_id,
+                "request_id": rid,
+                "success": False,
+                "error": str(exc)[:300],
+            })
+
+    elif t == "ssh_shell_input":
+        session_id = msg.get("session_id", "")
+        s = _shells.get(session_id)
+        if s and not s["chan"].closed:
+            try:
+                data = base64.b64decode(msg.get("data", ""))
+                # channel.sendall blocking → executor
+                await loop.run_in_executor(None, s["chan"].sendall, data)
+            except Exception as exc:
+                log.warning("shell input hata (session={}): {}".format(session_id[:8], exc))
+
+    elif t == "ssh_shell_resize":
+        session_id = msg.get("session_id", "")
+        s = _shells.get(session_id)
+        if s and not s["chan"].closed:
+            try:
+                s["chan"].resize_pty(
+                    width=int(msg.get("cols", 80)),
+                    height=int(msg.get("rows", 24)),
+                )
+            except Exception:
+                pass
+
+    elif t == "ssh_shell_close":
+        session_id = msg.get("session_id", "")
+        s = _shells.pop(session_id, None)
+        if s:
+            try: s["reader"].cancel()
+            except Exception: pass
+            try: s["chan"].close()
+            except Exception: pass
+            try: s["ssh"].close()
+            except Exception: pass
+            log.info("shell closed (session={})".format(session_id[:8]))
 
     # Feature 4: SNMP
     elif t == "snmp_get":
