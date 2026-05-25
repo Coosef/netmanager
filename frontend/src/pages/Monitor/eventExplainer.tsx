@@ -38,6 +38,7 @@ export const TYPE_LABELS: Record<string, string> = {
   lifecycle_alert:       'Lifecycle Uyarısı',
   rollout_failure:       'Config Rollout Hatası',
   sla_breach:            'SLA İhlali',
+  local_anomaly:         'Agent-Lokal Anomali',
 }
 
 // ── Event detail modal helpers ────────────────────────────────────────────────
@@ -458,6 +459,65 @@ export function buildEventDetail(ev: NetworkEvent): EventDetail {
         ],
         links: [
           { label: 'Config Rollout', path: '/change-management', icon: <CodeOutlined /> },
+        ],
+      }
+    }
+
+    case 'local_anomaly': {
+      // Agent tarafından gönderilen local anomaly. Agent kendi taraflı bir
+      // davranış değişikliği (örn. high_ssh_failure_rate) tespit edip
+      // backend'e iletiyor. Cihaz bağımsız — agent geneline ait.
+      const sub = (d.anomaly_type || ev.title || '').toLowerCase()
+      const failRate = typeof d.fail_rate === 'number' ? d.fail_rate : null
+      const failPct = failRate != null ? Math.round(failRate * 100) : null
+      const windowSize = d.window_size ?? null
+
+      let what = 'Agent tarafında bir lokal anomali tespit edildi.'
+      let reasonRow: { label: string; value: React.ReactNode } | null = null
+      let suggestion = 'Agent log\'larını ve hedeflediği cihazların erişilebilirliğini kontrol edin.'
+
+      if (sub.includes('ssh') || sub.includes('high_ssh')) {
+        what = 'Bu agent üzerinden dispatch edilen SON komutların büyük çoğunluğu BAŞARISIZ döndü. ' +
+               'Genellikle hedef cihaz(lar)a SSH ile ulaşılamadığında oluşur — credential, ' +
+               'network reach veya cihaz offline kaynaklı.'
+        reasonRow = {
+          label: 'Olası Neden', value: (
+            <Text style={{ fontSize: 12 }}>
+              • Hedef cihaz(lar) offline veya SSH portu engelli<br/>
+              • Credential profili güncel değil (şifre değişti)<br/>
+              • Agent ile cihaz arasında ağ kesintisi<br/>
+              • Cihazda max SSH session limiti dolu
+            </Text>
+          ),
+        }
+        suggestion = 'Agentin son komut log\'larını incele (Agentlar sayfası). ' +
+                     'Hedef cihazların ping/SSH testini yap. Credential rotasyonu son zamanlarda ' +
+                     'yapıldıysa Kimlik Profilleri\'nden doğrula.'
+      } else if (sub.includes('packet_loss') || sub.includes('ping_fail')) {
+        what = 'Agent tarafı ping/ICMP probe\'unda yüksek paket kaybı algıladı.'
+        suggestion = 'Hedef cihazın MTU, firewall ve link durumunu kontrol edin.'
+      }
+
+      return {
+        icon: <RobotOutlined style={{ color: '#f59e0b' }} />,
+        what,
+        rows: [
+          { label: 'Agent ID', value: <Tag color="geekblue" style={{ fontFamily: 'monospace' }}>{d.agent_id ?? '—'}</Tag> },
+          { label: 'Anomali Türü', value: <Tag color="orange" style={{ fontFamily: 'monospace' }}>{d.anomaly_type ?? 'local_anomaly'}</Tag> },
+          ...(failPct != null ? [{
+            label: 'Başarısız Oran', value: (
+              <Tag color={failPct >= 80 ? 'red' : failPct >= 50 ? 'orange' : 'gold'}>
+                %{failPct}{windowSize ? ` (son ${windowSize} komut)` : ''}
+              </Tag>
+            ),
+          }] : []),
+          ...(reasonRow ? [reasonRow] : []),
+          { label: 'Mesaj', value: ev.message ?? '—' },
+          { label: 'Öneri', value: suggestion },
+        ],
+        links: [
+          { label: 'Agentlar', path: '/agents', icon: <RobotOutlined /> },
+          { label: 'Kimlik Profilleri', path: '/settings?tab=credentials', icon: <DatabaseOutlined /> },
         ],
       }
     }

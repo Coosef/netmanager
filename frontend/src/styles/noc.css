@@ -440,6 +440,41 @@
   overflow: visible;
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * T8.4 — Column-based masonry (view mode, drag-drop kapalıyken)
+ *
+ * Kullanıcı raporu: "yarım olan kartları alt alta ekleyebilmeliyim,
+ * illa sabit bir yap kapladığı için çirkin görünüyor". CSS Grid 12-col
+ * + sabit span-X kısa kartların altında boşluk bırakıyordu. View mode'da
+ * CSS multi-column kullan — kartlar Pinterest tarzı sütunlara doğal akar,
+ * boşluklar kapanır. Edit mode'da .nm-dashboard-grid'e geri dön (sortable
+ * absolute positioning kullandığı için column-flow ile uyumsuz).
+ * ────────────────────────────────────────────────────────────────── */
+.nm-dashboard-masonry {
+  display: block;
+  column-count: 3;
+  column-gap: var(--gap);
+  column-fill: balance;
+  margin-top: var(--gap);
+}
+@media (max-width: 1280px) { .nm-dashboard-masonry { column-count: 2; } }
+@media (max-width: 720px)  { .nm-dashboard-masonry { column-count: 1; } }
+.nm-dashboard-masonry > .nm-masonry-item {
+  break-inside: avoid;
+  page-break-inside: avoid;
+  display: block;
+  margin-bottom: var(--gap);
+}
+/* span-12 kartlar (TopoMini, EventStream, ActivityHeatStrip) tüm sütunları
+   doldursun — Firefox/Chrome/Safari column-span:all destekler. */
+.nm-dashboard-masonry > .nm-masonry-item.span-full {
+  column-span: all;
+  -webkit-column-span: all;
+}
+.nm-dashboard-masonry .nm-card {
+  height: auto;
+}
+
 /* card sublabel pill */
 .nm-pill {
   font-family: var(--font-mono);

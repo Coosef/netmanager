@@ -319,32 +319,56 @@ function DashboardGrid({ editMode, order, hidden, setOrder, toggleWidget, render
     setOrder(arrayMove(order, from, to))
   }
 
+  // T8.4 — VIEW mode: CSS multi-column masonry (kartlar boşluksuz akar).
+  //         EDIT mode: sortable CSS Grid (dnd-kit absolute positioning ile
+  //         column-flow uyumsuz olduğu için).
+  if (editMode) {
+    return (
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+        <SortableContext items={visibleIds} strategy={rectSortingStrategy}>
+          <div className="nm-grid cols-12 nm-dashboard-grid" style={{ gap: 'var(--gap)', marginTop: 'var(--gap)' }}>
+            {visibleIds.map((id) => (
+              <SortableWidget key={id} id={id} span={WIDGET_SPAN[id] || 'span-4'}
+                editMode={editMode}
+                onRemove={() => toggleWidget(id)}>
+                {render(id)}
+              </SortableWidget>
+            ))}
+            {visibleIds.length === 0 && (
+              <div className="span-12" style={{
+                padding: 48, textAlign: 'center', color: 'var(--fg-3)',
+                border: '1px dashed var(--line)', borderRadius: 10,
+              }}>
+                Tüm widget'lar gizli. Özelleştir → Widget Görünürlüğü'nden seçim yap.
+              </div>
+            )}
+          </div>
+        </SortableContext>
+      </DndContext>
+    )
+  }
+  // VIEW mode — Pinterest tarzı column masonry. Boş alanlar otomatik
+  // kapanır; kartlar içeriğine göre yükseklik alır. span-12 (büyük)
+  // kartlar tüm sütunları kaplar (column-span:all).
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
-      <SortableContext items={visibleIds} strategy={rectSortingStrategy}>
-        {/* T8.4 — nm-dashboard-grid: grid-auto-flow:dense + grid-auto-rows:
-            min-content. Kısa kartlar üst boşluğu doldurur, kart yüksekliği
-            content-aware. Liste-tipi kartlar (Agent Filosu vb.) içeriği
-            320px'i geçince otomatik scroll. */}
-        <div className="nm-grid cols-12 nm-dashboard-grid" style={{ gap: 'var(--gap)', marginTop: 'var(--gap)' }}>
-          {visibleIds.map((id) => (
-            <SortableWidget key={id} id={id} span={WIDGET_SPAN[id] || 'span-4'}
-              editMode={editMode}
-              onRemove={() => toggleWidget(id)}>
-              {render(id)}
-            </SortableWidget>
-          ))}
-          {visibleIds.length === 0 && (
-            <div className="span-12" style={{
-              padding: 48, textAlign: 'center', color: 'var(--fg-3)',
-              border: '1px dashed var(--line)', borderRadius: 10,
-            }}>
-              Tüm widget'lar gizli. Özelleştir → Widget Görünürlüğü'nden seçim yap.
-            </div>
-          )}
+    <div className="nm-dashboard-masonry">
+      {visibleIds.map((id) => {
+        const fullWidth = (WIDGET_SPAN[id] || 'span-4') === 'span-12'
+        return (
+          <div key={id} className={`nm-masonry-item ${fullWidth ? 'span-full' : ''}`}>
+            {render(id)}
+          </div>
+        )
+      })}
+      {visibleIds.length === 0 && (
+        <div style={{
+          padding: 48, textAlign: 'center', color: 'var(--fg-3)',
+          border: '1px dashed var(--line)', borderRadius: 10,
+        }}>
+          Tüm widget'lar gizli. Özelleştir → Widget Görünürlüğü'nden seçim yap.
         </div>
-      </SortableContext>
-    </DndContext>
+      )}
+    </div>
   )
 }
 
@@ -404,7 +428,8 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     case 'topo':
       return (
         <Card title="Topoloji Önizleme" pill={{ label: `${offline} down`, kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => navigate('/topology-next')}>
-          <TopoMini online={online} offline={offline} total={total} devices={devicesData?.items} />
+          <TopoMini online={online} offline={offline} total={total} devices={devicesData?.items}
+            onSelectDevice={(did) => navigate(`/devices/${did}`)} />
         </Card>
       )
     case 'activity':
@@ -656,9 +681,10 @@ function useClock() {
   return t
 }
 
-function TopoMini({ online, offline, total, devices }: {
+function TopoMini({ online, offline, total, devices, onSelectDevice }: {
   online: number; offline: number; total: number
   devices?: any[]   // Device[] — varsa gerçek diagram; yoksa placeholder
+  onSelectDevice?: (deviceId: number) => void  // T8.4 — node click → navigate
 }) {
   // T8.4 — eski 10x7 grid ("yeşil/kırmızı kutucuklar") yerine
   // network-topology-vari katmanlı SVG diagram:
@@ -781,14 +807,18 @@ function TopoMini({ online, offline, total, devices }: {
             strokeDasharray={l.down ? '4 3' : 'none'} />
         ))}
 
-        {/* Nodes — render order: links arkada, sonra düğümler */}
+        {/* Nodes — render order: links arkada, sonra düğümler.
+            T8.4 — node click → device sayfasına navigate (etkileşim). */}
         {[...coreP, ...distP, ...accessP].map(({ d, x, y }) => {
           const color = colorOf(d)
           const down = isDownN(d)
           const r = layerOf(d) === 'core' ? 9 : layerOf(d) === 'dist' ? 7 : 5
+          const clickable = !!onSelectDevice && !!d.id
           return (
-            <g key={d.id ?? d.hostname}>
-              <title>{`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}`}</title>
+            <g key={d.id ?? d.hostname}
+              style={{ cursor: clickable ? 'pointer' : 'default' }}
+              onClick={() => { if (clickable && d.id) onSelectDevice(d.id) }}>
+              <title>{`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}${clickable ? ' — tıkla' : ''}`}</title>
               {/* Outer glow ring (sadece online/down ışıltısı için) */}
               {down ? (
                 <circle cx={x} cy={y} r={r + 4} fill="none" stroke={color}
@@ -800,10 +830,21 @@ function TopoMini({ online, offline, total, devices }: {
                 <circle cx={x} cy={y} r={r + 2} fill="none" stroke={color}
                   strokeWidth="0.6" opacity="0.4" />
               )}
+              {/* Hover'da büyüyen hit-area + node */}
+              <circle cx={x} cy={y} r={r + 6} fill="transparent" />
               <circle cx={x} cy={y} r={r}
                 fill={color}
-                stroke="var(--bg-1)" strokeWidth="1.5"
-                style={{ cursor: 'pointer' }} />
+                stroke="var(--bg-1)" strokeWidth="1.5">
+                {clickable && (
+                  <>
+                    <animate attributeName="r"
+                      values={`${r};${r};${r}`}
+                      keyTimes="0;0.99;1"
+                      dur="0.001s" begin="mouseover"
+                      fill="freeze" />
+                  </>
+                )}
+              </circle>
             </g>
           )
         })}
