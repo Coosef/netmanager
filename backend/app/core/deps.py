@@ -51,6 +51,35 @@ async def get_current_user(
     if user_id is None:
         raise credentials_exception
 
+    # T8.4 — Session revoke kontrolü. JWT'de jti varsa user_sessions
+    # tablosuna bak: kayıt yok → backward-compat (eski tokenlar tabloya
+    # yazılmadı), kayıt VAR ve revoked_at IS NOT NULL → 401. Last_activity
+    # rate-limited update (60s'ten eski ise yaz; her request'te yazma
+    # yükünü engelle).
+    jti = payload.get("jti")
+    if jti:
+        from app.models.user_session import UserSession
+        from sqlalchemy import update as _update
+        sess = (await db.execute(
+            select(UserSession).where(UserSession.jti == jti)
+        )).scalar_one_or_none()
+        if sess is not None and sess.revoked_at is not None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session revoked",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        if sess is not None:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            if (now - sess.last_activity) > timedelta(seconds=60):
+                await db.execute(
+                    _update(UserSession)
+                    .where(UserSession.id == sess.id)
+                    .values(last_activity=now)
+                )
+                await db.commit()
+
     result = await db.execute(select(User).where(User.id == int(user_id), User.is_active == True))
     user = result.scalar_one_or_none()
     if user is None:
