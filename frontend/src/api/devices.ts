@@ -1,4 +1,5 @@
 import client from './client'
+import { useAuthStore } from '@/store/auth'
 import type { Device, DeviceGroup, PaginatedResponse, ConfigBackup, NetworkInterface, Vlan } from '@/types'
 
 interface DeviceListParams {
@@ -144,7 +145,12 @@ export const devicesApi = {
     deviceIds: number[],
     onProgress: (ev: VlanRefreshStreamEvent) => void,
   ): Promise<VlanRefreshCompleteEvent> => {
-    const token = localStorage.getItem('access_token') || ''
+    // T8.4 token-source fix — daha önce `localStorage.getItem('access_token')`
+    // okuyorduk ama auth store JWT'yi `netmgr-auth` zustand-persist anahtarı
+    // altında saklıyor; o key hiçbir zaman var olmuyordu → Bearer boş gidiyor,
+    // backend 401 `Invalid or expired token` döndürüyor, "Tümünü Yenile"
+    // hep başarısız oluyordu. Şimdi axios client'la aynı kaynak: zustand store.
+    const token = useAuthStore.getState().token || ''
     const res = await fetch('/api/v1/devices/vlans-refresh', {
       method: 'POST',
       headers: {
