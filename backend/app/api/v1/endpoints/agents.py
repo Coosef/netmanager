@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 import redis as _redis_lib
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select, desc
@@ -508,12 +508,37 @@ async def download_installer(
     platform: str,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    agent_key: str = Query(..., description="Agent key (shown once at creation)"),
+    # T8.4 F3 / CyberStrike pentest MEDIUM CWE-598:
+    #   agent_key URL query'sinde TAŞINIYORDU → CDN/proxy log'larına,
+    #   browser history'sine, shell history'sine sızar. Header-first;
+    #   Query backward-compat (deprecation log) için tutuluyor — bir
+    #   sonraki minor release'de tamamen kaldırılır.
+    x_agent_key: str = Header(None, alias="X-Agent-Key",
+                              description="Agent key (preferred; URL query yerine header)"),
+    agent_key_q: str = Query(None, alias="agent_key",
+                             description="DEPRECATED: X-Agent-Key header'ı kullanın"),
     server_url: str = Query(None, description="Public server URL visible to the agent machine"),
 ):
     """Generate a platform-specific installer script with embedded credentials."""
     if platform not in ("linux", "windows"):
         raise HTTPException(status_code=400, detail="platform must be linux or windows")
+
+    # T8.4 F3 — Header tercih edilen, query backward-compat. İkisi de
+    # boşsa 401.
+    agent_key = x_agent_key or agent_key_q
+    if not agent_key:
+        raise HTTPException(
+            status_code=401,
+            detail="X-Agent-Key header gerekli (veya geçici olarak agent_key query)",
+        )
+    if not x_agent_key and agent_key_q:
+        # Deprecation telemetry — Audit log'a yaz, operatör URL'den
+        # header'a geçirsin diye görsün.
+        import logging
+        logging.getLogger("netmanager.security").warning(
+            "agent_key query string usage (DEPRECATED) — agent_id=%s, ip=%s",
+            agent_id, request.client.host if request.client else "?",
+        )
 
     # Public, credential-authenticated endpoint: the installer machine has no
     # user session, so `get_db` carries no RLS context and FORCE ROW LEVEL
@@ -599,14 +624,29 @@ async def download_agent_script(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ):
-    """Return the raw agent Python script. Validates X-Agent-Key header if provided."""
+    """Return the raw agent Python script.
+
+    T8.4 F3 / CyberStrike pentest LOW CWE-200: eski versiyonda X-Agent-ID/
+    X-Agent-Key header'ı YOKSA hiçbir auth check yapılmıyordu → anonim
+    indirilebilir + reverse engineering kolaylığı. Şimdi header ZORUNLU;
+    yoksa 401. RLS bypass yine yapılır (installer machine'in user session'ı
+    yok), authentication agent_key ile.
+    """
     agent_id = request.headers.get("X-Agent-ID")
     agent_key = request.headers.get("X-Agent-Key")
 
-    if agent_id and agent_key:
-        agent = await db.get(Agent, agent_id)
-        if not agent or not verify_password(agent_key, agent.agent_key_hash):
-            raise HTTPException(status_code=403, detail="Geçersiz agent kimlik bilgileri")
+    if not (agent_id and agent_key):
+        raise HTTPException(
+            status_code=401,
+            detail="X-Agent-ID + X-Agent-Key header'ları gerekli",
+        )
+
+    # RLS bypass (installer machine'in user session'ı yok)
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
+    agent = await db.get(Agent, agent_id)
+    if not agent or not verify_password(agent_key, agent.agent_key_hash):
+        raise HTTPException(status_code=403, detail="Geçersiz agent kimlik bilgileri")
 
     import os
     script_path = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "agent_script", "netmanager_agent.py")
@@ -1438,9 +1478,14 @@ def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         PYTHON="$VENV_DIR/bin/python"
 
         echo "[3/5] Agent betiği indiriliyor..."
-        TOKEN=$(cat "$INSTALL_DIR/.last_token" 2>/dev/null || true)
-        curl -fsSL -H "Authorization: Bearer $TOKEN" "$BACKEND_URL/api/v1/agents/download/script" -o "$INSTALL_DIR/netmanager_agent.py" || \
-          curl -fsSL "$BACKEND_URL/api/v1/agents/download/script" -o "$INSTALL_DIR/netmanager_agent.py"
+        # T8.4 F3 — /download/script artık X-Agent-ID + X-Agent-Key
+        # header'ları zorunlu (anonim erişim CWE-200 LOW kapatıldı).
+        # Eski fallback (anonim) bilinçli olarak kaldırıldı.
+        curl -fsSL \
+          -H "X-Agent-ID: $AGENT_ID" \
+          -H "X-Agent-Key: $AGENT_KEY" \
+          "$BACKEND_URL/api/v1/agents/download/script" \
+          -o "$INSTALL_DIR/netmanager_agent.py"
 
         echo "[4/5] Bağımlılıklar kuruluyor (venv)..."
         $PYTHON -m pip install --quiet --no-cache-dir --upgrade pip
@@ -1571,7 +1616,12 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
 
         Write-Host "[3/5] Agent betiği indiriliyor..."
-        Invoke-WebRequest "$BackendUrl/api/v1/agents/download/script" -OutFile "$InstallDir\\netmanager_agent.py" -UseBasicParsing
+        # T8.4 F3 — /download/script X-Agent-ID + X-Agent-Key header zorunlu
+        Invoke-WebRequest `
+            -Uri "$BackendUrl/api/v1/agents/download/script" `
+            -Headers @{{ "X-Agent-ID" = $AgentId; "X-Agent-Key" = $AgentKey }} `
+            -OutFile "$InstallDir\\netmanager_agent.py" `
+            -UseBasicParsing
 
         Write-Host "[4/5] Bağımlılıklar kuruluyor..."
         & $PythonExe -m pip install --quiet --upgrade websockets netmiko

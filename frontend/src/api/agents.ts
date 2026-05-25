@@ -159,6 +159,53 @@ export const agentsApi = {
   getCommands: (id: string, params?: { limit?: number; offset?: number; blocked_only?: boolean }) =>
     client.get<AgentCommandLogsResponse>(`/agents/${id}/commands`, { params }).then((r) => r.data),
 
+  // T8.4 F3 — agent_key URL query yerine X-Agent-Key header. UI "İndir"
+  // butonu fetch + Blob ile çağırır (anchor[download] header set
+  // edemediği için). Tek satırlık installer komutu da curl -H ile
+  // header gönderir (URL'de key gözükmez).
+  /**
+   * URL üretir + curl/iwr için komut metni. UI iki yerde kullanır:
+   *  - copy-to-clipboard tek-satır komut (curl/powershell + header)
+   *  - "İndir" butonu (fetch ile blob → tarayıcıya tetiklet)
+   */
+  downloadInstallerUrl: (id: string, platform: 'linux' | 'windows', serverUrl?: string) => {
+    const params = new URLSearchParams()
+    if (serverUrl) params.set('server_url', serverUrl)
+    const qs = params.toString()
+    return `/api/v1/agents/${id}/download/${platform}${qs ? '?' + qs : ''}`
+  },
+  /**
+   * Browser ile dosya indir — fetch + X-Agent-Key header + Blob anchor.
+   * agent_key URL'de gözükmez (CWE-598 risk azaltma).
+   */
+  downloadInstallerFile: async (
+    id: string,
+    agentKey: string,
+    platform: 'linux' | 'windows',
+    serverUrl: string | undefined,
+  ): Promise<void> => {
+    const url = `/api/v1/agents/${id}/download/${platform}${
+      serverUrl ? `?server_url=${encodeURIComponent(serverUrl)}` : ''
+    }`
+    const res = await fetch(url, {
+      headers: { 'X-Agent-Key': agentKey },
+    })
+    if (!res.ok) {
+      const text = await res.text().catch(() => '')
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+    const blob = await res.blob()
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = `netmanager-agent-${id}-${platform}${platform === 'linux' ? '.sh' : '.ps1'}`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(a.href)
+  },
+
+  // Legacy alias — eski caller'lar çalışmaya devam etsin. Bir sonraki
+  // minor release'de kaldırılacak (URL'de agent_key olur, deprecation log).
   downloadUrl: (id: string, agentKey: string, platform: 'linux' | 'windows', serverUrl?: string) => {
     const params = new URLSearchParams({ agent_key: agentKey })
     if (serverUrl) params.set('server_url', serverUrl)
