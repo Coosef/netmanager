@@ -17,13 +17,21 @@ from sqlalchemy import and_, func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import AsyncSessionLocal, get_db
 from app.core.deps import CurrentUser
 from app.core.security import hash_password, verify_password
 from app.models.agent import Agent
 from app.models.agent_command_log import AgentCommandLog
 from app.schemas.agent import AgentCreate, AgentCreateResponse, AgentResponse
 from app.services.agent_manager import agent_manager
+
+# T8.4 — agent WS bağlantısı yük altında (paralel SSH komutları sırasında)
+# kısa süreliğine kopup hemen reconnect oluyor. Bu sürede backend
+# agent_offline event'i yazıp UI toast'unu tetikliyor; kullanıcı "agent
+# çalışıyor olduğundan eminim" diye haklı şikayet ediyor. Debounce:
+# disconnect anında event yazma, X saniye bekle, agent reconnect olduysa
+# sessizce yut. Komut tarafı zaten retry ile (vlans-refresh) kapsanıyor.
+_AGENT_OFFLINE_DEBOUNCE_SECS = 20
 
 # ── Current agent version (read from script at startup) ───────────────────────
 def _read_agent_version() -> str:
@@ -118,6 +126,47 @@ async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
         location_id=agent.location_id,
     )
     db.add(ev)
+
+
+async def _emit_offline_if_still_offline(
+    agent_id: str, agent_pk: int, org_id: int, loc_id: Optional[int],
+    debounce_sec: int = _AGENT_OFFLINE_DEBOUNCE_SECS,
+) -> None:
+    """WS disconnect sonrası bir grace window bekle; agent o sürede
+    reconnect ederse 'agent_offline' event'ini hiç yazma (UI toast
+    bastırılır). Aksi halde fresh AsyncSession ile event'i yazar.
+
+    Komut yarış durumu: WS yeniden açıldığında agent_manager._connections
+    güncellenir; is_online() True döner. Bu yüzden sleep sonu kontrolü
+    yeterli — _connections hem RAM hem agent.status DB üzerinden teyit
+    edilir."""
+    try:
+        await asyncio.sleep(debounce_sec)
+    except asyncio.CancelledError:
+        return
+    if agent_manager.is_online(agent_id):
+        # Reconnect within debounce window — suppress
+        return
+    # Açık WS session kapanmış olabilir, yeni AsyncSession aç.
+    try:
+        async with AsyncSessionLocal() as db2:
+            agent2 = await db2.get(Agent, agent_pk)
+            if not agent2 or agent2.status == "online":
+                return
+            # GUCs (RLS WITH CHECK için)
+            from sqlalchemy import text as _sql_text2
+            await db2.execute(_sql_text2(
+                "SELECT set_config('app.is_super_admin','off',true),"
+                "       set_config('app.current_org_id', :o, true),"
+                "       set_config('app.current_location_id', :l, true)"
+            ), {"o": str(org_id), "l": str(loc_id) if loc_id is not None else ''})
+            await _emit_agent_event(db2, agent2, "agent_offline")
+            await db2.commit()
+    except Exception:
+        # Helper sessizce başarısız olur; offline event yazılmamış olabilir
+        # ama agent durumu DB'de zaten offline. Dedup TTL (10dk) varolan
+        # event'in yeniden yazılmasını da engelliyor.
+        pass
 
 
 # ── REST ─────────────────────────────────────────────────────────────────────
@@ -1394,18 +1443,19 @@ async def agent_websocket(
         except Exception:
             pass
 
-        # Emit offline event — same GUC-reset issue as the online path above.
-        try:
-            await db.execute(_sql_text(
-                "SELECT set_config('app.is_super_admin','off',true),"
-                "       set_config('app.current_org_id', :o, true),"
-                "       set_config('app.current_location_id', :l, true)"
-            ), {"o": str(agent.organization_id),
-                "l": str(agent.location_id) if agent.location_id is not None else ''})
-            await _emit_agent_event(db, agent, "agent_offline")
-            await db.commit()
-        except Exception:
-            pass
+        # T8.4 — offline event debounce. Eskiden burada direkt
+        # `_emit_agent_event(db, agent, "agent_offline")` çağırıyorduk;
+        # yük altında transient disconnect/reconnect her seferinde toast
+        # tetikliyordu. Şimdi fire-and-forget bir task'a alıyoruz: 20s
+        # sonra agent hala offline ise event yazar, aksi halde sessizce
+        # yutar. Komut tarafı (vlans-refresh) zaten kendi retry'ı ile
+        # transient disconnect'leri kapsıyor.
+        asyncio.create_task(_emit_offline_if_still_offline(
+            agent_id=agent_id,
+            agent_pk=agent.id,
+            org_id=agent.organization_id,
+            loc_id=agent.location_id,
+        ))
 
 
 # ── Installer templates ───────────────────────────────────────────────────────
