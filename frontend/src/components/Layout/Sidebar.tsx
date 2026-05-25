@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useNavGroups } from './useNavGroups'
+import CharonLogo from '@/components/CharonLogo'
 
 interface SidebarProps {
   mobileOpen?: boolean
@@ -22,7 +23,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const nav = (
     <aside className="nm-sidebar" style={{ height: '100%' }}>
       <div className="nm-brand" onClick={() => { navigate('/'); if (isMobile) onMobileClose?.() }} style={{ cursor: 'pointer' }}>
-        <div className="nm-brand-mark" />
+        <CharonLogo size={32} />
         <div className="nm-brand-name">
           Charon
           <small>universal cloud</small>

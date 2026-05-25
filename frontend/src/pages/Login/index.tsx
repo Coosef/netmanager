@@ -9,6 +9,7 @@ import { authApi } from '@/api/auth'
 import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
+import CharonLogo from '@/components/CharonLogo'
 
 const CSS = `
 :root.charon-login {
@@ -416,20 +417,11 @@ export default function LoginPage() {
       <div className="charon-ornament br"><span className="frame" /><div className="l">— ⊕ —</div></div>
 
       <div className="charon-stage">
-        {/* Brand */}
+        {/* Brand — T8.4: kullanıcının verdiği marka logosu (altın elmas + Ω
+            + dik mızrak). Eski geometric placeholder kaldırıldı. */}
         <div className="charon-brand">
-          <div className="charon-brand-mark">
-            <svg viewBox="0 0 40 40" fill="none">
-              <defs>
-                <linearGradient id="charonMark" x1="0" y1="0" x2="40" y2="40">
-                  <stop offset="0%" stopColor="#d4a86a" />
-                  <stop offset="100%" stopColor="#8a6f3d" />
-                </linearGradient>
-              </defs>
-              <polygon points="20,3 37,20 20,37 3,20" fill="none" stroke="url(#charonMark)" strokeWidth="1.5" />
-              <polygon points="20,12 28,20 20,28 12,20" fill="none" stroke="url(#charonMark)" strokeWidth="1" />
-              <circle cx="20" cy="20" r="1.5" fill="#d4a86a" />
-            </svg>
+          <div className="charon-brand-mark" style={{ width: 72, height: 72 }}>
+            <CharonLogo size={72} />
           </div>
           <h1 className="charon-brand-name">CHARON</h1>
           <div className="charon-brand-tagline">Universal Network Intelligence</div>

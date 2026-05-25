@@ -14,6 +14,7 @@ import { reportsApi, type ReportSummary } from '@/api/reports'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
 import dayjs from 'dayjs'
+import CharonLogo from '@/components/CharonLogo'
 
 const { Text } = Typography
 
@@ -401,17 +402,27 @@ export default function ReportsPage() {
         flexWrap: 'wrap',
         gap: 12,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          {/* T8.4 — Charon brand: A4 yazdırılan raporda da headline'da
+              gözüksün diye Logo + "Charon" wordmark. Sağdaki başlık asıl
+              rapor adı (Raporlar / sayfa içeriği). */}
+          <CharonLogo size={44} />
+          <div style={{ borderRight: `1px solid ${C.border}`, height: 36, opacity: 0.5 }} />
           <div style={{
-            width: 40, height: 40, borderRadius: 10,
+            width: 36, height: 36, borderRadius: 9,
             background: '#3b82f620', border: '1px solid #3b82f630',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}>
-            <BarChartOutlined style={{ color: C.primary, fontSize: 20 }} />
+            <BarChartOutlined style={{ color: C.primary, fontSize: 18 }} />
           </div>
           <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>{t('reports.title')}</div>
-            <Text style={{ color: C.muted, fontSize: 12 }}>
+            <div style={{ color: C.text, fontWeight: 700, fontSize: 16, lineHeight: 1.1 }}>
+              {t('reports.title')}
+            </div>
+            <div style={{ fontSize: 10, fontFamily: 'monospace', color: C.muted, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 2 }}>
+              CHARON · UNIVERSAL CLOUD
+            </div>
+            <Text style={{ color: C.muted, fontSize: 11 }}>
               {s ? <span>{t('reports.last_updated')}: {dayjs(s.generated_at).format('HH:mm:ss')}</span> : 'Yükleniyor...'}
             </Text>
           </div>

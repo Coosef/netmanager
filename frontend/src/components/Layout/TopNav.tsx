@@ -3,6 +3,7 @@
 // (pure CSS hover dropdown; antd Dropdown gerektirmiyor).
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useNavGroups } from './useNavGroups'
+import CharonLogo from '@/components/CharonLogo'
 
 export default function TopNav() {
   const navigate = useNavigate()
@@ -16,7 +17,7 @@ export default function TopNav() {
     <div className="nm-topnav">
       {/* Brand */}
       <div className="nm-brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
-        <div className="nm-brand-mark" style={{ width: 24, height: 24, flexShrink: 0 }} />
+        <CharonLogo size={26} glow={false} />
         <div className="nm-brand-name" style={{ fontWeight: 600, fontSize: 14, color: 'var(--fg-0)' }}>
           Charon
         </div>

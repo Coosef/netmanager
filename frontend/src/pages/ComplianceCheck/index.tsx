@@ -351,7 +351,39 @@ export default function ComplianceCheckPage() {
             </div>
           </div>
         </div>
-        <Space>
+        <Space wrap>
+          {/* T8.4 — Profile (standart) seçici + Standart Yönetimi butonu.
+              Daha önce yalnız trend kartının başlığındaydı; trend boşsa
+              hiç görünmüyordu. Şimdi her zaman top header'da. */}
+          <Select
+            size="small"
+            style={{ minWidth: 200 }}
+            placeholder="Standart seç…"
+            value={selectedProfileId ?? undefined}
+            onChange={(v) => setSelectedProfileId(v ?? null)}
+            allowClear
+            options={profiles.map((p) => ({
+              value: p.id,
+              label: (
+                <span>
+                  {p.is_default && <CrownOutlined style={{ color: '#f59e0b', marginRight: 4 }} />}
+                  {p.name}{' '}
+                  <span style={{ color: '#94a3b8', fontSize: 11 }}>({p.enabled_rule_ids.length} kural)</span>
+                </span>
+              ) as any,
+            }))}
+            notFoundContent={
+              <div style={{ padding: 8, fontSize: 12, color: '#94a3b8' }}>
+                Henüz profil yok — &quot;Standart Yönetimi&quot; butonundan oluştur
+              </div>
+            }
+          />
+          <Tooltip title="Standart Yönetimi — profil oluştur, kuralları aç/kapat">
+            <Button size="small" icon={<FilterOutlined />} onClick={() => setProfileDrawerOpen(true)}>
+              Standartlar
+            </Button>
+          </Tooltip>
+
           {hasScanned && results.length > 0 && (
             <Button
               icon={<FileExcelOutlined />}
@@ -429,42 +461,19 @@ export default function ComplianceCheckPage() {
                 ]}
               />
             </Space>
-            <Space size={6}>
-              {/* T8.4 — Profile seçici: otomatik tarama'da hangi kural seti
-                  kullanılacak. Default profile crown ikonuyla işaretli; profil
-                  yoksa "Tüm Kurallar (legacy)" seçeneği gösterilir. */}
-              <Select
-                size="small"
-                style={{ minWidth: 200 }}
-                placeholder="Standart seç…"
-                value={selectedProfileId ?? undefined}
-                onChange={(v) => setSelectedProfileId(v ?? null)}
-                allowClear
-                options={[
-                  ...profiles.map((p) => ({
-                    value: p.id,
-                    label: (
-                      <span>
-                        {p.is_default && <CrownOutlined style={{ color: '#f59e0b', marginRight: 4 }} />}
-                        {p.name} <span style={{ color: '#94a3b8', fontSize: 11 }}>({p.enabled_rule_ids.length} kural)</span>
-                      </span>
-                    ) as any,
-                  })),
-                ]}
-              />
-              <Tooltip title="Standart Yönetimi — profil oluştur / kuralları aç-kapa">
-                <Button size="small" icon={<FilterOutlined />} onClick={() => setProfileDrawerOpen(true)} />
-              </Tooltip>
-              <Button
-                size="small"
-                type="primary"
-                icon={<ThunderboltOutlined />}
-                loading={autoScanMutation.isPending}
-                onClick={() => autoScanMutation.mutate()}
-              >
-                Otomatik Tarama Başlat
-              </Button>
-            </Space>
+            <Button
+              size="small"
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              loading={autoScanMutation.isPending}
+              onClick={() => autoScanMutation.mutate()}
+            >
+              Otomatik Tarama Başlat
+              {selectedProfileId && (() => {
+                const p = profiles.find((x) => x.id === selectedProfileId)
+                return p ? ` (${p.name})` : ''
+              })()}
+            </Button>
           </div>
           <div style={{ padding: '12px 16px' }}>
             <ResponsiveContainer width="100%" height={120}>
