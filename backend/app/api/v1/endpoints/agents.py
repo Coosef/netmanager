@@ -1457,6 +1457,20 @@ async def agent_websocket(
         except Exception:
             pass
 
+        # T8.4 — poll-skip flag'ini DISCONNECT ANINDA set et. Önce
+        # `_emit_agent_event`'in içinde set ediliyordu; biz event yazımını
+        # 20s debounce edince flag set de gecikiyordu → poll_device_status
+        # bu sırada cihazları gerçek SSH ile sorgulayıp "down" işaretliyordu.
+        # Şimdi flag bağımsız: disconnect → flag set; reconnect olunca
+        # agent_online event'i flag'i siler.
+        try:
+            _redis.setex(
+                f"agent:{agent.id}:recently_offline",
+                _AGENT_OFFLINE_FLAG_TTL, "1",
+            )
+        except Exception:
+            pass
+
         # T8.4 — offline event debounce. Eskiden burada direkt
         # `_emit_agent_event(db, agent, "agent_offline")` çağırıyorduk;
         # yük altında transient disconnect/reconnect her seferinde toast
