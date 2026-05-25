@@ -40,6 +40,9 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "bulk:password_change", "bulk:config_push", "bulk:command",
         "monitor:view",
         "approval:view", "approval:review",
+        # T8.4 F2 — locations:view artık explicit izin; viewer da görür
+        # (lokasyon switcher sidebar için gerekli) ama org_admin tam yönetir.
+        "locations:view", "locations:edit", "locations:delete",
     ],
     SystemRole.LOCATION_ADMIN: [
         "device:view", "device:create", "device:edit", "device:connect",
@@ -47,12 +50,20 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "config:view", "config:push", "config:backup", "config:restore",
         "task:view", "task:create",
         "audit:view", "monitor:view", "approval:view",
+        "locations:view",  # kendi atanmış lokasyonlarını görür (scope RLS'de)
     ],
     SystemRole.VIEWER: [
-        "device:view", "config:view", "task:view", "audit:view", "monitor:view",
+        # T8.4 F2 / CyberStrike pentest — viewer minimal grant'a indirildi.
+        # Eski set'te `task:view` ve `audit:view` vardı; frontend permission_set
+        # (_role_default_permissions / DEFAULT_PERMISSIONS) bu key'leri viewer'a
+        # vermiyordu → mismatch, raporda "viewer /tasks ve /audit-log'a
+        # erişebiliyor" High bulgusunun kökeni. Şimdi backend has_permission()
+        # ile permission_set frontend görünümü hizalı.
+        "device:view", "config:view", "monitor:view",
+        "locations:view",  # sidebar location switcher için
     ],
     SystemRole.MEMBER: [
-        "device:view", "config:view", "task:view", "monitor:view",
+        "device:view", "config:view", "monitor:view", "locations:view",
     ],
 }
 
