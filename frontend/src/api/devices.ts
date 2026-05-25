@@ -13,6 +13,43 @@ interface DeviceListParams {
   site?: string
 }
 
+// T8.4 v2 — vlans-refresh stream protokolü (NDJSON satır tipleri)
+export type VlanRefreshStreamEvent =
+  | { type: 'start'; total: number; fetched_at: string; fetched_by: string }
+  | {
+      type: 'device'
+      device_id: number | null
+      hostname: string
+      status: 'ok' | 'error'
+      added: number[]
+      removed: number[]
+      error?: string
+      completed: number
+      total: number
+    }
+  | VlanRefreshCompleteEvent
+
+export interface VlanRefreshCompleteEvent {
+  type: 'complete'
+  diff_summary: {
+    added: number
+    removed: number
+    added_devices: number
+    removed_devices: number
+    errors: number
+  }
+  items: Record<string, {
+    success: boolean
+    hostname?: string
+    error?: string
+    added: number[]
+    removed: number[]
+    fetched_at: string
+  }>
+  fetched_at: string
+  fetched_by: string
+}
+
 export const devicesApi = {
   list: (params?: DeviceListParams) =>
     client.get<PaginatedResponse<Device>>('/devices/', { params }).then((r) => r.data),
@@ -90,29 +127,59 @@ export const devicesApi = {
       oldest_fetched_at: string | null
     }>('/devices/vlans-batch', { device_ids: deviceIds }).then((r) => r.data),
 
-  // T8.4 v2 — SSH paralel + DB snapshot upsert + diff hesabı. UI "Tümünü
-  // Yenile" tuşunda tetiklenir. Response per-device added/removed VLAN
-  // id'leri + global diff_summary döndürür (UI banner için).
-  refreshVlansBatch: (deviceIds: number[]) =>
-    client.post<{
-      items: Record<string, {
-        success: boolean
-        hostname?: string
-        error?: string
-        added: number[]
-        removed: number[]
-        fetched_at: string
-      }>
-      diff_summary: {
-        added: number
-        removed: number
-        added_devices: number
-        removed_devices: number
-        errors: number
+  // T8.4 v2 — SSH paralel + DB snapshot upsert + diff hesabı.
+  // STREAMING (NDJSON): backend her cihaz tamamlandıkça satır gönderir,
+  // UI canlı progress bar + son cihaz adı + diff görür.
+  //
+  // Protokol:
+  //   { type:'start',  total, fetched_at, fetched_by }
+  //   { type:'device', device_id, hostname, status:'ok'|'error',
+  //                    added, removed, error?, completed, total }
+  //   ...
+  //   { type:'complete', diff_summary, items, fetched_at, fetched_by }
+  //
+  // axios stream parsing yorucu, native fetch + ReadableStream.getReader
+  // tercih edildi.
+  refreshVlansBatchStream: async (
+    deviceIds: number[],
+    onProgress: (ev: VlanRefreshStreamEvent) => void,
+  ): Promise<VlanRefreshCompleteEvent> => {
+    const token = localStorage.getItem('access_token') || ''
+    const res = await fetch('/api/v1/devices/vlans-refresh', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ device_ids: deviceIds }),
+    })
+    if (!res.ok || !res.body) {
+      const text = await res.text().catch(() => '')
+      throw new Error(text || `HTTP ${res.status}`)
+    }
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let final: VlanRefreshCompleteEvent | null = null
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      let nl
+      while ((nl = buf.indexOf('\n')) !== -1) {
+        const line = buf.slice(0, nl).trim()
+        buf = buf.slice(nl + 1)
+        if (!line) continue
+        try {
+          const ev = JSON.parse(line) as VlanRefreshStreamEvent
+          onProgress(ev)
+          if (ev.type === 'complete') final = ev as VlanRefreshCompleteEvent
+        } catch { /* skip malformed line */ }
       }
-      fetched_at: string
-      fetched_by: string
-    }>('/devices/vlans-refresh', { device_ids: deviceIds }).then((r) => r.data),
+    }
+    if (!final) throw new Error('Stream complete event missing')
+    return final
+  },
 
   createVlan: (id: number, vlan_id: number, name: string) =>
     client.post<{ success: boolean; error?: string }>(
