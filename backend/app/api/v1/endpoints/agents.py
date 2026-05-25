@@ -526,15 +526,55 @@ async def download_installer(
     if not agent or not verify_password(agent_key, agent.agent_key_hash):
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    # T8.4 Security F1.3 — server_url command injection fix (CyberStrike
+    # pentest HIGH). Eski versiyon `server_url`'i validation'sız shell
+    # template'e interpolate ediyordu; saldırgan `"` ile kapatıp `; rm -rf`
+    # ekleyebiliyordu. Yeni: strict scheme + netloc validation + ALLOWED
+    # ORIGIN whitelist. Whitelist = ALLOWED_ORIGINS env + AGENT_WS_URL.
+    def _validate_server_url(url: str) -> str:
+        from urllib.parse import urlparse
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            raise HTTPException(400, "server_url parse edilemedi")
+        if parsed.scheme not in ("http", "https"):
+            raise HTTPException(400, "server_url scheme http veya https olmalı")
+        if not parsed.netloc:
+            raise HTTPException(400, "server_url netloc eksik")
+        # Shell-anlamlı karakterler reddet — installer template'e
+        # interpolate edilecek değer içinde ASLA bulunmamalı.
+        forbidden = set('"\';|`$&\\\n\r<> ')
+        if any(c in url for c in forbidden):
+            raise HTTPException(400, "server_url geçersiz karakter içeriyor")
+        # Whitelist: production'da yalnız bilinen origin'ler
+        allowed = set()
+        for origin in (settings.allowed_origins_list or []):
+            o = origin.strip().rstrip("/")
+            if o and o != "*":
+                allowed.add(o)
+        if settings.AGENT_WS_URL:
+            allowed.add(settings.AGENT_WS_URL.rstrip("/"))
+        base = f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+        if allowed and base not in allowed:
+            raise HTTPException(
+                400,
+                f"server_url izin verilen liste dışı (allowed: {sorted(allowed)})",
+            )
+        return base
+
     if server_url:
-        base_url = server_url.rstrip("/")
+        base_url = _validate_server_url(server_url)
     elif settings.AGENT_WS_URL:
         base_url = settings.AGENT_WS_URL.rstrip("/")
     else:
         forwarded_host = request.headers.get("x-forwarded-host")
         forwarded_proto = request.headers.get("x-forwarded-proto", "http")
         if forwarded_host:
-            base_url = f"{forwarded_proto}://{forwarded_host}"
+            # Forwarded-host trusted (reverse proxy set'liyor) ama yine de
+            # shell-anlamlı karakter olabilir mi? Defansif sanitize.
+            safe_host = "".join(c for c in forwarded_host
+                                if c.isalnum() or c in ".:-")
+            base_url = f"{forwarded_proto}://{safe_host}"
         else:
             base_url = str(request.base_url).rstrip("/")
 
@@ -1331,6 +1371,13 @@ async def agent_websocket(
 # ── Installer templates ───────────────────────────────────────────────────────
 
 def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
+    # T8.4 Security F1.3 defense-in-depth — server_url whitelist üstüne
+    # shlex.quote ile shell-safe escape. Whitelist atlanmış bir code-path
+    # olsa bile çıktı script'inde quote kapatması mümkün olmaz.
+    import shlex as _shlex
+    safe_id  = _shlex.quote(agent_id)
+    safe_key = _shlex.quote(agent_key)
+    safe_url = _shlex.quote(backend_url)
     return textwrap.dedent(f"""\
         #!/bin/bash
         # NetManager Proxy Agent — Linux/macOS Installer
@@ -1339,9 +1386,9 @@ def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
 
         set -e
 
-        AGENT_ID="{agent_id}"
-        AGENT_KEY="{agent_key}"
-        BACKEND_URL="{backend_url}"
+        AGENT_ID={safe_id}
+        AGENT_KEY={safe_key}
+        BACKEND_URL={safe_url}
         SERVICE_NAME="netmanager-agent"
 
         OS_TYPE="$(uname -s)"
@@ -1486,14 +1533,22 @@ SVCEOF
 
 
 def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
+    # T8.4 Security F1.3 defense-in-depth — PowerShell single-quoted
+    # string'lerde tek tırnak escape `''` ile. Whitelist atlanmış bir
+    # senaryoda bile değer kaçıp komut enjekte edilemez.
+    def _psq(s: str) -> str:
+        return "'" + s.replace("'", "''") + "'"
+    p_id  = _psq(agent_id)
+    p_key = _psq(agent_key)
+    p_url = _psq(backend_url)
     return textwrap.dedent(f"""\
         # NetManager Proxy Agent — Windows Kurulum Betiği
         # Oluşturulma: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
         # Agent ID: {agent_id}
 
-        $AgentId   = "{agent_id}"
-        $AgentKey  = "{agent_key}"
-        $BackendUrl = "{backend_url}"
+        $AgentId   = {p_id}
+        $AgentKey  = {p_key}
+        $BackendUrl = {p_url}
         $InstallDir = "C:\\ProgramData\\NetManagerAgent"
         $ServiceName = "NetManagerAgent"
         $PythonExe = ""

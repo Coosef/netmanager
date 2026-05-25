@@ -295,12 +295,14 @@ services:
   frontend:
     build:
       context: ./frontend
-      target: development
+      # T8.4 security/F1 — production stage default (nginx + dist build).
+      # Eski "development" target Vite dev server'ı (vite + /src/* + /@vite/*
+      # + /__open-in-editor) production'da expose ediyordu (CyberStrike
+      # pentest raporu HIGH bulgu). Local geliştirme için docker-compose.
+      # override.yml ile target=development + src volume mount kullanılır.
+      target: ${FRONTEND_TARGET:-production}
     expose:
-      - "3000"
-    volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
+      - "3000"   # dev: vite, prod: nginx — ikisi de 3000'de listen (frontend/nginx.conf)
     environment:
       - VITE_API_URL=http://backend:8000
       - VITE_WS_URL=ws://backend:8000

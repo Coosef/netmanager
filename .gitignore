@@ -42,3 +42,6 @@ backend/backups/
 
 # Claude Code
 .claude/settings.local.json
+
+# Docker compose local override (dev mode) — T8.4 security F1
+docker-compose.override.yml
