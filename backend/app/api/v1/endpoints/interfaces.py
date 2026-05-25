@@ -570,23 +570,51 @@ async def refresh_vlans_batch(
     # bağlantı kurulma penceresine yetişir.
     _per_device_timeout = max(45.0, float(settings.SSH_CONNECT_TIMEOUT) + 15.0)
 
-    async def fetch_one(dev: Device) -> tuple[Device, dict, list[int]]:
-        try:
-            result = await asyncio.wait_for(
-                ssh_manager.execute_command(dev, _vlan_cmd(dev.os_type)),
-                timeout=_per_device_timeout,
-            )
-        except asyncio.TimeoutError:
-            return dev, {"success": False, "error": f"SSH zaman aşımı ({int(_per_device_timeout)}s)"}, []
-        except Exception as exc:
-            return dev, {"success": False, "error": str(exc)[:200]}, []
-        if not result.success:
-            return dev, {"success": False, "error": result.error}, []
-        parsed = _parse_vlans(result.output, dev.os_type)
-        vids = sorted({int(v["id"]) for v in parsed if v.get("id") is not None})
-        return dev, {"success": True, "vlans": parsed}, vids
+    # T8.4 transient retry — canlı tanı: aynı subnet (10.24.90.x) içinde
+    # bazı switch'ler ardarda "TCP connection failed" / "Agent disconnected"
+    # döndü, anlık tek tetikleyiş sonrası 5-10s sonra elle çalışıyordu.
+    # Sebep muhtemelen: Ruijie SSH paralel session limit (concurrency=10 →
+    # bazı bağlantılar TCP RST yiyor) + agent WS bağlantısının yük altında
+    # geçici kopması. Düzeltme: concurrency 10→5, transient fail için tek
+    # backoff'lu retry (3s). Non-transient (auth/config) hatalarda retry
+    # yapmıyoruz, ilk hata dönüyor.
+    _TRANSIENT_TOKENS = ("tcp connection", "agent", "disconnected", "connection reset")
+    def _is_transient(err: str | None) -> bool:
+        if not err:
+            return False
+        e = err.lower()
+        return ("tcp connection" in e) or ("disconnect" in e and "agent" in e) or "connection reset" in e
 
-    sem = asyncio.Semaphore(10)
+    async def fetch_one(dev: Device) -> tuple[Device, dict, list[int]]:
+        last_payload: dict | None = None
+        for attempt in range(2):  # 1 ilk + 1 retry
+            if attempt > 0:
+                await asyncio.sleep(3.0)  # brief backoff before retry
+            try:
+                result = await asyncio.wait_for(
+                    ssh_manager.execute_command(dev, _vlan_cmd(dev.os_type)),
+                    timeout=_per_device_timeout,
+                )
+            except asyncio.TimeoutError:
+                last_payload = {"success": False, "error": f"SSH zaman aşımı ({int(_per_device_timeout)}s)"}
+                # timeout transient kabul ediyoruz — retry'a düş
+                continue
+            except Exception as exc:
+                # Beklenmedik exception → retry yapma, ham hatayı döndür
+                return dev, {"success": False, "error": str(exc)[:200]}, []
+            if not result.success:
+                last_payload = {"success": False, "error": result.error}
+                if attempt == 0 and _is_transient(result.error):
+                    continue  # retry
+                return dev, last_payload, []
+            parsed = _parse_vlans(result.output, dev.os_type)
+            vids = sorted({int(v["id"]) for v in parsed if v.get("id") is not None})
+            return dev, {"success": True, "vlans": parsed}, vids
+        # Tüm denemeler tükendi (yalnızca transient'lar bu noktaya gelir)
+        return dev, last_payload or {"success": False, "error": "Retry sonrası başarısız"}, []
+
+    # Concurrency: 10 → 5 (Ruijie SSH session limit + agent WS kararlılığı)
+    sem = asyncio.Semaphore(5)
     async def bounded(d):
         async with sem:
             return await fetch_one(d)
