@@ -1,0 +1,19 @@
+# Local development override — bu dosyayı `docker-compose.override.yml`
+# olarak KOPYALA (gitignored). docker compose otomatik olarak okur.
+#
+# Production deploy'lar (VPS) bu dosyaya sahip OLMAYACAK; dolayısıyla
+# docker-compose.yml'daki `target: ${FRONTEND_TARGET:-production}` default
+# production stage kullanır → vite dev mode prod'da kesinlikle açılmaz.
+#
+# Kullanım:
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   docker compose up -d frontend
+# → vite dev server + HMR + src volume mount aktif.
+
+services:
+  frontend:
+    build:
+      target: development
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
