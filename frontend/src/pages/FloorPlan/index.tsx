@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   App, Button, Drawer, Empty, Input, Popconfirm, Select, Space,
   Tooltip, Upload, Tag, Spin,
@@ -541,15 +541,123 @@ interface MapViewProps {
   liveStatus?: Record<number, string>
 }
 
+// Tile-layer presets. Esri WorldImagery free-tier (no key) for satellite.
+// Light/Dark use OSM + CartoDB dark — same as before.
+type MapLayer = 'street' | 'satellite'
+const LAYER_PRESET: Record<MapLayer, { url: (isDark: boolean) => string; attribution: string; label: string }> = {
+  street: {
+    url: (isDark) => isDark
+      ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+      : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>',
+    label: 'Sokak',
+  },
+  satellite: {
+    url: () => 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+    label: 'Uydu',
+  },
+}
+
+const MAP_LAYER_LS_KEY = (planId: string) => `nm_map_layer:${planId}`
+
+// ── Harita edge → Kabinler Kablolama tab sync ────────────────────────────────
+// Kullanıcı haritada iki cihazı bağladığında, NocRacks içindeki Kablolama
+// tab'ında da bu link görünsün. NocRacks localStorage key'i `nm_cables_v1:
+// {rackName}` ve `Cable { from:{deviceId,port}, to:{deviceId,port}, kind,
+// speed }` formatında. Burada SADECE device-device bağlantılar için kayıt
+// yapıyoruz (kabin-marker tip uyumsuz). Cable hangi rack'e gider?
+// `from` cihazının rack'ine; o yoksa `to` cihazınınkine. İkisi de rack'siz
+// ise sessizce skip. ID prefix'i 'map-edge:{edgeId}' — harita edge'i
+// silindiğinde Kablolama tab'ından da otomatik temizlenebilsin.
+type _MiniCable = {
+  id: string
+  from: { deviceId: number; port: string }
+  to:   { deviceId: number; port: string }
+  kind: 'cat6' | 'fiber' | 'power' | 'dac' | 'serial'
+  speed: string
+}
+function _readCables(rackName: string): _MiniCable[] {
+  try { const raw = localStorage.getItem(`nm_cables_v1:${rackName}`); return raw ? JSON.parse(raw) : [] }
+  catch { return [] }
+}
+function _writeCables(rackName: string, cables: _MiniCable[]) {
+  try { localStorage.setItem(`nm_cables_v1:${rackName}`, JSON.stringify(cables)) } catch { /* quota */ }
+}
+async function syncMapEdgeToCables(
+  edgeId: string,
+  fromDeviceId: number,
+  toDeviceId: number,
+  deviceRackMap: Record<number, string>,
+): Promise<string | null> {
+  const rack = deviceRackMap[fromDeviceId] || deviceRackMap[toDeviceId]
+  if (!rack) return null
+  const cables = _readCables(rack)
+  const cableId = `map-edge:${edgeId}`
+  if (cables.some(c => c.id === cableId)) return rack   // already synced
+  cables.push({
+    id: cableId,
+    from: { deviceId: fromDeviceId, port: '1' },
+    to:   { deviceId: toDeviceId,   port: '1' },
+    kind: 'fiber',
+    speed: '1G',
+  })
+  _writeCables(rack, cables)
+  return rack
+}
+function removeMapEdgeFromCables(edgeId: string, deviceRackMap: Record<number, string>) {
+  const cableId = `map-edge:${edgeId}`
+  // Edge'in iki ucu farklı rack'lerde olabilir; her iki rack'i de kontrol et
+  // (LS key'lerini bilmiyoruz; deviceRackMap'tan TÜM rack adlarını çıkarıp
+  // birer birer sil — küçük cluster için maliyet kabul edilir).
+  const racks = new Set<string>(Object.values(deviceRackMap))
+  for (const rack of racks) {
+    const cables = _readCables(rack)
+    const next = cables.filter(c => c.id !== cableId)
+    if (next.length !== cables.length) _writeCables(rack, next)
+  }
+}
+
 function FloorMap({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: MapViewProps) {
+  // Tüm rack'leri çekip deviceId→rackName tersine map'lemesi yap. Sync
+  // sırasında her cable yazımı için anlık erişim. Site filtresine bağlı
+  // değil — kullanıcı haritada herhangi bir cihazı seçebilir.
+  const { data: allRacks = [] } = useQuery({
+    queryKey: ['fp-map-racks-all'],
+    queryFn: async () => {
+      const racks = await racksApi.list({})
+      const out: { rack_name: string; devices: { id: number }[] }[] = []
+      for (const r of racks) {
+        try {
+          const detail = await racksApi.get(r.rack_name)
+          out.push({ rack_name: r.rack_name, devices: detail.devices.map(d => ({ id: d.id })) })
+        } catch { /* skip */ }
+      }
+      return out
+    },
+    staleTime: 300_000,
+  })
+  const deviceRackMap = useMemo(() => {
+    const m: Record<number, string> = {}
+    for (const r of allRacks) for (const d of r.devices) m[d.id] = r.rack_name
+    return m
+  }, [allRacks])
+
   const center: [number, number] = plan.mapCenter ?? [41.0082, 28.9784]  // Istanbul default
   const zoom = plan.mapZoom ?? 11
-  const tileUrl = isDark
-    ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
-    : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-  const attribution = isDark
-    ? '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
-    : '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>'
+
+  // Tile layer choice — kullanıcı plan başına seçer (uydu daha okunaklı bir
+  // bina/kabin görmek için, sokak daha hızlı tile + label). localStorage:
+  // her plan'a göre ayrı persist.
+  const [layer, setLayer] = useState<MapLayer>(() => {
+    try { return (localStorage.getItem(MAP_LAYER_LS_KEY(plan.id)) as MapLayer) || 'street' }
+    catch { return 'street' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem(MAP_LAYER_LS_KEY(plan.id), layer) } catch { /* quota */ }
+  }, [plan.id, layer])
+  const tileUrl = LAYER_PRESET[layer].url(isDark)
+  const attribution = LAYER_PRESET[layer].attribution
 
   const [connecting, setConnecting] = useState<string | null>(null)
 
@@ -594,6 +702,9 @@ function FloorMap({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: Map
 
   const handleNodeClick = (id: string, nodeType: 'device' | 'rack', rackName?: string) => {
     if (mode === 'erase') {
+      // Silinen edge'leri Kabinler Kablolama tab'ından da temizle.
+      const affectedEdges = plan.edges.filter(ed => ed.from === id || ed.to === id)
+      affectedEdges.forEach(ed => removeMapEdgeFromCables(ed.id, deviceRackMap))
       if (nodeType === 'device')
         onUpdate({ ...plan, nodes: plan.nodes.filter(n => n.id !== id), edges: plan.edges.filter(ed => ed.from !== id && ed.to !== id) })
       else
@@ -604,7 +715,18 @@ function FloorMap({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: Map
       if (!connecting) { setConnecting(id); return }
       if (connecting !== id) {
         const dup = plan.edges.some(ed => (ed.from === connecting && ed.to === id) || (ed.from === id && ed.to === connecting))
-        if (!dup) onUpdate({ ...plan, edges: [...plan.edges, { id: `fe${Date.now()}`, from: connecting, to: id }] })
+        if (!dup) {
+          const newEdgeId = `fe${Date.now()}`
+          onUpdate({ ...plan, edges: [...plan.edges, { id: newEdgeId, from: connecting, to: id }] })
+          // Eğer iki ucu da device ise NocRacks Kablolama tab'ına da yaz.
+          // Kabin-marker'lar Cable shape'ine sığmıyor (port-port modeli),
+          // bunlar sessizce skip — sadece haritada gözükür.
+          const a = plan.nodes.find(n => n.id === connecting)
+          const b = plan.nodes.find(n => n.id === id)
+          if (a && b) {
+            void syncMapEdgeToCables(newEdgeId, a.deviceId, b.deviceId, deviceRackMap)
+          }
+        }
       }
       setConnecting(null)
       return
@@ -614,6 +736,31 @@ function FloorMap({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: Map
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      {/* Layer toggle (sokak/uydu) — Leaflet kontrolünün üstüne, çakışmasın
+          diye sağ-üst yerine sol-üst yakın bir köşeye yerleştirildi. */}
+      <div style={{
+        position: 'absolute', top: 12, right: 12, zIndex: 1000,
+        background: 'rgba(15,23,42,0.92)', borderRadius: 8, padding: 3,
+        display: 'flex', gap: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.35)',
+      }}>
+        {(['street', 'satellite'] as const).map(opt => {
+          const active = layer === opt
+          return (
+            <button key={opt}
+              onClick={() => setLayer(opt)}
+              title={opt === 'satellite' ? 'Uydu görünümü (Esri WorldImagery)' : 'Sokak (OpenStreetMap)'}
+              style={{
+                padding: '4px 10px', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+                borderRadius: 6, border: 'none',
+                background: active ? '#22c55e' : 'transparent',
+                color: active ? '#0a0e1a' : '#cbd5e1',
+              }}>
+              {LAYER_PRESET[opt].label}
+            </button>
+          )
+        })}
+      </div>
+
       {mode === 'connect' && connecting && (
         <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
           background: '#22c55e', color: 'white', padding: '6px 16px', borderRadius: 20,
@@ -628,7 +775,10 @@ function FloorMap({ plan, mode, isDark, onUpdate, onClickRack, liveStatus }: Map
         style={{ width: '100%', height: '100%' }}
         scrollWheelZoom
       >
-        <TileLayer url={tileUrl} attribution={attribution} />
+        {/* key={layer} → kullanıcı sokak ↔ uydu değiştirdiğinde tile cache
+            tamamen yenilensin; react-leaflet aksi halde aynı TileLayer
+            instance'ı tutar ve url prop'unu görmezden gelir. */}
+        <TileLayer key={`${layer}:${isDark}`} url={tileUrl} attribution={attribution} maxZoom={layer === 'satellite' ? 19 : 19} />
         <MapDropTarget onDrop={handleDrop} />
         <MapViewSync onChange={handleViewChange} />
 

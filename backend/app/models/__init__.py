@@ -48,6 +48,7 @@ from app.models.device_availability_snapshot import DeviceAvailabilitySnapshot
 from app.models.synthetic_probe import SyntheticProbe, SyntheticProbeResult
 from app.models.agent_peer_latency import AgentPeerLatency
 from app.models.escalation_rule import EscalationRule, EscalationNotificationLog
+from app.models.compliance_profile import ComplianceProfile
 
 __all__ = [
     "User", "SystemRole",
