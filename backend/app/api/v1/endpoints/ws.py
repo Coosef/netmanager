@@ -406,7 +406,84 @@ async def ssh_terminal_ws(
     await websocket.accept()
     revalidator = asyncio.create_task(_revalidate_loop(websocket, token or "", scope))
 
-    # Send a status line before connecting
+    # Faz T8.5 — Agent-relay path. VPS doğrudan 10.x.x.x cihaza ulaşamaz;
+    # cihaza atanmış bir agent varsa onun üzerinden tunnel aç. Browser
+    # protokolü değişmiyor: text+binary+resize JSON aynen.
+    # Fallback: agent yok ya da offline → mevcut direct paramiko (aşağıda).
+    from app.services.agent_manager import agent_manager as _ag
+    use_agent = bool(device.agent_id) and _ag.is_online(device.agent_id)
+
+    if use_agent:
+        await websocket.send_text(
+            f"\r\nConnecting to {username}@{host}:{port} via agent…\r\n"
+        )
+        closed_evt = asyncio.Event()
+
+        async def _on_output(data: bytes):
+            if closed_evt.is_set():
+                return
+            try:
+                await websocket.send_bytes(data)
+            except Exception:
+                closed_evt.set()
+
+        async def _on_close():
+            closed_evt.set()
+
+        session_id: Optional[str] = None
+        try:
+            session_id = await _ag.open_shell_session(
+                device.agent_id, device, cols=cols, rows=rows,
+                on_output=_on_output, on_close=_on_close, timeout=20.0,
+            )
+        except Exception as exc:
+            await websocket.send_text(f"\r\nAgent shell open hata: {exc}\r\n")
+            try: await websocket.close()
+            except Exception: pass
+            revalidator.cancel()
+            return
+
+        await websocket.send_text("\r\nConnected (via agent).\r\n")
+
+        try:
+            while not closed_evt.is_set():
+                try:
+                    raw = await asyncio.wait_for(websocket.receive(), timeout=30)
+                except (asyncio.TimeoutError, WebSocketDisconnect):
+                    break
+                if raw.get("type") == "websocket.disconnect":
+                    break
+                text = raw.get("text") or (raw.get("bytes") or b"").decode(
+                    "utf-8", errors="replace"
+                )
+                if not text:
+                    continue
+                # Resize control
+                if text.startswith("{") and '"type"' in text:
+                    try:
+                        msg = json.loads(text)
+                        if msg.get("type") == "resize":
+                            await _ag.send_shell_resize(
+                                session_id,
+                                int(msg.get("cols", cols)),
+                                int(msg.get("rows", rows)),
+                            )
+                        continue
+                    except Exception:
+                        pass
+                # Keystrokes → agent → device
+                await _ag.send_shell_input(
+                    session_id, text.encode("utf-8", errors="replace"),
+                )
+        finally:
+            revalidator.cancel()
+            if session_id:
+                await _ag.close_shell_session(session_id)
+            try: await websocket.close()
+            except Exception: pass
+        return
+
+    # ── Fallback: direct paramiko (agent yok / offline / eski sürüm) ──────
     await websocket.send_text(f"\r\nConnecting to {username}@{host}:{port} …\r\n")
 
     # Open SSH connection in a thread (paramiko is synchronous)
