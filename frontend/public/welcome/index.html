@@ -1,0 +1,3657 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>Charon — Networks Between Worlds</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-0: #050505;
+      --bg-1: #0c0a07;
+      --bg-2: #14110a;
+      --gold: #b8924b;
+      --gold-soft: #8a6f3d;
+      --gold-deep: #5a4729;
+      --ember: #d4a86a;
+      --ember-bright: #f0c98a;
+      --fg: #e8dcc4;
+      --fg-dim: rgba(232, 220, 196, 0.62);
+      --fg-deep: rgba(232, 220, 196, 0.38);
+      --line: rgba(184, 146, 75, 0.18);
+      --line-strong: rgba(184, 146, 75, 0.35);
+      --crit: #c44a3d;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg-0); }
+    body {
+      font-family: 'IBM Plex Sans', system-ui, sans-serif;
+      color: var(--fg);
+      overflow-x: hidden;
+      line-height: 1.5;
+    }
+    img { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ─── Cursor aurora (subtle background follower) ─── */
+    .aurora {
+      position: fixed;
+      top: 0; left: 0;
+      width: 720px; height: 720px;
+      pointer-events: none;
+      z-index: 1;
+      transform: translate(-50%, -50%);
+      background:
+        radial-gradient(circle at center,
+          rgba(212, 168, 106, 0.10) 0%,
+          rgba(184, 146, 75, 0.05) 25%,
+          rgba(184, 146, 75, 0.02) 45%,
+          transparent 60%);
+      mix-blend-mode: screen;
+      filter: blur(4px);
+      opacity: 0;
+      transition: opacity 1.2s ease;
+      will-change: transform;
+    }
+    .aurora.ready { opacity: 1; }
+    .aurora-small {
+      position: fixed;
+      top: 0; left: 0;
+      width: 320px; height: 320px;
+      pointer-events: none;
+      z-index: 1;
+      transform: translate(-50%, -50%);
+      background: radial-gradient(circle at center,
+        rgba(232, 220, 196, 0.06) 0%,
+        rgba(184, 146, 75, 0.02) 40%,
+        transparent 70%);
+      mix-blend-mode: screen;
+      opacity: 0;
+      transition: opacity 1s ease;
+      will-change: transform;
+    }
+    .aurora-small.ready { opacity: 1; }
+
+    /* ─── Top nav ─── */
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0;
+      z-index: 100;
+      display: flex; align-items: center;
+      padding: 18px 44px;
+      gap: 36px;
+      background: linear-gradient(180deg, rgba(5,5,5,0.9), rgba(5,5,5,0.4) 60%, transparent);
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+    }
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+    }
+    .nav-brand .mark { width: 26px; height: 26px; }
+    .nav-brand .name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px; font-weight: 500;
+      letter-spacing: 0.32em;
+      color: var(--gold);
+      padding-left: 0.32em;
+    }
+    .nav-links {
+      display: flex; gap: 32px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+    }
+    .nav-links a { transition: color .15s; }
+    .nav-links a:hover { color: var(--gold); }
+    .nav-cta { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+
+    /* Language switcher */
+    .lang {
+      display: flex; align-items: center;
+      background: rgba(8, 6, 4, 0.55);
+      border: 1px solid var(--line);
+      border-radius: 3px;
+      padding: 4px;
+      gap: 0;
+    }
+    .lang button {
+      appearance: none;
+      background: transparent;
+      border: 0;
+      color: var(--fg-deep);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.16em;
+      padding: 5px 9px;
+      cursor: pointer;
+      border-radius: 2px;
+      transition: color .15s, background .15s;
+    }
+    .lang button:hover { color: var(--fg); }
+    .lang button.active {
+      background: rgba(184, 146, 75, 0.15);
+      color: var(--gold);
+    }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 8px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 12px; font-weight: 500;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      padding: 10px 22px;
+      border-radius: 3px;
+      cursor: pointer;
+      transition: all .18s;
+      border: 1px solid transparent;
+    }
+    .btn.primary {
+      background: linear-gradient(180deg, var(--gold), var(--gold-soft));
+      color: #1a1208;
+      box-shadow: 0 4px 18px rgba(184, 146, 75, 0.25), inset 0 1px 0 rgba(255, 220, 160, 0.3);
+    }
+    .btn.primary:hover { filter: brightness(1.1); box-shadow: 0 6px 22px rgba(184, 146, 75, 0.4); }
+    .btn.ghost {
+      background: transparent;
+      border-color: rgba(184, 146, 75, 0.4);
+      color: var(--gold);
+    }
+    .btn.ghost:hover { background: rgba(184, 146, 75, 0.08); border-color: var(--gold); }
+    .btn.lg { font-size: 13px; padding: 14px 30px; }
+
+    /* ─── HERO ─── */
+    .hero {
+      position: relative;
+      height: 100vh;
+      min-height: 720px;
+      display: grid; place-items: center;
+      overflow: hidden;
+    }
+    .hero-bg {
+      position: absolute; inset: 0;
+      background-image: url('assets/charon-styx.png');
+      background-size: cover;
+      background-position: center;
+      filter: brightness(0.85);
+      transform: scale(1.05);
+      z-index: 0;
+    }
+    .hero-bg::after {
+      content: ""; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 70% 70% at 50% 50%, transparent 20%, rgba(0,0,0,0.7) 100%),
+        linear-gradient(180deg, rgba(0,0,0,0.5) 0%, transparent 30%, transparent 60%, var(--bg-0) 100%);
+    }
+    .hero-canvas {
+      position: absolute; inset: 0;
+      z-index: 1;
+      pointer-events: none;
+      mix-blend-mode: screen;
+      opacity: 0.85;
+    }
+
+    /* ─── COMPARISON TABLE ─── */
+    .compare-wrap {
+      position: relative; z-index: 2;
+      padding: 140px 44px;
+      max-width: 1320px;
+      margin: 0 auto;
+    }
+    .compare-table {
+      margin-top: 60px;
+      border: 1px solid var(--line);
+      background: var(--bg-1);
+      overflow: hidden;
+    }
+    .compare-row {
+      display: grid;
+      grid-template-columns: 1.6fr repeat(5, 1fr);
+      border-bottom: 1px solid var(--line);
+    }
+    .compare-row:last-child { border-bottom: 0; }
+    .compare-row > div {
+      padding: 18px 16px;
+      font-size: 12.5px;
+      color: var(--fg-dim);
+      border-right: 1px solid var(--line);
+      display: flex; align-items: center; gap: 6px;
+    }
+    .compare-row > div:last-child { border-right: 0; }
+    .compare-row.head > div {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--gold-soft);
+      background: rgba(184, 146, 75, 0.04);
+      padding: 14px 16px;
+    }
+    .compare-row.head > div.charon-col {
+      color: var(--gold);
+      background: rgba(184, 146, 75, 0.12);
+    }
+    .compare-row .lbl {
+      color: var(--fg);
+      font-weight: 500;
+      font-size: 13px;
+    }
+    .compare-row > div.charon-col {
+      background: rgba(184, 146, 75, 0.06);
+      color: var(--gold);
+    }
+    .yes { color: var(--gold); font-size: 16px; }
+    .no  { color: var(--fg-deep); font-size: 14px; }
+    .partial { color: #c89568; font-size: 12px; }
+
+    /* ─── INDUSTRIES ─── */
+    .industries-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 70px;
+    }
+    .industry {
+      background: var(--bg-1);
+      padding: 40px 32px;
+      transition: background .25s;
+    }
+    .industry:hover { background: var(--bg-2); }
+    .industry .icon {
+      color: var(--gold-soft);
+      margin-bottom: 24px;
+      transition: color .2s, transform .25s;
+    }
+    .industry:hover .icon { color: var(--ember); transform: translateY(-2px); }
+    .industry .name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 24px;
+      color: var(--fg);
+      margin: 0 0 6px;
+    }
+    .industry .use {
+      font-size: 12.5px;
+      color: var(--gold);
+      font-family: 'IBM Plex Mono', monospace;
+      margin-bottom: 12px;
+    }
+    .industry .desc {
+      font-size: 13px;
+      color: var(--fg-dim);
+      line-height: 1.55;
+    }
+
+    /* ─── SECURITY BAND ─── */
+    .security-band {
+      position: relative; z-index: 2;
+      padding: 100px 44px;
+      background: linear-gradient(180deg, transparent, rgba(184, 146, 75, 0.03), transparent);
+      border-top: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      text-align: center;
+    }
+    .security-band .kicker {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.32em;
+      color: var(--gold);
+      text-transform: uppercase;
+      margin-bottom: 18px;
+    }
+    .security-band h3 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 32px;
+      font-weight: 300;
+      color: var(--fg);
+      margin: 0 0 32px;
+    }
+    .badges {
+      display: flex; flex-wrap: wrap; justify-content: center;
+      gap: 36px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .badge-item {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 8px;
+      min-width: 110px;
+    }
+    .badge-item .ring {
+      width: 56px; height: 56px;
+      border: 1px solid var(--line-strong);
+      border-radius: 50%;
+      display: grid; place-items: center;
+      color: var(--gold);
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 16px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+    .badge-item .lbl {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.14em;
+      color: var(--fg-dim);
+      text-transform: uppercase;
+      text-align: center;
+    }
+
+    /* ─── TESTIMONIALS ─── */
+    .testimonials {
+      position: relative; z-index: 2;
+      padding: 140px 44px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .testimonial-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 60px;
+    }
+    .quote {
+      background: var(--bg-1);
+      padding: 40px 36px;
+      position: relative;
+    }
+    .quote::before {
+      content: "\201C";
+      position: absolute;
+      top: 8px; left: 18px;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 86px;
+      color: var(--gold);
+      opacity: 0.35;
+      line-height: 1;
+    }
+    .quote .body {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      line-height: 1.5;
+      color: var(--fg);
+      font-style: italic;
+      margin-bottom: 28px;
+      padding-top: 14px;
+    }
+    .quote .body em {
+      color: var(--gold);
+      font-weight: 500;
+      font-style: italic;
+    }
+    .quote .attr {
+      display: flex; align-items: center; gap: 14px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+    }
+    .quote .avatar {
+      width: 42px; height: 42px;
+      border-radius: 50%;
+      background: linear-gradient(135deg, var(--gold), var(--gold-deep));
+      display: grid; place-items: center;
+      color: #1a1208;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 18px;
+      font-weight: 600;
+      flex-shrink: 0;
+    }
+    .quote .info { font-size: 12px; line-height: 1.4; }
+    .quote .info .name { color: var(--fg); font-weight: 500; }
+    .quote .info .role { color: var(--fg-dim); font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2px; }
+
+    /* ─── FAQ ─── */
+    .faq-wrap {
+      max-width: 880px;
+      margin: 60px auto 0;
+    }
+    .faq-item {
+      border-bottom: 1px solid var(--line);
+    }
+    .faq-item summary {
+      list-style: none;
+      padding: 22px 8px;
+      cursor: pointer;
+      display: flex; align-items: center; gap: 18px;
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      color: var(--fg);
+      font-weight: 400;
+      transition: color .15s;
+    }
+    .faq-item summary::-webkit-details-marker { display: none; }
+    .faq-item summary::after {
+      content: "\002B";
+      margin-left: auto;
+      color: var(--gold);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 22px;
+      transition: transform .25s;
+      font-weight: 300;
+    }
+    .faq-item[open] summary::after { content: "\2212"; transform: rotate(180deg); }
+    .faq-item[open] summary { color: var(--gold); }
+    .faq-item summary:hover { color: var(--gold); }
+    .faq-body {
+      padding: 0 8px 24px;
+      font-size: 14px;
+      color: var(--fg-dim);
+      line-height: 1.7;
+      max-width: 720px;
+    }
+
+    /* ─── ROADMAP ─── */
+    .roadmap-track {
+      display: flex;
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 60px;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+    }
+    .roadmap-item {
+      flex: 0 0 280px;
+      background: var(--bg-1);
+      padding: 28px 24px;
+      scroll-snap-align: start;
+      border-top: 2px solid var(--gold-deep);
+      position: relative;
+      transition: border-color .25s;
+    }
+    .roadmap-item.done { border-top-color: var(--gold); }
+    .roadmap-item.current { border-top-color: var(--ember); background: rgba(184, 146, 75, 0.06); }
+    .roadmap-item.current::before {
+      content: "";
+      position: absolute; top: -7px; left: 24px;
+      width: 12px; height: 12px;
+      background: var(--ember);
+      border-radius: 50%;
+      box-shadow: 0 0 16px var(--gold);
+      animation: blip 1.6s ease-in-out infinite;
+    }
+    @keyframes blip { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .roadmap-item .quarter {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.22em;
+      color: var(--gold);
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+    .roadmap-item .name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      color: var(--fg);
+      margin: 0 0 10px;
+    }
+    .roadmap-item .desc {
+      font-size: 12.5px;
+      color: var(--fg-dim);
+      line-height: 1.55;
+    }
+
+    /* ─── DEMO MODAL ─── */
+    .modal-scrim {
+      position: fixed; inset: 0;
+      background: rgba(0, 0, 0, 0);
+      z-index: 200;
+      pointer-events: none;
+      transition: background .25s;
+    }
+    .modal-scrim.open {
+      background: rgba(0, 0, 0, 0.75);
+      pointer-events: auto;
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+    }
+    .modal {
+      position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, calc(-50% + 20px));
+      width: 92vw; max-width: 520px;
+      max-height: 90vh; overflow-y: auto;
+      background: var(--bg-1);
+      border: 1px solid var(--line-strong);
+      padding: 40px 36px;
+      z-index: 201;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .25s, transform .25s cubic-bezier(0.32, 0.72, 0.21, 1);
+    }
+    .modal.open {
+      pointer-events: auto;
+      opacity: 1;
+      transform: translate(-50%, -50%);
+    }
+    .modal::before, .modal::after, .modal .ctr, .modal .cbr {
+      content: ""; position: absolute;
+      width: 16px; height: 16px;
+      border: 1px solid var(--gold);
+    }
+    .modal::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+    .modal .ctr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+    .modal::after { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+    .modal .cbr { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+    .modal .x {
+      position: absolute; top: 14px; right: 14px;
+      background: transparent; border: 0;
+      color: var(--fg-dim); font-size: 18px; cursor: pointer;
+      padding: 4px 8px;
+    }
+    .modal .x:hover { color: var(--gold); }
+    .modal h3 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 32px; font-weight: 300;
+      margin: 0 0 8px; color: var(--fg);
+    }
+    .modal h3 em { color: var(--gold); font-style: italic; }
+    .modal p { font-size: 13px; color: var(--fg-dim); margin: 0 0 24px; line-height: 1.6; }
+    .modal label {
+      display: block;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9.5px;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      margin-bottom: 6px;
+      margin-top: 14px;
+    }
+    .modal input, .modal select {
+      width: 100%;
+      background: rgba(8, 6, 4, 0.7);
+      border: 1px solid var(--line);
+      color: var(--fg);
+      padding: 10px 12px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .15s;
+    }
+    .modal input:focus, .modal select:focus { border-color: var(--gold); }
+    .modal .modal-cta {
+      margin-top: 26px;
+      display: flex; gap: 10px;
+    }
+    .modal .modal-cta .btn { flex: 1; justify-content: center; }
+
+    /* ─── Newsletter ─── */
+    .newsletter {
+      max-width: 1280px;
+      margin: 30px auto 50px;
+      padding: 28px 36px;
+      border: 1px solid var(--line);
+      display: flex; align-items: center; gap: 24px;
+      flex-wrap: wrap;
+    }
+    .newsletter .text { flex: 1; min-width: 240px; }
+    .newsletter h4 {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px; font-weight: 400;
+      margin: 0 0 4px; color: var(--fg);
+    }
+    .newsletter p {
+      font-size: 12.5px; color: var(--fg-dim);
+      margin: 0; line-height: 1.5;
+    }
+    .newsletter .form {
+      display: flex; gap: 6px; flex: 1; min-width: 280px;
+    }
+    .newsletter input {
+      flex: 1;
+      background: rgba(8, 6, 4, 0.7);
+      border: 1px solid var(--line);
+      color: var(--fg);
+      padding: 11px 14px;
+      font-family: 'IBM Plex Sans', sans-serif;
+      font-size: 13px;
+      outline: none;
+    }
+    .newsletter input:focus { border-color: var(--gold); }
+
+    /* ─── ORIGIN STORY ─── */
+    .origin {
+      position: relative; z-index: 2;
+      padding: 160px 44px;
+      max-width: 1100px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 64px;
+      align-items: start;
+    }
+    .origin-side {
+      position: sticky; top: 100px;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.42em;
+      text-transform: uppercase;
+      color: var(--gold-soft);
+      padding-top: 24px;
+    }
+    .origin-content p {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      line-height: 1.65;
+      color: var(--fg);
+      font-weight: 300;
+      margin: 0 0 24px;
+      letter-spacing: 0.005em;
+    }
+    .origin-content p em { color: var(--gold); font-style: italic; font-weight: 400; }
+    .origin-content .first-letter {
+      float: left;
+      font-size: 78px;
+      line-height: 0.85;
+      padding: 6px 14px 0 0;
+      color: var(--gold);
+      font-weight: 400;
+    }
+    .origin-sign {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.32em;
+      color: var(--fg-deep);
+      text-transform: uppercase;
+      margin-top: 28px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      display: flex; align-items: center; gap: 12px;
+    }
+    .origin-sign::before { content: "◆"; color: var(--gold); }
+
+    .showcase-card .live-preview {
+      position: absolute; inset: 0;
+      z-index: 1;
+      opacity: 0;
+      transition: opacity .4s ease;
+      pointer-events: none;
+    }
+    .showcase-card .live-preview iframe {
+      width: 200%; height: 200%;
+      border: 0;
+      transform: scale(0.5);
+      transform-origin: top left;
+      pointer-events: none;
+      filter: saturate(0.9) brightness(0.75);
+    }
+    .showcase-card:hover .live-preview { opacity: 1; }
+    .showcase-card:hover .preview { opacity: 0; }
+    .showcase-card .preview { transition: opacity .35s ease; }
+    @media (hover: none) {
+      .showcase-card .live-preview { display: none; }
+    }
+    @media (max-width: 980px) {
+      .origin { grid-template-columns: 1fr; padding: 80px 22px; gap: 18px; }
+      .origin-side { display: none; }
+      .origin-content .first-letter { font-size: 56px; }
+      .origin-content p { font-size: 18px; }
+    }
+
+    /* ─── INTERACTIVE 3D PREVIEW ─── */
+    .iso-preview-wrap {
+      position: relative; z-index: 2;
+      padding: 140px 44px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .iso-stage {
+      margin-top: 60px;
+      position: relative;
+      height: 520px;
+      perspective: 1400px;
+      cursor: grab;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(ellipse 70% 50% at 50% 50%, rgba(184, 146, 75, 0.06), transparent 70%),
+        var(--bg-1);
+      overflow: hidden;
+    }
+    .iso-stage::before, .iso-stage::after,
+    .iso-stage > .ctr, .iso-stage > .cbr {
+      content: ""; position: absolute;
+      width: 18px; height: 18px;
+      border: 1px solid var(--gold);
+      opacity: 0.6;
+      z-index: 4;
+    }
+    .iso-stage::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+    .iso-stage > .ctr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+    .iso-stage::after { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+    .iso-stage > .cbr { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+    .iso-world {
+      position: absolute; inset: 0;
+      transform-style: preserve-3d;
+      transform: rotateX(55deg) rotateZ(-30deg);
+      transition: transform .2s ease-out;
+      will-change: transform;
+    }
+    .iso-plane {
+      position: absolute;
+      left: 50%; top: 50%;
+      width: 600px; height: 360px;
+      margin: -180px 0 0 -300px;
+      transform-style: preserve-3d;
+    }
+    .iso-grid {
+      position: absolute; inset: 0;
+      background:
+        linear-gradient(rgba(184, 146, 75, 0.18) 1px, transparent 1px) 0 0 / 50px 50px,
+        linear-gradient(90deg, rgba(184, 146, 75, 0.18) 1px, transparent 1px) 0 0 / 50px 50px;
+      mask: radial-gradient(ellipse 60% 70% at 50% 50%, black, transparent 85%);
+      -webkit-mask: radial-gradient(ellipse 60% 70% at 50% 50%, black, transparent 85%);
+    }
+    .iso-ring {
+      position: absolute;
+      left: 50%; top: 50%;
+      border-radius: 50%;
+      border: 1px solid rgba(184, 146, 75, 0.35);
+      transform: translate(-50%, -50%);
+    }
+    .iso-ring.r1 { width: 180px; height: 180px; }
+    .iso-ring.r2 { width: 320px; height: 320px; opacity: 0.6; border-style: dashed; animation: spin 32s linear infinite; }
+    .iso-ring.r3 { width: 460px; height: 460px; opacity: 0.3; border-style: dashed; animation: spin 48s linear infinite reverse; }
+    @keyframes spin { to { transform: translate(-50%, -50%) rotate(360deg); } }
+    .iso-node {
+      position: absolute;
+      width: 26px; height: 26px;
+      transform: translate(-50%, -50%);
+      transform-style: preserve-3d;
+    }
+    .iso-node .crystal {
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, var(--gold), var(--gold-deep));
+      transform: rotate(45deg);
+      box-shadow:
+        0 0 20px rgba(184, 146, 75, 0.5),
+        inset 0 0 8px rgba(255, 220, 160, 0.3);
+    }
+    .iso-node.warn .crystal { background: linear-gradient(135deg, #f97316, #8a3f1a); box-shadow: 0 0 24px rgba(249, 115, 22, 0.6); }
+    .iso-node.crit .crystal {
+      background: linear-gradient(135deg, #ef4444, #7a1f1f);
+      box-shadow: 0 0 28px rgba(239, 68, 68, 0.7);
+      animation: critPulse 1.4s ease-in-out infinite;
+    }
+    @keyframes critPulse { 0%, 100% { transform: rotate(45deg) scale(1); } 50% { transform: rotate(45deg) scale(1.18); } }
+    .iso-node .stem {
+      position: absolute;
+      left: 50%; top: 100%;
+      width: 1px;
+      background: linear-gradient(to bottom, var(--gold), transparent);
+      transform-origin: top;
+      opacity: 0.5;
+    }
+    .iso-node .halo {
+      position: absolute;
+      width: 50px; height: 50px;
+      left: 50%; top: 50%;
+      margin: -25px 0 0 -25px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(184, 146, 75, 0.25), transparent 70%);
+      transform: rotateX(90deg) translateZ(-12px);
+    }
+    .iso-link {
+      position: absolute;
+      height: 1.5px;
+      background: linear-gradient(90deg,
+        transparent,
+        rgba(184, 146, 75, 0.5) 30%,
+        rgba(184, 146, 75, 0.7) 50%,
+        rgba(184, 146, 75, 0.5) 70%,
+        transparent);
+      transform-origin: left center;
+      box-shadow: 0 0 6px rgba(184, 146, 75, 0.4);
+    }
+    .iso-packet {
+      position: absolute;
+      width: 5px; height: 5px;
+      background: var(--ember-bright);
+      border-radius: 50%;
+      box-shadow: 0 0 10px var(--ember), 0 0 20px var(--gold);
+      top: -2.5px;
+      animation: pktFlow 2.6s linear infinite;
+    }
+    @keyframes pktFlow {
+      from { left: -5px; opacity: 0; }
+      8% { opacity: 1; }
+      92% { opacity: 1; }
+      to { left: calc(100% - 5px); opacity: 0; }
+    }
+    .iso-hud {
+      position: absolute;
+      top: 16px; left: 16px;
+      z-index: 5;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.22em;
+      color: var(--gold);
+      text-transform: uppercase;
+      background: rgba(8, 6, 4, 0.7);
+      padding: 5px 10px;
+      border: 1px solid rgba(184, 146, 75, 0.3);
+    }
+    .iso-hud::before {
+      content: ""; display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--gold);
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: blip 1.6s ease-in-out infinite;
+      vertical-align: middle;
+    }
+    .iso-hint {
+      position: absolute;
+      bottom: 16px; right: 16px;
+      z-index: 5;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9.5px;
+      letter-spacing: 0.22em;
+      color: var(--fg-deep);
+      text-transform: uppercase;
+    }
+
+    /* ─── SOUND TOGGLE ─── */
+    .sound-toggle {
+      position: fixed;
+      bottom: 22px; left: 22px;
+      z-index: 95;
+      width: 44px; height: 44px;
+      background: rgba(8, 6, 4, 0.75);
+      border: 1px solid var(--line);
+      border-radius: 50%;
+      color: var(--gold-soft);
+      cursor: pointer;
+      display: grid; place-items: center;
+      transition: color .15s, border-color .15s, background .15s;
+      -webkit-backdrop-filter: blur(8px);
+      backdrop-filter: blur(8px);
+    }
+    .sound-toggle:hover { color: var(--gold); border-color: var(--gold-soft); }
+    .sound-toggle.on { color: var(--gold); border-color: var(--gold); box-shadow: 0 0 16px rgba(184, 146, 75, 0.3); }
+    .sound-toggle .wave {
+      position: absolute;
+      width: 100%; height: 100%;
+      border-radius: 50%;
+      border: 1px solid var(--gold);
+      opacity: 0;
+    }
+    .sound-toggle.on .wave { animation: soundWave 1.8s ease-out infinite; }
+    @keyframes soundWave {
+      0% { transform: scale(1); opacity: 0.6; }
+      100% { transform: scale(1.8); opacity: 0; }
+    }
+
+    .perf-strip {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 30px;
+    }
+    .perf-strip .cell {
+      background: var(--bg-1);
+      padding: 28px 24px;
+    }
+    .perf-strip .v {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 38px;
+      color: var(--gold);
+      line-height: 1;
+    }
+    .perf-strip .v small { font-size: 18px; color: var(--fg-dim); margin-left: 4px; }
+    .perf-strip .l {
+      font-size: 12px;
+      color: var(--fg-dim);
+      margin-top: 10px;
+      line-height: 1.4;
+    }
+
+    .grain {
+      position: absolute; inset: 0;
+      background-image: repeating-linear-gradient(0deg, transparent 0 2px, rgba(184, 146, 75, 0.012) 2px 3px);
+      mix-blend-mode: overlay;
+      pointer-events: none;
+      z-index: 1;
+    }
+    .hero-content {
+      position: relative; z-index: 3;
+      text-align: center;
+      padding: 0 24px;
+      max-width: 1000px;
+    }
+    .hero-kicker {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.42em;
+      color: var(--gold-soft);
+      text-transform: uppercase;
+      margin-bottom: 24px;
+      padding-left: 0.42em;
+    }
+    .hero-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(72px, 13vw, 180px);
+      font-weight: 400;
+      letter-spacing: 0.32em;
+      color: var(--gold);
+      text-shadow:
+        0 0 48px rgba(184, 146, 75, 0.5),
+        0 0 100px rgba(184, 146, 75, 0.2);
+      margin: 0;
+      padding-left: 0.32em;
+      line-height: 0.95;
+    }
+    .hero-tagline {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(20px, 2.6vw, 28px);
+      font-style: italic;
+      font-weight: 300;
+      color: var(--fg);
+      letter-spacing: 0.04em;
+      margin: 24px 0 10px;
+    }
+    .hero-sub {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.32em;
+      color: var(--fg-deep);
+      text-transform: uppercase;
+      margin-bottom: 42px;
+    }
+    .hero-cta { display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; }
+    .hero-scroll {
+      position: absolute;
+      bottom: 36px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 3;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.32em;
+      color: var(--fg-deep);
+      text-transform: uppercase;
+      display: flex; flex-direction: column;
+      align-items: center; gap: 8px;
+    }
+    .hero-scroll .line {
+      width: 1px; height: 32px;
+      background: linear-gradient(to bottom, var(--gold-soft), transparent);
+      animation: drift 2.4s ease-in-out infinite;
+    }
+    @keyframes drift {
+      0%, 100% { opacity: 1; transform: translateY(0); }
+      50% { opacity: 0.4; transform: translateY(6px); }
+    }
+
+    .hero-corners > span {
+      position: absolute;
+      width: 32px; height: 32px;
+      border: 1px solid var(--gold);
+      opacity: 0.55;
+      z-index: 3;
+    }
+    .hero-corners .tl { top: 28px; left: 28px; border-right: 0; border-bottom: 0; }
+    .hero-corners .tr { top: 28px; right: 28px; border-left: 0; border-bottom: 0; }
+    .hero-corners .bl { bottom: 28px; left: 28px; border-right: 0; border-top: 0; }
+    .hero-corners .br { bottom: 28px; right: 28px; border-left: 0; border-top: 0; }
+
+    /* ─── Section primitives ─── */
+    .section {
+      position: relative; z-index: 2;
+      padding: 140px 44px;
+      max-width: 1320px;
+      margin: 0 auto;
+    }
+    .section-kicker {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.32em;
+      color: var(--gold);
+      text-transform: uppercase;
+      margin-bottom: 18px;
+      display: flex; align-items: center; gap: 14px;
+    }
+    .section-kicker::before {
+      content: "";
+      width: 28px; height: 1px;
+      background: var(--gold);
+    }
+    .section-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(40px, 5vw, 64px);
+      font-weight: 300;
+      line-height: 1.05;
+      letter-spacing: -0.005em;
+      color: var(--fg);
+      margin: 0 0 22px;
+      max-width: 900px;
+    }
+    .section-title em {
+      color: var(--gold);
+      font-style: italic;
+      font-weight: 400;
+    }
+    .section-lede {
+      font-size: 16px;
+      line-height: 1.7;
+      color: var(--fg-dim);
+      max-width: 660px;
+    }
+
+    .divider-ornament {
+      position: relative; z-index: 2;
+      display: flex; align-items: center; justify-content: center;
+      gap: 18px;
+      padding: 50px 0;
+      color: var(--gold-soft);
+    }
+    .divider-ornament .line {
+      width: 80px; height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold-soft), transparent);
+    }
+    .divider-ornament .mark { font-size: 14px; }
+
+    /* ─── MANIFESTO ─── */
+    .manifesto {
+      position: relative; z-index: 2;
+      text-align: center;
+      padding: 160px 44px;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+    .manifesto-quote {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(28px, 3.8vw, 44px);
+      font-weight: 300;
+      font-style: italic;
+      line-height: 1.4;
+      color: var(--fg);
+      letter-spacing: 0.005em;
+      margin: 0;
+    }
+    .manifesto-quote em {
+      color: var(--gold);
+      font-weight: 400;
+    }
+    .manifesto-attr {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.32em;
+      color: var(--fg-deep);
+      text-transform: uppercase;
+      margin-top: 32px;
+    }
+
+    /* ─── CAPABILITIES ─── */
+    .capabilities-head {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 60px;
+      align-items: end;
+      margin-bottom: 80px;
+    }
+    .cap-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+    }
+    .cap-card {
+      background: var(--bg-1);
+      padding: 38px 32px;
+      position: relative;
+      transition: background .25s;
+    }
+    .cap-card:hover { background: var(--bg-2); }
+    .cap-card:hover .cap-num { color: var(--gold); }
+    .cap-card:hover .cap-icon { color: var(--ember); transform: translateY(-2px); }
+    .cap-num {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      color: var(--fg-deep);
+      letter-spacing: 0.22em;
+      transition: color .2s;
+    }
+    .cap-icon {
+      margin: 24px 0 28px;
+      color: var(--gold-soft);
+      transition: color .2s, transform .25s;
+    }
+    .cap-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 26px;
+      font-weight: 400;
+      color: var(--fg);
+      margin: 0 0 12px;
+      letter-spacing: 0.005em;
+    }
+    .cap-body {
+      font-size: 13.5px;
+      line-height: 1.65;
+      color: var(--fg-dim);
+    }
+
+    /* ─── LIVE SHOWCASE ─── */
+    .showcase {
+      position: relative; z-index: 2;
+      background:
+        radial-gradient(ellipse 80% 60% at 50% 50%, rgba(184, 146, 75, 0.04), transparent 70%),
+        var(--bg-0);
+      padding: 160px 0;
+    }
+    .showcase-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1px;
+      max-width: 1400px;
+      margin: 80px auto 0;
+      padding: 0 44px;
+      background: transparent;
+    }
+    .showcase-card {
+      position: relative;
+      background: var(--bg-1);
+      border: 1px solid var(--line);
+      overflow: hidden;
+      cursor: pointer;
+      aspect-ratio: 4/3;
+      transition: border-color .2s;
+    }
+    .showcase-card:hover { border-color: var(--gold); }
+    .showcase-card .preview {
+      position: absolute; inset: 0;
+      display: grid; place-items: center;
+      color: var(--gold-soft);
+    }
+    .showcase-card .preview svg { width: 60%; height: 60%; opacity: 0.5; }
+    .showcase-card .overlay {
+      position: absolute; inset: 0;
+      background: linear-gradient(0deg, rgba(0,0,0,0.85) 0%, transparent 50%);
+      padding: 24px 28px;
+      display: flex; flex-direction: column; justify-content: flex-end;
+      z-index: 2;
+    }
+    .showcase-card .lbl {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+    .showcase-card .ttl {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 24px;
+      font-weight: 400;
+      color: var(--fg);
+      margin: 0 0 6px;
+    }
+    .showcase-card .desc {
+      font-size: 12.5px; color: var(--fg-dim);
+      line-height: 1.5;
+    }
+    .showcase-card .corner {
+      position: absolute;
+      top: 12px; right: 12px;
+      width: 24px; height: 24px;
+      border: 1px solid var(--gold-soft);
+      border-left: 0; border-bottom: 0;
+      transition: border-color .2s;
+      z-index: 2;
+    }
+    .showcase-card:hover .corner { border-color: var(--gold); }
+
+    /* ─── STATS ─── */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+    }
+    .stat {
+      background: var(--bg-1);
+      padding: 50px 32px;
+      text-align: center;
+    }
+    .stat .v {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 72px;
+      font-weight: 300;
+      color: var(--gold);
+      line-height: 1;
+      letter-spacing: -0.02em;
+      text-shadow: 0 0 24px rgba(184, 146, 75, 0.25);
+    }
+    .stat .v small { font-size: 32px; opacity: 0.7; }
+    .stat .l {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--fg-dim);
+      margin-top: 14px;
+    }
+
+    /* ─── ARCHITECTURE ─── */
+    .arch {
+      position: relative; z-index: 2;
+      padding: 160px 44px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .arch-stage {
+      margin-top: 70px;
+      position: relative;
+      background: var(--bg-1);
+      border: 1px solid var(--line);
+      padding: 60px;
+      overflow: hidden;
+    }
+    .arch-stage::before, .arch-stage::after,
+    .arch-stage > .ctr, .arch-stage > .cbr {
+      content: ""; position: absolute;
+      width: 22px; height: 22px;
+      border: 1px solid var(--gold);
+      opacity: 0.6;
+    }
+    .arch-stage::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+    .arch-stage > .ctr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+    .arch-stage::after { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+    .arch-stage > .cbr { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+    .arch-row {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr auto 1fr;
+      gap: 18px;
+      align-items: center;
+      margin-bottom: 28px;
+    }
+    .arch-row:last-child { margin-bottom: 0; }
+    .arch-cell {
+      background: rgba(184, 146, 75, 0.04);
+      border: 1px solid var(--line);
+      padding: 20px 18px;
+      text-align: center;
+    }
+    .arch-cell .h {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9.5px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 8px;
+    }
+    .arch-cell .n {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 22px;
+      color: var(--fg);
+      margin-bottom: 6px;
+    }
+    .arch-cell .m {
+      font-size: 11px; color: var(--fg-dim);
+      line-height: 1.45;
+    }
+    .arch-arrow {
+      color: var(--gold);
+      font-size: 22px;
+      opacity: 0.6;
+    }
+
+    /* ─── PRICING ─── */
+    .pricing {
+      position: relative; z-index: 2;
+      padding: 160px 44px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--line);
+      border: 1px solid var(--line);
+      margin-top: 70px;
+    }
+    .price-card {
+      background: var(--bg-1);
+      padding: 44px 32px;
+      position: relative;
+      transition: background .2s;
+      display: flex; flex-direction: column;
+    }
+    .price-card.featured {
+      background: linear-gradient(180deg, rgba(184, 146, 75, 0.10), rgba(184, 146, 75, 0.02));
+    }
+    .price-card.featured .badge {
+      position: absolute; top: -1px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--gold); color: #1a1208;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 9.5px;
+      padding: 5px 14px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+    .price-name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 28px;
+      color: var(--fg);
+      margin: 0 0 8px;
+    }
+    .price-desc {
+      font-size: 13px;
+      color: var(--fg-dim);
+      margin-bottom: 24px;
+      line-height: 1.5;
+      min-height: 56px;
+    }
+    .price-amount {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 56px;
+      color: var(--gold);
+      line-height: 1;
+      letter-spacing: -0.02em;
+    }
+    .price-amount small {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 12px;
+      color: var(--fg-dim);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-left: 4px;
+    }
+    .price-amount.custom { font-size: 36px; color: var(--fg); }
+    .price-features {
+      list-style: none; padding: 0; margin: 28px 0;
+      display: flex; flex-direction: column; gap: 10px;
+      flex: 1;
+    }
+    .price-features li {
+      display: flex; align-items: flex-start; gap: 10px;
+      font-size: 13px; line-height: 1.55;
+      color: var(--fg);
+    }
+    .price-features li::before {
+      content: "+"; flex-shrink: 0;
+      color: var(--gold);
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 14px;
+      width: 14px;
+    }
+    .price-features li.muted { color: var(--fg-deep); }
+    .price-features li.muted::before { content: "−"; color: var(--fg-deep); }
+    .price-cta { width: 100%; justify-content: center; margin-top: auto; }
+
+    /* ─── FINAL CTA ─── */
+    .final {
+      position: relative; z-index: 2;
+      padding: 200px 44px;
+      text-align: center;
+      overflow: hidden;
+    }
+    .final-bg {
+      position: absolute; inset: 0;
+      background-image: url('assets/charon-styx.png');
+      background-size: cover;
+      background-position: center 65%;
+      filter: brightness(0.6) saturate(0.8);
+      z-index: 0;
+    }
+    .final-bg::after {
+      content: ""; position: absolute; inset: 0;
+      background:
+        radial-gradient(ellipse 70% 80% at 50% 50%, transparent 10%, rgba(0,0,0,0.85) 100%),
+        linear-gradient(180deg, var(--bg-0) 0%, transparent 30%, transparent 70%, var(--bg-0) 100%);
+    }
+    .final-content {
+      position: relative; z-index: 2;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+    .final-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(48px, 7vw, 96px);
+      font-weight: 300;
+      line-height: 1.05;
+      color: var(--fg);
+      margin: 0 0 28px;
+      letter-spacing: -0.005em;
+    }
+    .final-title em {
+      color: var(--gold);
+      font-style: italic;
+      font-weight: 400;
+      text-shadow: 0 0 32px rgba(184, 146, 75, 0.3);
+    }
+    .final-sub {
+      font-size: 16px;
+      color: var(--fg-dim);
+      line-height: 1.7;
+      margin-bottom: 42px;
+    }
+
+    /* ─── FOOTER ─── */
+    .footer {
+      position: relative; z-index: 2;
+      background: var(--bg-0);
+      padding: 80px 44px 40px;
+      border-top: 1px solid var(--line);
+    }
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr 1fr 1fr;
+      gap: 50px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .footer-brand .name {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 32px;
+      letter-spacing: 0.32em;
+      color: var(--gold);
+      padding-left: 0.32em;
+    }
+    .footer-brand .desc {
+      font-size: 13px;
+      color: var(--fg-dim);
+      line-height: 1.6;
+      max-width: 380px;
+      margin-top: 14px;
+    }
+    .footer-col h4 {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin: 0 0 18px;
+      font-weight: 500;
+    }
+    .footer-col ul {
+      list-style: none; padding: 0; margin: 0;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .footer-col a {
+      font-size: 13px; color: var(--fg-dim);
+      transition: color .15s;
+    }
+    .footer-col a:hover { color: var(--gold); }
+    .footer-bottom {
+      max-width: 1280px;
+      margin: 60px auto 0;
+      padding-top: 28px;
+      border-top: 1px solid var(--line);
+      display: flex; justify-content: space-between;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 10.5px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--fg-deep);
+    }
+
+    @media (max-width: 980px) {
+      .compare-row { grid-template-columns: 1.4fr repeat(5, 1fr); font-size: 11px; }
+      .compare-row > div { padding: 12px 6px; font-size: 11px; }
+      .industries-grid { grid-template-columns: 1fr; }
+      .testimonial-grid { grid-template-columns: 1fr; }
+      .perf-strip { grid-template-columns: repeat(2, 1fr); }
+      .newsletter { flex-direction: column; align-items: stretch; padding: 22px 22px; }
+      .modal { padding: 28px 22px; }
+    }
+    @media (max-width: 980px) {
+      .nav { padding: 14px 20px; gap: 16px; }
+      .nav-links { display: none; }
+      .lang button { padding: 4px 7px; font-size: 9.5px; }
+      .section { padding: 80px 22px; }
+      .capabilities-head { grid-template-columns: 1fr; gap: 30px; }
+      .cap-grid { grid-template-columns: 1fr; }
+      .showcase-grid { grid-template-columns: 1fr; padding: 0 22px; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .arch-row { grid-template-columns: 1fr; }
+      .arch-arrow { display: none; }
+      .pricing-grid { grid-template-columns: 1fr; }
+      .footer-grid { grid-template-columns: 1fr 1fr; }
+      .footer-bottom { flex-direction: column; gap: 10px; text-align: center; }
+      .hero-corners > span { display: none; }
+      .aurora { width: 480px; height: 480px; }
+    }
+    @media (hover: none) {
+      .aurora, .aurora-small { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Aurora cursor effect -->
+  <div class="aurora" id="aurora"></div>
+  <div class="aurora-small" id="auroraSmall"></div>
+
+  <!-- ─── NAV ─── -->
+  <nav class="nav">
+    <a href="#" class="nav-brand">
+      <div class="mark">
+        <svg viewBox="0 0 40 40" fill="none">
+          <polygon points="20,3 37,20 20,37 3,20" fill="none" stroke="#b8924b" stroke-width="1.5" />
+          <polygon points="20,12 28,20 20,28 12,20" fill="none" stroke="#b8924b" stroke-width="1" />
+          <circle cx="20" cy="20" r="1.5" fill="#d4a86a" />
+        </svg>
+      </div>
+      <span class="name">CHARON</span>
+    </a>
+    <div class="nav-links">
+      <a href="#capabilities" data-i18n="nav.capabilities">Capabilities</a>
+      <a href="#showcase" data-i18n="nav.platform">Platform</a>
+      <a href="#architecture" data-i18n="nav.architecture">Architecture</a>
+      <a href="#pricing" data-i18n="nav.pricing">Pricing</a>
+    </div>
+    <div class="nav-cta">
+      <div class="lang" id="langSwitch">
+        <button data-lang="tr">TR</button>
+        <button data-lang="en" class="active">EN</button>
+        <button data-lang="de">DE</button>
+        <button data-lang="ru">RU</button>
+      </div>
+      <a href="/login" class="btn ghost" data-i18n="nav.signIn">Sign in</a>
+      <a href="#final" class="btn primary" data-i18n="nav.cta">Begin the crossing</a>
+    </div>
+  </nav>
+
+  <!-- ─── HERO ─── -->
+  <section class="hero">
+    <div class="hero-bg"></div>
+    <canvas class="hero-canvas" id="heroCanvas"></canvas>
+    <div class="grain"></div>
+    <div class="hero-corners">
+      <span class="tl"></span><span class="tr"></span>
+      <span class="bl"></span><span class="br"></span>
+    </div>
+    <div class="hero-content">
+      <div class="hero-kicker" data-i18n="hero.kicker">Enterprise network intelligence</div>
+      <h1 class="hero-title">CHARON</h1>
+      <p class="hero-tagline" data-i18n="hero.tagline">The ferryman of every packet between every world.</p>
+      <p class="hero-sub" data-i18n="hero.sub">Networks · Between · Worlds</p>
+      <div class="hero-cta">
+        <a href="#" onclick="event.preventDefault(); openDemo();" class="btn primary lg" data-i18n="hero.ctaPrimary">Begin the crossing →</a>
+        <a href="/login" class="btn ghost lg" data-i18n="hero.ctaSecondary">Live demo</a>
+      </div>
+    </div>
+    <div class="hero-scroll">
+      <span data-i18n="hero.scroll">Scroll</span>
+      <span class="line"></span>
+    </div>
+  </section>
+
+  <!-- ─── MANIFESTO ─── -->
+  <section class="manifesto">
+    <p class="manifesto-quote" data-i18n-html="manifesto.quote">
+      Every modern enterprise lives on two shores —
+      <em>data center</em> and <em>the cloud</em>,
+      <em>known</em> and <em>unknown</em>,
+      <em>silent</em> and <em>screaming</em>.
+      <br><br>
+      Charon is the operator who knows the crossing.
+    </p>
+    <div class="manifesto-attr" data-i18n="manifesto.attr">— Charon field manual · vol. I</div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span>
+    <span class="mark">◆</span>
+    <span class="line"></span>
+  </div>
+
+  <!-- ─── CAPABILITIES ─── -->
+  <section class="section" id="capabilities">
+    <div class="capabilities-head">
+      <div>
+        <div class="section-kicker" data-i18n="cap.kicker">I · Capabilities</div>
+        <h2 class="section-title" data-i18n-html="cap.title">
+          Six instruments for <em>passage</em>.
+        </h2>
+      </div>
+      <p class="section-lede" data-i18n="cap.lede">
+        Built for the operations engineers who carry the network on their backs.
+        Multi-vendor, agent-routed, AI-correlated — and quiet enough to live in a NOC for years.
+      </p>
+    </div>
+
+    <div class="cap-grid">
+      <div class="cap-card">
+        <div class="cap-num" data-i18n="cap.1.num">01 / Topology</div>
+        <div class="cap-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+            <circle cx="20" cy="20" r="2.5" fill="currentColor" />
+            <circle cx="8" cy="10" r="2" fill="currentColor" />
+            <circle cx="32" cy="10" r="2" fill="currentColor" />
+            <circle cx="8" cy="30" r="2" fill="currentColor" />
+            <circle cx="32" cy="30" r="2" fill="currentColor" />
+            <line x1="20" y1="20" x2="8" y2="10" />
+            <line x1="20" y1="20" x2="32" y2="10" />
+            <line x1="20" y1="20" x2="8" y2="30" />
+            <line x1="20" y1="20" x2="32" y2="30" />
+            <line x1="8" y1="10" x2="8" y2="30" stroke-dasharray="2 2" />
+            <line x1="32" y1="10" x2="32" y2="30" stroke-dasharray="2 2" />
+          </svg>
+        </div>
+        <h3 class="cap-title" data-i18n="cap.1.title">3D tactical topology</h3>
+        <p class="cap-body" data-i18n="cap.1.body">
+          Hierarchical and harmonic-cluster views in WebGL. Live traffic flow, incident shockwaves, AI anomaly auras, focus-mode dimming and cinematic camera modes for the operations center wall.
+        </p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-num" data-i18n="cap.2.num">02 / Intelligence</div>
+        <div class="cap-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+            <circle cx="20" cy="20" r="12" />
+            <circle cx="20" cy="20" r="6" />
+            <circle cx="20" cy="20" r="1.5" fill="currentColor" />
+            <path d="M20 4v4M20 32v4M4 20h4M32 20h4" />
+            <path d="M8.5 8.5l2.5 2.5M29 29l2.5 2.5M8.5 31.5l2.5-2.5M29 11l2.5-2.5" />
+          </svg>
+        </div>
+        <h3 class="cap-title" data-i18n="cap.2.title">AI correlation engine</h3>
+        <p class="cap-body" data-i18n="cap.2.body">
+          Root-cause detection across BGP, STP, LLDP, syslog and synthetic probes. Topology-aware suppression, predictive anomaly cones, and confidence-scored incident timelines.
+        </p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-num" data-i18n="cap.3.num">03 / Automation</div>
+        <div class="cap-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+            <path d="M14 6h12l4 6-4 6h-12l-4-6 4-6z" />
+            <path d="M14 22h12l4 6-4 6h-12l-4-6 4-6z" />
+            <line x1="20" y1="18" x2="20" y2="22" stroke-dasharray="1 2" />
+          </svg>
+        </div>
+        <h3 class="cap-title" data-i18n="cap.3.title">Playbooks & change rollouts</h3>
+        <p class="cap-body" data-i18n="cap.3.body">
+          Multi-step playbooks with dry-run preview, blast-radius warnings, rollback snapshots and four-eye approval flows. Event-driven, scheduled or manual — with full audit trail.
+        </p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-num" data-i18n="cap.4.num">04 / Observability</div>
+        <div class="cap-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+            <path d="M4 28l6-10 6 4 8-14 6 8 6-2" />
+            <circle cx="10" cy="18" r="1.5" fill="currentColor" />
+            <circle cx="16" cy="22" r="1.5" fill="currentColor" />
+            <circle cx="24" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="30" cy="16" r="1.5" fill="currentColor" />
+          </svg>
+        </div>
+        <h3 class="cap-title" data-i18n="cap.4.title">SLA · MTTR · drift</h3>
+        <p class="cap-body" data-i18n="cap.4.body">
+          Per-device uptime trends, golden-baseline config drift detection, interval-aware availability math, and tier-based SLA policies with compliance reporting.
+        </p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-num" data-i18n="cap.5.num">05 / Agents</div>
+        <div class="cap-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+            <circle cx="20" cy="20" r="4" />
+            <circle cx="8" cy="8" r="3" />
+            <circle cx="32" cy="8" r="3" />
+            <circle cx="8" cy="32" r="3" />
+            <circle cx="32" cy="32" r="3" />
+            <line x1="20" y1="20" x2="8" y2="8" stroke-dasharray="2 2" />
+            <line x1="20" y1="20" x2="32" y2="8" stroke-dasharray="2 2" />
+            <line x1="20" y1="20" x2="8" y2="32" stroke-dasharray="2 2" />
+            <line x1="20" y1="20" x2="32" y2="32" stroke-dasharray="2 2" />
+          </svg>
+        </div>
+        <h3 class="cap-title" data-i18n="cap.5.title">Proxy agent fleet</h3>
+        <p class="cap-body" data-i18n="cap.5.body">
+          Lightweight WebSocket agents for NAT-behind devices. SSH connection pooling, offline command queue, latency-aware routing, encrypted credential vault and remote SNMP probing.
+        </p>
+      </div>
+
+      <div class="cap-card">
+        <div class="cap-num" data-i18n="cap.6.num">06 / Governance</div>
+        <div class="cap-icon">
+          <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round">
+            <rect x="8" y="14" width="24" height="20" rx="2" />
+            <path d="M14 14V9a6 6 0 0112 0v5" />
+            <circle cx="20" cy="23" r="2" fill="currentColor" />
+            <line x1="20" y1="25" x2="20" y2="29" />
+          </svg>
+        </div>
+        <h3 class="cap-title" data-i18n="cap.6.title">Forensic audit & RBAC</h3>
+        <p class="cap-body" data-i18n="cap.6.body">
+          Request-id tracing across every API call, before/after state diff, full CLI command archive, SSO/SAML/OIDC and just-in-time privilege escalation. MFA at every gate.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span>
+    <span class="mark">◆</span>
+    <span class="line"></span>
+  </div>
+
+  <!-- ─── SHOWCASE ─── -->
+  <section class="showcase" id="showcase">
+    <div class="section" style="padding: 0 44px;">
+      <div class="section-kicker" data-i18n="showcase.kicker">II · The platform</div>
+      <h2 class="section-title" data-i18n-html="showcase.title">
+        Twelve canvases. <em>One operations center.</em>
+      </h2>
+      <p class="section-lede" data-i18n="showcase.lede">
+        From the morning briefing on the executive dashboard to the 3 AM incident on the NOC wall — every screen Charon ships with is live. Click through any of the panels below.
+      </p>
+    </div>
+
+    <div class="showcase-grid">
+      <a href="NetManager Dashboard.html" class="showcase-card">
+        <span class="corner"></span>
+        <div class="live-preview"><iframe src="NetManager Dashboard.html" loading="lazy" tabindex="-1"></iframe></div>
+        <div class="preview">
+          <svg viewBox="0 0 200 150" fill="none" stroke="currentColor" stroke-width="0.8">
+            <rect x="10" y="14" width="36" height="20" rx="2" />
+            <rect x="50" y="14" width="36" height="20" rx="2" />
+            <rect x="90" y="14" width="36" height="20" rx="2" />
+            <rect x="130" y="14" width="36" height="20" rx="2" />
+            <rect x="170" y="14" width="20" height="20" rx="2" />
+            <rect x="10" y="42" width="80" height="48" rx="2" />
+            <polyline points="14,80 24,72 34,76 44,64 54,68 64,58 74,62 84,52" fill="none" />
+            <rect x="94" y="42" width="50" height="48" rx="2" />
+            <rect x="148" y="42" width="42" height="48" rx="2" />
+            <rect x="10" y="96" width="60" height="44" rx="2" />
+            <rect x="74" y="96" width="60" height="44" rx="2" />
+            <rect x="138" y="96" width="52" height="44" rx="2" />
+          </svg>
+        </div>
+        <div class="overlay">
+          <div class="lbl" data-i18n="showcase.1.lbl">01 · Command center</div>
+          <h3 class="ttl" data-i18n="showcase.1.ttl">Dashboard</h3>
+          <p class="desc" data-i18n="showcase.1.desc">Three layouts — workspace, mission control wall, editorial briefing. Drag-drop tiles, live tickers, saved presets.</p>
+        </div>
+      </a>
+
+      <a href="NetManager Topoloji.html" class="showcase-card">
+        <span class="corner"></span>
+        <div class="live-preview"><iframe src="NetManager Topoloji.html" loading="lazy" tabindex="-1"></iframe></div>
+        <div class="preview">
+          <svg viewBox="0 0 200 150" fill="none" stroke="currentColor" stroke-width="0.8">
+            <circle cx="100" cy="30" r="4" />
+            <circle cx="60" cy="60" r="4" />
+            <circle cx="140" cy="60" r="4" />
+            <circle cx="30" cy="100" r="3" />
+            <circle cx="70" cy="100" r="3" />
+            <circle cx="100" cy="100" r="3" />
+            <circle cx="130" cy="100" r="3" />
+            <circle cx="170" cy="100" r="3" />
+            <circle cx="40" cy="130" r="2" />
+            <circle cx="80" cy="130" r="2" />
+            <circle cx="120" cy="130" r="2" />
+            <circle cx="160" cy="130" r="2" />
+            <line x1="100" y1="30" x2="60" y2="60" />
+            <line x1="100" y1="30" x2="140" y2="60" />
+            <line x1="60" y1="60" x2="30" y2="100" />
+            <line x1="60" y1="60" x2="70" y2="100" />
+            <line x1="140" y1="60" x2="130" y2="100" />
+            <line x1="140" y1="60" x2="170" y2="100" />
+            <line x1="60" y1="60" x2="100" y2="100" />
+            <line x1="30" y1="100" x2="40" y2="130" />
+            <line x1="70" y1="100" x2="80" y2="130" />
+            <line x1="130" y1="100" x2="120" y2="130" />
+            <line x1="170" y1="100" x2="160" y2="130" />
+          </svg>
+        </div>
+        <div class="overlay">
+          <div class="lbl" data-i18n="showcase.2.lbl">02 · Live map</div>
+          <h3 class="ttl" data-i18n="showcase.2.ttl">3D topology</h3>
+          <p class="desc" data-i18n="showcase.2.desc">WebGL tactical visualization with bloom, particle traffic, holographic HUD, and full mode catalogue.</p>
+        </div>
+      </a>
+
+      <a href="NetManager Kabinler.html" class="showcase-card">
+        <span class="corner"></span>
+        <div class="live-preview"><iframe src="NetManager Kabinler.html" loading="lazy" tabindex="-1"></iframe></div>
+        <div class="preview">
+          <svg viewBox="0 0 200 150" fill="none" stroke="currentColor" stroke-width="0.8">
+            <rect x="20" y="20" width="50" height="110" rx="2" />
+            <rect x="80" y="20" width="50" height="110" rx="2" />
+            <rect x="140" y="20" width="40" height="110" rx="2" />
+            <line x1="20" y1="30" x2="70" y2="30" /><line x1="20" y1="38" x2="70" y2="38" />
+            <line x1="20" y1="46" x2="70" y2="46" /><line x1="20" y1="54" x2="70" y2="54" />
+            <line x1="20" y1="62" x2="70" y2="62" /><line x1="20" y1="70" x2="70" y2="70" />
+            <line x1="80" y1="30" x2="130" y2="30" /><line x1="80" y1="38" x2="130" y2="38" />
+            <line x1="80" y1="46" x2="130" y2="46" /><line x1="80" y1="54" x2="130" y2="54" />
+            <line x1="80" y1="62" x2="130" y2="62" /><line x1="80" y1="70" x2="130" y2="70" />
+            <rect x="22" y="80" width="46" height="6" fill="currentColor" opacity="0.4" />
+            <rect x="82" y="80" width="46" height="6" fill="currentColor" opacity="0.4" />
+            <rect x="142" y="80" width="36" height="6" fill="currentColor" opacity="0.4" />
+          </svg>
+        </div>
+        <div class="overlay">
+          <div class="lbl" data-i18n="showcase.3.lbl">03 · Physical plant</div>
+          <h3 class="ttl" data-i18n="showcase.3.ttl">Rack & cable</h3>
+          <p class="desc" data-i18n="showcase.3.desc">42U rack layouts, custom item catalog, port-to-port cabling matrix and rack thermal overlay.</p>
+        </div>
+      </a>
+
+      <a href="NetManager Uyarilar.html" class="showcase-card">
+        <span class="corner"></span>
+        <div class="preview">
+          <svg viewBox="0 0 200 150" fill="none" stroke="currentColor" stroke-width="0.8">
+            <rect x="10" y="20" width="180" height="22" rx="2" />
+            <circle cx="22" cy="31" r="3" fill="currentColor" />
+            <line x1="32" y1="27" x2="100" y2="27" />
+            <line x1="32" y1="35" x2="80" y2="35" />
+            <rect x="10" y="48" width="180" height="22" rx="2" />
+            <circle cx="22" cy="59" r="3" fill="currentColor" opacity="0.6" />
+            <line x1="32" y1="55" x2="120" y2="55" />
+            <line x1="32" y1="63" x2="90" y2="63" />
+            <rect x="10" y="76" width="180" height="22" rx="2" />
+            <circle cx="22" cy="87" r="3" fill="currentColor" opacity="0.4" />
+            <rect x="10" y="104" width="180" height="22" rx="2" />
+            <circle cx="22" cy="115" r="3" fill="currentColor" opacity="0.3" />
+          </svg>
+        </div>
+        <div class="overlay">
+          <div class="lbl" data-i18n="showcase.4.lbl">04 · Incident hub</div>
+          <h3 class="ttl" data-i18n="showcase.4.ttl">Alerts & correlation</h3>
+          <p class="desc" data-i18n="showcase.4.desc">RCA timelines, escalation chains, multi-channel notifications and rule-based deduplication.</p>
+        </div>
+      </a>
+
+      <a href="NetManager Playbooklar.html" class="showcase-card">
+        <span class="corner"></span>
+        <div class="preview">
+          <svg viewBox="0 0 200 150" fill="none" stroke="currentColor" stroke-width="0.8">
+            <rect x="20" y="30" width="36" height="20" rx="2" />
+            <rect x="82" y="30" width="36" height="20" rx="2" />
+            <rect x="144" y="30" width="36" height="20" rx="2" />
+            <rect x="20" y="65" width="36" height="20" rx="2" />
+            <rect x="82" y="65" width="36" height="20" rx="2" />
+            <rect x="144" y="65" width="36" height="20" rx="2" />
+            <line x1="56" y1="40" x2="82" y2="40" stroke-dasharray="2 2" />
+            <line x1="118" y1="40" x2="144" y2="40" stroke-dasharray="2 2" />
+            <line x1="56" y1="75" x2="82" y2="75" stroke-dasharray="2 2" />
+            <line x1="118" y1="75" x2="144" y2="75" stroke-dasharray="2 2" />
+            <circle cx="100" cy="120" r="6" fill="none" />
+            <polygon points="97,115 105,120 97,125" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="overlay">
+          <div class="lbl" data-i18n="showcase.5.lbl">05 · Operations</div>
+          <h3 class="ttl" data-i18n="showcase.5.ttl">Playbook engine</h3>
+          <p class="desc" data-i18n="showcase.5.desc">Conditional steps, approval workflows, dry-run preview and trigger-event automation.</p>
+        </div>
+      </a>
+
+      <a href="NetManager SLA.html" class="showcase-card">
+        <span class="corner"></span>
+        <div class="preview">
+          <svg viewBox="0 0 200 150" fill="none" stroke="currentColor" stroke-width="0.8">
+            <rect x="10" y="20" width="180" height="60" rx="2" />
+            <polyline points="14,70 30,60 46,55 62,50 78,52 94,42 110,48 126,40 142,38 158,32 174,30 190,28" fill="none" stroke-width="1.2" />
+            <line x1="10" y1="50" x2="190" y2="50" stroke-dasharray="2 2" opacity="0.5" />
+            <rect x="10" y="90" width="56" height="40" rx="2" />
+            <rect x="72" y="90" width="56" height="40" rx="2" />
+            <rect x="134" y="90" width="56" height="40" rx="2" />
+            <text x="38" y="118" font-size="12" fill="currentColor" text-anchor="middle">99.97%</text>
+            <text x="100" y="118" font-size="12" fill="currentColor" text-anchor="middle">28m</text>
+            <text x="162" y="118" font-size="12" fill="currentColor" text-anchor="middle">2.4K</text>
+          </svg>
+        </div>
+        <div class="overlay">
+          <div class="lbl" data-i18n="showcase.6.lbl">06 · Reporting</div>
+          <h3 class="ttl" data-i18n="showcase.6.ttl">SLA & uptime</h3>
+          <p class="desc" data-i18n="showcase.6.desc">Per-device uptime, tier policies, drift compliance and executive PDF digests.</p>
+        </div>
+      </a>
+    </div>
+  </section>
+
+  <!-- ─── STATS ─── -->
+  <section class="section">
+    <div class="section-kicker" data-i18n="stats.kicker">III · Scale</div>
+    <h2 class="section-title" data-i18n-html="stats.title">
+      Built for the <em>thousand-node</em> network.
+    </h2>
+    <div class="stats-row" style="margin-top: 70px;">
+      <div class="stat"><div class="v">1248</div><div class="l" data-i18n="stats.1">Devices indexed</div></div>
+      <div class="stat"><div class="v">2835</div><div class="l" data-i18n="stats.2">Discovered links</div></div>
+      <div class="stat"><div class="v">99.97<small>%</small></div><div class="l" data-i18n="stats.3">Fleet uptime</div></div>
+      <div class="stat"><div class="v">28<small>ms</small></div><div class="l" data-i18n="stats.4">Avg correlation</div></div>
+    </div>
+  </section>
+
+  <!-- ─── ARCHITECTURE ─── -->
+  <section class="arch" id="architecture">
+    <div class="section-kicker" data-i18n="arch.kicker">IV · Architecture</div>
+    <h2 class="section-title" data-i18n-html="arch.title">
+      Three tiers. <em>One ferryman.</em>
+    </h2>
+    <p class="section-lede" data-i18n="arch.lede">
+      Charon is a federated platform: lightweight edge agents at every site, a stateful intelligence core in the cloud, and a real-time presentation layer for the operations team.
+    </p>
+
+    <div class="arch-stage">
+      <span class="ctr"></span><span class="cbr"></span>
+
+      <div class="arch-row">
+        <div class="arch-cell">
+          <div class="h" data-i18n="arch.1h">Edge</div>
+          <div class="n" data-i18n="arch.1n">Proxy agents</div>
+          <div class="m" data-i18n="arch.1m">WebSocket · SSH pool · offline queue · SNMP · syslog · vault</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-cell">
+          <div class="h" data-i18n="arch.2h">Core</div>
+          <div class="n" data-i18n="arch.2n">Intelligence</div>
+          <div class="m" data-i18n="arch.2m">Correlation · topology twin · risk score · RCA · playbook runtime</div>
+        </div>
+        <span class="arch-arrow">→</span>
+        <div class="arch-cell">
+          <div class="h" data-i18n="arch.3h">Surface</div>
+          <div class="n" data-i18n="arch.3n">Operator console</div>
+          <div class="m" data-i18n="arch.3m">Dashboard · 3D topology · incident hub · audit forensics</div>
+        </div>
+      </div>
+
+      <div class="arch-row" style="margin-top: 36px;">
+        <div class="arch-cell">
+          <div class="h" data-i18n="arch.4h">Devices</div>
+          <div class="n" data-i18n="arch.4n">Cisco · Aruba · Ruijie</div>
+          <div class="m" data-i18n="arch.4m">Fortinet · generic SSH · multi-vendor parser</div>
+        </div>
+        <span class="arch-arrow">↔</span>
+        <div class="arch-cell">
+          <div class="h" data-i18n="arch.5h">Storage</div>
+          <div class="n" data-i18n="arch.5n">PostgreSQL · Redis</div>
+          <div class="m" data-i18n="arch.5m">Celery · TimescaleDB · encrypted backups</div>
+        </div>
+        <span class="arch-arrow">↔</span>
+        <div class="arch-cell">
+          <div class="h" data-i18n="arch.6h">Identity</div>
+          <div class="n" data-i18n="arch.6n">SSO · SAML · OIDC</div>
+          <div class="m" data-i18n="arch.6m">MFA · RBAC · just-in-time escalation · forensic audit</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span>
+    <span class="mark">◆</span>
+    <span class="line"></span>
+  </div>
+
+  <!-- ─── PRICING ─── -->
+  <section class="pricing" id="pricing">
+    <div class="section-kicker" data-i18n="pricing.kicker">V · Tiers</div>
+    <h2 class="section-title" data-i18n-html="pricing.title">
+      Three crossings. <em>Choose your fare.</em>
+    </h2>
+
+    <div class="pricing-grid">
+      <div class="price-card">
+        <h3 class="price-name" data-i18n="pricing.1.name">Operator</h3>
+        <p class="price-desc" data-i18n="pricing.1.desc">Small networks under 100 devices. Single agent, core monitoring, basic playbooks.</p>
+        <div class="price-amount">€199<small data-i18n="pricing.permonth">/ month</small></div>
+        <ul class="price-features">
+          <li data-i18n="pricing.1.f1">Up to 100 devices</li>
+          <li data-i18n="pricing.1.f2">1 proxy agent</li>
+          <li data-i18n="pricing.1.f3">Topology, alerts, basic playbooks</li>
+          <li data-i18n="pricing.1.f4">Email + Slack notifications</li>
+          <li data-i18n="pricing.1.f5">Standard support · business hours</li>
+          <li class="muted" data-i18n="pricing.1.f6">3D tactical topology</li>
+          <li class="muted" data-i18n="pricing.1.f7">AI correlation engine</li>
+        </ul>
+        <a href="#final" class="btn ghost price-cta" data-i18n="pricing.1.cta">Begin</a>
+      </div>
+
+      <div class="price-card featured">
+        <span class="badge" data-i18n="pricing.featured">Most chosen</span>
+        <h3 class="price-name" data-i18n="pricing.2.name">Network admin</h3>
+        <p class="price-desc" data-i18n="pricing.2.desc">Mid-size enterprises. Multi-site, multi-vendor, AI correlation included.</p>
+        <div class="price-amount">€799<small data-i18n="pricing.permonth">/ month</small></div>
+        <ul class="price-features">
+          <li data-i18n="pricing.2.f1">Up to 1000 devices</li>
+          <li data-i18n="pricing.2.f2">10 proxy agents · multi-site</li>
+          <li data-i18n="pricing.2.f3">3D tactical topology</li>
+          <li data-i18n="pricing.2.f4">AI correlation engine</li>
+          <li data-i18n="pricing.2.f5">Change rollout & four-eye approval</li>
+          <li data-i18n="pricing.2.f6">SLA policies + executive reports</li>
+          <li data-i18n="pricing.2.f7">Priority support · 24/7</li>
+        </ul>
+        <a href="#final" class="btn primary price-cta" data-i18n="pricing.2.cta">Cross with us</a>
+      </div>
+
+      <div class="price-card">
+        <h3 class="price-name" data-i18n="pricing.3.name">Enterprise</h3>
+        <p class="price-desc" data-i18n="pricing.3.desc">Unlimited fleet, SSO/SAML, custom SLAs, on-premise option, dedicated CSM.</p>
+        <div class="price-amount custom" data-i18n="pricing.custom">Custom</div>
+        <ul class="price-features">
+          <li data-i18n="pricing.3.f1">Unlimited devices & agents</li>
+          <li data-i18n="pricing.3.f2">Multi-tenant + SSO/SAML/OIDC</li>
+          <li data-i18n="pricing.3.f3">On-premise or air-gap deployment</li>
+          <li data-i18n="pricing.3.f4">Custom SLA & runbook engineering</li>
+          <li data-i18n="pricing.3.f5">Dedicated success manager</li>
+          <li data-i18n="pricing.3.f6">White-label option</li>
+          <li data-i18n="pricing.3.f7">99.99% uptime SLA</li>
+        </ul>
+        <a href="#final" class="btn ghost price-cta" data-i18n="pricing.3.cta">Negotiate</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── ORIGIN STORY ─── -->
+  <section class="origin">
+    <div class="origin-side" data-i18n="origin.kicker">IV · Origin</div>
+    <div class="origin-content">
+      <p>
+        <span class="first-letter" data-i18n="origin.dropcap">I</span>
+        <span data-i18n-html="origin.p1">t was three in the morning when the network finally fell. <em>Two hundred devices</em>, one operator, six unanswered Slack messages and a dashboard that refused to load.</span>
+      </p>
+      <p data-i18n-html="origin.p2">We had been told the network was visible. It was not. We were told the alerts were correlated. They were not. We were told the runbook would help. It was a PDF from <em>2019</em>.</p>
+      <p data-i18n-html="origin.p3">Charon is what we wished we had that night. Not a dashboard with a thousand widgets. A <em>ferryman</em> — quiet, precise, knowing the crossing. The instrument an operations engineer would design for another operations engineer, at three in the morning, alone.</p>
+      <div class="origin-sign" data-i18n="origin.sign">Built by the on-call engineers who could not find what they needed.</div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span><span class="mark">◆</span><span class="line"></span>
+  </div>
+
+  <!-- ─── INTERACTIVE 3D PREVIEW ─── -->
+  <section class="iso-preview-wrap">
+    <div class="section-kicker" data-i18n="iso.kicker">XIII · The tactical view</div>
+    <h2 class="section-title" data-i18n-html="iso.title">
+      Move your <em>mouse</em>. The network moves with it.
+    </h2>
+    <p class="section-lede" data-i18n="iso.lede">
+      A miniature of the Mission Control wall — same engine, same physics, same packets. Drag, tilt, observe. The real surface lives at full size in the platform.
+    </p>
+
+    <div class="iso-stage" id="isoStage">
+      <span class="ctr"></span><span class="cbr"></span>
+      <div class="iso-hud" data-i18n="iso.hud">LIVE · 9 NODES · 12 LINKS</div>
+      <div class="iso-hint" data-i18n="iso.hint">DRAG TO ORBIT</div>
+
+      <div class="iso-world" id="isoWorld">
+        <div class="iso-plane">
+          <div class="iso-grid"></div>
+          <div class="iso-ring r3"></div>
+          <div class="iso-ring r2"></div>
+          <div class="iso-ring r1"></div>
+
+          <!-- Links (left, top, angle, length) -->
+          <div class="iso-link" style="left:300px;top:180px;width:130px;transform:translate(0,0) rotate(-25deg);"><span class="iso-packet" style="animation-delay:.2s"></span></div>
+          <div class="iso-link" style="left:300px;top:180px;width:130px;transform:translate(0,0) rotate(155deg);"><span class="iso-packet" style="animation-delay:.8s"></span></div>
+          <div class="iso-link" style="left:300px;top:180px;width:110px;transform:translate(0,0) rotate(85deg);"><span class="iso-packet" style="animation-delay:1.4s"></span></div>
+          <div class="iso-link" style="left:300px;top:180px;width:110px;transform:translate(0,0) rotate(-95deg);"><span class="iso-packet" style="animation-delay:0s"></span></div>
+          <div class="iso-link" style="left:418px;top:124px;width:90px;transform:translate(0,0) rotate(40deg);"><span class="iso-packet" style="animation-delay:.6s"></span></div>
+          <div class="iso-link" style="left:418px;top:124px;width:90px;transform:translate(0,0) rotate(-40deg);"><span class="iso-packet" style="animation-delay:1.2s"></span></div>
+          <div class="iso-link" style="left:182px;top:236px;width:90px;transform:translate(0,0) rotate(220deg);"><span class="iso-packet" style="animation-delay:1.7s"></span></div>
+          <div class="iso-link" style="left:182px;top:236px;width:90px;transform:translate(0,0) rotate(140deg);"><span class="iso-packet" style="animation-delay:.3s"></span></div>
+          <div class="iso-link" style="left:300px;top:64px;width:80px;transform:translate(0,0) rotate(0deg);"><span class="iso-packet" style="animation-delay:.9s"></span></div>
+          <div class="iso-link" style="left:300px;top:64px;width:80px;transform:translate(0,0) rotate(180deg);"><span class="iso-packet" style="animation-delay:1.5s"></span></div>
+
+          <!-- Center core -->
+          <div class="iso-node" style="left:300px;top:180px;transform:translate(-50%,-50%) translateZ(40px);">
+            <div class="halo"></div>
+            <div class="crystal"></div>
+            <div class="stem" style="height:140px;"></div>
+          </div>
+          <!-- North -->
+          <div class="iso-node" style="left:300px;top:64px;transform:translate(-50%,-50%) translateZ(28px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:100px;"></div>
+          </div>
+          <div class="iso-node" style="left:218px;top:64px;transform:translate(-50%,-50%) translateZ(28px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:100px;"></div>
+          </div>
+          <div class="iso-node" style="left:382px;top:64px;transform:translate(-50%,-50%) translateZ(28px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:100px;"></div>
+          </div>
+          <!-- NE / NW -->
+          <div class="iso-node warn" style="left:418px;top:124px;transform:translate(-50%,-50%) translateZ(20px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:90px;"></div>
+          </div>
+          <div class="iso-node" style="left:182px;top:236px;transform:translate(-50%,-50%) translateZ(20px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:90px;"></div>
+          </div>
+          <div class="iso-node crit" style="left:480px;top:200px;transform:translate(-50%,-50%) translateZ(20px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:90px;"></div>
+          </div>
+          <div class="iso-node" style="left:120px;top:170px;transform:translate(-50%,-50%) translateZ(20px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:90px;"></div>
+          </div>
+          <div class="iso-node" style="left:300px;top:300px;transform:translate(-50%,-50%) translateZ(28px);">
+            <div class="halo"></div><div class="crystal"></div>
+            <div class="stem" style="height:100px;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span><span class="mark">◆</span><span class="line"></span>
+  </div>
+
+  <!-- ─── COMPARISON ─── -->
+  <section class="compare-wrap" id="compare">
+    <div class="section-kicker" data-i18n="compare.kicker">VI · The competition</div>
+    <h2 class="section-title" data-i18n-html="compare.title">
+      Where <em>others stop</em>, Charon begins.
+    </h2>
+    <p class="section-lede" data-i18n="compare.lede">
+      A side-by-side look at the capabilities that matter to a NOC engineer at 3 a.m. — not a marketing checklist.
+    </p>
+
+    <div class="compare-table">
+      <div class="compare-row head">
+        <div data-i18n="compare.cap">Capability</div>
+        <div>SolarWinds</div>
+        <div>PRTG</div>
+        <div>LibreNMS</div>
+        <div>Cisco DNA</div>
+        <div class="charon-col">Charon</div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r1">3D tactical topology</div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="partial">◐</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r2">AI-driven correlation</div>
+        <div><span class="partial">◐</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="partial">◐</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r3">Multi-vendor (Cisco/Aruba/Ruijie)</div>
+        <div><span class="yes">●</span></div>
+        <div><span class="yes">●</span></div>
+        <div><span class="yes">●</span></div>
+        <div><span class="no">●</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r4">NAT-behind proxy agents</div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r5">Four-eye change approval</div>
+        <div><span class="partial">◐</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="yes">●</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r6">Modern UI (sub-100ms render)</div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="partial">◐</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r7">Forensic audit (before/after diff)</div>
+        <div><span class="partial">◐</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="no">●</span></div>
+        <div><span class="yes">●</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r8">On-premise / air-gap option</div>
+        <div><span class="yes">●</span></div>
+        <div><span class="yes">●</span></div>
+        <div><span class="yes">●</span></div>
+        <div><span class="no">●</span></div>
+        <div class="charon-col"><span class="yes">●</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="lbl" data-i18n="compare.r9">Starting price (mid-size)</div>
+        <div>$$$$</div>
+        <div>$$$</div>
+        <div>Free*</div>
+        <div>$$$$$</div>
+        <div class="charon-col">$$</div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span><span class="mark">◆</span><span class="line"></span>
+  </div>
+
+  <!-- ─── PERFORMANCE STRIP ─── -->
+  <section class="section">
+    <div class="section-kicker" data-i18n="perf.kicker">VII · Performance</div>
+    <h2 class="section-title" data-i18n-html="perf.title">
+      Engineering that <em>respects your time</em>.
+    </h2>
+    <p class="section-lede" data-i18n="perf.lede">
+      Benchmarks from a 1000-device staging environment running on a single 8-core box. The boat is quieter than you think.
+    </p>
+    <div class="perf-strip">
+      <div class="cell"><div class="v">32<small>ms</small></div><div class="l" data-i18n="perf.1">p99 query latency</div></div>
+      <div class="cell"><div class="v">12<small>s</small></div><div class="l" data-i18n="perf.2">1000-device discovery</div></div>
+      <div class="cell"><div class="v">99.97<small>%</small></div><div class="l" data-i18n="perf.3">Agent heartbeat fidelity</div></div>
+      <div class="cell"><div class="v">8<small>MB</small></div><div class="l" data-i18n="perf.4">Browser memory footprint</div></div>
+    </div>
+  </section>
+
+  <!-- ─── INDUSTRIES ─── -->
+  <section class="section" id="industries">
+    <div class="section-kicker" data-i18n="ind.kicker">VIII · Industries</div>
+    <h2 class="section-title" data-i18n-html="ind.title">
+      Built for networks that <em>cannot fail</em>.
+    </h2>
+    <p class="section-lede" data-i18n="ind.lede">
+      Six verticals where downtime is measured in regulatory fines, lost lives, or both. Each comes with a Charon reference architecture.
+    </p>
+
+    <div class="industries-grid">
+      <div class="industry">
+        <div class="icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="6" y="12" width="24" height="18" rx="1"/><path d="M3 12l15-8 15 8M10 30v-12M18 30v-12M26 30v-12"/></svg></div>
+        <h3 class="name" data-i18n="ind.1.name">Banking & finance</h3>
+        <div class="use" data-i18n="ind.1.use">Tier-1 bank · 4 data centers · 6800 devices</div>
+        <p class="desc" data-i18n="ind.1.desc">Sub-second incident correlation across trading floor and core banking fabric. BaFin / KVKK / PCI-DSS audit trails baked in.</p>
+      </div>
+      <div class="industry">
+        <div class="icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M18 6v8M18 22v8M6 18h8M22 18h8"/><circle cx="18" cy="18" r="4"/><circle cx="18" cy="18" r="10"/><circle cx="18" cy="18" r="15"/></svg></div>
+        <h3 class="name" data-i18n="ind.2.name">Telecom & ISP</h3>
+        <div class="use" data-i18n="ind.2.use">Regional carrier · 142 POPs · 18K subscribers</div>
+        <p class="desc" data-i18n="ind.2.desc">Last-mile to backbone visibility, BGP intelligence, customer-impact mapping with service dependency graphs.</p>
+      </div>
+      <div class="industry">
+        <div class="icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M6 12h24v18H6zM6 12l12-6 12 6"/><line x1="14" y1="22" x2="22" y2="22"/><line x1="14" y1="26" x2="22" y2="26"/></svg></div>
+        <h3 class="name" data-i18n="ind.3.name">Universities</h3>
+        <div class="use" data-i18n="ind.3.use">Istanbul University · 1240 devices · 1 operator</div>
+        <p class="desc" data-i18n="ind.3.desc">Campus-wide wireless, eduroam federation, lab segmentation and BYOD onboarding from a single ferryman.</p>
+      </div>
+      <div class="industry">
+        <div class="icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M18 4v28M4 18h28" stroke-linecap="round"/><circle cx="18" cy="18" r="12"/></svg></div>
+        <h3 class="name" data-i18n="ind.4.name">Healthcare</h3>
+        <div class="use" data-i18n="ind.4.use">600-bed hospital · 8400 medical devices</div>
+        <p class="desc" data-i18n="ind.4.desc">Medical IoT segmentation, HIPAA-ready audit, real-time ventilator and MRI uplink health. Lives, measured in milliseconds.</p>
+      </div>
+      <div class="industry">
+        <div class="icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"><rect x="6" y="6" width="10" height="10"/><rect x="20" y="6" width="10" height="10"/><rect x="6" y="20" width="10" height="10"/><rect x="20" y="20" width="10" height="10"/></svg></div>
+        <h3 class="name" data-i18n="ind.5.name">E-commerce</h3>
+        <div class="use" data-i18n="ind.5.use">Top-50 retailer · 24 fulfillment centers</div>
+        <p class="desc" data-i18n="ind.5.desc">Black Friday-ready capacity dashboards, automatic surge response playbooks and CDN-edge synthetic probes.</p>
+      </div>
+      <div class="industry">
+        <div class="icon"><svg width="36" height="36" viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M18 4l12 5v8c0 9-12 15-12 15S6 26 6 17V9l12-5z"/><path d="M14 18l3 3 5-6"/></svg></div>
+        <h3 class="name" data-i18n="ind.6.name">Government & defense</h3>
+        <div class="use" data-i18n="ind.6.use">Ministry · air-gap deployment · TS-cleared ops</div>
+        <p class="desc" data-i18n="ind.6.desc">Fully on-premise / air-gapped install, signed bootchain, FIPS-compliant crypto and forensic audit retention.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── SECURITY BAND ─── -->
+  <section class="security-band">
+    <div class="kicker" data-i18n="sec.kicker">IX · Security & compliance</div>
+    <h3 data-i18n="sec.title">Audited. Encrypted. Trusted.</h3>
+    <div class="badges">
+      <div class="badge-item"><div class="ring">SOC 2</div><div class="lbl" data-i18n="sec.soc">Type II</div></div>
+      <div class="badge-item"><div class="ring">ISO</div><div class="lbl" data-i18n="sec.iso">27001 : 2022</div></div>
+      <div class="badge-item"><div class="ring">GDPR</div><div class="lbl" data-i18n="sec.gdpr">EU compliant</div></div>
+      <div class="badge-item"><div class="ring">KVKK</div><div class="lbl" data-i18n="sec.kvkk">TR data law</div></div>
+      <div class="badge-item"><div class="ring">HIPAA</div><div class="lbl" data-i18n="sec.hipaa">Ready</div></div>
+      <div class="badge-item"><div class="ring">PCI</div><div class="lbl" data-i18n="sec.pci">DSS 4.0</div></div>
+      <div class="badge-item"><div class="ring">Pen<br>test</div><div class="lbl" data-i18n="sec.pen">Annual</div></div>
+    </div>
+  </section>
+
+  <!-- ─── TESTIMONIALS ─── -->
+  <section class="testimonials">
+    <div class="section-kicker" data-i18n="test.kicker">X · Voices from the shore</div>
+    <h2 class="section-title" data-i18n-html="test.title">
+      The engineers who <em>sleep better</em>.
+    </h2>
+
+    <div class="testimonial-grid">
+      <div class="quote">
+        <p class="body" data-i18n-html="test.1.body">Charon let me <em>shrink my NOC from five to two</em> — and the two who remain are calmer than the five ever were. Mean-time-to-acknowledge dropped from eleven minutes to under one.</p>
+        <div class="attr">
+          <div class="avatar">EK</div>
+          <div class="info">
+            <div class="name" data-i18n="test.1.name">Emre K.</div>
+            <div class="role" data-i18n="test.1.role">NOC director · Tier-1 bank</div>
+          </div>
+        </div>
+      </div>
+      <div class="quote">
+        <p class="body" data-i18n-html="test.2.body">The 3D topology is not a gimmick — it is the only view I keep open during a major incident. Watching the blast radius animate as services fail is <em>genuinely diagnostic</em>.</p>
+        <div class="attr">
+          <div class="avatar">AD</div>
+          <div class="info">
+            <div class="name" data-i18n="test.2.name">Ayşe D.</div>
+            <div class="role" data-i18n="test.2.role">Senior network architect · Carrier</div>
+          </div>
+        </div>
+      </div>
+      <div class="quote">
+        <p class="body" data-i18n-html="test.2b.body">I have run SolarWinds, PRTG and LibreNMS over fifteen years. Charon is the first tool that <em>feels designed for the on-call engineer</em>, not the procurement officer.</p>
+        <div class="attr">
+          <div class="avatar">OT</div>
+          <div class="info">
+            <div class="name" data-i18n="test.3.name">Osman T.</div>
+            <div class="role" data-i18n="test.3.role">Principal engineer · Healthcare group</div>
+          </div>
+        </div>
+      </div>
+      <div class="quote">
+        <p class="body" data-i18n-html="test.4.body">Our regulator asked for before/after diff on every config change. We turned it on with one toggle. <em>Compliance, by default.</em></p>
+        <div class="attr">
+          <div class="avatar">SA</div>
+          <div class="info">
+            <div class="name" data-i18n="test.4.name">Selin A.</div>
+            <div class="role" data-i18n="test.4.role">CISO · Public utility</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span><span class="mark">◆</span><span class="line"></span>
+  </div>
+
+  <!-- ─── FAQ ─── -->
+  <section class="section" id="faq">
+    <div class="section-kicker" data-i18n="faq.kicker">XI · Questions</div>
+    <h2 class="section-title" data-i18n-html="faq.title">
+      Before the <em>crossing</em>.
+    </h2>
+
+    <div class="faq-wrap">
+      <details class="faq-item">
+        <summary data-i18n="faq.q1">How does device counting work?</summary>
+        <div class="faq-body" data-i18n="faq.a1">Each managed network device — switch, router, firewall, AP, server NIC — counts as one. Virtual machines, clients and wireless endpoints are free. Sub-interfaces do not multiply the count.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q2">Is on-premise installation possible?</summary>
+        <div class="faq-body" data-i18n="faq.a2">Yes. Charon ships as a self-contained Docker Compose stack and a Kubernetes Helm chart. Air-gapped installations are supported on Enterprise tier with signed offline update bundles.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q3">Where is the data stored?</summary>
+        <div class="faq-body" data-i18n="faq.a3">On your own PostgreSQL and Redis instances. Charon never phones home. Cloud SaaS uses regional Frankfurt or Istanbul data centers with at-rest AES-256-GCM encryption.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q4">Is multi-factor authentication required?</summary>
+        <div class="faq-body" data-i18n="faq.a4">For admin and super-admin roles, yes — and it cannot be turned off. Operator and viewer accounts can be configured per-organization policy. Authenticator apps, email and hardware keys (FIDO2) are supported.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q5">How does the first 30 days work?</summary>
+        <div class="faq-body" data-i18n="faq.a5">A network engineer from our team co-pilots the rollout. Day 1: agent install, discovery, baseline. Week 2: playbook templates, SLA policies. Week 4: first incident dry-run together. No charge until you say yes.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q6">What about agent overhead on small devices?</summary>
+        <div class="faq-body" data-i18n="faq.a6">The proxy agent is ~12 MB resident memory and uses under 0.5 % CPU during idle polling on a Raspberry Pi 4. It does not need to run on the network device itself — it sits on any reachable host nearby.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q7">Do you support white-labeling?</summary>
+        <div class="faq-body" data-i18n="faq.a7">On Enterprise tier. Custom domain, brand colors, logo, login screen and email templates. The mythological dressing is optional.</div>
+      </details>
+      <details class="faq-item">
+        <summary data-i18n="faq.q8">What happens if my contract ends?</summary>
+        <div class="faq-body" data-i18n="faq.a8">Your data, config, audit log and golden baselines export as portable JSON + plain config files. No lock-in, no proprietary format. The boat docks where you ask it to.</div>
+      </details>
+    </div>
+  </section>
+
+  <!-- ─── ROADMAP ─── -->
+  <section class="section">
+    <div class="section-kicker" data-i18n="road.kicker">XII · Roadmap</div>
+    <h2 class="section-title" data-i18n-html="road.title">
+      The next <em>shores</em>.
+    </h2>
+    <p class="section-lede" data-i18n="road.lede">
+      What we are building, what we have shipped, and what comes after. Open, opinionated, and shaped by the operations engineers we ferry every day.
+    </p>
+
+    <div class="roadmap-track">
+      <div class="roadmap-item done">
+        <div class="quarter">2024 Q4</div>
+        <h4 class="name" data-i18n="road.1.name">Beta · the first crossing</h4>
+        <p class="desc" data-i18n="road.1.desc">Multi-vendor discovery, basic monitoring, single-tenant.</p>
+      </div>
+      <div class="roadmap-item done">
+        <div class="quarter">2025 Q2</div>
+        <h4 class="name" data-i18n="road.2.name">v1.0 · multi-vendor</h4>
+        <p class="desc" data-i18n="road.2.desc">Cisco, Aruba, Ruijie, Fortinet. Playbooks, four-eye approval.</p>
+      </div>
+      <div class="roadmap-item done">
+        <div class="quarter">2025 Q4</div>
+        <h4 class="name" data-i18n="road.3.name">v2 · the intelligence core</h4>
+        <p class="desc" data-i18n="road.3.desc">Correlation engine, risk scoring, golden baseline drift.</p>
+      </div>
+      <div class="roadmap-item current">
+        <div class="quarter">2026 Q2</div>
+        <h4 class="name" data-i18n="road.4.name">v2.4 · the tactical view</h4>
+        <p class="desc" data-i18n="road.4.desc">3D topology, mission control wall, incident shockwaves. Shipping now.</p>
+      </div>
+      <div class="roadmap-item">
+        <div class="quarter">2026 Q3</div>
+        <h4 class="name" data-i18n="road.5.name">v3 · AI anomaly v2</h4>
+        <p class="desc" data-i18n="road.5.desc">Predictive overlays, suspicious-path prediction, east-west detection.</p>
+      </div>
+      <div class="roadmap-item">
+        <div class="quarter">2027 Q1</div>
+        <h4 class="name" data-i18n="road.6.name">v4 · quantum-safe</h4>
+        <p class="desc" data-i18n="road.6.desc">Post-quantum credential vault, signed playbook attestation.</p>
+      </div>
+    </div>
+  </section>
+
+  <div class="divider-ornament">
+    <span class="line"></span><span class="mark">◆</span><span class="line"></span>
+  </div>
+
+  <!-- ─── FINAL CTA ─── -->
+  <section class="final" id="final">
+    <div class="final-bg"></div>
+    <div class="final-content">
+      <div class="hero-kicker" data-i18n="final.kicker">The crossing awaits</div>
+      <h2 class="final-title" data-i18n-html="final.title">
+        Step into the <em>boat</em>.
+      </h2>
+      <p class="final-sub" data-i18n="final.sub">
+        Thirty-minute walkthrough with a network engineer. No slide deck — just your topology, your incidents, your runbook. We will show you what Charon would have caught last week.
+      </p>
+      <div style="display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;">
+        <a href="#" onclick="event.preventDefault(); openDemo();" class="btn primary lg" data-i18n="final.ctaPrimary">Book a walkthrough →</a>
+        <a href="/login" class="btn ghost lg" data-i18n="final.ctaSecondary">Open live demo</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── NEWSLETTER ─── -->
+  <div class="newsletter">
+    <div class="text">
+      <h4 data-i18n="news.title">Charon field notes</h4>
+      <p data-i18n="news.sub">Monthly newsletter for operations engineers — real incident postmortems, AI observations, runbook ideas. No spam. Unsubscribe in two clicks.</p>
+    </div>
+    <form class="form" onsubmit="event.preventDefault(); alert('Subscribed (mock).');">
+      <input type="email" placeholder="engineer@your-company.com" required />
+      <button type="submit" class="btn primary" data-i18n="news.cta">Subscribe</button>
+    </form>
+  </div>
+
+  <!-- Sound toggle -->
+  <button class="sound-toggle" id="soundBtn" title="Ambient sound" aria-label="Toggle ambient sound">
+    <span class="wave"></span>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" id="soundIcon">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+      <path d="M19 12c0-2.5-1.5-4.5-3-5" id="soundWaveLines"/>
+    </svg>
+  </button>
+
+  <!-- Sound toggle -->
+  <script>
+    (function isoPreview() {
+      const stage = document.getElementById('isoStage');
+      const world = document.getElementById('isoWorld');
+      if (!stage || !world) return;
+      let baseX = 55, baseZ = -30, dragging = null;
+      let curX = baseX, curZ = baseZ;
+      function setTransform() {
+        world.style.transform = `rotateX(${curX}deg) rotateZ(${curZ}deg)`;
+      }
+      // mouse parallax — subtle drift on hover
+      stage.addEventListener('pointermove', (e) => {
+        if (dragging) return;
+        const r = stage.getBoundingClientRect();
+        const px = (e.clientX - r.left) / r.width - 0.5;  // -0.5..0.5
+        const py = (e.clientY - r.top) / r.height - 0.5;
+        curX = baseX - py * 12;
+        curZ = baseZ + px * 16;
+        setTransform();
+      });
+      // drag to orbit
+      stage.addEventListener('pointerdown', (e) => {
+        dragging = { x: e.clientX, y: e.clientY, sx: curX, sz: curZ };
+        stage.style.cursor = 'grabbing';
+      });
+      window.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const dx = (e.clientX - dragging.x) * 0.35;
+        const dy = (e.clientY - dragging.y) * 0.25;
+        curZ = dragging.sz + dx;
+        curX = Math.max(20, Math.min(85, dragging.sx + dy));
+        setTransform();
+      });
+      window.addEventListener('pointerup', () => {
+        if (dragging) { baseX = curX; baseZ = curZ; dragging = null; stage.style.cursor = 'grab'; }
+      });
+    })();
+
+    // ─── Ambient sound (WebAudio drone) ────────────────────────────
+    (function ambient() {
+      const btn = document.getElementById('soundBtn');
+      if (!btn) return;
+      let ctx = null, master = null, filter = null, nodes = [], started = false;
+      let bellTimer = null, swellLfo = null;
+
+      function start() {
+        if (started) return;
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        master = ctx.createGain();
+        master.gain.value = 0;
+
+        filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 2400;
+        filter.Q.value = 0.3;
+        master.connect(filter);
+
+        // Cathedral reverb — long, lush
+        const conv = ctx.createConvolver();
+        const irLen = Math.floor(5.5 * ctx.sampleRate);
+        const ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+        for (let c = 0; c < 2; c++) {
+          const d = ir.getChannelData(c);
+          for (let i = 0; i < irLen; i++) {
+            const decay = Math.pow(1 - i / irLen, 2.2);
+            d[i] = (Math.random() * 2 - 1) * decay * 0.85;
+          }
+        }
+        conv.buffer = ir;
+        const wet = ctx.createGain(); wet.gain.value = 0.85;
+        const dry = ctx.createGain(); dry.gain.value = 0.45;
+        filter.connect(dry); dry.connect(ctx.destination);
+        filter.connect(conv); conv.connect(wet); wet.connect(ctx.destination);
+
+        // Choral pad — A-minor sus, wide voicing
+        // Voices: root + fifth + octave + 9th, each doubled with slight detune
+        const voices = [
+          { f: 55.00,  type: 'sine',     g: 0.28 }, // A1 root
+          { f: 82.41,  type: 'sine',     g: 0.16 }, // E2 fifth
+          { f: 110.00, type: 'triangle', g: 0.14 }, // A2
+          { f: 164.81, type: 'sine',     g: 0.10 }, // E3
+          { f: 220.00, type: 'sine',     g: 0.08 }, // A3
+          { f: 329.63, type: 'sine',     g: 0.05 }, // E4
+        ];
+        voices.forEach((v, i) => {
+          // Each voice has 2 detuned siblings for choir thickness
+          [-7, 0, 7].forEach((cents) => {
+            const osc = ctx.createOscillator();
+            osc.type = v.type;
+            osc.frequency.value = v.f;
+            osc.detune.value = cents;
+
+            // Very slow detune drift — celestial
+            const detuneLfo = ctx.createOscillator();
+            detuneLfo.frequency.value = 0.02 + Math.random() * 0.05;
+            const detuneGain = ctx.createGain();
+            detuneGain.gain.value = 3 + Math.random() * 3;
+            detuneLfo.connect(detuneGain);
+            detuneGain.connect(osc.detune);
+            detuneLfo.start();
+
+            const g = ctx.createGain();
+            g.gain.value = v.g / 3;
+            osc.connect(g); g.connect(master);
+            osc.start();
+            nodes.push(osc, detuneLfo);
+          });
+        });
+
+        // Massive slow swell — major breathing every ~30 seconds
+        swellLfo = ctx.createOscillator();
+        swellLfo.frequency.value = 0.032;
+        const swellGain = ctx.createGain();
+        swellGain.gain.value = 0.20;
+        swellLfo.connect(swellGain);
+        swellGain.connect(master.gain);
+        swellLfo.start();
+        nodes.push(swellLfo);
+
+        // Spaced shimmer bells — distant, celestial
+        function bell() {
+          if (!ctx) return;
+          const tones = [
+            [659.25, 783.99, 880.00],  // E5 / G5 / A5
+            [987.77, 1046.50, 1318.51], // B5 / C6 / E6
+          ];
+          const set = tones[Math.floor(Math.random() * tones.length)];
+          set.forEach((f, idx) => {
+            const o = ctx.createOscillator();
+            o.type = 'sine';
+            o.frequency.value = f;
+            const g = ctx.createGain();
+            g.gain.value = 0;
+            const t = ctx.currentTime + idx * 0.18;
+            const peak = 0.05 - idx * 0.012;
+            g.gain.linearRampToValueAtTime(peak, t + 0.05);
+            g.gain.exponentialRampToValueAtTime(0.0001, t + 7.5);
+            o.connect(g); g.connect(filter);
+            o.start(t); o.stop(t + 7.7);
+          });
+          bellTimer = setTimeout(bell, 14000 + Math.random() * 16000);
+        }
+        bellTimer = setTimeout(bell, 9000);
+
+        master.gain.linearRampToValueAtTime(0.65, ctx.currentTime + 5);
+        started = true;
+      }
+      function stop() {
+        if (!ctx) return;
+        if (bellTimer) { clearTimeout(bellTimer); bellTimer = null; }
+        master.gain.cancelScheduledValues(ctx.currentTime);
+        master.gain.linearRampToValueAtTime(0, ctx.currentTime + 2);
+        setTimeout(() => {
+          nodes.forEach(n => { try { n.stop(); } catch {} });
+          try { ctx.close(); } catch {}
+          ctx = null; master = null; filter = null; nodes = []; started = false;
+        }, 2200);
+      }
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('on')) {
+          btn.classList.remove('on');
+          stop();
+        } else {
+          btn.classList.add('on');
+          start();
+        }
+      });
+
+      // Auto-start on first user interaction (browsers block autoplay until gesture)
+      btn.classList.add('on');
+      function tryStart() {
+        if (!started) start();
+        if (ctx && ctx.state === 'suspended') ctx.resume();
+        window.removeEventListener('pointerdown', tryStart);
+        window.removeEventListener('keydown', tryStart);
+        window.removeEventListener('scroll', tryStart);
+      }
+      window.addEventListener('pointerdown', tryStart, { once: true });
+      window.addEventListener('keydown', tryStart, { once: true });
+      window.addEventListener('scroll', tryStart, { once: true });
+    })();
+  </script>
+
+  <!-- ─── FOOTER ─── -->
+  <footer class="footer">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <div class="name">CHARON</div>
+        <p class="desc" data-i18n="footer.brand">
+          Networks between worlds. An AI-driven network intelligence platform for the operations engineer who carries the network on their back.
+        </p>
+      </div>
+      <div class="footer-col">
+        <h4 data-i18n="footer.platform">Platform</h4>
+        <ul>
+          <li><a href="NetManager Dashboard.html" data-i18n="footer.dashboard">Dashboard</a></li>
+          <li><a href="NetManager Topoloji.html" data-i18n="footer.topology">3D topology</a></li>
+          <li><a href="NetManager Cihazlar.html" data-i18n="footer.devices">Devices</a></li>
+          <li><a href="NetManager Kabinler.html" data-i18n="footer.racks">Racks</a></li>
+          <li><a href="NetManager Playbooklar.html" data-i18n="footer.playbooks">Playbooks</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4 data-i18n="footer.operations">Operations</h4>
+        <ul>
+          <li><a href="NetManager Uyarilar.html" data-i18n="footer.alerts">Alerts</a></li>
+          <li><a href="NetManager Otomasyon.html" data-i18n="footer.automation">Automation</a></li>
+          <li><a href="NetManager Config Drift.html" data-i18n="footer.drift">Config drift</a></li>
+          <li><a href="NetManager SLA.html" data-i18n="footer.sla">SLA & uptime</a></li>
+          <li><a href="NetManager Audit.html" data-i18n="footer.audit">Audit log</a></li>
+        </ul>
+      </div>
+      <div class="footer-col">
+        <h4 data-i18n="footer.company">Company</h4>
+        <ul>
+          <li><a href="#capabilities" data-i18n="footer.about">About</a></li>
+          <li><a href="#final" data-i18n="footer.contact">Contact</a></li>
+          <li><a href="Charon Login.html" data-i18n="footer.signIn">Sign in</a></li>
+          <li><a href="#pricing" data-i18n="footer.pricing">Pricing</a></li>
+          <li><a href="#" data-i18n="footer.trust">Trust center</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span data-i18n="footer.copyright">© MMXXVI · Charon Network Intelligence</span>
+      <span data-i18n="footer.tagline">v2.4 · Built for the operations engineer</span>
+    </div>
+  </footer>
+
+  <!-- ─── DEMO MODAL ─── -->
+  <div class="modal-scrim" id="demoScrim" onclick="if(event.target===this) closeDemo()"></div>
+  <div class="modal" id="demoModal" role="dialog" aria-modal="true">
+    <span class="ctr"></span><span class="cbr"></span>
+    <button class="x" onclick="closeDemo()" aria-label="Close">✕</button>
+    <h3 data-i18n-html="demo.title">Book the <em>crossing</em>.</h3>
+    <p data-i18n="demo.sub">Thirty-minute walkthrough with a network engineer. Bring your topology — we will bring the boat.</p>
+    <form onsubmit="event.preventDefault(); submitDemo();">
+      <label data-i18n="demo.name">Your name</label>
+      <input type="text" required placeholder="Erdem K." />
+      <label data-i18n="demo.email">Work email</label>
+      <input type="email" required placeholder="engineer@your-company.com" />
+      <label data-i18n="demo.company">Company</label>
+      <input type="text" required placeholder="Your Company" />
+      <label data-i18n="demo.devices">Approximate device count</label>
+      <select required>
+        <option value="" data-i18n="demo.pick">— select —</option>
+        <option value="sub100">&lt; 100</option>
+        <option value="100-500">100 – 500</option>
+        <option value="500-1000">500 – 1000</option>
+        <option value="1000+">1000+</option>
+      </select>
+      <label data-i18n="demo.when">Preferred timeframe</label>
+      <select required>
+        <option value="" data-i18n="demo.pick">— select —</option>
+        <option data-i18n="demo.thisweek">This week</option>
+        <option data-i18n="demo.nextweek">Next week</option>
+        <option data-i18n="demo.flex">Flexible</option>
+      </select>
+      <div class="modal-cta">
+        <button type="button" class="btn ghost" onclick="closeDemo()" data-i18n="demo.cancel">Cancel</button>
+        <button type="submit" class="btn primary" data-i18n="demo.submit">Book it</button>
+      </div>
+    </form>
+  </div>
+
+  <script>
+    // ─── Demo modal ───────────────────────────────────────
+    function openDemo() { document.getElementById('demoScrim').classList.add('open'); document.getElementById('demoModal').classList.add('open'); }
+    function closeDemo() { document.getElementById('demoScrim').classList.remove('open'); document.getElementById('demoModal').classList.remove('open'); }
+    function submitDemo() { closeDemo(); setTimeout(() => alert('Booked (mock). We will reach out within 24 h.'), 250); }
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDemo(); });
+
+    // ─── Hero ferry canvas ────────────────────────────────
+    (function heroCanvas() {
+      const c = document.getElementById('heroCanvas');
+      if (!c) return;
+      const ctx = c.getContext('2d');
+      let W = 0, H = 0;
+      function resize() {
+        W = c.width = c.clientWidth * (window.devicePixelRatio || 1);
+        H = c.height = c.clientHeight * (window.devicePixelRatio || 1);
+      }
+      resize();
+      window.addEventListener('resize', resize);
+
+      // particles (drifting embers)
+      const embers = Array.from({ length: 32 }, () => ({
+        x: Math.random() * W,
+        y: Math.random() * H,
+        s: 0.4 + Math.random() * 1.2,
+        vy: 0.15 + Math.random() * 0.35,
+        vx: -0.05 + Math.random() * 0.1,
+        a: 0.2 + Math.random() * 0.4,
+      }));
+      // mist points (water glints)
+      const glints = Array.from({ length: 24 }, () => ({
+        x: Math.random() * W,
+        y: H * 0.65 + Math.random() * H * 0.3,
+        s: 0.5 + Math.random() * 1.2,
+        ph: Math.random() * Math.PI * 2,
+      }));
+      let t = 0;
+      function frame() {
+        t += 0.01;
+        ctx.clearRect(0, 0, W, H);
+
+        // soft golden mist horizon
+        const grad = ctx.createRadialGradient(W * 0.5, H * 0.6, 10, W * 0.5, H * 0.6, W * 0.6);
+        grad.addColorStop(0, 'rgba(212, 168, 106, 0.10)');
+        grad.addColorStop(0.5, 'rgba(184, 146, 75, 0.04)');
+        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, W, H);
+
+        // embers rising
+        embers.forEach(e => {
+          e.y -= e.vy * (window.devicePixelRatio || 1);
+          e.x += e.vx;
+          if (e.y < -10) { e.y = H + 10; e.x = Math.random() * W; }
+          if (e.x < -10) e.x = W + 10;
+          if (e.x > W + 10) e.x = -10;
+          ctx.fillStyle = `rgba(212, 168, 106, ${e.a})`;
+          ctx.beginPath();
+          ctx.arc(e.x, e.y, e.s * (window.devicePixelRatio || 1), 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // water glints (twinkle)
+        glints.forEach(g => {
+          const flick = 0.4 + 0.6 * Math.abs(Math.sin(t * 1.4 + g.ph));
+          ctx.fillStyle = `rgba(232, 220, 196, ${flick * 0.18})`;
+          ctx.beginPath();
+          ctx.arc(g.x, g.y + Math.sin(t + g.ph) * 1.5 * (window.devicePixelRatio || 1), g.s * (window.devicePixelRatio || 1), 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // subtle horizon line glow
+        const lineGrad = ctx.createLinearGradient(0, H * 0.62, W, H * 0.62);
+        lineGrad.addColorStop(0, 'rgba(184, 146, 75, 0)');
+        lineGrad.addColorStop(0.5, 'rgba(184, 146, 75, 0.18)');
+        lineGrad.addColorStop(1, 'rgba(184, 146, 75, 0)');
+        ctx.fillStyle = lineGrad;
+        ctx.fillRect(0, H * 0.615, W, 1.5 * (window.devicePixelRatio || 1));
+
+        requestAnimationFrame(frame);
+      }
+      frame();
+    })();
+
+    // ─── Konami easter egg ───────────────────────────────
+    (function konami() {
+      const seq = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'b', 'a'];
+      let i = 0;
+      window.addEventListener('keydown', (e) => {
+        const k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+        if (k === seq[i]) {
+          i++;
+          if (i === seq.length) {
+            i = 0;
+            const ov = document.createElement('div');
+            ov.style.cssText = 'position:fixed;inset:0;z-index:9999;pointer-events:none;background:radial-gradient(ellipse 60% 60% at 50% 50%, rgba(184,146,75,0.2), transparent 70%);animation:fadeBoat 4s ease-out forwards;display:grid;place-items:center;font-family:Cormorant Garamond,serif;font-size:120px;color:rgba(184,146,75,0.4);letter-spacing:0.32em;';
+            ov.textContent = 'Ψ Χ Α Ρ Ω Ν';
+            document.body.appendChild(ov);
+            const style = document.createElement('style');
+            style.textContent = '@keyframes fadeBoat { from { opacity: 0 } 20% { opacity: 1 } to { opacity: 0 } }';
+            document.head.appendChild(style);
+            setTimeout(() => { ov.remove(); style.remove(); }, 4200);
+          }
+        } else { i = (k === seq[0]) ? 1 : 0; }
+      });
+    })();
+
+    // ─── i18n strings ───────────────────────────────────────
+    const I18N = {
+      en: {
+        'origin.kicker': 'IV · Origin — a night, a network, a wish',
+        'origin.dropcap': 'I',
+        'origin.p1': 't was three in the morning when the network finally fell. <em>Two hundred devices</em>, one operator, six unanswered Slack messages and a dashboard that refused to load.',
+        'origin.p2': 'We had been told the network was visible. It was not. We were told the alerts were correlated. They were not. We were told the runbook would help. It was a PDF from <em>2019</em>.',
+        'origin.p3': 'Charon is what we wished we had that night. Not a dashboard with a thousand widgets. A <em>ferryman</em> — quiet, precise, knowing the crossing. The instrument an operations engineer would design for another operations engineer, at three in the morning, alone.',
+        'origin.sign': 'Built by the on-call engineers who could not find what they needed.',
+        'compare.kicker': 'VI · The competition',
+        'compare.title': 'Where <em>others stop</em>, Charon begins.',
+        'compare.lede': 'A side-by-side look at the capabilities that matter to a NOC engineer at 3 a.m. — not a marketing checklist.',
+        'compare.cap': 'Capability',
+        'compare.r1': '3D tactical topology',
+        'compare.r2': 'AI-driven correlation',
+        'compare.r3': 'Multi-vendor (Cisco/Aruba/Ruijie)',
+        'compare.r4': 'NAT-behind proxy agents',
+        'compare.r5': 'Four-eye change approval',
+        'compare.r6': 'Modern UI (sub-100ms render)',
+        'compare.r7': 'Forensic audit (before/after diff)',
+        'compare.r8': 'On-premise / air-gap option',
+        'compare.r9': 'Starting price (mid-size)',
+        'perf.kicker': 'VII · Performance',
+        'perf.title': 'Engineering that <em>respects your time</em>.',
+        'perf.lede': 'Benchmarks from a 1000-device staging environment running on a single 8-core box. The boat is quieter than you think.',
+        'perf.1': 'p99 query latency', 'perf.2': '1000-device discovery',
+        'perf.3': 'Agent heartbeat fidelity', 'perf.4': 'Browser memory footprint',
+        'ind.kicker': 'VIII · Industries',
+        'ind.title': 'Built for networks that <em>cannot fail</em>.',
+        'ind.lede': 'Six verticals where downtime is measured in regulatory fines, lost lives, or both. Each comes with a Charon reference architecture.',
+        'ind.1.name': 'Banking & finance', 'ind.1.use': 'Tier-1 bank · 4 data centers · 6800 devices',
+        'ind.1.desc': 'Sub-second incident correlation across trading floor and core banking fabric. BaFin / KVKK / PCI-DSS audit trails baked in.',
+        'ind.2.name': 'Telecom & ISP', 'ind.2.use': 'Regional carrier · 142 POPs · 18K subscribers',
+        'ind.2.desc': 'Last-mile to backbone visibility, BGP intelligence, customer-impact mapping with service dependency graphs.',
+        'ind.3.name': 'Universities', 'ind.3.use': 'Istanbul University · 1240 devices · 1 operator',
+        'ind.3.desc': 'Campus-wide wireless, eduroam federation, lab segmentation and BYOD onboarding from a single ferryman.',
+        'ind.4.name': 'Healthcare', 'ind.4.use': '600-bed hospital · 8400 medical devices',
+        'ind.4.desc': 'Medical IoT segmentation, HIPAA-ready audit, real-time ventilator and MRI uplink health. Lives, measured in milliseconds.',
+        'ind.5.name': 'E-commerce', 'ind.5.use': 'Top-50 retailer · 24 fulfillment centers',
+        'ind.5.desc': 'Black Friday-ready capacity dashboards, automatic surge response playbooks and CDN-edge synthetic probes.',
+        'ind.6.name': 'Government & defense', 'ind.6.use': 'Ministry · air-gap deployment · TS-cleared ops',
+        'ind.6.desc': 'Fully on-premise / air-gapped install, signed bootchain, FIPS-compliant crypto and forensic audit retention.',
+        'sec.kicker': 'IX · Security & compliance', 'sec.title': 'Audited. Encrypted. Trusted.',
+        'sec.soc': 'Type II', 'sec.iso': '27001 : 2022', 'sec.gdpr': 'EU compliant',
+        'sec.kvkk': 'TR data law', 'sec.hipaa': 'Ready', 'sec.pci': 'DSS 4.0', 'sec.pen': 'Annual',
+        'test.kicker': 'X · Voices from the shore',
+        'test.title': 'The engineers who <em>sleep better</em>.',
+        'test.1.body': 'Charon let me <em>shrink my NOC from five to two</em> — and the two who remain are calmer than the five ever were. Mean-time-to-acknowledge dropped from eleven minutes to under one.',
+        'test.1.name': 'Emre K.', 'test.1.role': 'NOC director · Tier-1 bank',
+        'test.2.body': 'The 3D topology is not a gimmick — it is the only view I keep open during a major incident. Watching the blast radius animate as services fail is <em>genuinely diagnostic</em>.',
+        'test.2.name': 'Ayşe D.', 'test.2.role': 'Senior network architect · Carrier',
+        'test.2b.body': 'I have run SolarWinds, PRTG and LibreNMS over fifteen years. Charon is the first tool that <em>feels designed for the on-call engineer</em>, not the procurement officer.',
+        'test.3.name': 'Osman T.', 'test.3.role': 'Principal engineer · Healthcare group',
+        'test.4.body': 'Our regulator asked for before/after diff on every config change. We turned it on with one toggle. <em>Compliance, by default.</em>',
+        'test.4.name': 'Selin A.', 'test.4.role': 'CISO · Public utility',
+        'faq.kicker': 'XI · Questions', 'faq.title': 'Before the <em>crossing</em>.',
+        'faq.q1': 'How does device counting work?',
+        'faq.a1': 'Each managed network device — switch, router, firewall, AP, server NIC — counts as one. Virtual machines, clients and wireless endpoints are free. Sub-interfaces do not multiply the count.',
+        'faq.q2': 'Is on-premise installation possible?',
+        'faq.a2': 'Yes. Charon ships as a self-contained Docker Compose stack and a Kubernetes Helm chart. Air-gapped installations are supported on Enterprise tier with signed offline update bundles.',
+        'faq.q3': 'Where is the data stored?',
+        'faq.a3': 'On your own PostgreSQL and Redis instances. Charon never phones home. Cloud SaaS uses regional Frankfurt or Istanbul data centers with at-rest AES-256-GCM encryption.',
+        'faq.q4': 'Is multi-factor authentication required?',
+        'faq.a4': 'For admin and super-admin roles, yes — and it cannot be turned off. Operator and viewer accounts can be configured per-organization policy. Authenticator apps, email and hardware keys (FIDO2) are supported.',
+        'faq.q5': 'How does the first 30 days work?',
+        'faq.a5': 'A network engineer from our team co-pilots the rollout. Day 1: agent install, discovery, baseline. Week 2: playbook templates, SLA policies. Week 4: first incident dry-run together. No charge until you say yes.',
+        'faq.q6': 'What about agent overhead on small devices?',
+        'faq.a6': 'The proxy agent is ~12 MB resident memory and uses under 0.5 % CPU during idle polling on a Raspberry Pi 4. It does not need to run on the network device itself — it sits on any reachable host nearby.',
+        'faq.q7': 'Do you support white-labeling?',
+        'faq.a7': 'On Enterprise tier. Custom domain, brand colors, logo, login screen and email templates. The mythological dressing is optional.',
+        'faq.q8': 'What happens if my contract ends?',
+        'faq.a8': 'Your data, config, audit log and golden baselines export as portable JSON + plain config files. No lock-in, no proprietary format. The boat docks where you ask it to.',
+        'road.kicker': 'XII · Roadmap', 'road.title': 'The next <em>shores</em>.',
+        'road.lede': 'What we are building, what we have shipped, and what comes after. Open, opinionated, and shaped by the operations engineers we ferry every day.',
+        'road.1.name': 'Beta · the first crossing', 'road.1.desc': 'Multi-vendor discovery, basic monitoring, single-tenant.',
+        'road.2.name': 'v1.0 · multi-vendor', 'road.2.desc': 'Cisco, Aruba, Ruijie, Fortinet. Playbooks, four-eye approval.',
+        'road.3.name': 'v2 · the intelligence core', 'road.3.desc': 'Correlation engine, risk scoring, golden baseline drift.',
+        'road.4.name': 'v2.4 · the tactical view', 'road.4.desc': '3D topology, mission control wall, incident shockwaves. Shipping now.',
+        'road.5.name': 'v3 · AI anomaly v2', 'road.5.desc': 'Predictive overlays, suspicious-path prediction, east-west detection.',
+        'road.6.name': 'v4 · quantum-safe', 'road.6.desc': 'Post-quantum credential vault, signed playbook attestation.',
+        'news.title': 'Charon field notes',
+        'news.sub': 'Monthly newsletter for operations engineers — real incident postmortems, AI observations, runbook ideas. No spam. Unsubscribe in two clicks.',
+        'news.cta': 'Subscribe',
+        'demo.title': 'Book the <em>crossing</em>.',
+        'demo.sub': 'Thirty-minute walkthrough with a network engineer. Bring your topology — we will bring the boat.',
+        'demo.name': 'Your name', 'demo.email': 'Work email', 'demo.company': 'Company',
+        'demo.devices': 'Approximate device count', 'demo.when': 'Preferred timeframe',
+        'demo.pick': '— select —', 'demo.thisweek': 'This week', 'demo.nextweek': 'Next week', 'demo.flex': 'Flexible',
+        'demo.cancel': 'Cancel', 'demo.submit': 'Book it',
+        'iso.kicker': 'XIII · The tactical view',
+        'iso.title': 'Move your <em>mouse</em>. The network moves with it.',
+        'iso.lede': 'A miniature of the Mission Control wall — same engine, same physics, same packets. Drag, tilt, observe. The real surface lives at full size in the platform.',
+        'iso.hud': 'LIVE · 9 NODES · 12 LINKS',
+        'iso.hint': 'DRAG TO ORBIT',
+        'nav.capabilities': 'Capabilities', 'nav.platform': 'Platform', 'nav.architecture': 'Architecture',
+        'nav.pricing': 'Pricing', 'nav.signIn': 'Sign in', 'nav.cta': 'Begin the crossing',
+        'hero.kicker': 'Enterprise network intelligence',
+        'hero.tagline': 'The ferryman of every packet between every world.',
+        'hero.sub': 'Networks · Between · Worlds',
+        'hero.ctaPrimary': 'Begin the crossing →', 'hero.ctaSecondary': 'Live demo',
+        'hero.scroll': 'Scroll',
+        'manifesto.quote': 'Every modern enterprise lives on two shores — <em>data center</em> and <em>the cloud</em>, <em>known</em> and <em>unknown</em>, <em>silent</em> and <em>screaming</em>.<br><br>Charon is the operator who knows the crossing.',
+        'manifesto.attr': '— Charon field manual · vol. I',
+        'cap.kicker': 'I · Capabilities',
+        'cap.title': 'Six instruments for <em>passage</em>.',
+        'cap.lede': 'Built for the operations engineers who carry the network on their backs. Multi-vendor, agent-routed, AI-correlated — and quiet enough to live in a NOC for years.',
+        'cap.1.num': '01 / Topology', 'cap.1.title': '3D tactical topology',
+        'cap.1.body': 'Hierarchical and harmonic-cluster views in WebGL. Live traffic flow, incident shockwaves, AI anomaly auras, focus-mode dimming and cinematic camera modes for the operations center wall.',
+        'cap.2.num': '02 / Intelligence', 'cap.2.title': 'AI correlation engine',
+        'cap.2.body': 'Root-cause detection across BGP, STP, LLDP, syslog and synthetic probes. Topology-aware suppression, predictive anomaly cones, and confidence-scored incident timelines.',
+        'cap.3.num': '03 / Automation', 'cap.3.title': 'Playbooks & change rollouts',
+        'cap.3.body': 'Multi-step playbooks with dry-run preview, blast-radius warnings, rollback snapshots and four-eye approval flows. Event-driven, scheduled or manual — with full audit trail.',
+        'cap.4.num': '04 / Observability', 'cap.4.title': 'SLA · MTTR · drift',
+        'cap.4.body': 'Per-device uptime trends, golden-baseline config drift detection, interval-aware availability math, and tier-based SLA policies with compliance reporting.',
+        'cap.5.num': '05 / Agents', 'cap.5.title': 'Proxy agent fleet',
+        'cap.5.body': 'Lightweight WebSocket agents for NAT-behind devices. SSH connection pooling, offline command queue, latency-aware routing, encrypted credential vault and remote SNMP probing.',
+        'cap.6.num': '06 / Governance', 'cap.6.title': 'Forensic audit & RBAC',
+        'cap.6.body': 'Request-id tracing across every API call, before/after state diff, full CLI command archive, SSO/SAML/OIDC and just-in-time privilege escalation. MFA at every gate.',
+        'showcase.kicker': 'II · The platform',
+        'showcase.title': 'Twelve canvases. <em>One operations center.</em>',
+        'showcase.lede': 'From the morning briefing on the executive dashboard to the 3 AM incident on the NOC wall — every screen Charon ships with is live. Click through any of the panels below.',
+        'showcase.1.lbl': '01 · Command center', 'showcase.1.ttl': 'Dashboard',
+        'showcase.1.desc': 'Three layouts — workspace, mission control wall, editorial briefing. Drag-drop tiles, live tickers, saved presets.',
+        'showcase.2.lbl': '02 · Live map', 'showcase.2.ttl': '3D topology',
+        'showcase.2.desc': 'WebGL tactical visualization with bloom, particle traffic, holographic HUD, and full mode catalogue.',
+        'showcase.3.lbl': '03 · Physical plant', 'showcase.3.ttl': 'Rack & cable',
+        'showcase.3.desc': '42U rack layouts, custom item catalog, port-to-port cabling matrix and rack thermal overlay.',
+        'showcase.4.lbl': '04 · Incident hub', 'showcase.4.ttl': 'Alerts & correlation',
+        'showcase.4.desc': 'RCA timelines, escalation chains, multi-channel notifications and rule-based deduplication.',
+        'showcase.5.lbl': '05 · Operations', 'showcase.5.ttl': 'Playbook engine',
+        'showcase.5.desc': 'Conditional steps, approval workflows, dry-run preview and trigger-event automation.',
+        'showcase.6.lbl': '06 · Reporting', 'showcase.6.ttl': 'SLA & uptime',
+        'showcase.6.desc': 'Per-device uptime, tier policies, drift compliance and executive PDF digests.',
+        'stats.kicker': 'III · Scale',
+        'stats.title': 'Built for the <em>thousand-node</em> network.',
+        'stats.1': 'Devices indexed', 'stats.2': 'Discovered links',
+        'stats.3': 'Fleet uptime', 'stats.4': 'Avg correlation',
+        'arch.kicker': 'IV · Architecture',
+        'arch.title': 'Three tiers. <em>One ferryman.</em>',
+        'arch.lede': 'Charon is a federated platform: lightweight edge agents at every site, a stateful intelligence core in the cloud, and a real-time presentation layer for the operations team.',
+        'arch.1h': 'Edge', 'arch.1n': 'Proxy agents', 'arch.1m': 'WebSocket · SSH pool · offline queue · SNMP · syslog · vault',
+        'arch.2h': 'Core', 'arch.2n': 'Intelligence', 'arch.2m': 'Correlation · topology twin · risk score · RCA · playbook runtime',
+        'arch.3h': 'Surface', 'arch.3n': 'Operator console', 'arch.3m': 'Dashboard · 3D topology · incident hub · audit forensics',
+        'arch.4h': 'Devices', 'arch.4n': 'Cisco · Aruba · Ruijie', 'arch.4m': 'Fortinet · generic SSH · multi-vendor parser',
+        'arch.5h': 'Storage', 'arch.5n': 'PostgreSQL · Redis', 'arch.5m': 'Celery · TimescaleDB · encrypted backups',
+        'arch.6h': 'Identity', 'arch.6n': 'SSO · SAML · OIDC', 'arch.6m': 'MFA · RBAC · just-in-time escalation · forensic audit',
+        'pricing.kicker': 'V · Tiers',
+        'pricing.title': 'Three crossings. <em>Choose your fare.</em>',
+        'pricing.featured': 'Most chosen', 'pricing.custom': 'Custom', 'pricing.permonth': '/ month',
+        'pricing.1.name': 'Operator',
+        'pricing.1.desc': 'Small networks under 100 devices. Single agent, core monitoring, basic playbooks.',
+        'pricing.1.f1': 'Up to 100 devices', 'pricing.1.f2': '1 proxy agent',
+        'pricing.1.f3': 'Topology, alerts, basic playbooks', 'pricing.1.f4': 'Email + Slack notifications',
+        'pricing.1.f5': 'Standard support · business hours', 'pricing.1.f6': '3D tactical topology',
+        'pricing.1.f7': 'AI correlation engine', 'pricing.1.cta': 'Begin',
+        'pricing.2.name': 'Network admin',
+        'pricing.2.desc': 'Mid-size enterprises. Multi-site, multi-vendor, AI correlation included.',
+        'pricing.2.f1': 'Up to 1000 devices', 'pricing.2.f2': '10 proxy agents · multi-site',
+        'pricing.2.f3': '3D tactical topology', 'pricing.2.f4': 'AI correlation engine',
+        'pricing.2.f5': 'Change rollout & four-eye approval', 'pricing.2.f6': 'SLA policies + executive reports',
+        'pricing.2.f7': 'Priority support · 24/7', 'pricing.2.cta': 'Cross with us',
+        'pricing.3.name': 'Enterprise',
+        'pricing.3.desc': 'Unlimited fleet, SSO/SAML, custom SLAs, on-premise option, dedicated CSM.',
+        'pricing.3.f1': 'Unlimited devices & agents', 'pricing.3.f2': 'Multi-tenant + SSO/SAML/OIDC',
+        'pricing.3.f3': 'On-premise or air-gap deployment', 'pricing.3.f4': 'Custom SLA & runbook engineering',
+        'pricing.3.f5': 'Dedicated success manager', 'pricing.3.f6': 'White-label option',
+        'pricing.3.f7': '99.99% uptime SLA', 'pricing.3.cta': 'Negotiate',
+        'final.kicker': 'The crossing awaits',
+        'final.title': 'Step into the <em>boat</em>.',
+        'final.sub': 'Thirty-minute walkthrough with a network engineer. No slide deck — just your topology, your incidents, your runbook. We will show you what Charon would have caught last week.',
+        'final.ctaPrimary': 'Book a walkthrough →', 'final.ctaSecondary': 'Open live demo',
+        'footer.brand': 'Networks between worlds. An AI-driven network intelligence platform for the operations engineer who carries the network on their back.',
+        'footer.platform': 'Platform', 'footer.operations': 'Operations', 'footer.company': 'Company',
+        'footer.dashboard': 'Dashboard', 'footer.topology': '3D topology', 'footer.devices': 'Devices',
+        'footer.racks': 'Racks', 'footer.playbooks': 'Playbooks',
+        'footer.alerts': 'Alerts', 'footer.automation': 'Automation', 'footer.drift': 'Config drift',
+        'footer.sla': 'SLA & uptime', 'footer.audit': 'Audit log',
+        'footer.about': 'About', 'footer.contact': 'Contact', 'footer.signIn': 'Sign in',
+        'footer.pricing': 'Pricing', 'footer.trust': 'Trust center',
+        'footer.copyright': '© MMXXVI · Charon Network Intelligence',
+        'footer.tagline': 'v2.4 · Built for the operations engineer',
+      },
+      tr: {
+        'nav.capabilities': 'Yetenekler', 'nav.platform': 'Platform', 'nav.architecture': 'Mimari',
+        'nav.pricing': 'Fiyatlandırma', 'nav.signIn': 'Giriş yap', 'nav.cta': 'Yolculuğa başla',
+        'hero.kicker': 'Kurumsal ağ zekâsı',
+        'hero.tagline': 'Her dünyalar arası her paketin kayıkçısı.',
+        'hero.sub': 'Ağlar · Dünyalar · Arasında',
+        'hero.ctaPrimary': 'Yolculuğa başla →', 'hero.ctaSecondary': 'Canlı demo',
+        'hero.scroll': 'Aşağı',
+        'manifesto.quote': 'Her modern kuruluş iki kıyıda yaşar — <em>veri merkezi</em> ve <em>bulut</em>, <em>bilinen</em> ve <em>bilinmeyen</em>, <em>sessizlik</em> ve <em>çığlık</em>.<br><br>Charon, geçişi bilen operatördür.',
+        'manifesto.attr': '— Charon saha kılavuzu · cilt I',
+        'cap.kicker': 'I · Yetenekler',
+        'cap.title': '<em>Geçiş</em> için altı enstrüman.',
+        'cap.lede': 'Ağı sırtında taşıyan operasyon mühendisleri için inşa edildi. Çoklu üretici, ajan yönlendirmeli, yapay zekâ korelasyonlu — ve yıllarca bir NOC içinde yaşayacak kadar sessiz.',
+        'cap.1.num': '01 / Topoloji', 'cap.1.title': '3B taktik topoloji',
+        'cap.1.body': 'WebGL üzerinde hiyerarşik ve harmonik küme görünümleri. Canlı trafik akışı, olay şok dalgaları, yapay zekâ anomali halkaları, odak modu sönümleme ve operasyon merkezi duvarı için sinematik kamera modları.',
+        'cap.2.num': '02 / Zekâ', 'cap.2.title': 'Yapay zekâ korelasyon motoru',
+        'cap.2.body': 'BGP, STP, LLDP, syslog ve sentetik probe’lar arasında kök neden tespiti. Topoloji bilinçli bastırma, öngörücü anomali konileri ve güven puanlı olay zaman çizelgeleri.',
+        'cap.3.num': '03 / Otomasyon', 'cap.3.title': 'Playbook ve değişiklik dağıtımı',
+        'cap.3.body': 'Kuru çalıştırma önizlemeli, etki alanı uyarılı, rollback anlık görüntüleri ve dört göz onaylı çok adımlı playbook’lar. Olay tetikli, zamanlanmış veya manuel — tam denetim izi ile.',
+        'cap.4.num': '04 / Gözlemlenebilirlik', 'cap.4.title': 'SLA · MTTR · drift',
+        'cap.4.body': 'Cihaz bazında çalışma süresi trendleri, altın temel hatlı yapılandırma drift tespiti, aralık duyarlı kullanılabilirlik matematiği ve uyumluluk raporlu kademeli SLA politikaları.',
+        'cap.5.num': '05 / Ajanlar', 'cap.5.title': 'Proxy ajan filosu',
+        'cap.5.body': 'NAT arkasındaki cihazlar için hafif WebSocket ajanları. SSH bağlantı havuzu, çevrimdışı komut kuyruğu, gecikme duyarlı yönlendirme, şifreli kimlik kasası ve uzak SNMP soruşturma.',
+        'cap.6.num': '06 / Yönetişim', 'cap.6.title': 'Adli denetim ve RBAC',
+        'cap.6.body': 'Her API çağrısında istek kimliği takibi, öncesi/sonrası durum farkı, tam CLI komut arşivi, SSO/SAML/OIDC ve tam zamanında yetki yükseltme. Her kapıda MFA.',
+        'showcase.kicker': 'II · Platform',
+        'showcase.title': 'On iki ekran. <em>Tek bir operasyon merkezi.</em>',
+        'showcase.lede': 'Sabah brifinginden gece 03.00’deki NOC duvarındaki olaya kadar — Charon’un her ekranı canlı. Aşağıdaki panellerden herhangi birine tıklayın.',
+        'showcase.1.lbl': '01 · Komuta merkezi', 'showcase.1.ttl': 'Gösterge paneli',
+        'showcase.1.desc': 'Üç düzen — çalışma alanı, görev kontrol duvarı, editöryal brifing. Sürükle bırak kartlar, canlı tickerlar, kayıtlı şablonlar.',
+        'showcase.2.lbl': '02 · Canlı harita', 'showcase.2.ttl': '3B topoloji',
+        'showcase.2.desc': 'Bloom, parçacık trafiği, holografik HUD ve tam mod kataloğu ile WebGL taktik görselleştirme.',
+        'showcase.3.lbl': '03 · Fiziksel tesis', 'showcase.3.ttl': 'Kabin ve kablo',
+        'showcase.3.desc': '42U kabin yerleşimleri, özel öğe kataloğu, port-port kablo matrisi ve kabin termal katmanı.',
+        'showcase.4.lbl': '04 · Olay merkezi', 'showcase.4.ttl': 'Uyarılar ve korelasyon',
+        'showcase.4.desc': 'RCA zaman çizelgeleri, eskalasyon zincirleri, çok kanallı bildirimler ve kural tabanlı tekrar eden olay temizleme.',
+        'showcase.5.lbl': '05 · Operasyonlar', 'showcase.5.ttl': 'Playbook motoru',
+        'showcase.5.desc': 'Koşullu adımlar, onay akışları, kuru çalıştırma önizleme ve olay tetikli otomasyon.',
+        'showcase.6.lbl': '06 · Raporlama', 'showcase.6.ttl': 'SLA ve çalışma süresi',
+        'showcase.6.desc': 'Cihaz bazında çalışma süresi, kademe politikaları, drift uyumluluğu ve yönetici PDF özetleri.',
+        'stats.kicker': 'III · Ölçek',
+        'stats.title': '<em>Bin düğümlü</em> ağ için tasarlandı.',
+        'stats.1': 'İndekslenen cihaz', 'stats.2': 'Keşfedilen bağlantı',
+        'stats.3': 'Filo uptime\'ı', 'stats.4': 'Ortalama korelasyon',
+        'arch.kicker': 'IV · Mimari',
+        'arch.title': 'Üç katman. <em>Tek bir kayıkçı.</em>',
+        'arch.lede': 'Charon federatif bir platformdur: her sahada hafif edge ajanları, bulutta durum bilgili bir zekâ çekirdeği ve operasyon ekibi için gerçek zamanlı bir sunum katmanı.',
+        'arch.1h': 'Edge', 'arch.1n': 'Proxy ajanlar', 'arch.1m': 'WebSocket · SSH havuzu · çevrimdışı kuyruk · SNMP · syslog · kasa',
+        'arch.2h': 'Çekirdek', 'arch.2n': 'Zekâ', 'arch.2m': 'Korelasyon · topoloji ikizi · risk skoru · RCA · playbook çalışma zamanı',
+        'arch.3h': 'Yüzey', 'arch.3n': 'Operatör konsolu', 'arch.3m': 'Gösterge paneli · 3B topoloji · olay merkezi · adli denetim',
+        'arch.4h': 'Cihazlar', 'arch.4n': 'Cisco · Aruba · Ruijie', 'arch.4m': 'Fortinet · jenerik SSH · çoklu üretici çözümleyici',
+        'arch.5h': 'Depolama', 'arch.5n': 'PostgreSQL · Redis', 'arch.5m': 'Celery · TimescaleDB · şifreli yedekler',
+        'arch.6h': 'Kimlik', 'arch.6n': 'SSO · SAML · OIDC', 'arch.6m': 'MFA · RBAC · tam zamanında yetki · adli denetim',
+        'pricing.kicker': 'V · Paketler',
+        'pricing.title': 'Üç geçiş. <em>Yolunu seç.</em>',
+        'pricing.featured': 'En çok tercih edilen', 'pricing.custom': 'Özel', 'pricing.permonth': '/ ay',
+        'pricing.1.name': 'Operatör',
+        'pricing.1.desc': '100 cihaz altındaki küçük ağlar. Tek ajan, temel izleme, basit playbook’lar.',
+        'pricing.1.f1': '100 cihaza kadar', 'pricing.1.f2': '1 proxy ajan',
+        'pricing.1.f3': 'Topoloji, uyarılar, temel playbook’lar', 'pricing.1.f4': 'E-posta + Slack bildirimleri',
+        'pricing.1.f5': 'Standart destek · mesai saatleri', 'pricing.1.f6': '3B taktik topoloji',
+        'pricing.1.f7': 'Yapay zekâ korelasyon motoru', 'pricing.1.cta': 'Başla',
+        'pricing.2.name': 'Ağ yöneticisi',
+        'pricing.2.desc': 'Orta ölçekli kuruluşlar. Çoklu saha, çoklu üretici, yapay zekâ korelasyonu dahil.',
+        'pricing.2.f1': '1000 cihaza kadar', 'pricing.2.f2': '10 proxy ajan · çoklu saha',
+        'pricing.2.f3': '3B taktik topoloji', 'pricing.2.f4': 'Yapay zekâ korelasyon motoru',
+        'pricing.2.f5': 'Değişiklik dağıtımı ve dört göz onayı', 'pricing.2.f6': 'SLA politikaları + yönetici raporları',
+        'pricing.2.f7': 'Öncelikli destek · 7/24', 'pricing.2.cta': 'Bizimle geç',
+        'pricing.3.name': 'Kurumsal',
+        'pricing.3.desc': 'Sınırsız filo, SSO/SAML, özel SLA’lar, on-premise seçeneği, özel CSM.',
+        'pricing.3.f1': 'Sınırsız cihaz ve ajan', 'pricing.3.f2': 'Çoklu kiracı + SSO/SAML/OIDC',
+        'pricing.3.f3': 'On-premise veya air-gap dağıtım', 'pricing.3.f4': 'Özel SLA ve runbook mühendisliği',
+        'pricing.3.f5': 'Özel başarı yöneticisi', 'pricing.3.f6': 'White-label seçeneği',
+        'pricing.3.f7': '99,99% uptime SLA', 'pricing.3.cta': 'Görüşelim',
+        'final.kicker': 'Geçiş sizi bekliyor',
+        'final.title': '<em>Kayığa</em> adımını at.',
+        'final.sub': 'Bir ağ mühendisi ile otuz dakikalık tanıtım. Slayt yok — sadece sizin topolojiniz, sizin olaylarınız, sizin runbook’unuz. Charon’un geçen hafta neyi yakalayacağını göstereceğiz.',
+        'final.ctaPrimary': 'Tanıtım al →', 'final.ctaSecondary': 'Canlı demoyu aç',
+        'footer.brand': 'Dünyalar arasındaki ağlar. Ağı sırtında taşıyan operasyon mühendisi için yapay zekâ destekli bir ağ zekâ platformu.',
+        'footer.platform': 'Platform', 'footer.operations': 'Operasyon', 'footer.company': 'Şirket',
+        'footer.dashboard': 'Gösterge paneli', 'footer.topology': '3B topoloji', 'footer.devices': 'Cihazlar',
+        'footer.racks': 'Kabinler', 'footer.playbooks': 'Playbook’lar',
+        'footer.alerts': 'Uyarılar', 'footer.automation': 'Otomasyon', 'footer.drift': 'Config drift',
+        'footer.sla': 'SLA ve uptime', 'footer.audit': 'Denetim kaydı',
+        'footer.about': 'Hakkında', 'footer.contact': 'İletişim', 'footer.signIn': 'Giriş yap',
+        'footer.pricing': 'Fiyatlandırma', 'footer.trust': 'Güven merkezi',
+        'footer.copyright': '© MMXXVI · Charon Ağ Zekâsı',
+        'footer.tagline': 'v2.4 · Operasyon mühendisi için inşa edildi',
+        'origin.kicker': 'IV · Köken — bir gece, bir ağ, bir dilek',
+        'origin.dropcap': 'S',
+        'origin.p1': 'aat üçtü ve ağ nihayet düştü. <em>İki yüz cihaz</em>, bir operatör, yanıtsız altı Slack mesajı ve açılmayı reddeden bir panel.',
+        'origin.p2': 'Bize ağın görünür olduğu söylenmişti. Değildi. Uyarıların korelasyonlu olduğu söylenmişti. Değildi. Runbook’un yardım edeceği söylenmişti. <em>2019</em>’dan kalma bir PDF’ti.',
+        'origin.p3': 'Charon o gece keşke elimde olsaydı dediğimiz şey. Bin widget’lı bir panel değil. Bir <em>kayıkçı</em> — sessiz, kesin, geçişi bilen. Bir operasyon mühendisinin başka bir operasyon mühendisi için, sabahın üçünde, yalnızken tasarlayacağı enstrüman.',
+        'origin.sign': 'Aradığını bulamayan nöbetçi mühendisler tarafından inşa edildi.',
+        'compare.kicker': 'VI · Rekabet',
+        'compare.title': '<em>Diğerlerinin bittiği</em> yerde Charon başlar.',
+        'compare.lede': 'Sabah üçte bir NOC mühendisi için önemli olan yetenekler — pazarlama checklisti değil.',
+        'compare.cap': 'Yetenek',
+        'compare.r1': '3B taktik topoloji', 'compare.r2': 'AI tabanlı korelasyon',
+        'compare.r3': 'Çoklu üretici (Cisco/Aruba/Ruijie)', 'compare.r4': 'NAT arkası proxy ajanları',
+        'compare.r5': 'Dört göz değişiklik onayı', 'compare.r6': 'Modern arayüz (100ms altı render)',
+        'compare.r7': 'Adli denetim (öncesi/sonrası farkı)', 'compare.r8': 'On-premise / air-gap seçeneği',
+        'compare.r9': 'Başlangıç fiyatı (orta ölçek)',
+        'perf.kicker': 'VII · Performans',
+        'perf.title': '<em>Zamanına saygı duyan</em> mühendislik.',
+        'perf.lede': '1000 cihazlı bir test ortamında, tek bir 8-çekirdek sunucuda çalışan kıyaslamalar. Kayık düşündüğünüzden sessiz.',
+        'perf.1': 'p99 sorgu gecikmesi', 'perf.2': '1000 cihazlı keşif',
+        'perf.3': 'Ajan heartbeat güvenilirliği', 'perf.4': 'Tarayıcı bellek izi',
+        'ind.kicker': 'VIII · Sektörler',
+        'ind.title': '<em>Düşmemesi gereken</em> ağlar için inşa edildi.',
+        'ind.lede': 'Kesintinin yasal cezayla, kayıp hayatlarla veya her ikisiyle ölçüldüğü altı dikey. Her biri için Charon referans mimarisi var.',
+        'ind.1.name': 'Bankacılık & finans', 'ind.1.use': 'Tier-1 banka · 4 veri merkezi · 6800 cihaz',
+        'ind.1.desc': 'Trading floor ile temel bankacılık dokusu arasında saniye altı korelasyon. BDDK / KVKK / PCI-DSS denetim izleri hazır.',
+        'ind.2.name': 'Telekom & İSS', 'ind.2.use': 'Bölgesel operatör · 142 POP · 18K abone',
+        'ind.2.desc': 'Son mil – omurga görünürlüğü, BGP zekâsı, hizmet bağımlılık grafikleriyle müşteri etkisi haritalama.',
+        'ind.3.name': 'Üniversiteler', 'ind.3.use': 'İstanbul Üniversitesi · 1240 cihaz · 1 operatör',
+        'ind.3.desc': 'Tüm kampüs kablosuzu, eduroam federasyonu, laboratuvar segmentasyonu ve BYOD onboarding tek kayıkçıdan.',
+        'ind.4.name': 'Sağlık', 'ind.4.use': '600 yataklı hastane · 8400 tıbbi cihaz',
+        'ind.4.desc': 'Tıbbi IoT segmentasyonu, HIPAA-hazır denetim, gerçek zamanlı ventilatör ve MR uplink sağlığı. Hayatlar, milisaniyelerle ölçülür.',
+        'ind.5.name': 'E-ticaret', 'ind.5.use': 'İlk 50 perakendeci · 24 sevkiyat merkezi',
+        'ind.5.desc': 'Black Friday’e hazır kapasite panelleri, otomatik yoğunluk yanıt playbook’ları ve CDN-edge sentetik probe’ları.',
+        'ind.6.name': 'Devlet & savunma', 'ind.6.use': 'Bakanlık · air-gap dağıtım · TS-onaylı operasyon',
+        'ind.6.desc': 'Tamamen on-premise / air-gap kurulum, imzalı bootchain, FIPS-uyumlu kriptografi ve adli denetim saklama.',
+        'sec.kicker': 'IX · Güvenlik & uyumluluk', 'sec.title': 'Denetlendi. Şifreli. Güvenilir.',
+        'sec.soc': 'Type II', 'sec.iso': '27001 : 2022', 'sec.gdpr': 'AB uyumlu',
+        'sec.kvkk': 'TR veri yasası', 'sec.hipaa': 'Hazır', 'sec.pci': 'DSS 4.0', 'sec.pen': 'Yıllık',
+        'test.kicker': 'X · Kıyıdan sesler',
+        'test.title': '<em>Daha rahat uyuyan</em> mühendisler.',
+        'test.1.body': 'Charon sayesinde <em>NOC’u beşten ikiye indirdim</em> — ve kalan iki kişi beşin hiç olmadığı kadar sakin. Onay alma süresi on bir dakikadan bir dakikanın altına düştü.',
+        'test.1.name': 'Emre K.', 'test.1.role': 'NOC direktörü · Tier-1 banka',
+        'test.2.body': '3D topoloji bir gösteriş değil — büyük bir incident sırasında açık tuttuğum tek görünüm. Servisler düştükçe blast radius’un canlandığını izlemek <em>gerçek anlamda teşhis edici</em>.',
+        'test.2.name': 'Ayşe D.', 'test.2.role': 'Kıdemli ağ mimarı · Operatör',
+        'test.2b.body': 'On beş yıl boyunca SolarWinds, PRTG ve LibreNMS kullandım. Charon <em>nöbet tutan mühendis için tasarlandığı hissini veren</em> ilk araç — satın alma sorumlusu için değil.',
+        'test.3.name': 'Osman T.', 'test.3.role': 'Baş mühendis · Sağlık grubu',
+        'test.4.body': 'Düzenleyici her config değişikliği için öncesi/sonrası farkı istedi. Tek bir toggle ile açtık. <em>Varsayılan olarak uyumluluk.</em>',
+        'test.4.name': 'Selin A.', 'test.4.role': 'CISO · Kamu kuruluşu',
+        'faq.kicker': 'XI · Sorular', 'faq.title': '<em>Geçişten</em> önce.',
+        'faq.q1': 'Cihaz sayımı nasıl işliyor?',
+        'faq.a1': 'Her yönetilen ağ cihazı — switch, router, firewall, AP, sunucu NIC — bir olarak sayılır. Sanal makineler, istemciler ve kablosuz uç noktalar ücretsizdir. Alt arayüzler sayıyı çarpmaz.',
+        'faq.q2': 'On-premise kurulum mümkün mü?',
+        'faq.a2': 'Evet. Charon, kendi kendine yeten bir Docker Compose stack’i ve Kubernetes Helm chart olarak gelir. Air-gap kurulum imzalı çevrimdışı güncelleme paketleriyle Enterprise pakette desteklenir.',
+        'faq.q3': 'Veri nerede tutulur?',
+        'faq.a3': 'Sizin PostgreSQL ve Redis instance’larınızda. Charon dışarıya çağrı yapmaz. Bulut SaaS, bekleyen veri AES-256-GCM şifrelemesiyle Frankfurt veya İstanbul bölge veri merkezlerini kullanır.',
+        'faq.q4': 'Çok faktörlü kimlik doğrulama zorunlu mu?',
+        'faq.a4': 'Admin ve süper-admin rolleri için evet — ve kapatılamaz. Operatör ve viewer hesapları organizasyon politikasıyla yapılandırılabilir. Authenticator app, e-posta ve donanım anahtarları (FIDO2) desteklenir.',
+        'faq.q5': 'İlk 30 gün nasıl çalışır?',
+        'faq.a5': 'Ekibimizden bir ağ mühendisi kuruluma eşlik eder. 1. gün: ajan kurulumu, keşif, baseline. 2. hafta: playbook şablonları, SLA politikaları. 4. hafta: birlikte ilk incident dry-run. Siz "evet" diyene kadar ücret yok.',
+        'faq.q6': 'Küçük cihazlarda ajan yükü nasıl?',
+        'faq.a6': 'Proxy ajan ~12 MB bellek kaplar ve bir Raspberry Pi 4’te boşta polling sırasında %0,5’in altında CPU kullanır. Ağ cihazının kendisinde çalışmasına gerek yok — yakındaki herhangi bir erişilebilir host’ta durabilir.',
+        'faq.q7': 'White-label destekliyor musunuz?',
+        'faq.a7': 'Enterprise pakette. Özel alan adı, marka renkleri, logo, giriş ekranı ve e-posta şablonları. Mitolojik kostüm isteğe bağlıdır.',
+        'faq.q8': 'Sözleşmem biterse ne olur?',
+        'faq.a8': 'Verileriniz, yapılandırmanız, denetim kaydınız ve altın baseline’larınız taşınabilir JSON + düz config dosyaları olarak dışa aktarılır. Vendor lock-in yok, özel format yok. Kayık istediğiniz yere yanaşır.',
+        'road.kicker': 'XII · Yol haritası', 'road.title': 'Sıradaki <em>kıyılar</em>.',
+        'road.lede': 'Neyi inşa ediyoruz, neyi yayınladık, sonra ne geliyor. Açık, görüşlü ve her gün taşıdığımız operasyon mühendisleri tarafından şekillendiriliyor.',
+        'road.1.name': 'Beta · ilk geçiş', 'road.1.desc': 'Çoklu üretici keşfi, temel izleme, tek tenant.',
+        'road.2.name': 'v1.0 · çoklu üretici', 'road.2.desc': 'Cisco, Aruba, Ruijie, Fortinet. Playbook’lar, dört göz onayı.',
+        'road.3.name': 'v2 · zekâ çekirdeği', 'road.3.desc': 'Korelasyon motoru, risk skorlama, altın baseline drift.',
+        'road.4.name': 'v2.4 · taktik görünüm', 'road.4.desc': '3B topoloji, mission control duvarı, incident şok dalgaları. Şu an yayında.',
+        'road.5.name': 'v3 · AI anomali v2', 'road.5.desc': 'Öngörücü katmanlar, şüpheli yol tahmini, east-west tespiti.',
+        'road.6.name': 'v4 · kuantum-güvenli', 'road.6.desc': 'Kuantum sonrası kimlik kasası, imzalı playbook attestasyonu.',
+        'news.title': 'Charon saha notları',
+        'news.sub': 'Operasyon mühendisleri için aylık bülten — gerçek incident postmortem’ları, AI gözlemleri, runbook fikirleri. Spam yok. İki tıkla abonelikten çık.',
+        'news.cta': 'Abone ol',
+        'demo.title': '<em>Geçişi</em> ayırt.',
+        'demo.sub': 'Bir ağ mühendisi ile otuz dakikalık tanıtım. Topolojinizi getirin — kayık bizden.',
+        'demo.name': 'Adınız', 'demo.email': 'İş e-postası', 'demo.company': 'Şirket',
+        'demo.devices': 'Yaklaşık cihaz sayısı', 'demo.when': 'Tercih edilen zaman',
+        'demo.pick': '— seçin —', 'demo.thisweek': 'Bu hafta', 'demo.nextweek': 'Gelecek hafta', 'demo.flex': 'Esnek',
+        'demo.cancel': 'İptal', 'demo.submit': 'Ayır',
+        'iso.kicker': 'XIII · Taktik görünüm',
+        'iso.title': 'Fareni <em>oynat</em>. Ağ da seninle oynar.',
+        'iso.lede': 'Mission Control duvarının minyatürü — aynı motor, aynı fizik, aynı paketler. Sürükle, eğ, izle. Gerçeği platformda tam boyutta yaşıyor.',
+        'iso.hud': 'CANLI · 9 NODE · 12 BAĞLANTI',
+        'iso.hint': 'YORKİNGAYA SÜRÜKLE',
+      },
+      de: {
+        'nav.capabilities': 'Funktionen', 'nav.platform': 'Plattform', 'nav.architecture': 'Architektur',
+        'nav.pricing': 'Preise', 'nav.signIn': 'Anmelden', 'nav.cta': 'Überfahrt beginnen',
+        'hero.kicker': 'Enterprise Network Intelligence',
+        'hero.tagline': 'Der Fährmann jedes Pakets zwischen jeder Welt.',
+        'hero.sub': 'Netzwerke · Zwischen · Welten',
+        'hero.ctaPrimary': 'Überfahrt beginnen →', 'hero.ctaSecondary': 'Live-Demo',
+        'hero.scroll': 'Scrollen',
+        'manifesto.quote': 'Jedes moderne Unternehmen lebt an zwei Ufern — <em>Rechenzentrum</em> und <em>Cloud</em>, <em>bekannt</em> und <em>unbekannt</em>, <em>still</em> und <em>schreiend</em>.<br><br>Charon ist der Operator, der die Überfahrt kennt.',
+        'manifesto.attr': '— Charon Feldhandbuch · Band I',
+        'cap.kicker': 'I · Funktionen',
+        'cap.title': 'Sechs Instrumente für die <em>Überfahrt</em>.',
+        'cap.lede': 'Gebaut für die Betriebsingenieure, die das Netzwerk auf ihren Schultern tragen. Multi-Vendor, Agent-geroutet, KI-korreliert — und leise genug, um Jahre in einem NOC zu leben.',
+        'cap.1.num': '01 / Topologie', 'cap.1.title': '3D-Taktiktopologie',
+        'cap.1.body': 'Hierarchische und harmonische Cluster-Ansichten in WebGL. Live-Verkehrsfluss, Vorfall-Schockwellen, KI-Anomalie-Auren, Fokusmodus-Dimmung und filmische Kameramodi für die Operationszentrale.',
+        'cap.2.num': '02 / Intelligenz', 'cap.2.title': 'KI-Korrelations-Engine',
+        'cap.2.body': 'Ursachenerkennung über BGP, STP, LLDP, Syslog und synthetische Sonden. Topologiebewusste Unterdrückung, prädiktive Anomaliekegel und konfidenzgewichtete Vorfall-Zeitleisten.',
+        'cap.3.num': '03 / Automatisierung', 'cap.3.title': 'Playbooks & Change Rollouts',
+        'cap.3.body': 'Mehrstufige Playbooks mit Dry-Run-Vorschau, Blast-Radius-Warnungen, Rollback-Snapshots und Vier-Augen-Freigabe. Ereignisgesteuert, geplant oder manuell — mit vollständigem Audit-Pfad.',
+        'cap.4.num': '04 / Observability', 'cap.4.title': 'SLA · MTTR · Drift',
+        'cap.4.body': 'Geräte-spezifische Uptime-Trends, Golden-Baseline-Drifterkennung, intervallgenaue Verfügbarkeitsmathematik und stufenbasierte SLA-Richtlinien mit Compliance-Reporting.',
+        'cap.5.num': '05 / Agenten', 'cap.5.title': 'Proxy-Agenten-Flotte',
+        'cap.5.body': 'Leichtgewichtige WebSocket-Agenten für Geräte hinter NAT. SSH-Verbindungspool, Offline-Befehlswarteschlange, latenzbewusstes Routing, verschlüsselter Credential-Tresor und Remote-SNMP.',
+        'cap.6.num': '06 / Governance', 'cap.6.title': 'Forensisches Audit & RBAC',
+        'cap.6.body': 'Request-ID-Tracing über jeden API-Aufruf, Before/After-State-Diff, vollständiges CLI-Befehlsarchiv, SSO/SAML/OIDC und Just-in-Time-Berechtigungserhöhung. MFA an jedem Tor.',
+        'showcase.kicker': 'II · Die Plattform',
+        'showcase.title': 'Zwölf Leinwände. <em>Ein Operationszentrum.</em>',
+        'showcase.lede': 'Vom morgendlichen Briefing auf dem Executive Dashboard bis zum Vorfall um 3 Uhr morgens an der NOC-Wand — jeder Bildschirm von Charon ist live. Klicken Sie auf eines der Panels unten.',
+        'showcase.1.lbl': '01 · Kommandozentrale', 'showcase.1.ttl': 'Dashboard',
+        'showcase.1.desc': 'Drei Layouts — Workspace, Mission Control Wand, Editorial Briefing. Drag-Drop-Kacheln, Live-Ticker, gespeicherte Presets.',
+        'showcase.2.lbl': '02 · Live-Karte', 'showcase.2.ttl': '3D-Topologie',
+        'showcase.2.desc': 'WebGL-taktische Visualisierung mit Bloom, Partikelverkehr, holografischem HUD und vollständigem Modus-Katalog.',
+        'showcase.3.lbl': '03 · Physische Anlage', 'showcase.3.ttl': 'Rack & Verkabelung',
+        'showcase.3.desc': '42U-Rack-Layouts, anpassbarer Artikelkatalog, Port-zu-Port-Verkabelungsmatrix und Rack-Thermo-Overlay.',
+        'showcase.4.lbl': '04 · Vorfallzentrum', 'showcase.4.ttl': 'Alarme & Korrelation',
+        'showcase.4.desc': 'RCA-Zeitleisten, Eskalationsketten, mehrkanalige Benachrichtigungen und regelbasierte Deduplikation.',
+        'showcase.5.lbl': '05 · Operationen', 'showcase.5.ttl': 'Playbook-Engine',
+        'showcase.5.desc': 'Bedingte Schritte, Genehmigungs-Workflows, Dry-Run-Vorschau und ereignisgesteuerte Automatisierung.',
+        'showcase.6.lbl': '06 · Reporting', 'showcase.6.ttl': 'SLA & Uptime',
+        'showcase.6.desc': 'Geräte-spezifische Uptime, Stufenrichtlinien, Drift-Compliance und Executive-PDF-Zusammenfassungen.',
+        'stats.kicker': 'III · Skalierung',
+        'stats.title': 'Gebaut für das <em>Netzwerk mit tausend Knoten</em>.',
+        'stats.1': 'Indexierte Geräte', 'stats.2': 'Entdeckte Links',
+        'stats.3': 'Flotten-Uptime', 'stats.4': 'Ø Korrelation',
+        'arch.kicker': 'IV · Architektur',
+        'arch.title': 'Drei Ebenen. <em>Ein Fährmann.</em>',
+        'arch.lede': 'Charon ist eine föderierte Plattform: leichte Edge-Agenten an jedem Standort, ein zustandsbehafteter Intelligence-Kern in der Cloud und eine Echtzeit-Präsentationsschicht für das Operations-Team.',
+        'arch.1h': 'Edge', 'arch.1n': 'Proxy-Agenten', 'arch.1m': 'WebSocket · SSH-Pool · Offline-Queue · SNMP · Syslog · Tresor',
+        'arch.2h': 'Kern', 'arch.2n': 'Intelligenz', 'arch.2m': 'Korrelation · Topologie-Zwilling · Risk Score · RCA · Playbook-Runtime',
+        'arch.3h': 'Oberfläche', 'arch.3n': 'Operator-Konsole', 'arch.3m': 'Dashboard · 3D-Topologie · Vorfallzentrum · Audit-Forensik',
+        'arch.4h': 'Geräte', 'arch.4n': 'Cisco · Aruba · Ruijie', 'arch.4m': 'Fortinet · generisches SSH · Multi-Vendor-Parser',
+        'arch.5h': 'Speicher', 'arch.5n': 'PostgreSQL · Redis', 'arch.5m': 'Celery · TimescaleDB · verschlüsselte Backups',
+        'arch.6h': 'Identität', 'arch.6n': 'SSO · SAML · OIDC', 'arch.6m': 'MFA · RBAC · Just-in-Time-Erhöhung · forensisches Audit',
+        'pricing.kicker': 'V · Pakete',
+        'pricing.title': 'Drei Überfahrten. <em>Wählen Sie Ihre.</em>',
+        'pricing.featured': 'Am häufigsten gewählt', 'pricing.custom': 'Individuell', 'pricing.permonth': '/ Monat',
+        'pricing.1.name': 'Operator',
+        'pricing.1.desc': 'Kleine Netzwerke unter 100 Geräten. Einzelner Agent, Kernüberwachung, einfache Playbooks.',
+        'pricing.1.f1': 'Bis zu 100 Geräte', 'pricing.1.f2': '1 Proxy-Agent',
+        'pricing.1.f3': 'Topologie, Alarme, einfache Playbooks', 'pricing.1.f4': 'E-Mail + Slack-Benachrichtigungen',
+        'pricing.1.f5': 'Standard-Support · Geschäftszeiten', 'pricing.1.f6': '3D-Taktiktopologie',
+        'pricing.1.f7': 'KI-Korrelations-Engine', 'pricing.1.cta': 'Starten',
+        'pricing.2.name': 'Netzwerk-Admin',
+        'pricing.2.desc': 'Mittelständische Unternehmen. Multi-Site, Multi-Vendor, KI-Korrelation enthalten.',
+        'pricing.2.f1': 'Bis zu 1000 Geräte', 'pricing.2.f2': '10 Proxy-Agenten · Multi-Site',
+        'pricing.2.f3': '3D-Taktiktopologie', 'pricing.2.f4': 'KI-Korrelations-Engine',
+        'pricing.2.f5': 'Change Rollout & Vier-Augen-Freigabe', 'pricing.2.f6': 'SLA-Richtlinien + Executive-Reports',
+        'pricing.2.f7': 'Priority-Support · 24/7', 'pricing.2.cta': 'Mit uns übersetzen',
+        'pricing.3.name': 'Enterprise',
+        'pricing.3.desc': 'Unbegrenzte Flotte, SSO/SAML, individuelle SLAs, On-Premise-Option, dedizierter CSM.',
+        'pricing.3.f1': 'Unbegrenzte Geräte & Agenten', 'pricing.3.f2': 'Multi-Tenant + SSO/SAML/OIDC',
+        'pricing.3.f3': 'On-Premise oder Air-Gap-Deployment', 'pricing.3.f4': 'Individuelle SLA & Runbook-Engineering',
+        'pricing.3.f5': 'Dedizierter Success Manager', 'pricing.3.f6': 'White-Label-Option',
+        'pricing.3.f7': '99,99 % Uptime-SLA', 'pricing.3.cta': 'Verhandeln',
+        'final.kicker': 'Die Überfahrt erwartet Sie',
+        'final.title': 'Steigen Sie in das <em>Boot</em>.',
+        'final.sub': 'Dreißig-Minuten-Walkthrough mit einem Netzwerkingenieur. Keine Folien — nur Ihre Topologie, Ihre Vorfälle, Ihr Runbook. Wir zeigen Ihnen, was Charon letzte Woche erkannt hätte.',
+        'final.ctaPrimary': 'Walkthrough buchen →', 'final.ctaSecondary': 'Live-Demo öffnen',
+        'footer.brand': 'Netzwerke zwischen Welten. Eine KI-gestützte Network-Intelligence-Plattform für den Operations-Ingenieur, der das Netzwerk auf seinen Schultern trägt.',
+        'footer.platform': 'Plattform', 'footer.operations': 'Operationen', 'footer.company': 'Unternehmen',
+        'footer.dashboard': 'Dashboard', 'footer.topology': '3D-Topologie', 'footer.devices': 'Geräte',
+        'footer.racks': 'Racks', 'footer.playbooks': 'Playbooks',
+        'footer.alerts': 'Alarme', 'footer.automation': 'Automatisierung', 'footer.drift': 'Config-Drift',
+        'footer.sla': 'SLA & Uptime', 'footer.audit': 'Audit-Log',
+        'footer.about': 'Über uns', 'footer.contact': 'Kontakt', 'footer.signIn': 'Anmelden',
+        'footer.pricing': 'Preise', 'footer.trust': 'Trust-Center',
+        'footer.copyright': '© MMXXVI · Charon Network Intelligence',
+        'footer.tagline': 'v2.4 · Gebaut für den Operations-Ingenieur',
+        'origin.kicker': 'IV · Ursprung — eine Nacht, ein Netzwerk, ein Wunsch',
+        'origin.dropcap': 'E',
+        'origin.p1': 's war drei Uhr morgens, als das Netzwerk endgültig zusammenbrach. <em>Zweihundert Geräte</em>, ein Operator, sechs unbeantwortete Slack-Nachrichten und ein Dashboard, das sich weigerte zu laden.',
+        'origin.p2': 'Man hatte uns gesagt, das Netzwerk sei sichtbar. War es nicht. Man hatte uns gesagt, die Alarme seien korreliert. Waren sie nicht. Man hatte uns gesagt, das Runbook würde helfen. Es war ein PDF aus <em>2019</em>.',
+        'origin.p3': 'Charon ist, was wir uns in jener Nacht gewünscht hätten. Kein Dashboard mit tausend Widgets. Ein <em>Fährmann</em> — leise, präzise, die Überfahrt kennend. Das Instrument, das ein Operations-Ingenieur für einen anderen Operations-Ingenieur entwerfen würde, um drei Uhr morgens, allein.',
+        'origin.sign': 'Gebaut von den Bereitschaftsingenieuren, die nicht fanden, was sie brauchten.',
+        'compare.kicker': 'VI · Der Wettbewerb',
+        'compare.title': 'Wo <em>andere aufhören</em>, beginnt Charon.',
+        'compare.lede': 'Ein Vergleich der Fähigkeiten, die für einen NOC-Ingenieur um 3 Uhr morgens zählen — keine Marketing-Checkliste.',
+        'compare.cap': 'Fähigkeit',
+        'compare.r1': '3D-Taktiktopologie', 'compare.r2': 'KI-gestützte Korrelation',
+        'compare.r3': 'Multi-Vendor (Cisco/Aruba/Ruijie)', 'compare.r4': 'Proxy-Agenten hinter NAT',
+        'compare.r5': 'Vier-Augen-Genehmigung', 'compare.r6': 'Modernes UI (unter 100 ms Render)',
+        'compare.r7': 'Forensisches Audit (Vorher/Nachher-Diff)', 'compare.r8': 'On-Premise / Air-Gap-Option',
+        'compare.r9': 'Startpreis (Mittelstand)',
+        'perf.kicker': 'VII · Performance',
+        'perf.title': 'Engineering, das <em>Ihre Zeit respektiert</em>.',
+        'perf.lede': 'Benchmarks aus einer 1000-Geräte-Staging-Umgebung auf einer einzigen 8-Core-Maschine. Das Boot ist leiser, als Sie denken.',
+        'perf.1': 'p99-Abfragelatenz', 'perf.2': '1000-Geräte-Discovery',
+        'perf.3': 'Agent-Heartbeat-Treue', 'perf.4': 'Browser-Speicher-Footprint',
+        'ind.kicker': 'VIII · Branchen',
+        'ind.title': 'Gebaut für Netzwerke, die <em>nicht ausfallen dürfen</em>.',
+        'ind.lede': 'Sechs Branchen, in denen Ausfallzeit in Bußgeldern, verlorenen Leben oder beidem gemessen wird. Jede mit eigener Charon-Referenzarchitektur.',
+        'ind.1.name': 'Banken & Finanzwesen', 'ind.1.use': 'Tier-1-Bank · 4 Rechenzentren · 6800 Geräte',
+        'ind.1.desc': 'Sub-Sekunden-Korrelation zwischen Trading Floor und Core-Banking-Fabric. BaFin / DSGVO / PCI-DSS-Audit-Pfade integriert.',
+        'ind.2.name': 'Telekom & ISP', 'ind.2.use': 'Regionaler Carrier · 142 POPs · 18K Abonnenten',
+        'ind.2.desc': 'Last-Mile-bis-Backbone-Sichtbarkeit, BGP-Intelligenz, Kundenwirkungs-Mapping mit Service-Abhängigkeitsgraphen.',
+        'ind.3.name': 'Universitäten', 'ind.3.use': 'Universität Istanbul · 1240 Geräte · 1 Operator',
+        'ind.3.desc': 'Campus-weites WLAN, eduroam-Föderation, Labor-Segmentierung und BYOD-Onboarding aus einem Fährmann.',
+        'ind.4.name': 'Gesundheitswesen', 'ind.4.use': '600-Betten-Klinik · 8400 Medizingeräte',
+        'ind.4.desc': 'Medizinische IoT-Segmentierung, HIPAA-Audit, Echtzeit-Beatmungsgerät- und MRT-Uplink-Gesundheit. Leben, gemessen in Millisekunden.',
+        'ind.5.name': 'E-Commerce', 'ind.5.use': 'Top-50-Händler · 24 Fulfillment-Center',
+        'ind.5.desc': 'Black-Friday-Kapazitäts-Dashboards, automatische Surge-Response-Playbooks und CDN-Edge-Sonden.',
+        'ind.6.name': 'Regierung & Verteidigung', 'ind.6.use': 'Ministerium · Air-Gap-Deployment · TS-zertifiziert',
+        'ind.6.desc': 'Vollständig On-Premise / Air-Gap, signierte Boot-Kette, FIPS-Krypto und forensische Audit-Aufbewahrung.',
+        'sec.kicker': 'IX · Sicherheit & Compliance', 'sec.title': 'Auditiert. Verschlüsselt. Vertraut.',
+        'sec.soc': 'Type II', 'sec.iso': '27001 : 2022', 'sec.gdpr': 'EU-konform',
+        'sec.kvkk': 'TR-Datenschutz', 'sec.hipaa': 'Bereit', 'sec.pci': 'DSS 4.0', 'sec.pen': 'Jährlich',
+        'test.kicker': 'X · Stimmen vom Ufer',
+        'test.title': 'Die Ingenieure, die <em>besser schlafen</em>.',
+        'test.1.body': 'Charon ließ mich <em>mein NOC von fünf auf zwei schrumpfen</em> — und die zwei, die bleiben, sind ruhiger als die fünf je waren. Mean-Time-to-Acknowledge sank von elf Minuten auf unter eine.',
+        'test.1.name': 'Emre K.', 'test.1.role': 'NOC-Direktor · Tier-1-Bank',
+        'test.2.body': 'Die 3D-Topologie ist kein Gimmick — es ist die einzige Ansicht, die ich während eines größeren Vorfalls offen halte. Den Blast-Radius zu sehen, während Dienste fallen, ist <em>echte Diagnostik</em>.',
+        'test.2.name': 'Ayşe D.', 'test.2.role': 'Senior Network Architect · Carrier',
+        'test.2b.body': 'Ich habe fünfzehn Jahre lang SolarWinds, PRTG und LibreNMS betrieben. Charon ist das erste Tool, das sich <em>für den Bereitschaftsingenieur entworfen anfühlt</em> — nicht für den Einkäufer.',
+        'test.3.name': 'Osman T.', 'test.3.role': 'Principal Engineer · Gesundheitskonzern',
+        'test.4.body': 'Unser Regulierer verlangte Vorher/Nachher-Diff für jede Config-Änderung. Wir haben es mit einem Schalter aktiviert. <em>Compliance, by Default.</em>',
+        'test.4.name': 'Selin A.', 'test.4.role': 'CISO · Versorgungsunternehmen',
+        'faq.kicker': 'XI · Fragen', 'faq.title': 'Vor der <em>Überfahrt</em>.',
+        'faq.q1': 'Wie funktioniert die Gerätezählung?',
+        'faq.a1': 'Jedes verwaltete Netzwerkgerät — Switch, Router, Firewall, AP, Server-NIC — zählt als eines. VMs, Clients und WLAN-Endpunkte sind kostenlos. Sub-Interfaces erhöhen die Zahl nicht.',
+        'faq.q2': 'Ist On-Premise-Installation möglich?',
+        'faq.a2': 'Ja. Charon kommt als eigenständiger Docker-Compose-Stack und Kubernetes-Helm-Chart. Air-Gap-Installationen werden im Enterprise-Tarif mit signierten Offline-Update-Bundles unterstützt.',
+        'faq.q3': 'Wo werden die Daten gespeichert?',
+        'faq.a3': 'Auf Ihren eigenen PostgreSQL- und Redis-Instanzen. Charon ruft nie nach Hause an. Cloud-SaaS nutzt regionale Rechenzentren in Frankfurt oder Istanbul mit AES-256-GCM-Verschlüsselung im Ruhezustand.',
+        'faq.q4': 'Ist Mehr-Faktor-Authentifizierung erforderlich?',
+        'faq.a4': 'Für Admin- und Super-Admin-Rollen, ja — und kann nicht deaktiviert werden. Operator- und Viewer-Konten sind per Organisations-Policy konfigurierbar. Authenticator-Apps, E-Mail und Hardware-Keys (FIDO2) werden unterstützt.',
+        'faq.q5': 'Wie funktionieren die ersten 30 Tage?',
+        'faq.a5': 'Ein Netzwerkingenieur aus unserem Team begleitet den Rollout. Tag 1: Agent-Install, Discovery, Baseline. Woche 2: Playbook-Vorlagen, SLA-Policies. Woche 4: erster Incident-Dry-Run gemeinsam. Keine Gebühr, bis Sie zustimmen.',
+        'faq.q6': 'Was ist mit Agent-Overhead auf kleinen Geräten?',
+        'faq.a6': 'Der Proxy-Agent benötigt ~12 MB Resident-Speicher und unter 0,5 % CPU im Idle-Polling auf einem Raspberry Pi 4. Er muss nicht auf dem Netzwerkgerät selbst laufen — er sitzt auf irgendeinem erreichbaren Host in der Nähe.',
+        'faq.q7': 'Unterstützen Sie White-Labeling?',
+        'faq.a7': 'Im Enterprise-Tarif. Eigene Domain, Markenfarben, Logo, Login-Bildschirm und E-Mail-Vorlagen. Die mythologische Inszenierung ist optional.',
+        'faq.q8': 'Was passiert, wenn mein Vertrag endet?',
+        'faq.a8': 'Ihre Daten, Config, Audit-Log und Golden-Baselines werden als portables JSON + Klartext-Config exportiert. Kein Lock-in, kein proprietäres Format. Das Boot dockt dort an, wo Sie es möchten.',
+        'road.kicker': 'XII · Roadmap', 'road.title': 'Die nächsten <em>Ufer</em>.',
+        'road.lede': 'Was wir bauen, was wir ausgeliefert haben und was kommt. Offen, eigenwillig und geprägt von den Operations-Ingenieuren, die wir täglich übersetzen.',
+        'road.1.name': 'Beta · die erste Überfahrt', 'road.1.desc': 'Multi-Vendor-Discovery, Basis-Monitoring, Single-Tenant.',
+        'road.2.name': 'v1.0 · Multi-Vendor', 'road.2.desc': 'Cisco, Aruba, Ruijie, Fortinet. Playbooks, Vier-Augen-Freigabe.',
+        'road.3.name': 'v2 · Intelligenz-Kern', 'road.3.desc': 'Korrelations-Engine, Risk-Scoring, Golden-Baseline-Drift.',
+        'road.4.name': 'v2.4 · Taktische Ansicht', 'road.4.desc': '3D-Topologie, Mission-Control-Wand, Incident-Schockwellen. Wird jetzt ausgeliefert.',
+        'road.5.name': 'v3 · KI-Anomalie v2', 'road.5.desc': 'Prädiktive Overlays, verdächtige Pfad-Vorhersage, Ost-West-Erkennung.',
+        'road.6.name': 'v4 · Quantum-Safe', 'road.6.desc': 'Post-Quantum-Credential-Tresor, signierte Playbook-Attestation.',
+        'news.title': 'Charon Field Notes',
+        'news.sub': 'Monatlicher Newsletter für Operations-Ingenieure — echte Vorfall-Postmortems, KI-Beobachtungen, Runbook-Ideen. Kein Spam. Zwei Klicks zum Abbestellen.',
+        'news.cta': 'Abonnieren',
+        'demo.title': 'Die <em>Überfahrt</em> buchen.',
+        'demo.sub': 'Dreißig-Minuten-Walkthrough mit einem Netzwerkingenieur. Bringen Sie Ihre Topologie — wir bringen das Boot.',
+        'demo.name': 'Ihr Name', 'demo.email': 'Arbeits-E-Mail', 'demo.company': 'Unternehmen',
+        'demo.devices': 'Ungefähre Gerätezahl', 'demo.when': 'Bevorzugter Zeitraum',
+        'demo.pick': '— auswählen —', 'demo.thisweek': 'Diese Woche', 'demo.nextweek': 'Nächste Woche', 'demo.flex': 'Flexibel',
+        'demo.cancel': 'Abbrechen', 'demo.submit': 'Buchen',
+        'iso.kicker': 'XIII · Taktische Ansicht',
+        'iso.title': 'Bewegen Sie Ihre <em>Maus</em>. Das Netzwerk bewegt sich mit.',
+        'iso.lede': 'Eine Miniatur der Mission-Control-Wand — gleiche Engine, gleiche Physik, gleiche Pakete. Ziehen, neigen, beobachten. Das Original lebt in voller Größe in der Plattform.',
+        'iso.hud': 'LIVE · 9 NODES · 12 LINKS',
+        'iso.hint': 'ZUM ORBITIEREN ZIEHEN',
+      },
+      ru: {
+        'nav.capabilities': 'Возможности', 'nav.platform': 'Платформа', 'nav.architecture': 'Архитектура',
+        'nav.pricing': 'Тарифы', 'nav.signIn': 'Войти', 'nav.cta': 'Начать переправу',
+        'hero.kicker': 'Корпоративная сетевая аналитика',
+        'hero.tagline': 'Перевозчик каждого пакета между мирами.',
+        'hero.sub': 'Сети · Между · Мирами',
+        'hero.ctaPrimary': 'Начать переправу →', 'hero.ctaSecondary': 'Живое демо',
+        'hero.scroll': 'Прокрутка',
+        'manifesto.quote': 'Каждое современное предприятие живёт на двух берегах — <em>дата-центр</em> и <em>облако</em>, <em>известное</em> и <em>неизвестное</em>, <em>тишина</em> и <em>крик</em>.<br><br>Charon — оператор, который знает переправу.',
+        'manifesto.attr': '— Полевое руководство Charon · том I',
+        'cap.kicker': 'I · Возможности',
+        'cap.title': 'Шесть инструментов для <em>переправы</em>.',
+        'cap.lede': 'Создано для инженеров эксплуатации, которые несут сеть на своих плечах. Мульти-вендор, маршрутизация через агенты, корреляция ИИ — и достаточно тихое, чтобы годами жить в NOC.',
+        'cap.1.num': '01 / Топология', 'cap.1.title': '3D-тактическая топология',
+        'cap.1.body': 'Иерархические и гармонические кластерные представления в WebGL. Живой трафик, ударные волны инцидентов, ауры аномалий ИИ, затемнение фокуса и кинематографические режимы камеры для стены операционного центра.',
+        'cap.2.num': '02 / Интеллект', 'cap.2.title': 'Корреляционный движок ИИ',
+        'cap.2.body': 'Определение первопричин по BGP, STP, LLDP, syslog и синтетическим зондам. Подавление с учётом топологии, прогнозные конусы аномалий и шкалы инцидентов с оценкой уверенности.',
+        'cap.3.num': '03 / Автоматизация', 'cap.3.title': 'Playbook и развёртывание изменений',
+        'cap.3.body': 'Многошаговые playbook с предпросмотром dry-run, предупреждением о радиусе поражения, снапшотами отката и четырёхглазным согласованием. Событие, расписание или вручную — с полным аудитом.',
+        'cap.4.num': '04 / Наблюдаемость', 'cap.4.title': 'SLA · MTTR · дрейф',
+        'cap.4.body': 'Тренды uptime по устройствам, обнаружение дрейфа от золотой базовой линии, математика доступности с учётом интервалов и многоуровневые политики SLA с отчётами о соответствии.',
+        'cap.5.num': '05 / Агенты', 'cap.5.title': 'Флот прокси-агентов',
+        'cap.5.body': 'Лёгкие WebSocket-агенты для устройств за NAT. Пул SSH-соединений, очередь офлайн-команд, маршрутизация с учётом задержки, зашифрованное хранилище учётных данных и удалённый SNMP.',
+        'cap.6.num': '06 / Управление', 'cap.6.title': 'Криминалистический аудит и RBAC',
+        'cap.6.body': 'Трассировка request-id по каждому API-вызову, diff состояния до/после, полный архив CLI-команд, SSO/SAML/OIDC и эскалация прав по требованию. MFA на каждом шлюзе.',
+        'showcase.kicker': 'II · Платформа',
+        'showcase.title': 'Двенадцать полотен. <em>Один операционный центр.</em>',
+        'showcase.lede': 'От утреннего брифинга на исполнительной панели до инцидента в 3 часа ночи на стене NOC — каждый экран Charon живой. Откройте любую из панелей ниже.',
+        'showcase.1.lbl': '01 · Командный центр', 'showcase.1.ttl': 'Панель управления',
+        'showcase.1.desc': 'Три макета — рабочее пространство, стена mission control, редакционный брифинг. Drag-drop плитки, живые тикеры, сохранённые пресеты.',
+        'showcase.2.lbl': '02 · Живая карта', 'showcase.2.ttl': '3D-топология',
+        'showcase.2.desc': 'WebGL-тактическая визуализация с bloom, трафиком из частиц, голографическим HUD и полным каталогом режимов.',
+        'showcase.3.lbl': '03 · Физическая инфраструктура', 'showcase.3.ttl': 'Стойки и кабели',
+        'showcase.3.desc': 'Макеты 42U стоек, пользовательский каталог элементов, матрица port-to-port и термальный оверлей стоек.',
+        'showcase.4.lbl': '04 · Центр инцидентов', 'showcase.4.ttl': 'Оповещения и корреляция',
+        'showcase.4.desc': 'Шкалы RCA, цепочки эскалации, многоканальные уведомления и дедупликация на основе правил.',
+        'showcase.5.lbl': '05 · Операции', 'showcase.5.ttl': 'Playbook-движок',
+        'showcase.5.desc': 'Условные шаги, рабочие процессы согласования, предпросмотр dry-run и автоматизация по событию-триггеру.',
+        'showcase.6.lbl': '06 · Отчётность', 'showcase.6.ttl': 'SLA и uptime',
+        'showcase.6.desc': 'Uptime по устройствам, политики уровней, соответствие дрейфа и сводки в PDF для руководства.',
+        'stats.kicker': 'III · Масштаб',
+        'stats.title': 'Создано для сети <em>в тысячу узлов</em>.',
+        'stats.1': 'Проиндексировано устройств', 'stats.2': 'Обнаружено связей',
+        'stats.3': 'Uptime флота', 'stats.4': 'Средняя корреляция',
+        'arch.kicker': 'IV · Архитектура',
+        'arch.title': 'Три уровня. <em>Один перевозчик.</em>',
+        'arch.lede': 'Charon — это федеративная платформа: лёгкие edge-агенты на каждой площадке, ядро интеллекта в облаке и слой представления в реальном времени для команды эксплуатации.',
+        'arch.1h': 'Edge', 'arch.1n': 'Прокси-агенты', 'arch.1m': 'WebSocket · SSH-пул · офлайн-очередь · SNMP · syslog · хранилище',
+        'arch.2h': 'Ядро', 'arch.2n': 'Интеллект', 'arch.2m': 'Корреляция · цифровой двойник · оценка риска · RCA · playbook runtime',
+        'arch.3h': 'Поверхность', 'arch.3n': 'Консоль оператора', 'arch.3m': 'Панель · 3D-топология · центр инцидентов · криминалистика',
+        'arch.4h': 'Устройства', 'arch.4n': 'Cisco · Aruba · Ruijie', 'arch.4m': 'Fortinet · общий SSH · мульти-вендор парсер',
+        'arch.5h': 'Хранение', 'arch.5n': 'PostgreSQL · Redis', 'arch.5m': 'Celery · TimescaleDB · зашифрованные бэкапы',
+        'arch.6h': 'Идентичность', 'arch.6n': 'SSO · SAML · OIDC', 'arch.6m': 'MFA · RBAC · эскалация по требованию · криминалистический аудит',
+        'pricing.kicker': 'V · Тарифы',
+        'pricing.title': 'Три переправы. <em>Выберите свой путь.</em>',
+        'pricing.featured': 'Выбирают чаще всего', 'pricing.custom': 'Индивидуально', 'pricing.permonth': '/ мес.',
+        'pricing.1.name': 'Оператор',
+        'pricing.1.desc': 'Малые сети до 100 устройств. Один агент, базовый мониторинг, простые playbook.',
+        'pricing.1.f1': 'До 100 устройств', 'pricing.1.f2': '1 прокси-агент',
+        'pricing.1.f3': 'Топология, оповещения, базовые playbook', 'pricing.1.f4': 'Уведомления по e-mail + Slack',
+        'pricing.1.f5': 'Стандартная поддержка · рабочие часы', 'pricing.1.f6': '3D-тактическая топология',
+        'pricing.1.f7': 'Корреляционный движок ИИ', 'pricing.1.cta': 'Начать',
+        'pricing.2.name': 'Сетевой администратор',
+        'pricing.2.desc': 'Средний бизнес. Мульти-площадка, мульти-вендор, корреляция ИИ включена.',
+        'pricing.2.f1': 'До 1000 устройств', 'pricing.2.f2': '10 прокси-агентов · мульти-площадка',
+        'pricing.2.f3': '3D-тактическая топология', 'pricing.2.f4': 'Корреляционный движок ИИ',
+        'pricing.2.f5': 'Развёртывание изменений и согласование 4 глаз', 'pricing.2.f6': 'Политики SLA + отчёты для руководства',
+        'pricing.2.f7': 'Приоритетная поддержка · 24/7', 'pricing.2.cta': 'Переправиться с нами',
+        'pricing.3.name': 'Enterprise',
+        'pricing.3.desc': 'Неограниченный флот, SSO/SAML, индивидуальные SLA, on-premise, выделенный CSM.',
+        'pricing.3.f1': 'Неограниченное число устройств и агентов', 'pricing.3.f2': 'Мульти-тенант + SSO/SAML/OIDC',
+        'pricing.3.f3': 'On-premise или air-gap развёртывание', 'pricing.3.f4': 'Индивидуальные SLA и инжиниринг runbook',
+        'pricing.3.f5': 'Выделенный менеджер по успеху', 'pricing.3.f6': 'White-label вариант',
+        'pricing.3.f7': '99,99% SLA по uptime', 'pricing.3.cta': 'Обсудить',
+        'final.kicker': 'Переправа ожидает вас',
+        'final.title': 'Шагните в <em>лодку</em>.',
+        'final.sub': 'Тридцатиминутный обход с сетевым инженером. Без слайдов — только ваша топология, ваши инциденты, ваш runbook. Мы покажем, что Charon обнаружил бы на прошлой неделе.',
+        'final.ctaPrimary': 'Записаться на обход →', 'final.ctaSecondary': 'Открыть живое демо',
+        'footer.brand': 'Сети между мирами. Платформа сетевой аналитики на базе ИИ для инженера эксплуатации, который несёт сеть на своих плечах.',
+        'footer.platform': 'Платформа', 'footer.operations': 'Операции', 'footer.company': 'Компания',
+        'footer.dashboard': 'Панель управления', 'footer.topology': '3D-топология', 'footer.devices': 'Устройства',
+        'footer.racks': 'Стойки', 'footer.playbooks': 'Playbook',
+        'footer.alerts': 'Оповещения', 'footer.automation': 'Автоматизация', 'footer.drift': 'Config drift',
+        'footer.sla': 'SLA и uptime', 'footer.audit': 'Журнал аудита',
+        'footer.about': 'О нас', 'footer.contact': 'Контакты', 'footer.signIn': 'Войти',
+        'footer.pricing': 'Тарифы', 'footer.trust': 'Trust-центр',
+        'footer.copyright': '© MMXXVI · Charon Network Intelligence',
+        'footer.tagline': 'v2.4 · Создано для инженера эксплуатации',
+        'origin.kicker': 'IV · Происхождение — ночь, сеть, желание',
+        'origin.dropcap': 'Б',
+        'origin.p1': 'ыло три часа ночи, когда сеть наконец рухнула. <em>Двести устройств</em>, один оператор, шесть неотвеченных Slack-сообщений и панель, которая отказывалась загружаться.',
+        'origin.p2': 'Нам говорили, что сеть видима. Это было не так. Говорили, что оповещения скоррелированы. Это было не так. Говорили, что runbook поможет. Это был PDF из <em>2019</em>.',
+        'origin.p3': 'Charon — это то, что мы хотели бы иметь в ту ночь. Не панель с тысячей виджетов. <em>Перевозчик</em> — тихий, точный, знающий переправу. Инструмент, который инженер эксплуатации спроектировал бы для другого инженера эксплуатации, в три часа ночи, в одиночку.',
+        'origin.sign': 'Создано дежурными инженерами, которые не нашли того, что им было нужно.',
+        'compare.kicker': 'VI · Конкуренция',
+        'compare.title': 'Там, где <em>другие останавливаются</em>, Charon начинает.',
+        'compare.lede': 'Сравнение возможностей, которые важны для NOC-инженера в 3 часа ночи — не маркетинговый чек-лист.',
+        'compare.cap': 'Возможность',
+        'compare.r1': '3D-тактическая топология', 'compare.r2': 'Корреляция на ИИ',
+        'compare.r3': 'Мульти-вендор (Cisco/Aruba/Ruijie)', 'compare.r4': 'Прокси-агенты за NAT',
+        'compare.r5': 'Согласование четырьмя глазами', 'compare.r6': 'Современный UI (рендер до 100 мс)',
+        'compare.r7': 'Криминалистический аудит (diff до/после)', 'compare.r8': 'On-premise / air-gap',
+        'compare.r9': 'Стартовая цена (средний бизнес)',
+        'perf.kicker': 'VII · Производительность',
+        'perf.title': 'Инженерия, которая <em>уважает ваше время</em>.',
+        'perf.lede': 'Бенчмарки на стенде с 1000 устройств на одной 8-ядерной машине. Лодка тише, чем вы думаете.',
+        'perf.1': 'p99 задержка запроса', 'perf.2': 'Discovery 1000 устройств',
+        'perf.3': 'Точность heartbeat агентов', 'perf.4': 'Память браузера',
+        'ind.kicker': 'VIII · Отрасли',
+        'ind.title': 'Создано для сетей, <em>которые не могут упасть</em>.',
+        'ind.lede': 'Шесть вертикалей, где простой измеряется штрафами, потерянными жизнями или и тем и другим. Для каждой — референсная архитектура Charon.',
+        'ind.1.name': 'Банки и финансы', 'ind.1.use': 'Банк Tier-1 · 4 ЦОД · 6800 устройств',
+        'ind.1.desc': 'Корреляция инцидентов в течение доли секунды между торговым залом и core-banking. Аудит-следы BaFin / GDPR / PCI-DSS встроены.',
+        'ind.2.name': 'Телеком и ISP', 'ind.2.use': 'Региональный оператор · 142 POP · 18K абонентов',
+        'ind.2.desc': 'Видимость от последней мили до магистрали, BGP-интеллект, карта влияния на клиента с графами зависимостей сервисов.',
+        'ind.3.name': 'Университеты', 'ind.3.use': 'Стамбульский университет · 1240 устройств · 1 оператор',
+        'ind.3.desc': 'Беспроводная сеть кампуса, федерация eduroam, сегментация лабораторий и онбординг BYOD от одного перевозчика.',
+        'ind.4.name': 'Здравоохранение', 'ind.4.use': 'Больница на 600 коек · 8400 медицинских устройств',
+        'ind.4.desc': 'Сегментация медицинского IoT, HIPAA-аудит, мониторинг ИВЛ и аплинков МРТ в реальном времени. Жизни — в миллисекундах.',
+        'ind.5.name': 'E-commerce', 'ind.5.use': 'Топ-50 ритейлер · 24 fulfillment-центра',
+        'ind.5.desc': 'Дашборды ёмкости для Black Friday, автоматические playbook отклика на пики и синтетические зонды на CDN-edge.',
+        'ind.6.name': 'Госсектор и оборона', 'ind.6.use': 'Министерство · air-gap · допуски TS',
+        'ind.6.desc': 'Полностью on-premise / air-gap, подписанная цепочка загрузки, FIPS-криптография и криминалистическое хранение аудита.',
+        'sec.kicker': 'IX · Безопасность и соответствие', 'sec.title': 'Аудит. Шифрование. Доверие.',
+        'sec.soc': 'Type II', 'sec.iso': '27001 : 2022', 'sec.gdpr': 'ЕС-совместимо',
+        'sec.kvkk': 'TR закон о данных', 'sec.hipaa': 'Готово', 'sec.pci': 'DSS 4.0', 'sec.pen': 'Ежегодно',
+        'test.kicker': 'X · Голоса с берега',
+        'test.title': 'Инженеры, которые <em>спят лучше</em>.',
+        'test.1.body': 'Charon позволил мне <em>сократить NOC с пяти человек до двух</em> — и эти двое спокойнее, чем когда-либо были пятеро. Время подтверждения упало с одиннадцати минут до меньше одной.',
+        'test.1.name': 'Эмре К.', 'test.1.role': 'Директор NOC · банк Tier-1',
+        'test.2.body': '3D-топология — не показуха. Это единственное представление, которое я держу открытым во время серьёзного инцидента. Наблюдать, как анимируется радиус поражения по мере падения сервисов, — <em>по-настоящему диагностично</em>.',
+        'test.2.name': 'Айше Д.', 'test.2.role': 'Старший сетевой архитектор · оператор',
+        'test.2b.body': 'Я пятнадцать лет работал с SolarWinds, PRTG и LibreNMS. Charon — первый инструмент, <em>созданный для дежурного инженера</em>, а не для отдела закупок.',
+        'test.3.name': 'Осман Т.', 'test.3.role': 'Главный инженер · группа здравоохранения',
+        'test.4.body': 'Регулятор потребовал diff до/после на каждое изменение конфигурации. Мы включили это одним переключателем. <em>Соответствие по умолчанию.</em>',
+        'test.4.name': 'Селин А.', 'test.4.role': 'CISO · коммунальное предприятие',
+        'faq.kicker': 'XI · Вопросы', 'faq.title': 'Перед <em>переправой</em>.',
+        'faq.q1': 'Как считаются устройства?',
+        'faq.a1': 'Каждое управляемое сетевое устройство — switch, router, firewall, AP, сетевой адаптер сервера — считается за одно. Виртуальные машины, клиенты и беспроводные конечные точки бесплатны. Subinterface не умножают счёт.',
+        'faq.q2': 'Возможна ли on-premise установка?',
+        'faq.a2': 'Да. Charon поставляется как автономный Docker Compose стек и Helm-чарт для Kubernetes. Air-gap установки поддерживаются на тарифе Enterprise с подписанными офлайн-обновлениями.',
+        'faq.q3': 'Где хранятся данные?',
+        'faq.a3': 'На ваших собственных PostgreSQL и Redis. Charon никогда не звонит домой. Облачный SaaS использует региональные ЦОД во Франкфурте или Стамбуле с шифрованием AES-256-GCM в покое.',
+        'faq.q4': 'Обязательна ли многофакторная аутентификация?',
+        'faq.a4': 'Для ролей admin и super-admin — да, и её нельзя выключить. Аккаунты operator и viewer настраиваются политикой организации. Поддерживаются authenticator-приложения, e-mail и аппаратные ключи (FIDO2).',
+        'faq.q5': 'Как работают первые 30 дней?',
+        'faq.a5': 'Сетевой инженер из нашей команды сопровождает развёртывание. День 1: установка агента, discovery, baseline. Неделя 2: шаблоны playbook, SLA-политики. Неделя 4: первый dry-run инцидента вместе. Без оплаты, пока вы не скажете «да».',
+        'faq.q6': 'Какова нагрузка агента на маломощных устройствах?',
+        'faq.a6': 'Прокси-агент занимает ~12 МБ резидентной памяти и менее 0,5 % CPU при холостом polling на Raspberry Pi 4. Ему не нужно работать на самом сетевом устройстве — он стоит на любом достижимом хосте поблизости.',
+        'faq.q7': 'Поддерживаете ли вы white-label?',
+        'faq.a7': 'На тарифе Enterprise. Свой домен, фирменные цвета, логотип, экран входа и шаблоны e-mail. Мифологическое оформление опционально.',
+        'faq.q8': 'Что происходит, когда мой контракт заканчивается?',
+        'faq.a8': 'Ваши данные, конфигурация, журнал аудита и золотые baseline экспортируются как переносимый JSON + plain-config. Никакого lock-in, никаких проприетарных форматов. Лодка причаливает там, где вы попросите.',
+        'road.kicker': 'XII · Дорожная карта', 'road.title': 'Следующие <em>берега</em>.',
+        'road.lede': 'Что мы строим, что отгрузили, и что будет дальше. Открыто, с мнением, сформировано инженерами эксплуатации, которых мы перевозим каждый день.',
+        'road.1.name': 'Бета · первая переправа', 'road.1.desc': 'Мульти-вендор discovery, базовый мониторинг, single-tenant.',
+        'road.2.name': 'v1.0 · мульти-вендор', 'road.2.desc': 'Cisco, Aruba, Ruijie, Fortinet. Playbook, четырёхглазное согласование.',
+        'road.3.name': 'v2 · ядро интеллекта', 'road.3.desc': 'Движок корреляции, оценка риска, дрейф золотой baseline.',
+        'road.4.name': 'v2.4 · тактическое представление', 'road.4.desc': '3D-топология, стена mission control, ударные волны инцидентов. Отгружается сейчас.',
+        'road.5.name': 'v3 · ИИ-аномалии v2', 'road.5.desc': 'Прогнозные наложения, предсказание подозрительных путей, east-west детект.',
+        'road.6.name': 'v4 · квантово-безопасный', 'road.6.desc': 'Постквантовое хранилище учётных данных, подписанная аттестация playbook.',
+        'news.title': 'Charon — заметки с берега',
+        'news.sub': 'Ежемесячная рассылка для инженеров эксплуатации — реальные постмортемы инцидентов, наблюдения ИИ, идеи runbook. Без спама. Отписка в два клика.',
+        'news.cta': 'Подписаться',
+        'demo.title': 'Забронировать <em>переправу</em>.',
+        'demo.sub': 'Тридцатиминутный обход с сетевым инженером. Принесите свою топологию — лодка от нас.',
+        'demo.name': 'Ваше имя', 'demo.email': 'Рабочая почта', 'demo.company': 'Компания',
+        'demo.devices': 'Примерное число устройств', 'demo.when': 'Удобное время',
+        'demo.pick': '— выберите —', 'demo.thisweek': 'На этой неделе', 'demo.nextweek': 'На следующей неделе', 'demo.flex': 'Гибко',
+        'demo.cancel': 'Отмена', 'demo.submit': 'Записаться',
+        'iso.kicker': 'XIII · Тактический вид',
+        'iso.title': 'Двигайте <em>мышь</em>. Сеть движется вместе с ней.',
+        'iso.lede': 'Миниатюра стены Mission Control — тот же движок, та же физика, те же пакеты. Тяните, наклоняйте, наблюдайте. Настоящий живёт в полный рост в платформе.',
+        'iso.hud': 'ЖИВОЕ · 9 УЗЛОВ · 12 СВЯЗЕЙ',
+        'iso.hint': 'ПОТЯНИТЕ ДЛЯ ОРБИТЫ',
+      },
+    };
+
+    // ─── Apply translations ───────────────────────────────
+    function applyLang(lang) {
+      const dict = I18N[lang] || I18N.en;
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key] !== undefined) el.textContent = dict[key];
+      });
+      document.querySelectorAll('[data-i18n-html]').forEach(el => {
+        const key = el.getAttribute('data-i18n-html');
+        if (dict[key] !== undefined) el.innerHTML = dict[key];
+      });
+      document.documentElement.setAttribute('lang', lang);
+      try { localStorage.setItem('charon_lang', lang); } catch {}
+      document.querySelectorAll('#langSwitch button').forEach(b => {
+        b.classList.toggle('active', b.dataset.lang === lang);
+      });
+    }
+
+    // Init
+    const saved = (() => { try { return localStorage.getItem('charon_lang'); } catch { return null; } })();
+    const navLang = (navigator.language || 'en').slice(0, 2).toLowerCase();
+    const initial = saved || (['tr','en','de','ru'].includes(navLang) ? navLang : 'en');
+    applyLang(initial);
+
+    document.querySelectorAll('#langSwitch button').forEach(btn => {
+      btn.addEventListener('click', () => applyLang(btn.dataset.lang));
+    });
+
+    // ─── Aurora cursor follow ──────────────────────────────
+    const aurora = document.getElementById('aurora');
+    const auroraSmall = document.getElementById('auroraSmall');
+    let mx = window.innerWidth / 2, my = window.innerHeight / 2;
+    let ax = mx, ay = my;     // big aurora (slow)
+    let bx = mx, by = my;     // small aurora (fast)
+
+    window.addEventListener('pointermove', (e) => {
+      mx = e.clientX; my = e.clientY;
+      if (!aurora.classList.contains('ready')) {
+        aurora.classList.add('ready');
+        auroraSmall.classList.add('ready');
+      }
+    }, { passive: true });
+
+    function frame() {
+      ax += (mx - ax) * 0.05;
+      ay += (my - ay) * 0.05;
+      bx += (mx - bx) * 0.18;
+      by += (my - by) * 0.18;
+      aurora.style.transform = `translate(${ax}px, ${ay}px) translate(-50%, -50%)`;
+      auroraSmall.style.transform = `translate(${bx}px, ${by}px) translate(-50%, -50%)`;
+      requestAnimationFrame(frame);
+    }
+    frame();
+  </script>
+</body>
+</html>
