@@ -92,6 +92,13 @@ class AgentManager:
         self._security: dict[str, dict] = {}
         # Streaming: request_id -> list[str] accumulator
         self._stream_buffers: dict[str, list[str]] = {}
+        # Faz T8.5 — Interactive SSH shell sessions (agent-relay terminal).
+        # session_id (UUID hex) → {agent_id, on_output (async fn), on_close (async fn)}
+        # Browser↔backend WS handler bu callback'leri verir; backend
+        # ssh_shell_output/closed mesajları geldiğinde callback'leri çağırır.
+        self._shell_sessions: dict[str, dict] = {}
+        # session_id → Future (ssh_shell_opened response için)
+        self._shell_open_pending: dict[str, asyncio.Future] = {}
 
     # ── Connection lifecycle ──────────────────────────────────────────────────
 
@@ -301,6 +308,36 @@ class AgentManager:
             asyncio.get_running_loop().create_task(
                 self._handle_local_anomaly(agent_id, msg)
             )
+
+        # Faz T8.5 — Interactive shell (browser↔backend↔agent↔device)
+        elif msg_type == "ssh_shell_opened":
+            session_id = msg.get("session_id", "")
+            fut = self._shell_open_pending.pop(session_id, None)
+            if fut and not fut.done():
+                fut.set_result(msg)
+
+        elif msg_type == "ssh_shell_output":
+            session_id = msg.get("session_id", "")
+            s = self._shell_sessions.get(session_id)
+            if s:
+                try:
+                    data = base64.b64decode(msg.get("data", ""))
+                    on_output = s.get("on_output")
+                    if on_output:
+                        asyncio.get_running_loop().create_task(on_output(data))
+                except Exception as exc:
+                    log.warning(f"shell_output deliver hata session={session_id[:8]}: {exc}")
+
+        elif msg_type == "ssh_shell_closed":
+            session_id = msg.get("session_id", "")
+            s = self._shell_sessions.pop(session_id, None)
+            if s:
+                on_close = s.get("on_close")
+                if on_close:
+                    try:
+                        asyncio.get_running_loop().create_task(on_close())
+                    except Exception:
+                        pass
 
         elif msg_type == "ssh_stream_chunk":
             rid = msg.get("request_id")
@@ -1445,6 +1482,126 @@ class AgentManager:
             log.info(f"Loaded {len(self._latency)} latency entries from DB")
         except Exception as e:
             log.warning(f"Could not load latencies from DB: {e}")
+
+    # ── Faz T8.5 — Interactive SSH shell (agent-relay terminal) ──────────────
+    # Backend WS endpoint /ws/ssh/{device_id} cihazın atanmış agent'ı
+    # üzerinden tunnel açar. Bağlantı ömrü kısa olmayabilir (kullanıcı
+    # terminale uzun süre takılı kalabilir); request_id+future modeli sadece
+    # ilk handshake (ssh_shell_opened) için kullanılır. Sonraki tüm I/O
+    # (input/output/resize) callback bazlı, asenkron forward edilir.
+
+    async def open_shell_session(
+        self, agent_id: str, device, cols: int, rows: int,
+        on_output, on_close, timeout: float = 20.0,
+    ) -> str:
+        """Agent üzerinde interaktif SSH shell aç. Döner: session_id.
+        Backend WS endpoint on_output(bytes) ve on_close() callback'leri
+        sağlar; gelen veri/kapanış olayları bu callback'lere yönlendirilir.
+
+        Yükselen exception'lar:
+          - RuntimeError: agent bağlı değil / scope check başarısız
+          - TimeoutError: shell open response timeout
+          - RuntimeError(error str): agent paramiko exception (cihaz hatası)
+        """
+        if agent_id not in self._connections:
+            raise RuntimeError(f"Agent {agent_id} not connected")
+
+        # Scope check — Faz 8 Phase D ile aynı kural (cihaz agent'a izinli mi?)
+        self._enforce_device_scope(agent_id, device, "ssh_shell")
+
+        from app.core.security import decrypt_credential
+        session_id = uuid.uuid4().hex
+
+        self._shell_sessions[session_id] = {
+            "agent_id":  agent_id,
+            "on_output": on_output,
+            "on_close":  on_close,
+        }
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
+        self._shell_open_pending[session_id] = fut
+
+        payload = {
+            "type": "ssh_shell_open",
+            "session_id": session_id,
+            "request_id": session_id,  # log korelasyonu için alias
+            "device_ip": device.ip_address,
+            "ssh_port":  device.ssh_port or 22,
+            "ssh_username": device.ssh_username,
+            "ssh_password": decrypt_credential(device.ssh_password_enc),
+            "cols": int(cols), "rows": int(rows),
+        }
+
+        try:
+            await self._connections[agent_id].send_text(json.dumps(payload))
+        except Exception as exc:
+            self._shell_open_pending.pop(session_id, None)
+            self._shell_sessions.pop(session_id, None)
+            raise RuntimeError(f"Agent'a shell open mesajı gönderilemedi: {exc}")
+
+        # Open handshake
+        try:
+            result = await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._shell_open_pending.pop(session_id, None)
+            self._shell_sessions.pop(session_id, None)
+            raise TimeoutError(f"Agent shell open timeout ({int(timeout)}s)")
+
+        if not result.get("success"):
+            # Agent reader_task hiç başlamadı; ssh_shell_closed gelmez,
+            # callback'i temizle
+            self._shell_sessions.pop(session_id, None)
+            raise RuntimeError(result.get("error") or "Agent shell open failed")
+
+        return session_id
+
+    async def send_shell_input(self, session_id: str, data: bytes) -> None:
+        """Tuşlamaları agent'a forward et. Hata gözükmez (best-effort)."""
+        s = self._shell_sessions.get(session_id)
+        if not s:
+            return
+        ws = self._connections.get(s["agent_id"])
+        if not ws:
+            return
+        try:
+            await ws.send_text(json.dumps({
+                "type": "ssh_shell_input",
+                "session_id": session_id,
+                "data": base64.b64encode(data).decode("ascii"),
+            }))
+        except Exception:
+            pass
+
+    async def send_shell_resize(self, session_id: str, cols: int, rows: int) -> None:
+        """Terminal boyut değişikliği — best-effort."""
+        s = self._shell_sessions.get(session_id)
+        if not s:
+            return
+        ws = self._connections.get(s["agent_id"])
+        if not ws:
+            return
+        try:
+            await ws.send_text(json.dumps({
+                "type": "ssh_shell_resize",
+                "session_id": session_id,
+                "cols": int(cols), "rows": int(rows),
+            }))
+        except Exception:
+            pass
+
+    async def close_shell_session(self, session_id: str) -> None:
+        """Agent'a kapatma sinyali yolla + local state'i temizle. Idempotent."""
+        s = self._shell_sessions.pop(session_id, None)
+        if not s:
+            return
+        ws = self._connections.get(s["agent_id"])
+        if ws:
+            try:
+                await ws.send_text(json.dumps({
+                    "type": "ssh_shell_close",
+                    "session_id": session_id,
+                }))
+            except Exception:
+                pass
 
 
 agent_manager = AgentManager()
