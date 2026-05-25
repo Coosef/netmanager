@@ -395,6 +395,51 @@
 .nm-card-bd { padding: 4px var(--pad) var(--pad); flex: 1; min-height: 0; }
 .nm-card-bd.flush { padding: 0; }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * T8.4 — Dashboard kart davranışı (kullanıcı raporu):
+ *  - Agent Filosu gibi liste-tipi kartlar 6+ öğe varken kayrılmıyordu;
+ *    şimdi nm-card-bd 320px üstü içerikte otomatik scrollbar gösterir.
+ *  - Sabit yükseklik (height: 100%) yarım/boş kartların büyük görünmesine
+ *    yol açıyordu; .nm-dashboard-grid içinde Card yüksekliği content-aware
+ *    olur (sadece o grid'te; başka yerlerde Card height:100% korunur).
+ *  - Grid'e grid-auto-flow: dense → kısa kartlar üst boşluğu doldurur,
+ *    görsel "yarım/yarım" çirkinliği azalır.
+ * ────────────────────────────────────────────────────────────────── */
+.nm-card-bd {
+  max-height: var(--nm-card-bd-max, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--bg-3) transparent;
+}
+.nm-card-bd::-webkit-scrollbar { width: 6px; }
+.nm-card-bd::-webkit-scrollbar-thumb {
+  background: var(--bg-3);
+  border-radius: 3px;
+}
+.nm-card-bd::-webkit-scrollbar-thumb:hover { background: var(--fg-3); }
+/* Card içeriği özel renderer kullananlar için "flush" — scroll'u kapat
+   (örn. TopoMini, heatmap strip, grafik kartlar kendi yüksekliğini
+   yönetir). */
+.nm-card-bd.flush { max-height: none; overflow: visible; }
+
+/* Dashboard grid — masonry-like dense flow + içerik tabanlı satırlar */
+.nm-dashboard-grid {
+  grid-auto-flow: dense;
+  grid-auto-rows: min-content;
+  align-items: start;
+}
+.nm-dashboard-grid .nm-card {
+  height: auto;
+  align-self: start;
+}
+/* Topology/event/activity gibi büyük kartlar için scroll'u kapat */
+.nm-dashboard-grid .span-12 > .nm-card > .nm-card-bd,
+.nm-dashboard-grid .span-12 > .nm-card > .nm-card-bd.flush {
+  max-height: none;
+  overflow: visible;
+}
+
 /* card sublabel pill */
 .nm-pill {
   font-family: var(--font-mono);
@@ -3379,6 +3424,19 @@
     box-shadow: 8px 0 28px rgba(0,0,0,0.3);
   }
   .nm-sidebar.open { transform: translateX(0); }
+
+  /* T8.4 — Sidebar antd <Drawer> içinde render edildiğinde (mobile branch),
+     .nm-sidebar global CSS'i `position:fixed + transform:translateX(-100%)`
+     ile Drawer body'sini bozuyordu (drawer açılsa bile içerik görünmez).
+     Drawer içindeki sidebar'ı içerik akışına geri al. */
+  .ant-drawer .nm-sidebar {
+    position: static !important;
+    transform: none !important;
+    width: 100% !important;
+    box-shadow: none !important;
+    height: 100% !important;
+  }
+  .ant-drawer-body { padding: 0 !important; overflow-y: auto !important; }
   .nm-hamburger { display: inline-flex; }
   .nm-topnav { padding: 0 12px; gap: 2px; }
   .nm-topnav .nm-brand-name small { display: none; }
