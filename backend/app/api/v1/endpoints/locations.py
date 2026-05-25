@@ -71,6 +71,14 @@ async def list_locations(
     skip: int = Query(0, ge=0),
     limit: int = Query(200, ge=1, le=1000),
 ):
+    # T8.4 F2 / CyberStrike pentest — locations:view kapısı eklendi.
+    # SYSTEM_ROLE_PERMISSIONS'a göre viewer'a verildi (sidebar location
+    # switcher ihtiyacı); org_admin / location_admin / super_admin de
+    # görür. Permission set'i kapatılmış kullanıcılar 403 alır.
+    # RLS scope ayrı bir katman: viewer kendi org'undakini görür,
+    # location_admin yalnız atanmış lokasyonu.
+    if not current_user.has_permission("locations:view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     query = select(Location)
 
     # M6-B4 — org-level filtering now goes through `organization_id`; for

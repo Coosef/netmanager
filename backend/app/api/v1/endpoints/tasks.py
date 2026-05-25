@@ -22,12 +22,19 @@ router = APIRouter()
 @router.get("/", response_model=dict)
 async def list_tasks(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     skip: int = 0,
     limit: int = 50,
     status: str = Query(None),
     type: str = Query(None),
 ):
+    # T8.4 F2 / CyberStrike pentest — eski versiyonda yalnız auth check
+    # vardı, viewer tüm task'ları görebiliyordu. Şimdi `task:view`
+    # gerekli (viewer'a verilmedi; org_admin / location_admin / super_admin
+    # ve admin grant'lı kullanıcılar görür).
+    if not current_user.has_permission("task:view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     query = select(Task)
 
     # Location RBAC: filter tasks whose device_ids overlap with accessible devices
@@ -204,8 +211,11 @@ async def get_audit_log(
 async def get_task(
     task_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    # T8.4 F2 — IDOR koruması: task:view gerekli (eskiden yalnız auth).
+    if not current_user.has_permission("task:view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     q = select(Task).where(Task.id == task_id)
     task = (await db.execute(q)).scalar_one_or_none()
     if not task:

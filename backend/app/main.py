@@ -1111,14 +1111,37 @@ async def _location_access_error_handler(request: Request, exc: _LocationAccessE
     return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
 
 
+# T8.4 F2 / CyberStrike pentest — CORS strict allowlist. VPS .env'inde
+# ALLOWED_ORIGINS=* set'liydi → CORSMiddleware arbitrary origin reflect
+# ediyordu. Defansif fail-fast: production'da `*` veya boş kabul edilmez.
+# `allow_credentials=True` ile birlikte wildcard zaten W3C CORS spec'ine
+# göre tehlikeli (browser yine reddetse de origin sızıntısı için risk).
+_cors_origins = [
+    o for o in (settings.allowed_origins_list or [])
+    if o and o.strip() and o.strip() != "*"
+]
+if not _cors_origins:
+    # Fail-safe: hiç geçerli origin yoksa log + sadece localhost (development).
+    # Production'da .env yanlış set'lendiyse loglardan görülecek (tehlikeli
+    # `*` reflect davranışı yerine deny-all güvenli default).
+    import logging
+    logging.getLogger("netmanager.security").warning(
+        "ALLOWED_ORIGINS env değişkeni boş veya `*` — production'da strict "
+        "allowlist set'leyin. Şimdilik localhost fallback aktif (deny-all-ext)."
+    )
+    _cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=[
         "Authorization", "Content-Type", "X-Request-ID", "Accept",
         "X-Location-Id", "X-Org-Id",
+        # T8.4 F3 hazırlık: agent installer endpoint'i header'da agent_key
+        # alacak (mevcut query'den geçiş için Phase F3).
+        "X-Agent-Key", "X-Agent-ID",
     ],
 )
 
