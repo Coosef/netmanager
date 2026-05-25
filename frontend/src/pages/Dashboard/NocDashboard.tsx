@@ -85,7 +85,11 @@ function Card({ title, pill, children, span = 'span-4', onTitle }: {
 }) {
   return (
     <div className={span}>
-      <div className="nm-card" style={{ height: '100%' }}>
+      {/* T8.4 — height:100% kaldırıldı; .nm-dashboard-grid içinde Card
+          yüksekliği content'a göre belirlenir (CSS'te grid-auto-rows:
+          min-content + .nm-card { height: auto }). Diğer grid'lerde
+          height: 100% gerekirse override edilir. */}
+      <div className="nm-card">
         <div className="nm-card-hd">
           <h3 onClick={onTitle} style={{ cursor: onTitle ? 'pointer' : undefined }}>
             {title}{pill && <span className={`nm-pill ${pill.kind || ''}`}>{pill.label}</span>}
@@ -318,7 +322,11 @@ function DashboardGrid({ editMode, order, hidden, setOrder, toggleWidget, render
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
       <SortableContext items={visibleIds} strategy={rectSortingStrategy}>
-        <div className="nm-grid cols-12" style={{ gap: 'var(--gap)', marginTop: 'var(--gap)' }}>
+        {/* T8.4 — nm-dashboard-grid: grid-auto-flow:dense + grid-auto-rows:
+            min-content. Kısa kartlar üst boşluğu doldurur, kart yüksekliği
+            content-aware. Liste-tipi kartlar (Agent Filosu vb.) içeriği
+            320px'i geçince otomatik scroll. */}
+        <div className="nm-grid cols-12 nm-dashboard-grid" style={{ gap: 'var(--gap)', marginTop: 'var(--gap)' }}>
           {visibleIds.map((id) => (
             <SortableWidget key={id} id={id} span={WIDGET_SPAN[id] || 'span-4'}
               editMode={editMode}
@@ -650,12 +658,17 @@ function useClock() {
 
 function TopoMini({ online, offline, total, devices }: {
   online: number; offline: number; total: number
-  devices?: any[]   // Device[] — varsa gerçek grid; yoksa placeholder
+  devices?: any[]   // Device[] — varsa gerçek diagram; yoksa placeholder
 }) {
-  // T8.4 — eski placeholder ("65 online · 6 down" yazısı) yerine gerçek
-  // cihaz grid'i. Her hücre bir cihaz; status'a göre renkli + hover
-  // hostname. Topology sayfasının minyatürü. devicesData prop ile gelir.
-  const items = (devices || []).slice(0, 70)  // 7x10 = 70 hücre
+  // T8.4 — eski 10x7 grid ("yeşil/kırmızı kutucuklar") yerine
+  // network-topology-vari katmanlı SVG diagram:
+  //   CORE  (2-3 node, üstte, kalın bağlantı)
+  //   DIST  (4-6 node, ortada, distribution layer)
+  //   ACCS  (8-12 node, altta, access switch'leri)
+  // Cihazlar `layer` alanına göre kategorize (yoksa rol heuristic'i:
+  // hostname'de "core/bb/back" → core, "dist/agg" → dist, diğer → access).
+  // Status renkli node + offline'da pulse + SVG bağlantı çizgileri.
+  const items = (devices || [])
   if (items.length === 0) {
     return (
       <div className="nm-topo" style={{ minHeight: 200 }}>
@@ -670,19 +683,66 @@ function TopoMini({ online, offline, total, devices }: {
       </div>
     )
   }
-  const dotColor = (d: any) => {
+
+  // Tier sınıflandırma — DB'de `layer` varsa onu kullan; yoksa hostname/role.
+  const layerOf = (d: any): 'core' | 'dist' | 'access' => {
+    const layer = String(d.layer || '').toLowerCase()
+    if (layer === 'core' || layer === 'distribution' || layer === 'access') {
+      return layer === 'distribution' ? 'dist' : layer as any
+    }
+    const host = String(d.hostname || '').toLowerCase()
+    if (/^(core|bb|back|cr)/.test(host) || /(_|-)(core|bb)/.test(host)) return 'core'
+    if (/^(dist|agg|dr)/.test(host) || /(_|-)(dist|agg)/.test(host)) return 'dist'
+    return 'access'
+  }
+  const colorOf = (d: any): string => {
     const s = (d.status || '').toLowerCase()
     if (s === 'offline' || s === 'down') return 'var(--crit)'
     if (s === 'unreachable' || s === 'unknown') return 'var(--warn)'
     return 'var(--ok)'
   }
-  const isOffline = (d: any) => {
+  const isDownN = (d: any) => {
     const s = (d.status || '').toLowerCase()
     return s === 'offline' || s === 'down'
   }
+
+  const cores = items.filter((d) => layerOf(d) === 'core').slice(0, 3)
+  const dists = items.filter((d) => layerOf(d) === 'dist').slice(0, 6)
+  const access = items.filter((d) => layerOf(d) === 'access').slice(0, 14)
+  // Eğer hiç core/dist yoksa (heuristic tutmadı) ilk 2'yi core, sonraki 4'ü
+  // dist olarak göster — sayfanın boş görünmesini engelle.
+  if (cores.length === 0 && dists.length === 0) {
+    const head = items.slice(0, 2); const mid = items.slice(2, 6); const rest = items.slice(6, 20)
+    cores.push(...head); dists.push(...mid); access.length = 0; access.push(...rest)
+  }
+
+  // SVG koordinatları — viewBox 600x220, 3 katman: y=40 / y=110 / y=180
+  const W = 600, H = 220
+  const layerY = { core: 38, dist: 110, access: 184 }
+  const layout = (arr: any[], y: number) => arr.map((d, i) => ({
+    d, x: ((i + 1) * W) / (arr.length + 1), y,
+  }))
+  const coreP = layout(cores, layerY.core)
+  const distP = layout(dists, layerY.dist)
+  const accessP = layout(access, layerY.access)
+
+  // Bağlantılar — core ↔ dist tam mesh, dist ↔ access yakın eşleştirme
+  const links: { x1: number; y1: number; x2: number; y2: number; down: boolean }[] = []
+  for (const c of coreP) for (const d of distP) {
+    links.push({ x1: c.x, y1: c.y, x2: d.x, y2: d.y,
+      down: isDownN(c.d) || isDownN(d.d) })
+  }
+  // Her access'i en yakın dist'e bağla
+  for (const a of accessP) {
+    if (distP.length === 0) continue
+    const nearest = distP.reduce((p, q) => Math.abs(q.x - a.x) < Math.abs(p.x - a.x) ? q : p)
+    links.push({ x1: nearest.x, y1: nearest.y, x2: a.x, y2: a.y,
+      down: isDownN(nearest.d) || isDownN(a.d) })
+  }
+
   return (
-    <div className="nm-topo" style={{ minHeight: 200, padding: 10, position: 'relative' }}>
-      {/* Sol-üst köşede özet sayı */}
+    <div className="nm-topo" style={{ minHeight: 220, padding: 8, position: 'relative' }}>
+      {/* Sol-üst özet */}
       <div style={{
         position: 'absolute', top: 8, left: 12, zIndex: 2,
         fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--fg-3)',
@@ -690,42 +750,65 @@ function TopoMini({ online, offline, total, devices }: {
       }}>
         {online} / {total} ONLINE · {offline} DOWN
       </div>
-      {/* Grid */}
+      {/* Sağ-üst layer count */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(10, 1fr)',
-        gridAutoRows: '16px',
-        gap: 4,
-        height: '100%',
-        padding: '24px 6px 28px',
+        position: 'absolute', top: 8, right: 12, zIndex: 2,
+        fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)',
+        background: 'rgba(15,23,42,0.7)', padding: '2px 8px', borderRadius: 4,
       }}>
-        {items.map((d: any) => {
-          const color = dotColor(d)
-          const off = isOffline(d)
+        CORE {cores.length} · DIST {dists.length} · ACCESS {access.length}
+      </div>
+
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
+        style={{ width: '100%', height: '100%', display: 'block', marginTop: 6 }}>
+        {/* Tier guide lines */}
+        {[layerY.core, layerY.dist, layerY.access].map((y) => (
+          <line key={y} x1={0} y1={y} x2={W} y2={y}
+            stroke="var(--line-soft)" strokeWidth="0.5" strokeDasharray="2 4" opacity="0.5" />
+        ))}
+        {/* Tier labels */}
+        <text x={8} y={layerY.core - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">CORE</text>
+        <text x={8} y={layerY.dist - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">DIST</text>
+        <text x={8} y={layerY.access - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">ACCESS</text>
+
+        {/* Links */}
+        {links.map((l, i) => (
+          <line key={i}
+            x1={l.x1} y1={l.y1} x2={l.x2} y2={l.y2}
+            stroke={l.down ? 'var(--crit)' : 'var(--accent)'}
+            strokeWidth={l.down ? 1.4 : 0.9}
+            opacity={l.down ? 0.7 : 0.35}
+            strokeDasharray={l.down ? '4 3' : 'none'} />
+        ))}
+
+        {/* Nodes — render order: links arkada, sonra düğümler */}
+        {[...coreP, ...distP, ...accessP].map(({ d, x, y }) => {
+          const color = colorOf(d)
+          const down = isDownN(d)
+          const r = layerOf(d) === 'core' ? 9 : layerOf(d) === 'dist' ? 7 : 5
           return (
-            <div
-              key={d.id ?? d.hostname}
-              title={`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}`}
-              style={{
-                background: color,
-                borderRadius: 3,
-                opacity: off ? 1 : 0.85,
-                animation: off ? 'nmKpiCritPulse 1.6s ease-in-out infinite' : undefined,
-                cursor: 'pointer',
-                transition: 'transform .12s',
-              }}
-              onMouseEnter={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1.15)' }}
-              onMouseLeave={(e) => { (e.currentTarget as HTMLDivElement).style.transform = 'scale(1)' }}
-            />
+            <g key={d.id ?? d.hostname}>
+              <title>{`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}`}</title>
+              {/* Outer glow ring (sadece online/down ışıltısı için) */}
+              {down ? (
+                <circle cx={x} cy={y} r={r + 4} fill="none" stroke={color}
+                  strokeWidth="1" opacity="0.5">
+                  <animate attributeName="r" values={`${r + 2};${r + 7};${r + 2}`} dur="1.8s" repeatCount="indefinite" />
+                  <animate attributeName="opacity" values="0.7;0;0.7" dur="1.8s" repeatCount="indefinite" />
+                </circle>
+              ) : (
+                <circle cx={x} cy={y} r={r + 2} fill="none" stroke={color}
+                  strokeWidth="0.6" opacity="0.4" />
+              )}
+              <circle cx={x} cy={y} r={r}
+                fill={color}
+                stroke="var(--bg-1)" strokeWidth="1.5"
+                style={{ cursor: 'pointer' }} />
+            </g>
           )
         })}
-        {/* Doldurulamayan hücreler için boş slot (görsel grid tutarlı) */}
-        {Array.from({ length: Math.max(0, 70 - items.length) }, (_, i) => (
-          <div key={`empty-${i}`} style={{
-            background: 'var(--bg-3)', borderRadius: 3, opacity: 0.35,
-          }} />
-        ))}
-      </div>
+      </svg>
+
       <div className="nm-legend" style={{ position: 'absolute', left: 12, bottom: 8 }}>
         <span><span className="dot" style={{ background: 'var(--ok)' }} />online</span>
         <span><span className="dot" style={{ background: 'var(--warn)' }} />unknown</span>
