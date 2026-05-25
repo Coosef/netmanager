@@ -271,12 +271,31 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
     navigator.clipboard.writeText(text); setter(true); setTimeout(() => setter(false), 2000)
   }
   const base = serverUrl.trim().replace(/\/$/, '') || window.location.origin
-  const downloadUrl = platform ? `${base}${agentsApi.downloadUrl(agent.id, agent.agent_key!, platform, base)}` : null
-  const installCmd = platform === 'linux'
-    ? `curl -fsSL '${downloadUrl}' | sudo bash`
-    : platform === 'windows'
-    ? `powershell -ExecutionPolicy Bypass -c "iwr -useb '${downloadUrl}' | iex"`
+  // T8.4 F3 — agent_key URL'de değil, X-Agent-Key header'da. UI installer
+  // komutu da curl/iwr ile header gönderir; URL'de key görünmez.
+  const downloadUrl = platform
+    ? `${base}${agentsApi.downloadInstallerUrl(agent.id, platform, base)}`
     : null
+  const installCmd = platform === 'linux'
+    ? `curl -fsSL -H 'X-Agent-Key: ${agent.agent_key}' '${downloadUrl}' | sudo bash`
+    : platform === 'windows'
+    ? `powershell -ExecutionPolicy Bypass -c "$h=@{'X-Agent-Key'='${agent.agent_key}'}; iwr -useb -Headers $h '${downloadUrl}' | iex"`
+    : null
+  const [downloading, setDownloading] = useState(false)
+  const handleDownload = async () => {
+    if (!platform || !agent.agent_key) return
+    setDownloading(true)
+    try {
+      await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
+    } catch (e: any) {
+      // Modal'ı kapatmadan kullanıcıya hatayı göster — antd message alternatif
+      // (parent App içinde). Şimdilik alert.
+      // eslint-disable-next-line no-alert
+      alert('İndirme başarısız: ' + (e?.message || 'bilinmeyen'))
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   return (
     <Modal open onCancel={onClose} footer={null} width={600}
@@ -328,7 +347,9 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
             </div>
           </div>
           <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }} message={platform === 'linux' ? t('agents.linux_hint') : t('agents.windows_hint')} />
-          <Button type="default" icon={<DownloadOutlined />} block href={downloadUrl!} download>
+          <Button type="default" icon={<DownloadOutlined />} block
+            loading={downloading}
+            onClick={handleDownload}>
             {platform === 'linux' ? t('agents.download_linux') : t('agents.download_windows')}
           </Button>
         </>
