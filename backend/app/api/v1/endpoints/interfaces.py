@@ -560,14 +560,24 @@ async def refresh_vlans_batch(
     user_label = getattr(current_user, "username", None) or str(getattr(current_user, "id", "?"))
     now = datetime.now(timezone.utc)
 
+    # T8.4 timeout sizing — eskiden 12s outer wait_for kullanıyorduk ama
+    # ssh_manager._build_netmiko_params içinde:
+    #   timeout=SSH_CONNECT_TIMEOUT(30) + auth_timeout=30 + banner_timeout=30
+    # var. 12s outer → agent henüz cihaza bağlanmadan iptal ediyorduk; canlı
+    # tarama 44/56 cihazı "SSH zaman aşımı (12s)" ile false-fail ediyordu.
+    # Şimdi outer'ı SSH_CONNECT_TIMEOUT + komut yürütme marjı + relay overhead
+    # kadar tutuyoruz (~45s); cihaz gerçekten cevap vermiyorsa yine düşer ama
+    # bağlantı kurulma penceresine yetişir.
+    _per_device_timeout = max(45.0, float(settings.SSH_CONNECT_TIMEOUT) + 15.0)
+
     async def fetch_one(dev: Device) -> tuple[Device, dict, list[int]]:
         try:
             result = await asyncio.wait_for(
                 ssh_manager.execute_command(dev, _vlan_cmd(dev.os_type)),
-                timeout=12.0,
+                timeout=_per_device_timeout,
             )
         except asyncio.TimeoutError:
-            return dev, {"success": False, "error": "SSH zaman aşımı (12s)"}, []
+            return dev, {"success": False, "error": f"SSH zaman aşımı ({int(_per_device_timeout)}s)"}, []
         except Exception as exc:
             return dev, {"success": False, "error": str(exc)[:200]}, []
         if not result.success:
