@@ -1,19 +1,21 @@
 import { useEffect, useState } from 'react'
-import { Layout } from 'antd'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import Sidebar from './Sidebar'
+import TopNav from './TopNav'
 import AppHeader from './Header'
-import GlobalSearchModal from './GlobalSearchModal'
 import LocationGate from './LocationGate'
+import CommandPalette from '@/components/CommandPalette'
+import CustomizePanel from '@/components/CustomizePanel'
+import NocWallOverlay from '@/components/NocWallOverlay'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useCustomize } from '@/contexts/CustomizeContext'
+import { NocWallProvider, useNocWall } from '@/contexts/NocWallContext'
 import { useAlarmWatcher } from '@/hooks/useAlarmWatcher'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import {
   DashboardOutlined, LaptopOutlined, AlertOutlined,
   ApartmentOutlined, SettingOutlined,
 } from '@ant-design/icons'
-
-const { Content } = Layout
 
 const LAYOUT_CSS = `
   @keyframes pageEnterFade {
@@ -30,13 +32,25 @@ const BOTTOM_NAV_ITEMS = [
   { key: '/settings',icon: <SettingOutlined />,      label: 'Ayarlar' },
 ]
 
+// AppLayout — NocWallProvider ile sarmalı (useNavigate gerekiyor; provider
+// BrowserRouter altında olmalı). Tüm gerçek layout AppLayoutInner'da.
 export default function AppLayout() {
-  const { isDark } = useTheme()
+  return (
+    <NocWallProvider>
+      <AppLayoutInner />
+    </NocWallProvider>
+  )
+}
+
+function AppLayoutInner() {
+  const { isDark, toggle: toggleTheme } = useTheme()
+  const { menuPosition, soundEnabled, setSoundEnabled } = useCustomize()
+  const wall = useNocWall()
   const location = useLocation()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
-  const layoutBg = isDark ? '#030c1e' : '#f1f5f9'
-  const [searchOpen, setSearchOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [customizeOpen, setCustomizeOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
   useAlarmWatcher()
@@ -45,124 +59,103 @@ export default function AppLayout() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // ⌘K / Ctrl+K → CommandPalette (NAV + AKSIYON + CİHAZ arama).
+      // Eski GlobalSearchModal yerine — CommandPalette üst kümesi (sayfa
+      // ara, tema değiştir, özelleştir, ayrıca cihaz arama dahil).
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault()
-        setSearchOpen((v) => !v)
+        setPaletteOpen((v) => !v)
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [])
 
-  const bottomNavBg = isDark ? 'rgba(3,12,30,0.97)' : 'rgba(255,255,255,0.97)'
-  const bottomNavBorder = isDark ? '#112240' : '#e2e8f0'
-  const activeColor = '#3b82f6'
+  const activeColor = '#22d3c5'
   const inactiveColor = isDark ? '#64748b' : '#94a3b8'
-
   const isActive = (key: string) =>
     key === '/' ? location.pathname === '/' : location.pathname.startsWith(key)
 
   return (
-    <Layout style={{ minHeight: '100vh', background: layoutBg }}>
+    // T8.4 — NOC design shell. `:root` (noc.css) is dark by default; the
+    // `.theme-light` class flips the design CSS variables for light mode.
+    <div className={`nm-app-shell ${isDark ? '' : 'theme-light'}`} style={{ height: '100vh', overflow: 'hidden' }}>
       <style>{LAYOUT_CSS}</style>
-      <Sidebar
-        mobileOpen={mobileNavOpen}
-        onMobileClose={() => setMobileNavOpen(false)}
-      />
-      <Layout style={{ background: layoutBg }}>
-        <AppHeader
-          onOpenSearch={() => setSearchOpen(true)}
-          onOpenMobileNav={() => setMobileNavOpen(true)}
-        />
-        <Content style={{
-          padding: isMobile ? '12px 14px' : '20px 24px',
-          paddingBottom: isMobile ? 'calc(64px + max(16px, env(safe-area-inset-bottom)))' : '20px',
-          minHeight: 'calc(100vh - 60px)',
-          backgroundImage: isDark
-            ? 'radial-gradient(circle, rgba(0,195,255,0.03) 1px, transparent 0)'
-            : undefined,
-          backgroundSize: isDark ? '28px 28px' : undefined,
+      <div className={`nm-root menu-${menuPosition}`}>
+        {/* menu=side iken Sidebar (sol), menu=top iken Sidebar gizleniyor
+            (.menu-top .nm-sidebar { display: none } noc.css'te) ve TopNav
+            üstte yatay dropdown'larla geliyor. AppHeader iki modda da var. */}
+        <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        <div className="nm-main" style={{
+          gridTemplateRows: menuPosition === 'top' ? 'auto auto 1fr' : 'auto 1fr',
         }}>
-          <div key={location.pathname} style={{ animation: 'pageEnterFade 0.28s ease both' }}>
-            {/* Faz 8 Phase F — gate every page on a resolved location
-                context: a spinner while resolving, an explicit no-access
-                state for an un-located user, the page otherwise. */}
-            <LocationGate>
-              <Outlet />
-            </LocationGate>
+          {menuPosition === 'top' && <TopNav />}
+          <AppHeader
+            onOpenSearch={() => setPaletteOpen(true)}
+            onOpenMobileNav={() => setMobileNavOpen(true)}
+          />
+          <div className="nm-workspace">
+            <div key={location.pathname} style={{ animation: 'pageEnterFade 0.28s ease both', minHeight: '100%' }}>
+              {/* Faz 8 Phase F — gate every page on a resolved location context. */}
+              <LocationGate>
+                <Outlet />
+              </LocationGate>
+            </div>
           </div>
-        </Content>
-      </Layout>
+        </div>
+      </div>
 
       {/* Bottom navigation bar — mobile only */}
       {isMobile && (
         <nav style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
+          position: 'fixed', bottom: 0, left: 0, right: 0,
           height: 'calc(56px + env(safe-area-inset-bottom))',
           paddingBottom: 'env(safe-area-inset-bottom)',
-          background: bottomNavBg,
-          backdropFilter: 'blur(16px)',
-          WebkitBackdropFilter: 'blur(16px)',
-          borderTop: `1px solid ${bottomNavBorder}`,
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-around',
+          background: isDark ? 'rgba(11,19,34,0.97)' : 'rgba(255,255,255,0.97)',
+          backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)',
+          borderTop: `1px solid ${isDark ? '#1c2538' : '#e2e8f0'}`,
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-around',
           zIndex: 200,
           boxShadow: isDark ? '0 -4px 20px rgba(0,0,0,0.5)' : '0 -2px 12px rgba(0,0,0,0.08)',
         }}>
           {BOTTOM_NAV_ITEMS.map((item) => {
             const active = isActive(item.key)
             return (
-              <button
-                key={item.key}
-                onClick={() => navigate(item.key)}
+              <button key={item.key} onClick={() => navigate(item.key)}
                 style={{
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: 3,
-                  padding: '8px 0',
-                  height: 56,
-                  background: 'transparent',
-                  border: 'none',
-                  cursor: 'pointer',
+                  flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  justifyContent: 'center', gap: 3, padding: '8px 0', height: 56,
+                  background: 'transparent', border: 'none', cursor: 'pointer',
                   color: active ? activeColor : inactiveColor,
-                  fontSize: 10,
-                  fontWeight: active ? 700 : 400,
-                  transition: 'color 0.15s',
+                  fontSize: 10, fontWeight: active ? 700 : 400, transition: 'color 0.15s',
                   WebkitTapHighlightColor: 'transparent',
-                }}
-              >
-                <span style={{
-                  fontSize: 20,
-                  display: 'block',
-                  filter: active ? `drop-shadow(0 0 6px ${activeColor}80)` : undefined,
                 }}>
+                <span style={{ fontSize: 20, display: 'block', filter: active ? `drop-shadow(0 0 6px ${activeColor}80)` : undefined }}>
                   {item.icon}
                 </span>
                 <span style={{ fontSize: 10, lineHeight: 1.2 }}>{item.label}</span>
-                {active && (
-                  <span style={{
-                    position: 'absolute',
-                    top: 0,
-                    width: 24,
-                    height: 2,
-                    borderRadius: 1,
-                    background: activeColor,
-                  }} />
-                )}
               </button>
             )
           })}
         </nav>
       )}
 
-      <GlobalSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
-    </Layout>
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        onAction={(act) => {
+          if (act === 'theme') toggleTheme()
+          else if (act === 'customize') setCustomizeOpen(true)
+          else if (act === 'sound-toggle') setSoundEnabled(!soundEnabled)
+          else if (act === 'wall-start') wall.start()
+          else if (act === 'wall-stop') wall.stop()
+        }}
+        isDark={isDark}
+        soundEnabled={soundEnabled}
+        wallActive={wall.active}
+      />
+      <CustomizePanel open={customizeOpen} onClose={() => setCustomizeOpen(false)} />
+      <NocWallOverlay />
+    </div>
   )
 }

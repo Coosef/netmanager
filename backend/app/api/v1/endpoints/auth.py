@@ -1,5 +1,6 @@
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from slowapi import Limiter
@@ -9,12 +10,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.core.security import create_access_token, hash_password, verify_password
+from app.core.mfa import (
+    verify_and_consume_recovery_code,
+    verify_stored_totp,
+)
+from app.core.security import (
+    create_access_token,
+    create_mfa_challenge_token,
+    decode_mfa_challenge_token,
+    hash_password,
+    verify_password,
+)
 from app.models.invite_token import InviteToken
 from app.models.user import User, SystemRole
 from app.schemas.auth import (
     InviteAcceptRequest,
     LoginRequest,
+    MfaChallengeResponse,
+    MfaVerifyRequest,
     TokenResponse,
 )
 from app.schemas.user import UserResponse
@@ -43,7 +56,20 @@ async def _build_token_response(db: AsyncSession, user: User) -> TokenResponse:
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+def _mask_email(email: Optional[str]) -> Optional[str]:
+    """Mask 'alice@example.com' → 'a***e@example.com' for the MFA UI.
+    Falsy / malformed emails return None — the UI just hides the line."""
+    if not email or "@" not in email:
+        return None
+    name, _, domain = email.partition("@")
+    if len(name) <= 2:
+        masked = name[0] + "*"
+    else:
+        masked = name[0] + "*" * max(1, len(name) - 2) + name[-1]
+    return f"{masked}@{domain}"
+
+
+@router.post("/login", response_model=Union[TokenResponse, MfaChallengeResponse])
 @limiter.limit("10/minute")
 async def login(
     payload: LoginRequest,
@@ -64,6 +90,27 @@ async def login(
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    # ── MFA branch ──────────────────────────────────────────────────────
+    # The password is now confirmed. If the user opted into MFA, do NOT
+    # issue an access token — hand back a short-lived challenge token
+    # the client trades at /auth/mfa/verify. Audit the password step
+    # separately so a 2FA-protected account still leaves a breadcrumb on
+    # password-only success.
+    if user.mfa_enabled:
+        await log_action(
+            db, user, "login_mfa_challenge",
+            details={"methods": (user.mfa_methods or "totp").split(",")},
+            request=request,
+        )
+        methods = [m.strip() for m in (user.mfa_methods or "totp").split(",") if m.strip()]
+        return MfaChallengeResponse(
+            challenge_token=create_mfa_challenge_token(user.id),
+            mfa_methods=methods,
+            mfa_default_method=methods[0] if methods else "totp",
+            masked_email=_mask_email(user.email),
+        )
+
+    # ── No MFA — proceed as before ──────────────────────────────────────
     await db.execute(
         update(User).where(User.id == user.id).values(last_login=datetime.now(timezone.utc))
     )
@@ -72,6 +119,72 @@ async def login(
 
     token_resp = await _build_token_response(db, user)
     await log_action(db, user, "login", request=request)
+    return token_resp
+
+
+@router.post("/mfa/verify", response_model=TokenResponse)
+@limiter.limit("10/minute")
+async def mfa_verify(
+    payload: MfaVerifyRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trade an MFA challenge token + a valid OTP (or recovery code) for
+    a real access token. The challenge token alone cannot reach this —
+    it has scope='mfa-challenge' which decode_access_token rejects, and
+    this endpoint requires the code in the same call."""
+    user_id = decode_mfa_challenge_token(payload.challenge_token)
+    if user_id is None:
+        await log_action(
+            db, None, "mfa_verify_failed",
+            details={"reason": "invalid_or_expired_challenge"},
+            status="failure", request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="MFA challenge expired — please log in again",
+        )
+
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active or not user.mfa_enabled:
+        # Defense in depth — the challenge token already vouches for the
+        # user but the account could have been disabled / MFA removed in
+        # the 5-minute window.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+
+    method = (payload.method or "totp").lower()
+    ok = False
+    consumed_recovery = False
+
+    if method == "totp":
+        ok = verify_stored_totp(user.mfa_totp_secret, payload.code)
+    elif method == "recovery":
+        stored = list(user.mfa_recovery_codes or [])
+        ok, remaining = verify_and_consume_recovery_code(stored, payload.code)
+        if ok:
+            user.mfa_recovery_codes = remaining
+            consumed_recovery = True
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported MFA method: {method}")
+
+    if not ok:
+        await log_action(
+            db, user, "mfa_verify_failed",
+            details={"method": method},
+            status="failure", request=request,
+        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Geçersiz kod")
+
+    # ── Success — promote to a real session ─────────────────────────────
+    user.last_login = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(user)
+
+    token_resp = await _build_token_response(db, user)
+    audit_details: dict = {"method": method}
+    if consumed_recovery:
+        audit_details["recovery_codes_remaining"] = len(user.mfa_recovery_codes or [])
+    await log_action(db, user, "login_mfa_success", details=audit_details, request=request)
     return token_resp
 
 

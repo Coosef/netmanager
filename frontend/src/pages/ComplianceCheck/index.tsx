@@ -19,6 +19,8 @@ import {
 } from 'recharts'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
+import ComplianceProfileDrawer from './ComplianceProfileDrawer'
+import { FilterOutlined, CrownOutlined } from '@ant-design/icons'
 
 const { Text } = Typography
 
@@ -116,13 +118,34 @@ export default function ComplianceCheckPage() {
     staleTime: 300_000,
   })
 
+  // T8.4 — parametrik uyumluluk: profile seçilirse `run` payload'ına
+  // profile_id eklenir; yoksa backend default profili kullanır (yoksa tüm
+  // built-in kuralları çalıştırır = legacy davranış).
+  const [selectedProfileId, setSelectedProfileId] = useState<number | null>(null)
+  const [profileDrawerOpen, setProfileDrawerOpen] = useState(false)
+
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['compliance-profiles'],
+    queryFn: () => securityAuditApi.listProfiles(),
+  })
+
+  // İlk yüklemede default profili otomatik seç.
+  useEffect(() => {
+    if (selectedProfileId === null && profiles.length > 0) {
+      const def = profiles.find((p) => p.is_default)
+      if (def) setSelectedProfileId(def.id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profiles.length])
+
   const autoScanMutation = useMutation({
-    mutationFn: () => securityAuditApi.run(),
+    mutationFn: () => securityAuditApi.run(undefined, selectedProfileId),
     onSuccess: (res) => {
-      message.success(`Otomatik tarama başlatıldı — ${res.device_count} cihaz`)
+      const sufx = res.profile_name ? ` (${res.profile_name})` : ''
+      message.success(`Otomatik tarama başlatıldı — ${res.device_count} cihaz${sufx}`)
       qc.invalidateQueries({ queryKey: ['compliance-fleet-trend'] })
     },
-    onError: () => message.error('Tarama başlatılamadı'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Tarama başlatılamadı'),
   })
 
   const { data: devicesData } = useQuery({
@@ -328,7 +351,39 @@ export default function ComplianceCheckPage() {
             </div>
           </div>
         </div>
-        <Space>
+        <Space wrap>
+          {/* T8.4 — Profile (standart) seçici + Standart Yönetimi butonu.
+              Daha önce yalnız trend kartının başlığındaydı; trend boşsa
+              hiç görünmüyordu. Şimdi her zaman top header'da. */}
+          <Select
+            size="small"
+            style={{ minWidth: 200 }}
+            placeholder="Standart seç…"
+            value={selectedProfileId ?? undefined}
+            onChange={(v) => setSelectedProfileId(v ?? null)}
+            allowClear
+            options={profiles.map((p) => ({
+              value: p.id,
+              label: (
+                <span>
+                  {p.is_default && <CrownOutlined style={{ color: '#f59e0b', marginRight: 4 }} />}
+                  {p.name}{' '}
+                  <span style={{ color: '#94a3b8', fontSize: 11 }}>({p.enabled_rule_ids.length} kural)</span>
+                </span>
+              ) as any,
+            }))}
+            notFoundContent={
+              <div style={{ padding: 8, fontSize: 12, color: '#94a3b8' }}>
+                Henüz profil yok — &quot;Standart Yönetimi&quot; butonundan oluştur
+              </div>
+            }
+          />
+          <Tooltip title="Standart Yönetimi — profil oluştur, kuralları aç/kapat">
+            <Button size="small" icon={<FilterOutlined />} onClick={() => setProfileDrawerOpen(true)}>
+              Standartlar
+            </Button>
+          </Tooltip>
+
           {hasScanned && results.length > 0 && (
             <Button
               icon={<FileExcelOutlined />}
@@ -408,11 +463,16 @@ export default function ComplianceCheckPage() {
             </Space>
             <Button
               size="small"
+              type="primary"
               icon={<ThunderboltOutlined />}
               loading={autoScanMutation.isPending}
               onClick={() => autoScanMutation.mutate()}
             >
               Otomatik Tarama Başlat
+              {selectedProfileId && (() => {
+                const p = profiles.find((x) => x.id === selectedProfileId)
+                return p ? ` (${p.name})` : ''
+              })()}
             </Button>
           </div>
           <div style={{ padding: '12px 16px' }}>
@@ -708,6 +768,12 @@ export default function ComplianceCheckPage() {
           />
         </div>
       )}
+
+      {/* T8.4 — Standart Yönetimi drawer (built-in rule kataloğu + profile CRUD) */}
+      <ComplianceProfileDrawer
+        open={profileDrawerOpen}
+        onClose={() => setProfileDrawerOpen(false)}
+      />
     </div>
   )
 }

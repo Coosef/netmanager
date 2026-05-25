@@ -19,12 +19,13 @@ export type UiAction =
   | { kind: 'view'; view: ViewMode }
   | { kind: 'layout'; layout: LayoutMode3D }
   | { kind: 'incidentFocus' }
+  | { kind: 'cycleIncident'; direction: 'next' | 'prev' }
   | { kind: 'clear' }
 
 /**
  * Map a keyboard key to a NOC action. Returns null for unbound keys.
  *   F fullscreen · 2 2D · 3 3D · C cluster · O orbit · I incident focus
- *   Esc clear selection / exit
+ *   N next anomaly (P prev) · Esc clear selection / exit
  */
 export function keyboardAction(key: string): UiAction | null {
   switch (key.toLowerCase()) {
@@ -34,6 +35,8 @@ export function keyboardAction(key: string): UiAction | null {
     case 'c': return { kind: 'layout', layout: 'cluster' }
     case 'o': return { kind: 'layout', layout: 'orbit' }
     case 'i': return { kind: 'incidentFocus' }
+    case 'n': return { kind: 'cycleIncident', direction: 'next' }
+    case 'p': return { kind: 'cycleIncident', direction: 'prev' }
     case 'escape': return { kind: 'clear' }
     default: return null
   }

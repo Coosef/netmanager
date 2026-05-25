@@ -6,8 +6,9 @@ import {
 
 describe('node rendering', () => {
   it('colours a device by layer when online', () => {
-    expect(nodeColor({ kind: 'device', status: 'online', layer: 'core' })).toBe('#3b82f6')
-    expect(nodeColor({ kind: 'device', status: 'online', layer: 'access' })).toBe('#22c55e')
+    // T8.4 NOC palette — core teal, access slate.
+    expect(nodeColor({ kind: 'device', status: 'online', layer: 'core' })).toBe('#22d3c5')
+    expect(nodeColor({ kind: 'device', status: 'online', layer: 'access' })).toBe('#94a3b8')
   })
 
   it('a non-online status overrides the layer colour', () => {

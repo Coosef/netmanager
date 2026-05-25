@@ -10,7 +10,10 @@ def _run_async(coro):
 
 
 @celery_app.task(bind=True, name="app.workers.tasks.security_audit_tasks.run_security_audit")
-def run_security_audit(self, task_id: int, device_ids: list[int]):
+def run_security_audit(self, task_id: int, device_ids: list[int], enabled_rule_ids: list[str] | None = None):
+    """T8.4 — enabled_rule_ids opsiyonel: ComplianceProfile.enabled_rule_ids'i
+    iletir. None → audit servisi tüm built-in kuralları çalıştırır (legacy)."""
+    rule_filter: set[str] | None = set(enabled_rule_ids) if enabled_rule_ids else None
     async def _run():
         from datetime import datetime, timezone
         from sqlalchemy import select, update
@@ -47,7 +50,9 @@ def run_security_audit(self, task_id: int, device_ids: list[int]):
             failed_count = 0
 
             for device in devices:
-                score, grade, findings, error = await run_device_audit(device, ssh_manager)
+                score, grade, findings, error = await run_device_audit(
+                    device, ssh_manager, enabled_rule_ids=rule_filter,
+                )
                 audit = SecurityAudit(
                     device_id=device.id,
                     device_hostname=device.hostname,

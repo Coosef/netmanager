@@ -40,9 +40,16 @@ export interface DriftItem {
   site: string | null
   device_status: string | null
   drift: boolean
-  reason: 'hash_mismatch' | 'no_backup'
+  reason: 'hash_mismatch' | 'no_backup' | 'clean'
   latest_backup_at: string | null
   backup_id: number | null
+  // T8.4 — baseline detayı (include_clean=true ile temiz cihazları
+  // listelerken UI'ın golden ne zaman işaretlendiğini ve hash'i göstermesi
+  // için backend her satıra eklemeye başladı).
+  golden_at?: string | null
+  golden_id?: number | null
+  golden_hash_short?: string
+  latest_hash_short?: string
 }
 
 export interface DriftDiff {
@@ -61,6 +68,7 @@ export interface DriftReport {
   no_backup_count: number
   items: DriftItem[]
   total: number
+  include_clean?: boolean
 }
 
 export const backupSchedulesApi = {
@@ -79,7 +87,7 @@ export const backupSchedulesApi = {
   runNow: (id: number) =>
     client.post<{ status: string; task_id?: number }>(`/backup-schedules/${id}/run-now`).then((r) => r.data),
 
-  driftReport: (params?: { skip?: number; limit?: number }) =>
+  driftReport: (params?: { skip?: number; limit?: number; include_clean?: boolean }) =>
     client.get<DriftReport>('/backup-schedules/drift-report', { params }).then((r) => r.data),
 
   driftDiff: (deviceId: number) =>

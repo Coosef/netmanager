@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import {
-  Typography, Switch, Divider, Tag, Tabs, Table, Button, Modal, Form,
+  Typography, Switch, Divider, Tag, Table, Button, Modal, Form,
   Input, Select, Space, message, Popconfirm, Tooltip, InputNumber, Alert, DatePicker,
 } from 'antd'
 import {
@@ -15,6 +15,7 @@ import {
   CodeOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import DriverTemplatesPage from '@/pages/DriverTemplates'
+// MfaTab artık /profile sayfasında reuse ediliyor; Settings tab'ı kaldırıldı.
 import { apiTokensApi, ApiToken } from '@/api/apiTokens'
 import dayjs from 'dayjs'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -1131,7 +1132,7 @@ function SnmpConfigTab() {
         type="warning"
         showIcon
         message="Ruijie community string kuralı"
-        description='Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: "NetManager1"'
+        description='Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: "Charon1"'
         style={{ marginBottom: 8 }}
       />
 
@@ -1148,9 +1149,9 @@ function SnmpConfigTab() {
           label="SNMP Community String"
           name="community"
           rules={[{ required: true, message: 'Gerekli' }]}
-          extra='Ruijie için büyük harf + küçük harf + rakam gerekli — örn. "NetManager1"'
+          extra='Ruijie için büyük harf + küçük harf + rakam gerekli — örn. "Charon1"'
         >
-          <Input placeholder="NetManager1" />
+          <Input placeholder="Charon1" />
         </Form.Item>
         <Form.Item label="Versiyon" name="version" initialValue="v2c">
           <Select options={[
@@ -2013,6 +2014,35 @@ export default function SettingsPage() {
   const { isDark, toggle } = useTheme()
   const currentLang = i18n.language
 
+  // ── nm-statbar gerçek değerler — diğer sayfalar gibi ────────────────────
+  // Her API'nin list endpoint'i var; parallel useQuery'le çekiyoruz.
+  // Hata/loading durumunda 0 gösteriyoruz (sayfa açılınca hemen render olsun).
+  const { data: channels = [] } = useQuery({
+    queryKey: ['settings-stat-channels'],
+    queryFn: () => notificationsApi.list().then((d) => d.items),
+    staleTime: 60_000,
+  })
+  const { data: profiles = [] } = useQuery({
+    queryKey: ['settings-stat-cred-profiles'],
+    queryFn: credentialProfilesApi.list,
+    staleTime: 60_000,
+  })
+  const { data: tokens = [] } = useQuery({
+    queryKey: ['settings-stat-tokens'],
+    queryFn: apiTokensApi.list,
+    staleTime: 60_000,
+  })
+  const { data: rules = [] } = useQuery({
+    queryKey: ['settings-stat-alert-rules'],
+    queryFn: alertRulesApi.list,
+    staleTime: 60_000,
+  })
+  const { data: slaPolicies = [] } = useQuery({
+    queryKey: ['settings-stat-sla'],
+    queryFn: slaApi.listPolicies,
+    staleTime: 60_000,
+  })
+
   function handleLangChange(code: string) {
     i18n.changeLanguage(code)
     localStorage.setItem('nm-lang', code)
@@ -2111,92 +2141,93 @@ export default function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const activeTab = searchParams.get('tab') || 'general'
 
-  const C = { bg: isDark ? '#1e293b' : '#ffffff', bg2: isDark ? '#0f172a' : '#f8fafc', border: isDark ? '#334155' : '#e2e8f0', text: isDark ? '#f1f5f9' : '#1e293b', muted: isDark ? '#64748b' : '#94a3b8' }
-
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#64748b20' : C.border}`,
-        borderLeft: '4px solid #64748b',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', alignItems: 'center', gap: 12,
-      }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: '#64748b20', border: '1px solid #64748b30',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        }}>
-          <ToolOutlined style={{ color: '#64748b', fontSize: 20 }} />
-        </div>
-        <div>
-          <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>{t('settings.title')}</div>
-          <div style={{ color: C.muted, fontSize: 12 }}>NetManager v1.0</div>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>{t('settings.title')}</span></div>
+          <h1 className="nm-page-title">
+            {t('settings.title')}
+            <span className="nm-pill mono">Charon v1.0</span>
+          </h1>
+          <div className="nm-page-sub">Genel ayarlar · bildirim kanalları · uyarı kuralları · SLA politikaları · kimlik & token yönetimi.</div>
         </div>
       </div>
 
-      <Tabs
-        activeKey={activeTab}
-        onChange={(key) => setSearchParams({ tab: key })}
-        items={[
-          {
-            key: 'general',
-            label: <span><GlobalOutlined /> Genel</span>,
-            children: generalContent,
-          },
-          {
-            key: 'notifications',
-            label: <span><BellOutlined /> Bildirimler</span>,
-            children: <NotificationChannelsTab />,
-          },
-          {
-            key: 'alert-rules',
-            label: <span><AlertOutlined /> Uyarı Kuralları</span>,
-            children: <AlertRulesTab />,
-          },
-          {
-            key: 'maintenance',
-            label: <span><ToolOutlined /> Bakım Pencereleri</span>,
-            children: <MaintenanceWindowsTab />,
-          },
-          {
-            key: 'credentials',
-            label: <span><SafetyOutlined /> Kimlik Profilleri</span>,
-            children: <CredentialProfilesTab />,
-          },
-          {
-            key: 'rotation',
-            label: <span><SyncOutlined /> Şifre Rotasyonu</span>,
-            children: <SecretRotationTab />,
-          },
-          {
-            key: 'sla',
-            label: <span><RiseOutlined /> SLA Politikaları</span>,
-            children: <SlaPoliciesTab />,
-          },
-          {
-            key: 'snmp',
-            label: <span><WifiOutlined /> SNMP</span>,
-            children: <SnmpConfigTab />,
-          },
-          {
-            key: 'api-tokens',
-            label: <span><KeyOutlined /> API Tokenlar</span>,
-            children: <ApiTokensTab />,
-          },
-          {
-            key: 'driver-templates',
-            label: <span><CodeOutlined /> Sürücü Şablonları</span>,
-            children: <DriverTemplatesPage />,
-          },
-          {
-            key: 'ai',
-            label: <span><RobotOutlined /> AI Asistanı</span>,
-            children: <AISettingsTab />,
-          },
-        ]}
-      />
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">Bildirim Kanalı</div>
+          <div className="nm-stat-val">{channels.length}</div>
+          <div className="nm-stat-delta">{channels.filter((c) => c.is_active).length} aktif</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Uyarı Kuralı</div>
+          <div className="nm-stat-val">{rules.length}</div>
+          <div className="nm-stat-delta">{rules.filter((r) => r.enabled).length} aktif</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SLA Politikası</div>
+          <div className="nm-stat-val">{slaPolicies.length}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Kimlik Profili</div>
+          <div className="nm-stat-val">{profiles.length}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">API Token</div>
+          <div className="nm-stat-val">{tokens.length}</div>
+        </div>
+        <div className="nm-stat ok">
+          <div className="nm-stat-label">Tema</div>
+          <div className="nm-stat-val mono" style={{ fontSize: 18 }}>{isDark ? 'Karanlık' : 'Açık'}</div>
+          <div className="nm-stat-delta">{currentLang.toUpperCase()} · v1.0.0</div>
+        </div>
+      </div>
+
+      {/* Mockup tasarımı: sol dikey nav (220px) + sağ aktif sekme içeriği card */}
+      {(() => {
+        const TABS: { key: string; label: string; icon: React.ReactNode; content: React.ReactNode }[] = [
+          { key: 'general',          label: 'Genel',              icon: <GlobalOutlined />, content: generalContent },
+          // T8.4 — MFA artık kullanıcı bazlı /profile sayfasında (her
+          // authenticated kullanıcı kendi MFA'sını yönetebilsin diye).
+          // Settings org-admin gated; viewer/location_admin buradan kendi
+          // MFA'sına ulaşamıyordu. Kaldırıldı.
+          { key: 'notifications',    label: 'Bildirimler',        icon: <BellOutlined />,   content: <NotificationChannelsTab /> },
+          { key: 'alert-rules',      label: 'Uyarı Kuralları',    icon: <AlertOutlined />,  content: <AlertRulesTab /> },
+          { key: 'maintenance',      label: 'Bakım Pencereleri',  icon: <ToolOutlined />,   content: <MaintenanceWindowsTab /> },
+          { key: 'credentials',      label: 'Kimlik Profilleri',  icon: <SafetyOutlined />, content: <CredentialProfilesTab /> },
+          { key: 'rotation',         label: 'Şifre Rotasyonu',    icon: <SyncOutlined />,   content: <SecretRotationTab /> },
+          { key: 'sla',              label: 'SLA Politikaları',   icon: <RiseOutlined />,   content: <SlaPoliciesTab /> },
+          { key: 'snmp',             label: 'SNMP',               icon: <WifiOutlined />,   content: <SnmpConfigTab /> },
+          { key: 'api-tokens',       label: 'API Tokenlar',       icon: <KeyOutlined />,    content: <ApiTokensTab /> },
+          { key: 'driver-templates', label: 'Sürücü Şablonları',  icon: <CodeOutlined />,   content: <DriverTemplatesPage /> },
+          { key: 'ai',               label: 'AI Asistanı',        icon: <RobotOutlined />,  content: <AISettingsTab /> },
+        ]
+        const active = TABS.find((t) => t.key === activeTab) ?? TABS[0]
+        return (
+          <div style={{ display: 'grid', gridTemplateColumns: '230px 1fr', gap: 14, flex: 1, minHeight: 0 }}>
+            {/* Sol nav */}
+            <div className="nm-card" style={{ padding: 6, height: 'fit-content', position: 'sticky', top: 8 }}>
+              {TABS.map((tab) => {
+                const isActive = tab.key === active.key
+                return (
+                  <div key={tab.key}
+                    className={`nm-navitem ${isActive ? 'active' : ''}`}
+                    onClick={() => setSearchParams({ tab: tab.key })}
+                    style={{ cursor: 'pointer' }}>
+                    <span className="nm-navicon">{tab.icon}</span>
+                    <span>{tab.label}</span>
+                  </div>
+                )
+              })}
+            </div>
+            {/* Sağ içerik */}
+            <div className="nm-card" style={{ padding: 22, overflow: 'auto', minWidth: 0 }}>
+              {active.content}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }

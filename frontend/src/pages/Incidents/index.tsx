@@ -484,19 +484,70 @@ export default function IncidentsPage() {
     { value: 720, label: 'Son 30 gün' },
   ]
 
+  // Stats derived from the visible page (data.items) + total for the header.
+  // We compute on items because the API doesn't expose aggregate by-state
+  // counts; this matches what the user actually sees in the filter window.
+  const items = data?.items ?? []
+  const openCount       = items.filter((i) => i.state === 'OPEN').length
+  const degradedCount   = items.filter((i) => i.state === 'DEGRADED').length
+  const recoveringCount = items.filter((i) => i.state === 'RECOVERING').length
+  const criticalCount   = items.filter((i) => i.severity === 'critical').length
+  const activeCount     = openCount + degradedCount  // mtbf signal — open + worsening
+  const totalCount      = data?.total ?? 0
+  const windowLabel = HOURS_OPTIONS.find((o) => o.value === filterHours)?.label ?? ''
+
   return (
-    <div style={{ padding: '0 0 24px' }}>
-      {/* ── Header ─── */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Incident RCA</h2>
-          <div style={{ color: '#888', fontSize: 13, marginTop: 2 }}>
-            Kök neden analizi — durum zaman çizelgesi, kaynak dağılımı, topoloji
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>Incident RCA</span></div>
+          <h1 className="nm-page-title">
+            Incident RCA
+            <span className="nm-pill mono">{totalCount} kayıt</span>
+            {activeCount > 0 && (
+              <span className="nm-pill mono" style={{ color: 'var(--crit)', borderColor: 'var(--crit)' }}>
+                {activeCount} aktif
+              </span>
+            )}
+          </h1>
+          <div className="nm-page-sub">
+            K&#xF6;k neden analizi &#xB7; durum zaman &#xE7;izelgesi &#xB7;
+            kaynak da&#x11F;&#x131;l&#x131;m&#x131; &#xB7; topoloji &#xB7; {windowLabel.toLowerCase()}.
           </div>
         </div>
         <Button icon={<ReloadOutlined />} onClick={() => qc.invalidateQueries({ queryKey: ['incidents'] })}>
           Yenile
         </Button>
+      </div>
+
+      {/* NOC stat bar — 5 KPIs (live aggregates from the visible window) */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM</div>
+          <div className="nm-stat-val">{totalCount}</div>
+          <div className="nm-stat-delta">{windowLabel}</div>
+        </div>
+        <div className={`nm-stat ${openCount > 0 ? 'crit' : 'ok'}`}>
+          <div className="nm-stat-label">AÇIK</div>
+          <div className="nm-stat-val">{openCount}</div>
+          <div className="nm-stat-delta">aktif sorun</div>
+        </div>
+        <div className={`nm-stat ${degradedCount > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">AĞIRLAŞTI</div>
+          <div className="nm-stat-val">{degradedCount}</div>
+          <div className="nm-stat-delta">durumu k&#xF6;t&#xFC;le&#x15F;ti</div>
+        </div>
+        <div className={`nm-stat ${recoveringCount > 0 ? 'warn' : 'ok'}`}>
+          <div className="nm-stat-label">KURTARILIYOR</div>
+          <div className="nm-stat-val">{recoveringCount}</div>
+          <div className="nm-stat-delta">do&#x11F;rulama bekliyor</div>
+        </div>
+        <div className={`nm-stat ${criticalCount > 0 ? 'crit' : ''}`}>
+          <div className="nm-stat-label">CRITICAL</div>
+          <div className="nm-stat-val">{criticalCount}</div>
+          <div className="nm-stat-delta">en y&#xFC;ksek &#x15F;iddet</div>
+        </div>
       </div>
 
       {/* ── Filters ─── */}
@@ -535,6 +586,7 @@ export default function IncidentsPage() {
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
       ) : (
+        <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
         <Table
           dataSource={data?.items ?? []}
           rowKey="id"
@@ -563,6 +615,7 @@ export default function IncidentsPage() {
             r.state === 'OPEN' || r.state === 'DEGRADED' ? 'incident-row-active' : ''
           }
         />
+        </div>
       )}
 
       {/* ── RCA Drawer ─── */}

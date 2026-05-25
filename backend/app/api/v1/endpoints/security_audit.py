@@ -22,6 +22,140 @@ router = APIRouter()
 
 class RunAuditRequest(BaseModel):
     device_ids: Optional[list[int]] = None  # None = all active devices
+    # T8.4 — opsiyonel ComplianceProfile.id; verilirse audit sadece o
+    #profile'ın enabled_rule_ids set'i ile filtrelenir. None ise default
+    #profile (varsa) kullanılır, yoksa eski davranış: tüm built-in kurallar.
+    profile_id: Optional[int] = None
+
+
+# ── T8.4 — Built-in rules listing + ComplianceProfile CRUD ───────────────────
+
+class ProfilePayload(BaseModel):
+    name: str
+    description: Optional[str] = None
+    enabled_rule_ids: list[str]
+    is_default: bool = False
+
+
+@router.get("/rules")
+async def list_builtin_rules(_: CurrentUser = None):
+    """Built-in rule kataloğu — kullanıcı bir profile yaratırken bu listeden
+    seçer. Hiçbir DB call'u yok; sadece in-process registry'yi expose eder."""
+    from app.services.security_audit_service import BUILTIN_RULES
+    return {"rules": BUILTIN_RULES, "total": len(BUILTIN_RULES)}
+
+
+@router.get("/profiles")
+async def list_profiles(
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    from app.models.compliance_profile import ComplianceProfile
+    rows = (await db.execute(
+        select(ComplianceProfile).order_by(ComplianceProfile.is_default.desc(), ComplianceProfile.name)
+    )).scalars().all()
+    return [
+        {
+            "id": p.id, "name": p.name, "description": p.description,
+            "enabled_rule_ids": p.enabled_rule_ids, "is_default": p.is_default,
+            "created_at": p.created_at.isoformat(),
+            "updated_at": p.updated_at.isoformat(),
+        } for p in rows
+    ]
+
+
+@router.post("/profiles")
+async def create_profile(
+    payload: ProfilePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    from app.models.compliance_profile import ComplianceProfile
+    from app.services.security_audit_service import BUILTIN_RULE_IDS
+
+    # Validate rule_ids — bilinmeyenleri sessizce drop etmek yerine 400
+    unknown = [r for r in payload.enabled_rule_ids if r not in BUILTIN_RULE_IDS]
+    if unknown:
+        raise HTTPException(400, f"Bilinmeyen kural id: {unknown}")
+
+    # Eğer is_default seçildiyse aynı org'taki diğer profile'lardan default
+    #bayrağını kaldır (DB'de unique partial index v2'de eklenecek).
+    if payload.is_default:
+        await db.execute(
+            __import__('sqlalchemy').text(
+                "UPDATE compliance_profiles SET is_default=false WHERE is_default=true"
+            )
+        )
+
+    p = ComplianceProfile(
+        name=payload.name,
+        description=payload.description,
+        enabled_rule_ids=payload.enabled_rule_ids,
+        is_default=payload.is_default,
+        created_by_id=current_user.id,
+    )
+    db.add(p)
+    await db.commit()
+    await db.refresh(p)
+    await log_action(db, current_user, "compliance_profile_created", "compliance_profile", p.id, p.name, request=request)
+    return {"id": p.id, "name": p.name, "is_default": p.is_default}
+
+
+@router.put("/profiles/{profile_id}")
+async def update_profile(
+    profile_id: int,
+    payload: ProfilePayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    from app.models.compliance_profile import ComplianceProfile
+    from app.services.security_audit_service import BUILTIN_RULE_IDS
+
+    unknown = [r for r in payload.enabled_rule_ids if r not in BUILTIN_RULE_IDS]
+    if unknown:
+        raise HTTPException(400, f"Bilinmeyen kural id: {unknown}")
+
+    p = (await db.execute(
+        select(ComplianceProfile).where(ComplianceProfile.id == profile_id)
+    )).scalar_one_or_none()
+    if not p:
+        raise HTTPException(404, "Profile bulunamadı")
+
+    if payload.is_default and not p.is_default:
+        await db.execute(
+            __import__('sqlalchemy').text(
+                "UPDATE compliance_profiles SET is_default=false WHERE is_default=true AND id <> :i"
+            ), {"i": profile_id}
+        )
+
+    p.name = payload.name
+    p.description = payload.description
+    p.enabled_rule_ids = payload.enabled_rule_ids
+    p.is_default = payload.is_default
+    await db.commit()
+    await log_action(db, current_user, "compliance_profile_updated", "compliance_profile", p.id, p.name, request=request)
+    return {"id": p.id, "name": p.name}
+
+
+@router.delete("/profiles/{profile_id}", status_code=204)
+async def delete_profile(
+    profile_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    from app.models.compliance_profile import ComplianceProfile
+    p = (await db.execute(
+        select(ComplianceProfile).where(ComplianceProfile.id == profile_id)
+    )).scalar_one_or_none()
+    if not p:
+        raise HTTPException(404, "Profile bulunamadı")
+    name = p.name
+    await db.delete(p)
+    await db.commit()
+    await log_action(db, current_user, "compliance_profile_deleted", "compliance_profile", profile_id, name, request=request)
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
@@ -291,6 +425,30 @@ async def trigger_audit(
     current_user: CurrentUser = None,
 ):
     from app.workers.tasks.security_audit_tasks import run_security_audit
+    from app.models.compliance_profile import ComplianceProfile
+
+    # T8.4 — profile çözümlemesi:
+    #   1. body.profile_id verildi → onu kullan
+    #   2. verilmediyse → org'taki is_default=True profile'ı bul
+    #   3. yoksa → None (audit eski davranış: tüm built-in kuralları çalıştır)
+    enabled_rule_ids: Optional[list[str]] = None
+    profile_name: Optional[str] = None
+    target_pid = body.profile_id
+    if target_pid is None:
+        row = (await db.execute(
+            select(ComplianceProfile).where(ComplianceProfile.is_default == True).limit(1)
+        )).scalar_one_or_none()
+        if row:
+            target_pid = row.id
+    if target_pid is not None:
+        prof = (await db.execute(
+            select(ComplianceProfile).where(ComplianceProfile.id == target_pid)
+        )).scalar_one_or_none()
+        if prof is None and body.profile_id is not None:
+            raise HTTPException(400, "Belirtilen compliance profile bulunamadı")
+        if prof is not None:
+            enabled_rule_ids = list(prof.enabled_rule_ids or [])
+            profile_name = prof.name
 
     if body.device_ids:
         q = select(Device.id).where(Device.id.in_(body.device_ids), Device.is_active == True)
@@ -304,8 +462,9 @@ async def trigger_audit(
     if not device_ids:
         raise HTTPException(400, "Aktif cihaz bulunamadı")
 
+    task_name = f"Security Audit ({profile_name})" if profile_name else "Security Audit"
     task = Task(
-        name="Security Audit",
+        name=task_name,
         type=TaskType.MONITOR_POLL,
         status=TaskStatus.PENDING,
         device_ids=device_ids,
@@ -316,15 +475,23 @@ async def trigger_audit(
     await db.commit()
     await db.refresh(task)
 
+    # Pass enabled_rule_ids as positional arg (Celery worker signature
+    # updated to accept it as an optional 3rd arg with default=None).
     run_security_audit.apply_async(
-        args=[task.id, device_ids],
+        args=[task.id, device_ids, enabled_rule_ids],
         queue="monitor",
     )
 
     await log_action(
         db, current_user, "security_audit_run", "security_audit", str(task.id),
-        f"{len(device_ids)} cihaz için güvenlik denetimi",
+        f"{len(device_ids)} cihaz için güvenlik denetimi" + (f" — profile: {profile_name}" if profile_name else ""),
         request=request,
     )
 
-    return {"task_id": task.id, "device_count": len(device_ids)}
+    return {
+        "task_id": task.id,
+        "device_count": len(device_ids),
+        "profile_id": target_pid,
+        "profile_name": profile_name,
+        "rule_count": len(enabled_rule_ids) if enabled_rule_ids is not None else None,
+    }

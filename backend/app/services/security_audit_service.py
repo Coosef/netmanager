@@ -288,10 +288,55 @@ H3C_LIKE   = {"h3c_comware"}
 ARUBA_LIKE = {"aruba_osswitch", "aruba_aoscx", "hp_procurve"}
 
 
-async def run_device_audit(device, ssh_manager) -> tuple[int, str, list[dict], Optional[str]]:
+# ── Built-in rule registry (T8.4 — parametrik uyumluluk) ───────────────────────
+# Mevcut hard-coded check fonksiyonlarının dönüştürdüğü tüm rule id'leri.
+# Kullanıcı bir compliance profile yarattığında bu listeden seçer; profile
+# `enabled_rule_ids` set'i `_filter_findings` ile audit çıktısına uygulanır.
+# Rule id'leri aile-genel (telnet_disabled cisco/h3c/aruba'da var, tek id ile
+# yönetilir → kullanıcı "Telnet kapalı olsun" derken tek tıklama tüm
+# platformları kapsar).
+
+BUILTIN_RULES: list[dict] = [
+    # ── Erişim Kontrolü
+    {"id": "ssh_v2",              "name": "SSH Versiyon 2",                   "category": "Erişim Kontrolü",   "weight": 15, "platforms": ["cisco_like"],                         "desc": "SSH v2 protokol versiyonu aktif (v1 zafiyetlere açık)"},
+    {"id": "ssh_enabled",         "name": "SSH Aktif",                        "category": "Erişim Kontrolü",   "weight": 20, "platforms": ["h3c"],                                "desc": "SSH yönetim erişimi etkin"},
+    {"id": "telnet_disabled",     "name": "Telnet Devre Dışı",                "category": "Erişim Kontrolü",   "weight": 20, "platforms": ["cisco_like", "h3c", "aruba"],         "desc": "Açık metin telnet erişimi devre dışı"},
+    {"id": "console_timeout",     "name": "Konsol Oturum Zaman Aşımı",        "category": "Erişim Kontrolü",   "weight":  5, "platforms": ["cisco_like"],                         "desc": "Konsol oturumu belirli süre sonra düşer"},
+    {"id": "banner_configured",   "name": "Güvenlik Uyarı Banner",            "category": "Erişim Kontrolü",   "weight":  5, "platforms": ["cisco_like", "aruba"],                "desc": "Yetkisiz erişim uyarı mesajı tanımlı"},
+    # ── Kimlik Doğrulama
+    {"id": "enable_secret",       "name": "Enable Secret",                    "category": "Kimlik Doğrulama",  "weight": 10, "platforms": ["cisco_like"],                         "desc": "Enable secret (MD5 hash) kullanılıyor"},
+    {"id": "password_encryption", "name": "Şifre Şifreleme (Type-7)",         "category": "Kimlik Doğrulama",  "weight": 10, "platforms": ["cisco_like"],                         "desc": "Konfigürasyondaki şifreler şifreli depolanıyor"},
+    {"id": "password_complexity", "name": "Şifre Karmaşıklık Politikası",     "category": "Kimlik Doğrulama",  "weight": 20, "platforms": ["h3c"],                                "desc": "Şifre uzunluk/karakter karmaşıklık zorunluluğu"},
+    # ── Ağ Güvenliği
+    {"id": "snmp_community",      "name": "SNMP Community Güvenliği",         "category": "Ağ Güvenliği",      "weight": 10, "platforms": ["cisco_like"],                         "desc": "public/private gibi default SNMP community'leri yok"},
+    {"id": "no_http",             "name": "HTTP Yönetimi Kapalı",             "category": "Ağ Güvenliği",      "weight": 10, "platforms": ["cisco_like"],                         "desc": "Şifresiz HTTP yönetim arayüzü devre dışı"},
+    # ── İzleme & Loglama
+    {"id": "ntp_configured",      "name": "NTP Yapılandırması",               "category": "İzleme & Loglama",  "weight": 10, "platforms": ["cisco_like", "h3c", "aruba"],         "desc": "Zaman senkronizasyonu için NTP sunucusu tanımlı"},
+    {"id": "logging_configured",  "name": "Merkezi Syslog",                   "category": "İzleme & Loglama",  "weight": 10, "platforms": ["cisco_like", "h3c", "aruba"],         "desc": "Loglar merkezi syslog sunucusuna yönlendiriliyor"},
+]
+BUILTIN_RULE_IDS = {r["id"] for r in BUILTIN_RULES}
+
+
+def _filter_findings(findings: list[AuditFinding], enabled_ids: Optional[set[str]]) -> list[AuditFinding]:
+    """T8.4 — enabled_ids verildiyse sadece o rule_id'leri tut. None ise
+    geriye uyum: hepsini geçir (legacy çağrılar etkilenmesin)."""
+    if enabled_ids is None:
+        return findings
+    return [f for f in findings if f.id in enabled_ids]
+
+
+async def run_device_audit(
+    device,
+    ssh_manager,
+    enabled_rule_ids: Optional[set[str]] = None,
+) -> tuple[int, str, list[dict], Optional[str]]:
     """SSH into device, run config audit checks.
 
     Returns (score, grade, findings_as_dicts, error_or_none).
+
+    T8.4 — `enabled_rule_ids` opsiyonel: verildiyse audit çıktısı bu set ile
+    filtrelenir (ComplianceProfile.enabled_rule_ids'den geçer). None ise
+    legacy davranış (tüm built-in kurallar).
     """
     os_type = (device.os_type or "").lower()
 
@@ -310,7 +355,10 @@ async def run_device_audit(device, ssh_manager) -> tuple[int, str, list[dict], O
         if not result.success or not result.output:
             return 0, "F", [], result.error or "Komut çalıştırılamadı"
 
-        findings = audit_fn(result.output)
+        findings = _filter_findings(audit_fn(result.output), enabled_rule_ids)
+        if not findings:
+            # Profile tüm rule'ları kapatmış — anlamlı skor üretemeyiz.
+            return 100, "A", [], None
         score, grade = _score_and_grade(findings)
         return score, grade, [asdict(f) for f in findings], None
     except Exception as exc:

@@ -22,6 +22,7 @@ import { topologyApi } from '@/api/topology'
 import { snmpApi } from '@/api/snmp'
 import { intelligenceApi } from '@/api/intelligence'
 import { servicesApi } from '@/api/services'
+import { useAuthStore } from '@/store/auth'
 import type { Device, ConfigBackup, NetworkInterface, Vlan } from '@/types'
 import SwitchPortPanel, { type PortUtil } from '@/components/SwitchPortPanel'
 import dayjs from 'dayjs'
@@ -97,6 +98,12 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
   const [assignVlanModal, setAssignVlanModal] = useState<{ iface: NetworkInterface } | null>(null)
   const [vlanForm] = Form.useForm()
   const [assignForm] = Form.useForm()
+  // RBAC F9 — same flag set as the device list page. Mirrors backend's
+  // SYSTEM_ROLE_PERMISSIONS (devices.connect / config.backup). Viewer
+  // gets none of these → all action buttons + Terminal/Live-Config tabs
+  // hidden. Backend re-checks on every call.
+  const canConnect = useAuthStore((s) => s.can('devices', 'connect'))
+  const canBackup  = useAuthStore((s) => s.can('config_backups', 'backup'))
   const [terminalCmd, setTerminalCmd] = useState('')
   const [terminalHistory, setTerminalHistory] = useState<{ cmd: string; output: string; ok: boolean }[]>([])
   const [pendingConfirm, setPendingConfirm] = useState<{ cmd: string; warning: string } | null>(null)
@@ -481,6 +488,9 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
       title: 'İşlemler', key: 'actions', width: 180,
       render: (_: unknown, row: NetworkInterface) => {
         const isDown = row.status === 'disabled' || row.status === 'notconnect'
+        // RBAC F9 — both port toggle and VLAN assign are mutating actions
+        // that re-write switch config via SSH; viewer gets nothing here.
+        if (!canConnect) return <span style={{ color: 'var(--fg-3)' }}>—</span>
         return (
           <Space size="small">
             <Popconfirm
@@ -531,26 +541,28 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
 
         {/* ── Bilgiler ─────────────────────────────────────────────────────── */}
         <Tabs.TabPane tab="Bilgiler" key="info">
-          <Space style={{ marginBottom: 12 }} wrap>
-            <Button icon={<DatabaseOutlined />} loading={fetchInfoMutation.isPending}
-              onClick={() => fetchInfoMutation.mutate()}>
-              SSH'tan Bilgileri Çek
-            </Button>
-            <Button
-              icon={<ApiOutlined />}
-              loading={sshTestMutation.isPending}
-              onClick={() => sshTestMutation.mutate()}
-            >
-              SSH Test Et
-            </Button>
-            <Button
-              icon={<ScanOutlined />}
-              loading={scanNeighborsMutation.isPending}
-              onClick={() => { scanNeighborsMutation.mutate(); setActiveTab('neighbors') }}
-            >
-              Komşuları Tara
-            </Button>
-          </Space>
+          {canConnect && (
+            <Space style={{ marginBottom: 12 }} wrap>
+              <Button icon={<DatabaseOutlined />} loading={fetchInfoMutation.isPending}
+                onClick={() => fetchInfoMutation.mutate()}>
+                SSH'tan Bilgileri Çek
+              </Button>
+              <Button
+                icon={<ApiOutlined />}
+                loading={sshTestMutation.isPending}
+                onClick={() => sshTestMutation.mutate()}
+              >
+                SSH Test Et
+              </Button>
+              <Button
+                icon={<ScanOutlined />}
+                loading={scanNeighborsMutation.isPending}
+                onClick={() => { scanNeighborsMutation.mutate(); setActiveTab('neighbors') }}
+              >
+                Komşuları Tara
+              </Button>
+            </Space>
+          )}
           <Descriptions column={2} bordered size="small">
             <Descriptions.Item label="Hostname">{currentDevice.hostname}</Descriptions.Item>
             <Descriptions.Item label="IP Adresi">{currentDevice.ip_address}</Descriptions.Item>
@@ -566,10 +578,33 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
             <Descriptions.Item label="Proxy Agent">
               {(() => {
                 if (!currentDevice.agent_id) return <Tag color="default">Direkt SSH</Tag>
-                const ag = agents.find(a => a.id === currentDevice.agent_id)
-                return ag
-                  ? <Space size={4}><RobotOutlined /><span>{ag.name}</span><Tag color={ag.status === 'online' ? 'success' : 'error'}>{ag.status}</Tag></Space>
-                  : <Tag color="warning">Agent bulunamadı ({currentDevice.agent_id})</Tag>
+                // RBAC F11 — backend now ships agent_name + agent_status
+                // resolved under a superadmin context, so the name renders
+                // even when the agent lives in a location the caller can't
+                // see. Fall back to the cached agents list only if the
+                // backend didn't ship them (older endpoints), and finally
+                // to a friendlier 'erişim dışı' line — never the raw id.
+                const name = currentDevice.agent_name
+                  || agents.find((a) => a.id === currentDevice.agent_id)?.name
+                const status = currentDevice.agent_status
+                  || agents.find((a) => a.id === currentDevice.agent_id)?.status
+                if (name) {
+                  return (
+                    <Space size={4}>
+                      <RobotOutlined />
+                      <span>{name}</span>
+                      {status && (
+                        <Tag color={status === 'online' ? 'success' : 'error'}>{status}</Tag>
+                      )}
+                    </Space>
+                  )
+                }
+                // Last resort — should be rare after F11.
+                return (
+                  <Tooltip title={`Agent kimliği: ${currentDevice.agent_id}`}>
+                    <Tag color="default">Agent · görünürlük dışı</Tag>
+                  </Tooltip>
+                )
               })()}
             </Descriptions.Item>
             <Descriptions.Item label="Durum">
@@ -643,7 +678,9 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
               loading={vlanFetching}
               onClick={() => setVlanRefreshKey(k => k + 1)}
             >Yenile</Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setVlanModalOpen(true)}>VLAN Ekle</Button>
+            {canConnect && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={() => setVlanModalOpen(true)}>VLAN Ekle</Button>
+            )}
             {vlanData?.fetched_at && (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 Son güncelleme: {Math.round((Date.now() / 1000 - vlanData.fetched_at) / 60)} dk önce
@@ -659,7 +696,9 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
           )}
         </Tabs.TabPane>
 
-        {/* ── SSH Terminal ─────────────────────────────────────────────────── */}
+        {/* ── SSH Terminal — RBAC F9: hidden for VIEWER (live shell + write
+             mode toggle are mutating actions) ───────────────────────── */}
+        {canConnect && (
         <Tabs.TabPane tab={<span><CodeOutlined /> Terminal</span>} key="terminal">
           <Space style={{ marginBottom: 8, width: '100%', justifyContent: 'space-between' }} align="center">
             <Space.Compact style={{ flex: 1 }}>
@@ -749,8 +788,10 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
             <p>Komut: <code style={{ background: '#1e1e1e', color: '#4ec9b0', padding: '2px 6px', borderRadius: 4 }}>{pendingConfirm?.cmd}</code></p>
           </Modal>
         </Tabs.TabPane>
+        )}
 
-        {/* ── Canlı Config ─────────────────────────────────────────────────── */}
+        {/* ── Canlı Config — RBAC F9: hidden for VIEWER (SSH fetch on demand) ── */}
+        {canConnect && (
         <Tabs.TabPane tab="Canlı Config" key="config">
           <Space style={{ marginBottom: 8 }}>
             <Button icon={<ReloadOutlined />} onClick={() => refetchConfig()}>Yenile</Button>
@@ -773,19 +814,22 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
             <Typography.Text type="danger">{config?.error || 'Config alınamadı'}</Typography.Text>
           )}
         </Tabs.TabPane>
+        )}
 
         {/* ── Komşular ─────────────────────────────────────────────────────── */}
         <Tabs.TabPane tab={<span><ApartmentOutlined /> Komşular</span>} key="neighbors">
           <Space style={{ marginBottom: 8 }}>
             <Button icon={<ReloadOutlined />} onClick={() => refetchNeighbors()}>Yenile</Button>
-            <Button
-              type="primary"
-              icon={<ScanOutlined />}
-              loading={scanNeighborsMutation.isPending}
-              onClick={() => scanNeighborsMutation.mutate()}
-            >
-              LLDP/CDP Tara
-            </Button>
+            {canConnect && (
+              <Button
+                type="primary"
+                icon={<ScanOutlined />}
+                loading={scanNeighborsMutation.isPending}
+                onClick={() => scanNeighborsMutation.mutate()}
+              >
+                LLDP/CDP Tara
+              </Button>
+            )}
           </Space>
           {neighborsLoading ? <Spin /> : (
             <Table
@@ -939,10 +983,12 @@ export default function DeviceDetail({ device, onUpdated }: Props) {
         {/* ── Yedekler ─────────────────────────────────────────────────────── */}
         <Tabs.TabPane tab="Yedekler" key="backups">
           <Space style={{ marginBottom: 8 }} wrap>
-            <Button type="primary" icon={<SaveOutlined />} loading={takeBackupMutation.isPending}
-              onClick={() => takeBackupMutation.mutate()}>
-              Yedek Al
-            </Button>
+            {canBackup && (
+              <Button type="primary" icon={<SaveOutlined />} loading={takeBackupMutation.isPending}
+                onClick={() => takeBackupMutation.mutate()}>
+                Yedek Al
+              </Button>
+            )}
             <Button icon={<ReloadOutlined />} onClick={() => refetchBackups()}>Yenile</Button>
             <Tooltip title={!diffFrom || !diffTo ? 'Karşılaştırmak için "Başlangıç" ve "Bitiş" seçin' : undefined}>
               <Button

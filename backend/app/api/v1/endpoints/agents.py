@@ -110,6 +110,12 @@ async def _emit_agent_event(db: AsyncSession, agent: Agent, event_type: str):
         title=title,
         message=f"Agent {agent.id} ({agent.machine_hostname or agent.last_ip or '?'})",
         details={"agent_id": agent.id, "platform": agent.platform, "version": agent.version},
+        # Stamp the agent's own org/location explicitly. The WS connection is
+        # RLS-scoped to the agent (not super-admin), and the transaction-local
+        # GUCs are cleared by the status commit before this emit — so the
+        # auto-stamp can't resolve org here. The agent record is the source.
+        organization_id=agent.organization_id,
+        location_id=agent.location_id,
     )
     db.add(ev)
 
@@ -509,9 +515,15 @@ async def download_installer(
     if platform not in ("linux", "windows"):
         raise HTTPException(status_code=400, detail="platform must be linux or windows")
 
+    # Public, credential-authenticated endpoint: the installer machine has no
+    # user session, so `get_db` carries no RLS context and FORCE ROW LEVEL
+    # SECURITY on `agents` would hide every row (→ 404). Bypass RLS for this
+    # lookup (transaction-local), then authenticate via the agent_key itself.
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
     agent = result.scalar_one_or_none()
-    if not agent:
+    if not agent or not verify_password(agent_key, agent.agent_key_hash):
         raise HTTPException(status_code=404, detail="Agent not found")
 
     if server_url:
@@ -1107,6 +1119,13 @@ async def agent_websocket(
     key: str = Query(...),
     db: AsyncSession = Depends(get_db),
 ):
+    # Agent WS connect is credential-authenticated (the agent_key below), not a
+    # user session — `get_db` carries no RLS context, so FORCE ROW LEVEL
+    # SECURITY on `agents` would hide the row and reject every connect (4004 →
+    # 403). Bypass RLS for the agent's own connection; the agent_key is the
+    # authenticator and the agent record fixes its org/location scope.
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
     result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
     agent = result.scalar_one_or_none()
 
@@ -1135,6 +1154,16 @@ async def agent_websocket(
             await websocket.close(code=4003)
             return
 
+    # Authenticated via agent_key — now NARROW from the lookup bypass to the
+    # agent's OWN org/location so the rest of the connection is RLS-scoped,
+    # not super-admin (Faz 7 Phase 6e: agent ops scoped to the agent's scope).
+    await db.execute(_sql_text(
+        "SELECT set_config('app.is_super_admin','off',true),"
+        "       set_config('app.current_org_id', :o, true),"
+        "       set_config('app.current_location_id', :l, true)"
+    ), {"o": str(agent.organization_id),
+        "l": str(agent.location_id) if agent.location_id is not None else ''})
+
     await websocket.accept()
 
     # Reset failed auth on successful connect
@@ -1146,8 +1175,19 @@ async def agent_websocket(
     agent.total_connections = (agent.total_connections or 0) + 1
     await db.commit()
 
-    # Emit online event if agent was previously offline
+    # Emit online event if agent was previously offline.
+    # T8.4 hotfix — the `db.commit()` above ended the txn that held our
+    # `set_config(..., is_local := true)` GUCs, so when the NetworkEvent
+    # INSERT runs below the RLS WITH CHECK (`organization_id = current_org_id`)
+    # has no current_org_id to compare against and the row is rejected. Re-set
+    # the GUCs on the new txn before emitting.
     if was_offline:
+        await db.execute(_sql_text(
+            "SELECT set_config('app.is_super_admin','off',true),"
+            "       set_config('app.current_org_id', :o, true),"
+            "       set_config('app.current_location_id', :l, true)"
+        ), {"o": str(agent.organization_id),
+            "l": str(agent.location_id) if agent.location_id is not None else ''})
         await _emit_agent_event(db, agent, "agent_online")
         await db.commit()
 
@@ -1274,8 +1314,14 @@ async def agent_websocket(
         except Exception:
             pass
 
-        # Emit offline event
+        # Emit offline event — same GUC-reset issue as the online path above.
         try:
+            await db.execute(_sql_text(
+                "SELECT set_config('app.is_super_admin','off',true),"
+                "       set_config('app.current_org_id', :o, true),"
+                "       set_config('app.current_location_id', :l, true)"
+            ), {"o": str(agent.organization_id),
+                "l": str(agent.location_id) if agent.location_id is not None else ''})
             await _emit_agent_event(db, agent, "agent_offline")
             await db.commit()
         except Exception:

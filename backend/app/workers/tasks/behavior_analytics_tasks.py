@@ -247,36 +247,65 @@ async def _do_update_baselines():
             if r.avg_out is not None:
                 await _upsert_baseline(db, r.device_id, "traffic_out_pct", float(r.avg_out))
 
-        # ── VLAN count + known VLAN set per device ─────────────────────────────
-        vlan_count_rows = (await db.execute(
-            select(
-                MacAddressEntry.device_id,
-                func.count(func.distinct(MacAddressEntry.vlan_id)).label("cnt"),
-            )
-            .where(MacAddressEntry.is_active == True)
-            .where(MacAddressEntry.vlan_id.isnot(None))
-            .group_by(MacAddressEntry.device_id)
-        )).all()
+        # ── VLAN baseline — switch'in GERÇEK 'show vlan' çıktısından ─────────
+        # Eskiden MacAddressEntry'den türetiliyordu (cihazın MAC tablosundaki
+        # vlan_id sütunu). MAC tablosu = anlık iz; bir VLAN switch'te tanımlı
+        # olsa bile o anda trafik yoksa MAC tablosunda gözükmüyor → baseline'a
+        # girmiyor → sonra o VLAN'da bir cihaz aktifleştiğinde detect_anomalies
+        # "Beklenmeyen VLAN" alarmı tetikliyor (false positive — kullanıcı
+        #raporu: "VLAN switch'te zaten ekli ama sürekli alarm üretiyor").
+        #
+        # Doğru kaynak: SSH `show vlan` (interfaces.py `_vlan_cmd` + `_parse_vlans`
+        # zaten production'da kullanılıyor; cevaplar Redis'te 5 dk cache'li).
+        # Worker bu SSH çağrılarını paralel atar; başarısız cihazlar sessizce
+        #atlanır (zaten next-day worker run'da retry edilir).
+        from app.models.device import Device as _Dev
+        from app.api.v1.endpoints.interfaces import _vlan_cmd, _parse_vlans
+        from app.services.ssh_manager import ssh_manager as _ssh
 
-        vlan_set_rows = (await db.execute(
-            select(MacAddressEntry.device_id, MacAddressEntry.vlan_id)
-            .where(MacAddressEntry.is_active == True)
-            .where(MacAddressEntry.vlan_id.isnot(None))
-            .distinct()
-        )).all()
+        devices = (await db.execute(
+            select(_Dev).where(_Dev.is_active == True)
+        )).scalars().all()
 
-        device_vlans: dict[int, set] = {}
-        for r in vlan_set_rows:
-            device_vlans.setdefault(r.device_id, set()).add(r.vlan_id)
+        async def _fetch_one(dev) -> tuple[int, list[int] | None]:
+            try:
+                result = await asyncio.wait_for(
+                    _ssh.execute_command(dev, _vlan_cmd(dev.os_type)),
+                    timeout=12.0,
+                )
+            except Exception:
+                return dev.id, None
+            if not result.success:
+                return dev.id, None
+            try:
+                parsed = _parse_vlans(result.output, dev.os_type)
+                vids = sorted({int(v["id"]) for v in parsed if v.get("id") is not None})
+            except Exception:
+                return dev.id, None
+            return dev.id, vids
 
-        for r in vlan_count_rows:
-            known = sorted(device_vlans.get(r.device_id, set()))
-            await _upsert_baseline(db, r.device_id, "vlan_count", float(r.cnt),
-                                   known_vlans=known)
+        # Concurrency cap so we don't drown the SSH pool. 10 in-flight is plenty
+        # for a daily batch (63 devices × ~3s each ⇒ ~20s wall time at cap=10).
+        sem = asyncio.Semaphore(10)
+        async def _bounded(dev):
+            async with sem:
+                return await _fetch_one(dev)
+
+        results = await asyncio.gather(*(_bounded(d) for d in devices), return_exceptions=False)
+
+        vlan_ok = 0
+        vlan_skipped = 0
+        for did, vids in results:
+            if vids is None:
+                vlan_skipped += 1
+                continue
+            vlan_ok += 1
+            await _upsert_baseline(db, did, "vlan_count", float(len(vids)),
+                                   known_vlans=vids)
 
         await db.commit()
-        log.info("behavior: baselines updated, mac=%d traffic=%d vlan=%d",
-                 len(mac_rows), len(traffic_rows), len(vlan_count_rows))
+        log.info("behavior: baselines updated, mac=%d traffic=%d vlan_ok=%d vlan_skipped=%d",
+                 len(mac_rows), len(traffic_rows), vlan_ok, vlan_skipped)
 
 
 # ── detect_anomalies impl ─────────────────────────────────────────────────────
@@ -386,20 +415,30 @@ async def _do_detect_anomalies():
 
         for device_id, vset in current_vlans.items():
             b = bl.get((device_id, "vlan_count"))
-            if b and b.known_vlans and b.sample_count >= 3:
-                new_vlans = vset - set(b.known_vlans)
-                if new_vlans:
-                    dev = await _dev(device_id)
-                    if dev:
-                        payload = await _fire(db, dev, "vlan_anomaly", "warning",
-                            f"Beklenmeyen VLAN: {dev.hostname}",
-                            f"Yeni VLAN'lar: {sorted(new_vlans)}",
-                            details={"new_vlans": sorted(new_vlans),
-                                     "known_vlans": sorted(b.known_vlans)},
-                            dedup_key=f"vlan_{device_id}_{'_'.join(str(v) for v in sorted(new_vlans))}")
-                        if payload:
-                            notify_queue.append(payload)
-                            fired += 1
+            # T8.4 — baseline artık switch SSH `show vlan` çıktısından (gerçek
+            #switch konfig'i) seed ediliyor; tek snapshot bile güvenilir.
+            #Eski `sample_count >= 3` koşulu MAC-türetimli baseline için
+            #anlamlıydı (gürültü filtresi), şimdi seed-yok / boş-baseline
+            #durumunu skip etmek yeterli. Seed yoksa sessizce atla — bir
+            #sonraki update_baselines run'ında dolacak.
+            if not b or not b.known_vlans:
+                continue
+            new_vlans = vset - set(b.known_vlans)
+            if new_vlans:
+                dev = await _dev(device_id)
+                if dev:
+                    payload = await _fire(db, dev, "vlan_anomaly", "warning",
+                        f"Beklenmeyen VLAN: {dev.hostname}",
+                        f"Switch konfigürasyonunda OLMAYAN VLAN'larda MAC trafiği görüldü: "
+                        f"{sorted(new_vlans)}. (Switch'te tanımlı VLAN'lar: "
+                        f"{sorted(b.known_vlans)})",
+                        details={"new_vlans": sorted(new_vlans),
+                                 "known_vlans": sorted(b.known_vlans),
+                                 "source": "ssh:show_vlan"},
+                        dedup_key=f"vlan_{device_id}_{'_'.join(str(v) for v in sorted(new_vlans))}")
+                    if payload:
+                        notify_queue.append(payload)
+                        fired += 1
 
         # ── 4. MAC loop suspicion ──────────────────────────────────────────────
         loop_rows = (await db.execute(

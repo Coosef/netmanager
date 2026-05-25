@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Select, Tag, Button, Modal, Checkbox, Space, Tooltip,
   message, Spin, Typography, Divider, Popconfirm,
@@ -6,6 +6,7 @@ import {
 import {
   UserOutlined, SafetyOutlined, CheckCircleFilled, CloseCircleFilled,
   EditOutlined, PlusOutlined, SaveOutlined, DeleteOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { orgAdminApi, type OrgUser } from '@/api/orgAdmin'
@@ -14,7 +15,7 @@ import type { PermissionSet, Permissions } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
 
-const { Title, Text } = Typography
+const { Text } = Typography
 
 function usePageTheme() {
   const { isDark } = useTheme()
@@ -272,45 +273,131 @@ export default function PermissionsPage() {
     setEditName(ps.name)
   }
 
+  // RBAC F4 — 4-role colour/label map; aligned with SYSTEM_ROLE_OPTIONS
+  // in @/types. Legacy aliases (admin, location_*, org_viewer, operator,
+  // member) point at the same colour as their normalised target so older
+  // rows still render correctly.
   const ROLE_COLOR: Record<string, string> = {
-    super_admin: '#ef4444',
-    org_admin: '#3b82f6',
-    member: t.isDark ? '#475569' : '#64748b',
+    super_admin:    '#ef4444',
+    org_admin:      '#f97316',  admin:             '#f97316',
+    location_admin: '#06b6d4',  location_manager:  '#06b6d4',  location_operator: '#06b6d4',
+    viewer:         '#22c55e',  location_viewer:   '#22c55e',  org_viewer:        '#22c55e',
+                                operator:          '#22c55e',  member:            t.isDark ? '#475569' : '#64748b',
   }
   const ROLE_LABEL: Record<string, string> = {
-    super_admin: 'Süper Admin',
-    org_admin: 'Yönetici',
-    member: 'Üye',
+    super_admin:    'Süper Admin',
+    org_admin:      'Org Admin',         admin:             'Org Admin',
+    location_admin: 'Lokasyon Admin',    location_manager:  'Lokasyon Admin',
+                                         location_operator: 'Lokasyon Admin',
+    viewer:         'Görüntüleyici',     location_viewer:   'Görüntüleyici',
+    org_viewer:     'Görüntüleyici',     operator:          'Görüntüleyici',
+    member:         'Üye',  // pre-Faz7 alias — legacy data only
   }
 
-  return (
-    <div style={{ padding: 24, background: t.pageBg, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-      <Title level={4} style={{ color: t.textPrimary, marginBottom: 4 }}>Yetki Yönetimi</Title>
-      <Text style={{ color: t.textMuted, marginBottom: 16, display: 'block' }}>
-        Yetki setlerini düzenle, kullanıcılara ata
-      </Text>
+  // The 4 roles that get all permissions automatically via system_role —
+  // permission_set assignments are only meaningful for the rest.
+  const isFullAccessRole = (r?: string) => r === 'super_admin' || r === 'org_admin'
+  // Roles that need explicit per-location permission_set assignments to do
+  // anything beyond their default read scope.
+  const isManagedRole = (r?: string) => r === 'location_admin' || r === 'viewer'
 
-      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16, flex: 1, alignItems: 'start' }}>
+  // ── Real-data stats for the NOC stat bar ──────────────────────────────
+  // Managed roles with NO assignment = "yetkisiz" — they cannot reach
+  // anything beyond defaults in their org. Super + org admins bypass the
+  // permission set system entirely (full-access info pill).
+  const stats = useMemo(() => {
+    const totalUsers = users.length
+    const managed = users.filter((u) => isManagedRole(u.system_role)).length
+    const fullAccess = users.filter((u) => isFullAccessRole(u.system_role)).length
+    return {
+      totalUsers,
+      members: managed,   // kept name for stat-bar binding below
+      fullAccess,
+      orgSets: orgPermSets.length,
+      globalTemplates: globalPermSets.length,
+      totalSets: permSets.length,
+    }
+  }, [users, orgPermSets.length, globalPermSets.length, permSets.length])
+
+  return (
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>Yetki Yönetimi</span></div>
+          <h1 className="nm-page-title">
+            Yetki Yönetimi
+            <span className="nm-pill mono">{stats.totalSets} set</span>
+          </h1>
+          <div className="nm-page-sub">
+            Yetki setleri (permission sets) tan&#x131;mlay&#x131;n, kullan&#x131;c&#x131;lara organizasyon ya da lokasyon baz&#x131;nda atay&#x131;n.
+            Süper admin + org admin tüm yetkileri otomatik al&#x131;r.
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canEdit && (
+            <Button type="primary" icon={<PlusOutlined />}
+              onClick={() => { setNewSetName(''); setCloneFromId(null); setNewSetModal(true) }}>
+              Yeni Yetki Seti
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM KULLANICI</div>
+          <div className="nm-stat-val">{stats.totalUsers}</div>
+          <div className="nm-stat-delta">{stats.members} üye</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">YETKİ SETİ</div>
+          <div className="nm-stat-val">{stats.totalSets}</div>
+          <div className="nm-stat-delta">tüm setler</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">ORG SETİ</div>
+          <div className="nm-stat-val">{stats.orgSets}</div>
+          <div className="nm-stat-delta">organizasyona özel</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">GLOBAL ŞABLON</div>
+          <div className="nm-stat-val">{stats.globalTemplates}</div>
+          <div className="nm-stat-delta">salt-okunur</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">OTOMATİK TAM YETKİ</div>
+          <div className="nm-stat-val">{stats.fullAccess}</div>
+          <div className="nm-stat-delta">süper + org admin</div>
+        </div>
+        <div className={`nm-stat ${selectedUser && isManagedRole(selectedUser.system_role) && assignments.length === 0 ? 'crit' : ''}`}>
+          <div className="nm-stat-label">SEÇİLİ KULLANICI</div>
+          <div className="nm-stat-val" style={{ fontSize: selectedUser ? 14 : 22 }}>
+            {selectedUser ? selectedUser.username : '—'}
+          </div>
+          <div className="nm-stat-delta">
+            {selectedUser
+              ? (isFullAccessRole(selectedUser.system_role)
+                  ? 'rol-tabanlı tam yetki'
+                  : `${assignments.length} atama`)
+              : 'soldan seçin'}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 14, flex: 1, alignItems: 'start' }}>
 
         {/* ── Left: User list ── */}
-        <div style={{
-          background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10,
-          overflow: 'hidden', display: 'flex', flexDirection: 'column',
-          position: 'sticky', top: 24,
-          maxHeight: 'calc(100vh - 120px)',
-          boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)',
+        <div className="nm-card" style={{
+          padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column',
+          position: 'sticky', top: 8, maxHeight: 'calc(100vh - 160px)',
         }}>
-          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, background: t.cardBg }}>
-            <UserOutlined style={{ color: '#3b82f6' }} />
-            <Text style={{ color: t.textPrimary, fontWeight: 600, fontSize: 13 }}>Kullanıcılar</Text>
-            {users.length > 0 && (
-              <span style={{
-                marginLeft: 'auto', background: '#1d4ed8', color: '#fff',
-                borderRadius: 10, padding: '1px 8px', fontSize: 11, fontWeight: 600,
-              }}>{users.length}</span>
-            )}
+          <div className="nm-card-hd">
+            <h3><TeamOutlined /> Kullanıcılar</h3>
+            <span className="nm-pill mono">{users.length}</span>
           </div>
-          <div style={{ flex: 1, overflowY: 'auto', background: t.cardBg }}>
+          <div style={{ flex: 1, overflowY: 'auto' }}>
             {usersLoading ? (
               <div style={{ padding: 24, textAlign: 'center' }}><Spin /></div>
             ) : usersError ? (
@@ -375,13 +462,13 @@ export default function PermissionsPage() {
 
           {/* User permissions panel */}
           {selectedUser && (
-            <div style={{ background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10, padding: 20, boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div className="nm-card" style={{ padding: 16 }}>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div>
                   <Text style={{ color: t.textPrimary, fontWeight: 700, fontSize: 16 }}>{selectedUser.username}</Text>
                   <Text style={{ color: t.textMuted, fontSize: 12, marginLeft: 8 }}>{selectedUser.email}</Text>
                 </div>
-                {canEdit && selectedUser.system_role === 'member' && (
+                {canEdit && isManagedRole(selectedUser.system_role) && (
                   <Button
                     type="primary"
                     icon={<SafetyOutlined />}
@@ -393,11 +480,19 @@ export default function PermissionsPage() {
                 )}
               </div>
 
-              {selectedUser.system_role !== 'member' ? (
+              {isFullAccessRole(selectedUser.system_role) ? (
                 <div style={{ background: t.cardBg2, borderRadius: 8, padding: '12px 16px', border: `1px solid ${t.border}` }}>
                   <CheckCircleFilled style={{ color: '#f59e0b', marginRight: 8 }} />
                   <Text style={{ color: '#f59e0b' }}>
-                    {selectedUser.system_role === 'super_admin' ? 'Süper Admin — tüm yetkiler otomatik' : 'Org Yöneticisi — tüm yetkiler otomatik'}
+                    {selectedUser.system_role === 'super_admin'
+                      ? 'Süper Admin — platform genelinde tüm yetkiler otomatik (RLS bypass)'
+                      : 'Org Admin — kendi organizasyonu içinde tüm yetkiler otomatik'}
+                  </Text>
+                </div>
+              ) : !isManagedRole(selectedUser.system_role) ? (
+                <div style={{ background: t.cardBg2, borderRadius: 8, padding: '12px 16px', border: `1px solid ${t.border}` }}>
+                  <Text style={{ color: t.textMuted }}>
+                    Bilinmeyen rol: <code>{selectedUser.system_role}</code> — bu kullanıcı için yetki seti yönetilemiyor.
                   </Text>
                 </div>
               ) : (
@@ -447,24 +542,24 @@ export default function PermissionsPage() {
           )}
 
           {!selectedUser && (
-            <div style={{ background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10, padding: '48px 40px', textAlign: 'center', boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div className="nm-card" style={{ padding: '40px 30px', textAlign: 'center' }}>
               <div style={{
                 width: 56, height: 56, borderRadius: '50%',
-                background: t.avatarBg, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                margin: '0 auto 16px',
+                background: 'var(--bg-2)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                margin: '0 auto 14px', border: '1px solid var(--border-0)',
               }}>
-                <UserOutlined style={{ fontSize: 24, color: '#3b82f6' }} />
+                <UserOutlined style={{ fontSize: 24, color: 'var(--accent)' }} />
               </div>
-              <Text style={{ color: t.textSec, fontSize: 14, display: 'block' }}>Soldaki listeden bir kullanıcı seçin</Text>
-              <Text style={{ color: t.textMuted, fontSize: 12, marginTop: 4, display: 'block' }}>Kullanıcının mevcut yetkilerini görüntüleyin ve düzenleyin</Text>
+              <div style={{ color: 'var(--fg-1)', fontSize: 14 }}>Soldaki listeden bir kullan&#x131;c&#x131; seçin</div>
+              <div style={{ color: 'var(--fg-3)', fontSize: 12, marginTop: 4 }}>Kullan&#x131;c&#x131;n&#x131;n mevcut yetkilerini görüntüleyin ve düzenleyin</div>
             </div>
           )}
 
           {/* ── Permission sets manager ── */}
-          <div style={{ background: t.cardBg, border: `1px solid ${t.border}`, borderRadius: 10, overflow: 'hidden', boxShadow: t.isDark ? 'none' : '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <div style={{ padding: '12px 16px', borderBottom: `1px solid ${t.border}`, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <SafetyOutlined style={{ color: '#8b5cf6' }} />
-              <Text style={{ color: t.textPrimary, fontWeight: 600 }}>Yetki Setleri</Text>
+          <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="nm-card-hd">
+              <h3><SafetyOutlined /> Yetki Setleri</h3>
+              <span className="nm-pill mono">{permSets.length}</span>
               {canEdit && (
                 <Button
                   size="small"
@@ -478,7 +573,7 @@ export default function PermissionsPage() {
               )}
             </div>
 
-            <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {globalPermSets.length > 0 && (
                 <Text style={{ color: t.textMuted, fontSize: 11, marginBottom: 4, letterSpacing: '0.05em' }}>GLOBAL ŞABLONLAR (salt okunur)</Text>
               )}
@@ -691,36 +786,56 @@ function PermSetCard({
   onDelete?: () => void
   readOnly?: boolean
 }) {
-  const t = usePageTheme()
-
   const grantedCount = Object.values(ps.permissions?.modules ?? {}).reduce((sum, mod) => {
     return sum + Object.values(mod as Record<string, boolean>).filter(Boolean).length
   }, 0)
 
   const totalCount = MODULES.reduce((sum, m) => sum + m.actions.length, 0)
+  const coverage = grantedCount / totalCount
+  const barColor = grantedCount === 0 ? 'var(--fg-3)'
+    : coverage >= 0.7 ? 'var(--ok)'
+    : coverage >= 0.4 ? 'var(--accent)'
+    : 'var(--warn)'
 
   return (
     <div style={{
-      background: t.cardBg2, border: `1px solid ${t.border}`, borderRadius: 8,
-      padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 10,
-      transition: 'border-color 0.15s',
-    }}>
+      background: 'var(--bg-2)', border: '1px solid var(--border-0)', borderRadius: 6,
+      padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 10,
+      transition: 'border-color 0.15s, background 0.15s',
+    }}
+      onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.borderColor = barColor}
+      onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-0)'}
+    >
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Text style={{ color: t.textPrimary, fontWeight: 600, fontSize: 13 }}>{ps.name}</Text>
-          {ps.org_id === null && <Tag color="purple" style={{ fontSize: 10 }}>Global</Tag>}
-          {ps.is_default && <Tag color="blue" style={{ fontSize: 10 }}>Varsayılan</Tag>}
+          <span style={{ color: 'var(--fg-0)', fontWeight: 600, fontSize: 13 }}>{ps.name}</span>
+          {ps.org_id === null && (
+            <span className="nm-pill" style={{ fontSize: 9.5, color: '#a78bfa', borderColor: '#a78bfa66' }}>GLOBAL</span>
+          )}
+          {ps.is_default && (
+            <span className="nm-pill" style={{ fontSize: 9.5, color: 'var(--accent)', borderColor: 'var(--accent)' }}>VARSAYILAN</span>
+          )}
         </div>
-        {ps.description && <Text style={{ color: t.textMuted, fontSize: 11 }}>{ps.description}</Text>}
+        {ps.description && (
+          <div style={{ color: 'var(--fg-3)', fontSize: 11, marginTop: 2 }}>{ps.description}</div>
+        )}
+        {/* Coverage micro-bar */}
+        <div style={{
+          marginTop: 6, height: 3, background: 'var(--bg-1)', borderRadius: 2, overflow: 'hidden',
+        }}>
+          <div style={{
+            height: '100%', width: `${(coverage * 100).toFixed(0)}%`,
+            background: barColor, transition: 'width 0.2s',
+          }} />
+        </div>
       </div>
       <Tooltip title={`${grantedCount}/${totalCount} izin verilmiş`}>
-        <div style={{
-          background: grantedCount === 0 ? t.border : grantedCount >= totalCount * 0.7 ? '#22c55e20' : '#3b82f620',
-          color: grantedCount === 0 ? t.textMuted : grantedCount >= totalCount * 0.7 ? '#22c55e' : '#3b82f6',
-          padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 600, flexShrink: 0,
+        <span className="nm-pill mono" style={{
+          color: barColor, borderColor: barColor + '55',
+          background: barColor + '15', flexShrink: 0,
         }}>
           {grantedCount}/{totalCount}
-        </div>
+        </span>
       </Tooltip>
       <Space size={4}>
         <Button size="small" icon={<EditOutlined />} onClick={onView} style={{ fontSize: 11 }}>

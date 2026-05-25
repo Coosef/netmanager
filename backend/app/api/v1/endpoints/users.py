@@ -243,6 +243,38 @@ async def change_my_password(
     await log_action(db, user, "password_changed", "user", user.id, request=request)
 
 
+# ── Self profile — viewable by any authenticated user ─────────────────────────
+
+@router.get("/me/locations", response_model=list[dict])
+async def get_my_locations(
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Return the calling user's own location assignments.
+
+    Mirrors GET /users/{user_id}/locations but bypasses the AdminRequired gate
+    so a non-admin user can see their own scope on the profile page. Returns
+    an empty list for org-wide / super-admin users (they aren't bound to any
+    specific location).
+    """
+    rows = (await db.execute(
+        select(UserLocation, Location)
+        .join(Location, Location.id == UserLocation.location_id)
+        .where(UserLocation.user_id == current_user.id)
+        .order_by(Location.name)
+    )).all()
+
+    return [
+        {
+            "location_id": ul.location_id,
+            "location_name": loc.name,
+            "loc_role": ul.loc_role,
+            "assigned_at": ul.assigned_at.isoformat() if ul.assigned_at else None,
+        }
+        for ul, loc in rows
+    ]
+
+
 # ── User location assignments (viewed from user side) ────────────────────────
 
 @router.get("/{user_id}/locations", response_model=list[dict])

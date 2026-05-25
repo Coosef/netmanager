@@ -309,6 +309,38 @@ async def _get_device_scoped(db: AsyncSession, device_id: int, current_user) -> 
     return device
 
 
+async def _enrich_agent_display(db: AsyncSession, devices: list[Device]) -> None:
+    """RBAC F11 — populate transient agent_name + agent_status on each
+    device so DeviceResponse renders the agent's HUMAN name instead of
+    the raw `a0d7lspjjerg` short id. A location-scoped viewer may have
+    a device pinned to an agent that lives in another location they
+    can't see (e.g. an agent serving Belek while the user is assigned
+    only to Manavgat); the lookup runs under superadmin_context so the
+    display name resolves regardless. We never disclose the agent's
+    location / hostname — only `name` and `status` — so this stays a
+    purely cosmetic enrichment, not a data-leak vector."""
+    ids = {d.agent_id for d in devices if d.agent_id}
+    if not ids:
+        return
+    from app.core.org_context import superadmin_context
+    from app.core.rls import apply_rls_context
+    from app.models.agent import Agent  # local import — avoids circulars
+
+    with superadmin_context():
+        await apply_rls_context(db)
+        rows = (await db.execute(
+            select(Agent.id, Agent.name, Agent.status).where(Agent.id.in_(ids))
+        )).all()
+    name_map = {row[0]: (row[1], row[2]) for row in rows}
+    for d in devices:
+        if d.agent_id and d.agent_id in name_map:
+            name, status = name_map[d.agent_id]
+            # Stash as transient attributes; DeviceResponse._mask_snmp_community
+            # picks them up via getattr().
+            setattr(d, "agent_name", name)
+            setattr(d, "agent_status", status)
+
+
 # ── Devices ─────────────────────────────────────────────────────────────────
 
 @router.get("/", response_model=dict)
@@ -358,6 +390,9 @@ async def list_devices(
 
     result = await db.execute(query.order_by(Device.hostname).offset(skip).limit(limit))
     devices = result.scalars().all()
+
+    # RBAC F11 — enrich agent display name + status before serialising.
+    await _enrich_agent_display(db, list(devices))
 
     return {
         "total": total,
@@ -968,7 +1003,10 @@ async def bulk_tag_devices(
 
 @router.get("/{device_id}", response_model=DeviceResponse)
 async def get_device(device_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = None):
-    return await _get_device_scoped(db, device_id, current_user)
+    device = await _get_device_scoped(db, device_id, current_user)
+    # F11 — fill agent_name / agent_status (transient) before serialisation
+    await _enrich_agent_display(db, [device])
+    return device
 
 
 @router.patch("/{device_id}", response_model=DeviceResponse)
@@ -1619,6 +1657,11 @@ async def test_device_connection(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    # RBAC F7 — opens a real SSH session against the device (creds verified
+    # on the box). VIEWER role has read-only intent; require `device:connect`.
+    if not current_user.has_permission("device:connect"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     device = await _get_device_scoped(db, device_id, current_user)
     result = await ssh_manager.test_connection(device)
     await log_action(
@@ -1644,6 +1687,11 @@ async def fetch_device_info(
     current_user: CurrentUser = None,
 ):
     """SSH ile bağlanıp show version çıktısını parse ederek model/firmware/seri no günceller."""
+    # RBAC F7 — SSH session + writes back to the device row. VIEWER must
+    # not trigger this (the agent + device get a live connect attempt).
+    if not current_user.has_permission("device:connect"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
     device = await _get_device_scoped(db, device_id, current_user)
     result = await ssh_manager.execute_command(device, "show version")
     if not result.success:
@@ -1808,7 +1856,10 @@ async def run_show_command(
     - Config-altering commands require confirm=true in the request body.
     - Every execution (command + full output) is written to the audit log.
     """
-    if not current_user.has_permission("config:view"):
+    # RBAC F7 — running ANY command (even `show`) opens a live SSH session
+    # against the box. Plain `config:view` is too weak — that's granted to
+    # VIEWER for reading stored configs. Gate this on `device:connect`.
+    if not current_user.has_permission("device:connect"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     body = await request.json()
@@ -2110,7 +2161,11 @@ async def take_backup(
     current_user: CurrentUser = None,
 ):
     """Immediately SSH and take a config backup for this device."""
-    if not current_user.has_permission("config:view"):
+    # RBAC F7 — was guarded by `config:view` (VIEWER has it). A backup
+    # opens a live SSH session and writes a file artefact + audit row —
+    # mutating semantics. Correct permission is `config:backup` (granted
+    # to LOCATION_ADMIN / ORG_ADMIN / SUPER_ADMIN, not VIEWER).
+    if not current_user.has_permission("config:backup"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     device = await _get_device_scoped(db, device_id, current_user)

@@ -89,7 +89,7 @@ export default function ChangeManagement() {
   const [rejectModalId, setRejectModalId] = useState<number | null>(null)
   const [rejectNote, setRejectNote] = useState('')
 
-  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin'
+  const isAdmin = user?.system_role === 'super_admin' || user?.system_role === 'org_admin'
 
   // ── Queries ────────────────────────────────────────────────────────────────
   const { data, isLoading, refetch } = useQuery({

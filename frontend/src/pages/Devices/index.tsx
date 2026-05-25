@@ -3,17 +3,17 @@ import { useSearchParams } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
   App, Button, Card, Col, Form, Input, Modal, Popconfirm, Progress, Row, Select, Space,
-  Statistic, Table, Tag, Tooltip, Drawer, Alert, Radio,
+  Tag, Tooltip, Drawer, Alert, Radio,
 } from 'antd'
 import {
   PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined,
   EyeOutlined, ReloadOutlined, KeyOutlined, CheckCircleFilled,
   CloseCircleFilled, QuestionCircleFilled, ExclamationCircleFilled,
   SaveOutlined, RobotOutlined, SyncOutlined, TagOutlined, InfoCircleOutlined,
-  ApartmentOutlined, ShareAltOutlined, SafetyOutlined, WifiOutlined,
-  CloudServerOutlined, DatabaseOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined, ConsoleSqlOutlined,
-  SwapOutlined,
+  ApartmentOutlined,
+  DatabaseOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
+  SwapOutlined, CodeOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
@@ -60,23 +60,6 @@ const STATUS_CONFIG: Record<string, { badge: 'success' | 'error' | 'default' | '
   offline:     { badge: 'error',   color: '#f5222d', icon: <CloseCircleFilled style={{ color: '#f5222d' }} /> },
   unknown:     { badge: 'default', color: '#8c8c8c', icon: <QuestionCircleFilled style={{ color: '#8c8c8c' }} /> },
   unreachable: { badge: 'warning', color: '#fa8c16', icon: <ExclamationCircleFilled style={{ color: '#fa8c16' }} /> },
-}
-
-const VENDOR_COLORS: Record<string, string> = {
-  cisco: 'blue', aruba: 'cyan', ruijie: 'orange',
-  fortinet: 'red', paloalto: 'volcano', mikrotik: 'geekblue',
-  juniper: 'green', ubiquiti: 'purple', h3c: 'gold', apc: 'lime',
-  other: 'default',
-}
-
-const DEVICE_TYPE_ICON: Record<string, React.ReactNode> = {
-  switch:   <ApartmentOutlined style={{ color: '#1677ff' }} />,
-  router:   <ShareAltOutlined  style={{ color: '#52c41a' }} />,
-  firewall: <SafetyOutlined    style={{ color: '#f5222d' }} />,
-  ap:       <WifiOutlined      style={{ color: '#722ed1' }} />,
-  ups:      <ThunderboltOutlined style={{ color: '#faad14' }} />,
-  server:   <CloudServerOutlined style={{ color: '#13c2c2' }} />,
-  other:    <DatabaseOutlined  style={{ color: '#8c8c8c' }} />,
 }
 
 const DEVICE_TYPE_COLOR: Record<string, string> = {
@@ -590,13 +573,22 @@ export default function DevicesPage() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<Device | null>(null)
   const [detailDevice, setDetailDevice] = useState<Device | null>(null)
-  // Faz 8 Phase G — the device move action is shown only to roles that
-  // actually hold the device:move capability (admin / location_manager /
-  // super_admin). The backend re-checks regardless.
-  const moveRole = useAuthStore((s) => s.user?.role)
-  const canMoveDevice = ['super_admin', 'admin', 'location_manager'].includes(
-    moveRole ?? '',
-  )
+  // RBAC F9 — single source for mutating action visibility. Mirrors backend
+  // `device:*` grant map (SYSTEM_ROLE_PERMISSIONS). Viewer sees no
+  // mutating button at all; location_admin sees edit/connect/move but
+  // not delete; org_admin/super_admin see everything.
+  const can = useAuthStore((s) => s.can)
+  const canEdit    = useAuthStore((s) => s.can('devices', 'edit'))
+  const canCreate  = useAuthStore((s) => s.can('devices', 'create'))
+  const canDelete  = useAuthStore((s) => s.can('devices', 'delete'))
+  const canConnect = useAuthStore((s) => s.can('devices', 'connect'))
+  const canMoveDevice = useAuthStore((s) => s.can('devices', 'move'))
+  // Bulk operations (CSV import, sihirbaz, group profile, bulk fetch) —
+  // mutate many devices at once; gate on the strictest verb (`edit`).
+  const canBulk = canEdit
+  // `can` is referenced from inside JSX too (drawer actions); silence the
+  // unused-var warning while keeping the destructured handle.
+  void can
   const [moveDevice, setMoveDevice] = useState<Device | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
   const [bulkCredOpen, setBulkCredOpen] = useState(false)
@@ -651,21 +643,6 @@ export default function DevicesPage() {
     staleTime: 60000,
     refetchInterval: 120000,
   })
-
-  const { data: healthData } = useQuery({
-    queryKey: ['device-health-scores'],
-    queryFn: devicesApi.getHealthScores,
-    staleTime: 120000,
-    refetchInterval: 300000,
-  })
-
-  const healthMap = React.useMemo(() => {
-    const map = new Map<number, { score: number; issues: string[] }>()
-    for (const item of healthData?.items ?? []) {
-      map.set(item.device_id, { score: item.score, issues: item.issues })
-    }
-    return map
-  }, [healthData])
 
   const utilizationMap = React.useMemo(() => {
     const map = new Map<number, { maxPct: number; inPct: number; outPct: number }>()
@@ -777,201 +754,50 @@ export default function DevicesPage() {
     message.success(`${items.length} cihaz dışa aktarıldı`)
   }
 
-  const columns = [
-    {
-      title: t('devices.col_status'),
-      dataIndex: 'status',
-      width: 100,
-      render: (v: string) => {
-        const cfg = STATUS_CONFIG[v] || STATUS_CONFIG.unknown
-        return (
-          <Space size={4}>
-            {cfg.icon}
-            <span style={{ color: cfg.color, fontSize: 12, fontWeight: 500 }}>{v}</span>
-          </Space>
-        )
-      },
-    },
-    {
-      title: 'Sağlık',
-      key: 'health',
-      width: 72,
-      render: (_: unknown, r: Device) => {
-        const h = healthMap.get(r.id)
-        if (!h) return null
-        const score = h.score
-        const color = score >= 80 ? '#22c55e' : score >= 60 ? '#f59e0b' : '#ef4444'
-        return (
-          <Tooltip title={h.issues.length ? h.issues.join(', ') : 'Sorun yok'}>
-            <div style={{
-              width: 36, height: 36, borderRadius: '50%',
-              border: `2px solid ${color}`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, fontWeight: 700, color,
-            }}>
-              {score}
-            </div>
-          </Tooltip>
-        )
-      },
-    },
-    {
-      title: 'Tip',
-      dataIndex: 'device_type',
-      width: 90,
-      render: (v: string) => (
-        <Tooltip title={DEVICE_TYPE_OPTIONS.find(o => o.value === v)?.label ?? v}>
-          <Tag color={DEVICE_TYPE_COLOR[v] || 'default'} style={{ fontSize: 11 }}>
-            {DEVICE_TYPE_ICON[v] || null} {v?.toUpperCase() || '—'}
-          </Tag>
-        </Tooltip>
-      ),
-    },
-    {
-      title: t('devices.col_hostname'),
-      dataIndex: 'hostname',
-      sorter: true,
-      render: (v: string, r: Device) => (
-        <div>
-          <Button type="link" style={{ padding: 0, fontWeight: 600, color: '#1677ff', height: 'auto', lineHeight: 1.4 }} onClick={() => setDetailDevice(r)}>
-            {v}
-          </Button>
-          {r.alias && (
-            <div style={{ fontSize: 11, color: '#8c8c8c', lineHeight: 1.2, marginTop: 1 }}>
-              <TagOutlined style={{ marginRight: 3 }} />{r.alias}
-            </div>
-          )}
-          {r.tags && (
-            <div style={{ marginTop: 2 }}>
-              {r.tags.split(',').filter(Boolean).map(tag => (
-                <Tag
-                  key={tag.trim()}
-                  style={{ fontSize: 10, padding: '0 4px', lineHeight: '16px', cursor: 'pointer', marginBottom: 1 }}
-                  color="default"
-                  onClick={() => setTag(tag.trim())}
-                >
-                  {tag.trim()}
-                </Tag>
-              ))}
-            </div>
-          )}
-        </div>
-      ),
-    },
-    {
-      title: t('devices.col_ip'),
-      dataIndex: 'ip_address',
-      render: (v: string) => <code style={{ background: isDark ? '#0f172a' : '#f5f5f5', padding: '1px 6px', borderRadius: 4, fontSize: 12 }}>{v}</code>,
-    },
-    {
-      title: t('devices.col_vendor'),
-      dataIndex: 'vendor',
-      render: (v: string) => <Tag color={VENDOR_COLORS[v] || 'default'} style={{ textTransform: 'capitalize', fontWeight: 500 }}>{v}</Tag>,
-    },
-    { title: t('devices.col_os'), dataIndex: 'os_type', render: (v: string) => <span style={{ fontSize: 12, color: '#595959' }}>{v}</span> },
-    {
-      title: t('devices.col_model'),
-      dataIndex: 'model',
-      render: (v: string) => v ? <span style={{ fontSize: 12 }}>{v}</span> : <span style={{ color: '#bfbfbf', fontSize: 12 }}>—</span>,
-    },
-    { title: t('devices.col_location'), dataIndex: 'location', render: (v: string) => v || <span style={{ color: '#bfbfbf' }}>—</span> },
-    {
-      title: 'Bant',
-      key: 'bandwidth',
-      width: 100,
-      render: (_: unknown, record: Device) => {
-        const util = utilizationMap.get(record.id)
-        if (!util) return <span style={{ color: isDark ? '#334155' : '#cbd5e1', fontSize: 11 }}>—</span>
-        const color = util.maxPct >= 80 ? '#ef4444' : util.maxPct >= 50 ? '#f59e0b' : '#22c55e'
-        return (
-          <div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-              <span style={{ color: isDark ? '#475569' : '#94a3b8', fontSize: 10 }}>max</span>
-              <span style={{ color, fontSize: 10, fontWeight: 700 }}>{util.maxPct}%</span>
-            </div>
-            <div style={{ background: isDark ? '#0f172a' : '#f1f5f9', borderRadius: 3, height: 4, overflow: 'hidden', marginBottom: 2 }}>
-              <div style={{
-                background: `linear-gradient(90deg, ${color}70, ${color})`,
-                width: `${util.maxPct}%`, height: '100%', borderRadius: 3,
-                boxShadow: `0 0 4px ${color}50`,
-                transition: 'width 1s ease-out',
-              }} />
-            </div>
-            <div style={{ fontSize: 10, color: isDark ? '#475569' : '#94a3b8' }}>↓{util.inPct}% ↑{util.outPct}%</div>
-          </div>
-        )
-      },
-    },
-    {
-      title: t('devices.col_last_seen'),
-      dataIndex: 'last_seen',
-      render: (v: string) => v ? <span style={{ fontSize: 12, color: '#595959' }}>{dayjs(v).fromNow()}</span> : <span style={{ color: '#bfbfbf', fontSize: 12 }}>—</span>,
-    },
-    {
-      title: t('devices.col_actions'),
-      width: 140,
-      render: (_: unknown, record: Device) => (
-        <Space size={2}>
-          <Tooltip title={t('common.detail')}><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setDetailDevice(record)} /></Tooltip>
-          <Tooltip title="SSH Terminal (yeni sekme)">
-            <Button
-              size="small" type="text"
-              icon={<ConsoleSqlOutlined style={{ color: '#22c55e' }} />}
-              onClick={() => window.open(`/ssh/${record.id}?hostname=${encodeURIComponent(record.hostname)}&ip=${encodeURIComponent(record.ip_address)}`, '_blank')}
-            />
-          </Tooltip>
-          <Tooltip title={t('devices.test_connection')}>
-            <Button size="small" type="text" icon={<ThunderboltOutlined style={{ color: '#faad14' }} />} loading={testMutation.isPending} onClick={() => testMutation.mutate(record.id)} />
-          </Tooltip>
-          <Tooltip title={t('devices.fetch_info')}>
-            <Button size="small" type="text" icon={<SyncOutlined style={{ color: '#52c41a' }} />} loading={fetchInfoMutation.isPending} onClick={() => fetchInfoMutation.mutate(record.id)} />
-          </Tooltip>
-          <Tooltip title={t('common.edit')}>
-            <Button size="small" type="text" icon={<EditOutlined style={{ color: '#1677ff' }} />} onClick={() => { setEditDevice(record); setDrawerOpen(true) }} />
-          </Tooltip>
-          {canMoveDevice && (
-            <Tooltip title="Lokasyona Taşı">
-              <Button size="small" type="text" icon={<SwapOutlined style={{ color: '#a855f7' }} />} onClick={() => setMoveDevice(record)} />
-            </Tooltip>
-          )}
-          <Popconfirm title={t('devices.delete_confirm')} description={t('devices.delete_confirm_desc')} onConfirm={() => deleteMutation.mutate(record.id)} okButtonProps={{ danger: true }}>
-            <Button size="small" type="text" icon={<DeleteOutlined style={{ color: '#f5222d' }} />} />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
-
   const hasSelection = selectedRowKeys.length > 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Stats row */}
-      <Row gutter={12}>
-        {[
-          { label: t('devices.stat_total'), value: stats.total, color: '#3b82f6' },
-          { label: t('devices.stat_online'), value: stats.online, color: '#22c55e' },
-          { label: t('devices.stat_offline'), value: stats.offline, color: '#ef4444' },
-          { label: t('devices.stat_unknown'), value: stats.unknown, color: '#94a3b8' },
-        ].map(s => (
-          <Col span={6} key={s.label}>
-            <Card size="small"
-              style={{ border: `1px solid ${s.color}33`, borderRadius: 8 }}
-              styles={{ body: { padding: '10px 16px' } }}>
-              <Statistic
-                title={<span style={{ fontSize: 12 }}>{s.label}</span>}
-                value={s.value}
-                valueStyle={{ color: s.color, fontSize: 24, fontWeight: 700 }}
-              />
-            </Card>
-          </Col>
-        ))}
-      </Row>
+      {/* Page header (NOC design) */}
+      <div className="nm-page-hd">
+        <div>
+          <div className="nm-crumbs"><span>Envanter</span><span>Cihazlar</span></div>
+          <h1 className="nm-page-title">
+            {t('devices.title')}
+            <span className="nm-pill accent mono">{stats.total} {t('devices.records', 'kayıt')}</span>
+          </h1>
+          <div className="nm-page-sub">{t('devices.subtitle', 'Multi-vendor envanter — SSH bağlantı testi, otomatik yedek, vendor algılama ve agent ataması.')}</div>
+        </div>
+      </div>
+
+      {/* Stat bar (NOC design) */}
+      <div className="nm-statbar">
+        <div className="nm-stat ok">
+          <div className="nm-stat-label">{t('devices.stat_online')}</div>
+          <div className="nm-stat-val">{stats.online}<small>/ {stats.total}</small></div>
+          <div className="nm-stat-delta">{stats.total ? Math.round(stats.online / stats.total * 100) : 0}% filo</div>
+        </div>
+        <div className="nm-stat crit">
+          <div className="nm-stat-label">{t('devices.stat_offline')}</div>
+          <div className="nm-stat-val">{stats.offline}</div>
+          <div className="nm-stat-delta">çevrimdışı</div>
+        </div>
+        <div className="nm-stat warn">
+          <div className="nm-stat-label">{t('devices.stat_unknown')}</div>
+          <div className="nm-stat-val">{stats.unknown}</div>
+          <div className="nm-stat-delta">unreachable</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">{t('devices.stat_total')}</div>
+          <div className="nm-stat-val">{stats.total}</div>
+          <div className="nm-stat-delta">yönetilen cihaz</div>
+        </div>
+      </div>
 
       {/* Toolbar */}
       <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <Space wrap>
-          {hasSelection && (
+          {hasSelection && canBulk && (
             <>
               <Tag color="blue" style={{ padding: '4px 10px', fontSize: 13 }}>{t('devices.selected', { count: selectedRowKeys.length })}</Tag>
               <Button icon={<TagOutlined />} onClick={() => setBulkTagOpen(true)} style={{ borderColor: '#13c2c2', color: '#008080' }}>
@@ -1040,21 +866,31 @@ export default function DevicesPage() {
               CSV Dışa Aktar
             </Button>
           </Tooltip>
-          <Tooltip title="CSV ile Toplu İçe Aktar">
-            <Button icon={<UploadOutlined />} onClick={() => { setCsvFile(null); setCsvResult(null); setCsvImportOpen(true) }}>
-              CSV İçe Aktar
-            </Button>
-          </Tooltip>
-          <Tooltip title="Adım adım rehberli ekleme">
-            <Button icon={<ThunderboltOutlined />} onClick={() => setWizardOpen(true)}>Sihirbaz</Button>
-          </Tooltip>
-          <Tooltip title="Site/katman/topolojiye göre otomatik grup önerileri">
-            <Button icon={<ApartmentOutlined />} onClick={() => setAutoGroupOpen(true)}>Otomatik Grupla</Button>
-          </Tooltip>
-          <Tooltip title="Gruptaki tüm cihazlara toplu credential profil ata">
-            <Button icon={<KeyOutlined />} onClick={() => setGroupProfileOpen(true)}>Gruba Profil Ata</Button>
-          </Tooltip>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditDevice(null); setDrawerOpen(true) }}>{t('devices.add')}</Button>
+          {canBulk && (
+            <Tooltip title="CSV ile Toplu İçe Aktar">
+              <Button icon={<UploadOutlined />} onClick={() => { setCsvFile(null); setCsvResult(null); setCsvImportOpen(true) }}>
+                CSV İçe Aktar
+              </Button>
+            </Tooltip>
+          )}
+          {canCreate && (
+            <Tooltip title="Adım adım rehberli ekleme">
+              <Button icon={<ThunderboltOutlined />} onClick={() => setWizardOpen(true)}>Sihirbaz</Button>
+            </Tooltip>
+          )}
+          {canBulk && (
+            <Tooltip title="Site/katman/topolojiye göre otomatik grup önerileri">
+              <Button icon={<ApartmentOutlined />} onClick={() => setAutoGroupOpen(true)}>Otomatik Grupla</Button>
+            </Tooltip>
+          )}
+          {canBulk && (
+            <Tooltip title="Gruptaki tüm cihazlara toplu credential profil ata">
+              <Button icon={<KeyOutlined />} onClick={() => setGroupProfileOpen(true)}>Gruba Profil Ata</Button>
+            </Tooltip>
+          )}
+          {canCreate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditDevice(null); setDrawerOpen(true) }}>{t('devices.add')}</Button>
+          )}
           <Button.Group>
             <Tooltip title="Tablo Görünümü">
               <Button
@@ -1099,23 +935,27 @@ export default function DevicesPage() {
       )}
 
       {viewMode === 'table' && (
-        <Table<Device>
-          dataSource={data?.items || []}
-          rowKey="id"
+        <NocDeviceTable
+          items={data?.items || []}
+          total={data?.total ?? 0}
           loading={isLoading}
-          size="small"
-          columns={columns}
-          pagination={{
-            total: data?.total,
-            pageSize,
-            current: page,
-            onChange: setPage,
-            showSizeChanger: false,
-            showTotal: (n) => t('devices.total_devices', { total: n }),
-          }}
-          rowSelection={{ type: 'checkbox', selectedRowKeys, onChange: setSelectedRowKeys }}
-          rowClassName={(r) => r.status === 'offline' ? 'device-row-offline' : ''}
-          style={{ borderRadius: 8 }}
+          page={page}
+          pageSize={pageSize}
+          onPage={setPage}
+          selected={selectedRowKeys as number[]}
+          onSelect={(ids) => setSelectedRowKeys(ids)}
+          onDetail={(d) => setDetailDevice(d)}
+          onEdit={(d) => { setEditDevice(d); setDrawerOpen(true) }}
+          onTest={(d) => testMutation.mutate(d.id)}
+          onMove={(d) => setMoveDevice(d)}
+          onFetchInfo={(d) => fetchInfoMutation.mutate(d.id)}
+          onDelete={(d) => deleteMutation.mutate(d.id)}
+          testingId={testMutation.isPending ? (testMutation.variables as number | undefined) : undefined}
+          fetchingId={fetchInfoMutation.isPending ? (fetchInfoMutation.variables as number | undefined) : undefined}
+          canMove={canMoveDevice}
+          canEdit={canEdit}
+          canDelete={canDelete}
+          canConnect={canConnect}
         />
       )}
 
@@ -1351,6 +1191,230 @@ export default function DevicesPage() {
           </div>
         </Space>
       </Modal>
+    </div>
+  )
+}
+
+// ── NocDeviceTable — mockup-faithful nm-table inner content (T8.4) ─────────
+//
+// Replaces the previous antd <Table> while keeping every existing action
+// wired through to the page's mutations. No new features — only the visual
+// shell from pages-devices.jsx (`nm-table` columns: Hostname / Durum /
+// Vendor·Model / Firmware / Katman / Lokasyon / Tag / Agent / Uptime /
+// Actions). "Risk" and "24sa events" mockup columns are NOT added because
+// our backend doesn't compute them — Uptime (availability_24h) and the
+// status-cell `last_seen` cover the same intent with REAL data.
+
+const STATUS_PILL: Record<string, { dot: 'ok' | 'warn' | 'crit' | ''; cls: 'ok' | 'warn' | 'crit' | ''; label: string }> = {
+  online:      { dot: 'ok',   cls: 'ok',   label: 'Çevrimiçi' },
+  offline:     { dot: 'crit', cls: 'crit', label: 'Çevrimdışı' },
+  unreachable: { dot: 'warn', cls: 'warn', label: 'Ulaşılamıyor' },
+  unknown:     { dot: '',     cls: '',     label: 'Bilinmiyor' },
+}
+
+function parseTags(raw?: string): string[] {
+  if (!raw) return []
+  return raw.split(/[,;]/).map((s) => s.trim()).filter(Boolean)
+}
+
+function NocDeviceTable({
+  items, total, loading, page, pageSize, onPage,
+  selected, onSelect,
+  onDetail, onEdit, onTest, onMove, onFetchInfo, onDelete,
+  testingId, fetchingId, canMove, canEdit, canDelete, canConnect,
+}: {
+  items: Device[]
+  total: number
+  loading: boolean
+  page: number
+  pageSize: number
+  onPage: (p: number) => void
+  selected: number[]
+  onSelect: (ids: number[]) => void
+  onDetail: (d: Device) => void
+  onEdit: (d: Device) => void
+  onTest: (d: Device) => void
+  onMove: (d: Device) => void
+  onFetchInfo: (d: Device) => void
+  onDelete: (d: Device) => void
+  testingId?: number
+  fetchingId?: number
+  // RBAC F9 — visibility flags per action verb. Viewer gets all false;
+  // location_admin gets edit+connect+move (NOT delete); org_admin /
+  // super_admin get all true. Mirrors backend SYSTEM_ROLE_PERMISSIONS.
+  canMove: boolean
+  canEdit: boolean
+  canDelete: boolean
+  canConnect: boolean
+}) {
+  const selectedSet = new Set(selected)
+  const allChecked = items.length > 0 && items.every((d) => selectedSet.has(d.id))
+  const toggleAll = () => {
+    if (allChecked) onSelect(selected.filter((id) => !items.some((d) => d.id === id)))
+    else onSelect(Array.from(new Set([...selected, ...items.map((d) => d.id)])))
+  }
+  const toggleOne = (id: number) => {
+    if (selectedSet.has(id)) onSelect(selected.filter((x) => x !== id))
+    else onSelect([...selected, id])
+  }
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+
+  return (
+    <div className="nm-table-wrap">
+      <div className="nm-table-toolbar">
+        {selected.length > 0 ? (
+          <>
+            <span className="count"><em>{selected.length}</em> cihaz seçildi</span>
+            <span style={{ color: 'var(--fg-3)' }}>·</span>
+            <span className="bulk" onClick={() => onSelect([])} style={{ cursor: 'pointer', marginLeft: 'auto' }}>Seçimi temizle</span>
+          </>
+        ) : (
+          <>
+            <span className="count"><em>{items.length}</em> kayıt gösteriliyor · <em>{total}</em> toplam</span>
+            <span style={{ color: 'var(--fg-3)', marginLeft: 'auto', fontSize: 11 }}>{loading ? 'Yükleniyor…' : ' '}</span>
+          </>
+        )}
+      </div>
+
+      <div style={{ overflow: 'auto' }}>
+        <table className="nm-table">
+          <thead>
+            <tr>
+              <th className="col-check">
+                <span className={`nm-checkbox ${allChecked ? 'on' : ''}`} onClick={toggleAll}>
+                  <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+                    <path d="M3 8.5L6 11.5L13 4.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </span>
+              </th>
+              <th>Hostname</th>
+              <th>Durum</th>
+              <th>Vendor / Model</th>
+              <th>Firmware</th>
+              <th>Katman</th>
+              <th>Lokasyon</th>
+              <th>Tag</th>
+              <th>Agent</th>
+              <th style={{ textAlign: 'right' }}>Uptime 24sa</th>
+              <th className="col-actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((d) => {
+              const st = STATUS_PILL[d.status] || STATUS_PILL.unknown
+              const tags = parseTags(d.tags)
+              const sel = selectedSet.has(d.id)
+              const up = d.availability_24h
+              return (
+                <tr key={d.id} className={sel ? 'selected' : ''} style={{ cursor: 'pointer' }}
+                  onClick={(e) => {
+                    const t = e.target as HTMLElement
+                    if (t.closest('.nm-checkbox') || t.closest('.nm-rowact')) return
+                    onDetail(d)
+                  }}>
+                  <td className="col-check">
+                    <span className={`nm-checkbox ${sel ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleOne(d.id) }}>
+                      <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+                        <path d="M3 8.5L6 11.5L13 4.5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+                      </svg>
+                    </span>
+                  </td>
+                  <td>
+                    <div className="nm-host">{d.hostname}</div>
+                    <div className="nm-host-ip">{d.ip_address}{d.alias && <> · <span style={{ color: 'var(--fg-2)' }}>{d.alias}</span></>}</div>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                      {/* Online → yeşil pulse, crit → kırmızı pulse (1.2s hızlı) */}
+                      <span className={`nm-status-dot ${st.dot}${st.dot === 'ok' || st.dot === 'crit' ? ' pulse' : ''}`}></span>
+                      <div>
+                        <div style={{ fontSize: 11.5, color: st.cls ? `var(--${st.cls})` : 'var(--fg-1)' }}>{st.label}</div>
+                        <div style={{ fontSize: 10, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>
+                          {d.last_seen ? `${dayjs(d.last_seen).fromNow(true)} önce` : '—'}
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <div style={{ fontSize: 11.5, color: VENDOR_HEX[d.vendor] || 'var(--fg-0)', fontWeight: 500, textTransform: 'capitalize' }}>{d.vendor || '—'}</div>
+                    <div style={{ fontSize: 10.5, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>{d.model || '—'}</div>
+                  </td>
+                  <td className="mono" style={{ fontSize: 11.5, color: 'var(--fg-1)' }}>{d.firmware_version || '—'}</td>
+                  <td>{d.layer ? <span className="nm-tag">{d.layer}</span> : <span style={{ color: 'var(--fg-3)' }}>—</span>}</td>
+                  <td style={{ fontSize: 11.5 }}>{d.site || d.location || '—'}</td>
+                  <td>
+                    {tags.slice(0, 2).map((tg) => <span key={tg} className="nm-tag">{tg}</span>)}
+                    {tags.length > 2 && <span style={{ fontSize: 10, color: 'var(--fg-3)', marginLeft: 4 }}>+{tags.length - 2}</span>}
+                    {tags.length === 0 && <span style={{ color: 'var(--fg-3)' }}>—</span>}
+                  </td>
+                  <td className="mono" style={{ fontSize: 10.5, color: d.agent_id ? 'var(--fg-1)' : 'var(--fg-3)' }}>
+                    {d.agent_id ? d.agent_id.slice(0, 8) : '—'}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {up == null ? <span style={{ color: 'var(--fg-3)', fontSize: 11 }}>—</span> : (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <div className="nm-bar" style={{ width: 50 }}>
+                          <div style={{ width: `${Math.max(0, Math.min(100, up))}%`,
+                            background: up >= 99 ? 'var(--ok)' : up >= 95 ? 'var(--warn)' : 'var(--crit)' }}></div>
+                        </div>
+                        <span className="mono" style={{ fontSize: 11, width: 38, textAlign: 'right' }}>{up.toFixed(1)}%</span>
+                      </div>
+                    )}
+                  </td>
+                  <td className="col-actions">
+                    <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                      <Tooltip title="Detay"><button onClick={() => onDetail(d)}><EyeOutlined /></button></Tooltip>
+                      {canConnect && (
+                        <Tooltip title="SSH Terminal (yeni sekme)">
+                          <button onClick={() => window.open(`/ssh/${d.id}?hostname=${encodeURIComponent(d.hostname)}&ip=${encodeURIComponent(d.ip_address)}`, '_blank', 'noopener,noreferrer')}>
+                            <CodeOutlined style={{ color: 'var(--ok)' }} />
+                          </button>
+                        </Tooltip>
+                      )}
+                      {canConnect && (
+                        <Tooltip title="SSH Bağlantı Testi">
+                          <button onClick={() => onTest(d)} disabled={testingId === d.id}><ThunderboltOutlined /></button>
+                        </Tooltip>
+                      )}
+                      {canConnect && (
+                        <Tooltip title="Cihazdan Bilgi Çek">
+                          <button onClick={() => onFetchInfo(d)} disabled={fetchingId === d.id}><ReloadOutlined /></button>
+                        </Tooltip>
+                      )}
+                      {canEdit && (
+                        <Tooltip title="Düzenle"><button onClick={() => onEdit(d)}><EditOutlined /></button></Tooltip>
+                      )}
+                      {canMove && (
+                        <Tooltip title="Lokasyon Taşı"><button onClick={() => onMove(d)}><SwapOutlined /></button></Tooltip>
+                      )}
+                      {canDelete && (
+                        <Popconfirm title="Cihaz silinsin mi?" okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }} onConfirm={() => onDelete(d)}>
+                          <button title="Sil"><DeleteOutlined /></button>
+                        </Popconfirm>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+            {!loading && items.length === 0 && (
+              <tr><td colSpan={11} style={{ textAlign: 'center', padding: 30, color: 'var(--fg-3)' }}>Sonuç yok</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="nm-table-foot">
+        <span>Sayfa <strong style={{ color: 'var(--fg-0)' }}>{page}</strong> / {totalPages}</span>
+        <span style={{ color: 'var(--fg-3)' }}>·</span>
+        <span>{(page - 1) * pageSize + (items.length > 0 ? 1 : 0)}–{(page - 1) * pageSize + items.length} / {total}</span>
+        <div className="pager">
+          <button disabled={page <= 1} onClick={() => onPage(page - 1)}>‹</button>
+          <button className="active">{page}</button>
+          <button disabled={page >= totalPages} onClick={() => onPage(page + 1)}>›</button>
+        </div>
+      </div>
     </div>
   )
 }

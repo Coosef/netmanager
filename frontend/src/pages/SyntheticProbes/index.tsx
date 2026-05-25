@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { syntheticApi, type SyntheticProbe, type ProbeType, type SLAStatus } from '@/api/synthetic'
+import { useAuthStore } from '@/store/auth'
 import dayjs from 'dayjs'
 
 const PROBE_TYPE_COLOR: Record<ProbeType, string> = {
@@ -261,6 +262,9 @@ function ProbeDrawer({ open, onClose, onCreated }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function SyntheticProbesPage() {
   const qc = useQueryClient()
+  // Probe authorship = org-admin scope; viewer + location_admin can see
+  // the list + run history but cannot create / edit / delete probes.
+  const canMutate = useAuthStore((s) => s.canMutate('monitoring'))
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [runningIds, setRunningIds] = useState<Set<number>>(new Set())
 
@@ -334,51 +338,103 @@ export default function SyntheticProbesPage() {
     },
     {
       title: 'İşlemler', key: 'actions', width: 120,
-      render: (_: unknown, row: SyntheticProbe) => (
-        <Space size={4}>
-          <Tooltip title="Şimdi Çalıştır">
-            <Button
-              size="small" icon={<PlayCircleOutlined />}
-              loading={runningIds.has(row.id)}
-              onClick={() => runNow(row)}
-            />
-          </Tooltip>
-          <Popconfirm title="Probe silinsin mi?" onConfirm={() => deleteMutation.mutate(row.id)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_: unknown, row: SyntheticProbe) => {
+        if (!canMutate) return <span style={{ color: 'var(--fg-3)' }}>—</span>
+        return (
+          <Space size={4}>
+            <Tooltip title="Şimdi Çalıştır">
+              <Button
+                size="small" icon={<PlayCircleOutlined />}
+                loading={runningIds.has(row.id)}
+                onClick={() => runNow(row)}
+              />
+            </Tooltip>
+            <Popconfirm title="Probe silinsin mi?" onConfirm={() => deleteMutation.mutate(row.id)}>
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </Space>
+        )
+      },
     },
   ]
 
+  // Stats — derived from the list response (no separate endpoint)
+  const all = probes ?? []
+  const enabledCount = all.filter((p) => p.enabled).length
+  const breachCount = all.filter((p) => p.sla_enabled && p.sla_status?.compliant === false).length
+  const slaActiveCount = all.filter((p) => p.sla_enabled).length
+  const byType: Record<string, number> = {}
+  for (const p of all) byType[p.probe_type] = (byType[p.probe_type] ?? 0) + 1
+  const typeBreakdown = Object.entries(byType).sort((a, b) => b[1] - a[1])
+    .slice(0, 2).map(([t, n]) => `${t}:${n}`).join(' · ') || '—'
+
   return (
-    <div style={{ padding: '0 0 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>Synthetic Probes</h2>
-          <div style={{ color: '#888', fontSize: 13, marginTop: 2 }}>
-            Periyodik ağ erişilebilirlik testleri — ICMP / TCP / HTTP / DNS
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>Synthetic Probes</span></div>
+          <h1 className="nm-page-title">
+            Synthetic Probes
+            <span className="nm-pill mono">{all.length} probe</span>
+            {breachCount > 0 && (
+              <span className="nm-pill mono" style={{ color: 'var(--crit)', borderColor: 'var(--crit)' }}>
+                {breachCount} SLA ihlali
+              </span>
+            )}
+          </h1>
+          <div className="nm-page-sub">
+            Periyodik a&#x11F; eri&#x15F;ilebilirlik testleri &#xB7; ICMP / TCP / HTTP / DNS &#xB7;
+            SLA ba&#x15F;ar&#x131;m takibi.
           </div>
         </div>
         <Space>
           <Button icon={<ReloadOutlined />} onClick={() => qc.invalidateQueries({ queryKey: ['synthetic-probes'] })}>
             Yenile
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerOpen(true)}>
-            Yeni Probe
-          </Button>
+          {canMutate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setDrawerOpen(true)}>
+              Yeni Probe
+            </Button>
+          )}
         </Space>
+      </div>
+
+      {/* NOC stat bar — 4 KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM PROBE</div>
+          <div className="nm-stat-val">{all.length}</div>
+          <div className="nm-stat-delta mono">{typeBreakdown}</div>
+        </div>
+        <div className={`nm-stat ${enabledCount > 0 ? 'ok' : ''}`}>
+          <div className="nm-stat-label">AKTİF</div>
+          <div className="nm-stat-val">{enabledCount}</div>
+          <div className="nm-stat-delta">{all.length - enabledCount} duraklat&#x131;ld&#x131;</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SLA TAKİBİ</div>
+          <div className="nm-stat-val">{slaActiveCount}</div>
+          <div className="nm-stat-delta">SLA hedefi tan&#x131;ml&#x131;</div>
+        </div>
+        <div className={`nm-stat ${breachCount > 0 ? 'crit' : 'ok'}`}>
+          <div className="nm-stat-label">SLA İHLALİ</div>
+          <div className="nm-stat-val">{breachCount}</div>
+          <div className="nm-stat-delta">{breachCount > 0 ? 'an&#x131;nda m&#xFC;dahale' : 'hedef üzerinde'}</div>
+        </div>
       </div>
 
       {isLoading ? (
         <div style={{ textAlign: 'center', padding: 60 }}><Spin size="large" /></div>
       ) : !probes?.length ? (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: '#888' }}>
-          <CheckCircleOutlined style={{ fontSize: 36, marginBottom: 12, display: 'block', color: '#22c55e' }} />
+        <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--fg-3)' }}>
+          <CheckCircleOutlined style={{ fontSize: 36, marginBottom: 12, display: 'block', color: 'var(--ok)' }} />
           <div style={{ fontSize: 15 }}>Henüz probe tanımlanmamış.</div>
-          <Button type="primary" icon={<PlusOutlined />} style={{ marginTop: 12 }} onClick={() => setDrawerOpen(true)}>
-            İlk Probe'u Oluştur
-          </Button>
+          {canMutate && (
+            <Button type="primary" icon={<PlusOutlined />} style={{ marginTop: 12 }} onClick={() => setDrawerOpen(true)}>
+              İlk Probe'u Oluştur
+            </Button>
+          )}
         </div>
       ) : (
         <Table

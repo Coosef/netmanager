@@ -29,6 +29,34 @@ export interface AuditDetail extends AuditListItem {
   findings: AuditFinding[]
 }
 
+// T8.4 — built-in rule registry tipi (backend services/security_audit_service.py
+// BUILTIN_RULES dict shape'i).
+export interface BuiltinRule {
+  id: string
+  name: string
+  category: string
+  weight: number
+  platforms: string[]
+  desc: string
+}
+
+export interface ComplianceProfile {
+  id: number
+  name: string
+  description?: string | null
+  enabled_rule_ids: string[]
+  is_default: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface ProfilePayload {
+  name: string
+  description?: string | null
+  enabled_rule_ids: string[]
+  is_default: boolean
+}
+
 export interface AuditStats {
   total: number
   avg_score: number
@@ -55,12 +83,35 @@ export const securityAuditApi = {
       )
       .then((r) => r.data),
 
-  run: (deviceIds?: number[]) =>
+  run: (deviceIds?: number[], profileId?: number | null) =>
     client
-      .post<{ task_id: number; device_count: number }>('/security-audit/run', {
+      .post<{
+        task_id: number
+        device_count: number
+        profile_id?: number | null
+        profile_name?: string | null
+        rule_count?: number | null
+      }>('/security-audit/run', {
         device_ids: deviceIds ?? null,
+        profile_id: profileId ?? null,
       })
       .then((r) => r.data),
+
+  // T8.4 — Parametrik uyumluluk
+  listRules: () =>
+    client.get<{ rules: BuiltinRule[]; total: number }>('/security-audit/rules').then((r) => r.data),
+
+  listProfiles: () =>
+    client.get<ComplianceProfile[]>('/security-audit/profiles').then((r) => r.data),
+
+  createProfile: (data: ProfilePayload) =>
+    client.post<{ id: number; name: string; is_default: boolean }>('/security-audit/profiles', data).then((r) => r.data),
+
+  updateProfile: (id: number, data: ProfilePayload) =>
+    client.put<{ id: number; name: string }>(`/security-audit/profiles/${id}`, data).then((r) => r.data),
+
+  deleteProfile: (id: number) =>
+    client.delete(`/security-audit/profiles/${id}`),
 
   fleetTrend: (days = 30, site?: string) =>
     client

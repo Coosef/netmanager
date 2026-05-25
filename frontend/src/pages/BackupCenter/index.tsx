@@ -18,6 +18,7 @@ import { devicesApi } from '@/api/devices'
 import { tasksApi } from '@/api/tasks'
 import { backupSchedulesApi, type BackupSchedule } from '@/api/backupSchedules'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useAuthStore } from '@/store/auth'
 import { useSite } from '@/contexts/SiteContext'
 import ConfigDiffModal from './ConfigDiffModal'
 import type { ConfigBackup } from '@/types'
@@ -52,45 +53,8 @@ function mkC(isDark: boolean) {
   }
 }
 
-function BackupStatCard({ icon, label, value, color, isDark, sub }: {
-  icon: React.ReactNode; label: string; value: number | string; color: string; isDark: boolean; sub?: string
-}) {
-  const C = mkC(isDark)
-  return (
-    <div style={{
-      background: isDark ? `linear-gradient(135deg, ${color}0d 0%, ${C.bg} 60%)` : C.bg,
-      border: `1px solid ${isDark ? color + '28' : C.border}`,
-      borderTop: isDark ? `2px solid ${color}55` : `2px solid ${color}`,
-      borderRadius: 10,
-      padding: '12px 16px',
-      animation: 'backupCardIn 0.4s ease-out',
-      position: 'relative', overflow: 'hidden',
-      boxShadow: isDark ? `0 4px 16px ${color}10` : undefined,
-    }}>
-      {isDark && (
-        <div style={{
-          position: 'absolute', inset: 0,
-          background: `radial-gradient(ellipse at top left, ${color}10 0%, transparent 60%)`,
-          pointerEvents: 'none',
-        }} />
-      )}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, position: 'relative' }}>
-        <div style={{
-          width: 32, height: 32, borderRadius: 8, flexShrink: 0,
-          background: isDark ? `${color}20` : `${color}15`,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          <span style={{ color, fontSize: 16 }}>{icon}</span>
-        </div>
-        <div>
-          <div style={{ color: C.muted, fontSize: 10, fontWeight: 500, letterSpacing: 0.5, textTransform: 'uppercase' }}>{label}</div>
-          <div style={{ color: color, fontSize: 20, fontWeight: 800, lineHeight: 1, marginTop: 1 }}>{value}</div>
-          {sub && <div style={{ color: C.dim, fontSize: 10, marginTop: 1 }}>{sub}</div>}
-        </div>
-      </div>
-    </div>
-  )
-}
+// BackupStatCard removed — page-level nm-statbar (in the main return)
+// renders the same five aggregates with consistent NOC styling.
 
 interface BackupRow {
   device_id: string
@@ -663,6 +627,10 @@ export default function BackupCenterPage() {
   const { isDark } = useTheme()
   const { activeSite } = useSite()
   const C = mkC(isDark)
+  // Backup write = SSH config pull. Viewer can browse the list / search
+  // configs but can't kick off a backup task. Backend re-enforces via
+  // config:backup permission (F7a tightened this).
+  const canBackup = useAuthStore((s) => s.can('config_backups', 'backup'))
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [filter, setFilter] = useState<'all' | 'ok' | 'stale' | 'never'>('all')
   const [diffOpen, setDiffOpen] = useState(false)
@@ -712,7 +680,21 @@ export default function BackupCenterPage() {
       setSelectedIds([])
       setActiveTaskId(res.task_id)
     },
-    onError: () => message.error('Yedekleme başlatılamadı'),
+    // T8.4 — backend `detail` veya `error` alanı varsa onu göster (eskiden
+    // "Yedekleme başlatılamadı" generic mesajı kullanıcıya nedenini
+    // söylemiyordu: SSH timeout? permission? cihaz offline? RLS rejection?).
+    onError: (e: any) => {
+      const detail =
+        e?.response?.data?.detail ||
+        e?.response?.data?.error ||
+        e?.message ||
+        'Yedekleme başlatılamadı'
+      const code = e?.response?.status
+      message.error(
+        code ? `Yedekleme başlatılamadı (HTTP ${code}): ${detail}` : `Yedekleme başlatılamadı: ${detail}`,
+        6,
+      )
+    },
   })
 
   const rows: BackupRow[] = useMemo(() => {
@@ -880,48 +862,8 @@ export default function BackupCenterPage() {
         />
       )}
 
-      {/* Stats */}
-      <Row gutter={[10, 10]}>
-        <Col xs={12} sm={6} lg={4}>
-          <BackupStatCard icon={<DatabaseOutlined />} label="Toplam Switch" value={rows.length} color="#3b82f6" isDark={isDark} />
-        </Col>
-        <Col xs={12} sm={6} lg={4}>
-          <BackupStatCard icon={<CheckCircleOutlined />} label="Güncel Yedek" value={okCount} color="#22c55e" isDark={isDark} sub={`${coveragePct}% kapsam`} />
-        </Col>
-        <Col xs={12} sm={6} lg={4}>
-          <BackupStatCard icon={<WarningOutlined />} label="Eski Yedek (>7g)" value={staleCount} color={staleCount > 0 ? '#f59e0b' : '#64748b'} isDark={isDark} />
-        </Col>
-        <Col xs={12} sm={6} lg={4}>
-          <BackupStatCard icon={<CloseCircleOutlined />} label="Hiç Yok" value={neverCount} color={neverCount > 0 ? '#ef4444' : '#64748b'} isDark={isDark} />
-        </Col>
-        <Col xs={12} sm={6} lg={8}>
-          <div style={{
-            background: isDark ? `linear-gradient(135deg, ${coveragePct >= 80 ? '#22c55e' : coveragePct >= 50 ? '#f59e0b' : '#ef4444'}0d 0%, ${C.bg} 60%)` : C.bg,
-            border: `1px solid ${isDark ? (coveragePct >= 80 ? '#22c55e' : coveragePct >= 50 ? '#f59e0b' : '#ef4444') + '28' : C.border}`,
-            borderTop: `2px solid ${coveragePct >= 80 ? '#22c55e55' : coveragePct >= 50 ? '#f59e0b55' : '#ef444455'}`,
-            borderRadius: 10,
-            padding: '12px 16px',
-            animation: 'backupCardIn 0.4s ease-out',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ color: C.muted, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5 }}>Yedek Kapsamı</Text>
-              <Text style={{ fontSize: 16, fontWeight: 800, color: coveragePct >= 80 ? '#22c55e' : coveragePct >= 50 ? '#f59e0b' : '#ef4444' }}>
-                {coveragePct}%
-              </Text>
-            </div>
-            <Progress
-              percent={coveragePct}
-              size="small"
-              showInfo={false}
-              strokeColor={coveragePct >= 80 ? '#22c55e' : coveragePct >= 50 ? '#f59e0b' : '#ef4444'}
-              style={{ marginBottom: 4 }}
-            />
-            <Text style={{ color: C.dim, fontSize: 10 }}>
-              Son 7 günde en az 1 yedek = güncel
-            </Text>
-          </div>
-        </Col>
-      </Row>
+      {/* Stats moved to the page-level nm-statbar (see top of return) so
+          they stay visible while switching tabs. */}
 
       {/* Actions bar */}
       {(staleCount > 0 || neverCount > 0) && (
@@ -1015,53 +957,84 @@ export default function BackupCenterPage() {
     </>
   )
 
+  // Quick aggregates exposed across the page so tabs share the same totals.
+  const totalDevices = rows.length
+  const headerCoverage = coveragePct
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{BACKUP_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#3b82f620' : C.border}`,
-        borderLeft: '4px solid #3b82f6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#3b82f620', border: '1px solid #3b82f630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <DatabaseOutlined style={{ color: '#3b82f6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>Yedekleme Merkezi</div>
-            <div style={{ color: C.muted, fontSize: 12 }}>
-              Konfigürasyon yedekleme — manuel ve zamanlı otomatik yedekleme
-            </div>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>Yedekleme Merkezi</span></div>
+          <h1 className="nm-page-title">
+            Yedekleme Merkezi
+            <span className="nm-pill mono">{totalDevices} switch</span>
+            <span className={`nm-pill mono`} style={{
+              color: headerCoverage >= 80 ? 'var(--ok)' : headerCoverage >= 50 ? 'var(--warn)' : 'var(--crit)',
+              borderColor: headerCoverage >= 80 ? 'var(--ok)' : headerCoverage >= 50 ? 'var(--warn)' : 'var(--crit)',
+            }}>
+              %{headerCoverage} kapsam
+            </span>
+          </h1>
+          <div className="nm-page-sub">
+            Konfig&#xFC;rasyon yedekleme &#xB7; manuel ve zamanl&#x131; otomatik &#xB7;
+            config kar&#x15F;&#x131;la&#x15F;t&#x131;rma + arama tek panelde.
           </div>
         </div>
         <Space wrap>
           <Button icon={<SyncOutlined />} onClick={() => refetch()}>Yenile</Button>
           <Button icon={<DiffOutlined />} onClick={() => setDiffOpen(true)}>Config Karşılaştır</Button>
-          <Button icon={<DownloadOutlined />} onClick={() => reportsApi.downloadBackupsCsv()}>CSV İndir</Button>
-          <Button icon={<DownloadOutlined />} onClick={() => reportsApi.downloadBackupsZip()}>ZIP İndir</Button>
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            disabled={selectedIds.length === 0}
-            loading={bulkBackupMutation.isPending}
-            onClick={() => bulkBackupMutation.mutate(selectedIds)}
-          >
-            Seçilileri Yedekle ({selectedIds.length})
-          </Button>
+          <Button icon={<DownloadOutlined />} onClick={() => reportsApi.downloadBackupsCsv()}>CSV</Button>
+          <Button icon={<DownloadOutlined />} onClick={() => reportsApi.downloadBackupsZip()}>ZIP</Button>
+          {canBackup && (
+            <Button
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              disabled={selectedIds.length === 0}
+              loading={bulkBackupMutation.isPending}
+              onClick={() => bulkBackupMutation.mutate(selectedIds)}
+            >
+              Seçilileri Yedekle ({selectedIds.length})
+            </Button>
+          )}
         </Space>
+      </div>
+
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM SWITCH</div>
+          <div className="nm-stat-val">{totalDevices}</div>
+          <div className="nm-stat-delta">izleme kapsamında</div>
+        </div>
+        <div className={`nm-stat ${okCount > 0 ? 'ok' : ''}`}>
+          <div className="nm-stat-label">GÜNCEL YEDEK</div>
+          <div className="nm-stat-val">{okCount}</div>
+          <div className="nm-stat-delta">son 7 gün içinde</div>
+        </div>
+        <div className={`nm-stat ${staleCount > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">ESKİ (&gt;7g)</div>
+          <div className="nm-stat-val">{staleCount}</div>
+          <div className="nm-stat-delta">yenileme şart</div>
+        </div>
+        <div className={`nm-stat ${neverCount > 0 ? 'crit' : ''}`}>
+          <div className="nm-stat-label">HİÇ YEDEK YOK</div>
+          <div className="nm-stat-val">{neverCount}</div>
+          <div className="nm-stat-delta">açık risk</div>
+        </div>
+        <div className={`nm-stat ${headerCoverage >= 80 ? 'ok' : headerCoverage >= 50 ? 'warn' : 'crit'}`}>
+          <div className="nm-stat-label">YEDEK KAPSAMI</div>
+          <div className="nm-stat-val">{headerCoverage}<small>%</small></div>
+          <div className="nm-stat-delta">{okCount} / {totalDevices} cihaz</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SEÇİM</div>
+          <div className="nm-stat-val">{selectedIds.length}</div>
+          <div className="nm-stat-delta">toplu işlem için işaretli</div>
+        </div>
       </div>
 
       {/* Tabs */}

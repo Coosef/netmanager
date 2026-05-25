@@ -1,18 +1,23 @@
-import { useState } from 'react'
+// Locations — NOC redesign (T8.4 B1.2).
+// Tablo yerine kart grid: lokasyon zaten "tile" doğasına en uygun veri tipi.
+// Header + 6-stat real KPI + nm-grid (renk noktası + isim + şehir/ülke +
+// device/user metrikleri + actions). Modal/form korundu — fonksiyonel.
+import { useMemo, useState } from 'react'
 import {
-  App, Button, Card, Col, Form, Input, Modal, Popconfirm,
-  Row, Space, Table, Tag, Tooltip, Typography, ColorPicker, Select,
+  App, Button, Col, ColorPicker, Form, Input, Modal, Popconfirm,
+  Row, Select, Tooltip,
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
   EnvironmentOutlined, LaptopOutlined, ReloadOutlined, TeamOutlined,
+  ClockCircleOutlined, GlobalOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { locationsApi, type Location } from '@/api/locations'
+import { useAuthStore } from '@/store/auth'
 import { useTheme } from '@/contexts/ThemeContext'
+import NmEmpty from '@/components/NmEmpty'
 import dayjs from 'dayjs'
-
-const { Title, Text } = Typography
 
 const DEFAULT_COLORS = [
   '#3b82f6', '#22c55e', '#f97316', '#ef4444',
@@ -29,6 +34,10 @@ export default function LocationsPage() {
   const { message } = App.useApp()
   const { isDark } = useTheme()
   const qc = useQueryClient()
+
+  // RBAC F10 — locations are org-admin scope; viewer/location_admin see
+  // the list but cannot mutate. Backend require_system_role enforces.
+  const canMutate = useAuthStore((s) => s.canMutate('locations'))
 
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Location | null>(null)
@@ -113,172 +122,129 @@ export default function LocationsPage() {
     }
   }
 
-  const cardBg = isDark ? '#0e1e38' : '#ffffff'
-  const border = isDark ? '#1a3458' : '#e2e8f0'
-  const subText = isDark ? '#64748b' : '#94a3b8'
-
   const items = data?.items || []
-  const totalDevices = items.reduce((s, l) => s + l.device_count, 0)
-  const totalUsers = items.reduce((s, l) => s + (l.user_count || 0), 0)
 
-  const columns = [
-    {
-      title: 'Lokasyon',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, rec: Location) => (
-        <Space>
-          <div style={{
-            width: 12, height: 12, borderRadius: '50%',
-            background: rec.color || '#3b82f6', flexShrink: 0,
-          }} />
-          <div>
-            <Text strong style={{ fontSize: 14 }}>{name}</Text>
-            {(rec.city || rec.country) && (
-              <div style={{ fontSize: 11, color: subText }}>
-                {[rec.city, rec.country].filter(Boolean).join(', ')}
-              </div>
-            )}
-          </div>
-        </Space>
-      ),
-    },
-    {
-      title: 'Açıklama / Adres',
-      key: 'desc',
-      render: (_: unknown, rec: Location) => (
-        <div>
-          {rec.description && <Text type="secondary" style={{ fontSize: 12 }}>{rec.description}</Text>}
-          {rec.address && <div style={{ fontSize: 11, color: subText }}>{rec.address}</div>}
-          {!rec.description && !rec.address && <Text type="secondary" style={{ fontSize: 12 }}>—</Text>}
-        </div>
-      ),
-    },
-    {
-      title: 'Cihaz',
-      dataIndex: 'device_count',
-      key: 'device_count',
-      width: 80,
-      render: (n: number) => (
-        <Tag icon={<LaptopOutlined />} color={n > 0 ? 'blue' : 'default'}>{n}</Tag>
-      ),
-    },
-    {
-      title: 'Kullanıcı',
-      dataIndex: 'user_count',
-      key: 'user_count',
-      width: 90,
-      render: (n: number) => (
-        <Tag icon={<TeamOutlined />} color={n > 0 ? 'green' : 'default'}>{n}</Tag>
-      ),
-    },
-    {
-      title: 'Eklenme',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 110,
-      render: (v: string) => <Text type="secondary" style={{ fontSize: 12 }}>{dayjs(v).format('DD.MM.YYYY')}</Text>,
-    },
-    {
-      title: '',
-      key: 'actions',
-      width: 80,
-      render: (_: unknown, rec: Location) => (
-        <Space size={4}>
-          <Tooltip title="Düzenle">
-            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => openEdit(rec)} />
-          </Tooltip>
-          <Popconfirm
-            title="Lokasyonu sil"
-            description={rec.device_count > 0
-              ? `${rec.device_count} cihazın site alanı temizlenecek. Emin misiniz?`
-              : 'Bu lokasyonu silmek istediğinize emin misiniz?'}
-            okText="Sil"
-            cancelText="İptal"
-            okButtonProps={{ danger: true }}
-            onConfirm={() => deleteMutation.mutate(rec.id)}
-          >
-            <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
+  // ── Real-data stats for the NOC stat bar ──────────────────────────────
+  // BOŞ: device_count=0 (operasyonel olmayan / yeni eklenmiş lokasyon)
+  // TEK CİHAZ: device_count=1 (kırılgan — yedeği yok)
+  // ÜLKE: distinct country (boş olmayan), tek metrik kapsam genişliği için
+  const stats = useMemo(() => {
+    const totalDevices = items.reduce((s, l) => s + l.device_count, 0)
+    const totalUsers = items.reduce((s, l) => s + (l.user_count || 0), 0)
+    const empty = items.filter((l) => l.device_count === 0).length
+    const single = items.filter((l) => l.device_count === 1).length
+    const countries = new Set(items.map((l) => l.country).filter(Boolean)).size
+    return {
+      total: items.length,
+      totalDevices,
+      totalUsers,
+      empty,
+      single,
+      countries,
+    }
+  }, [items])
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            <EnvironmentOutlined style={{ marginRight: 8, color: '#3b82f6' }} />
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>Lokasyonlar</span></div>
+          <h1 className="nm-page-title">
             Lokasyon Yönetimi
-          </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            Şube / site tanımları — kullanıcılara lokasyon bazlı yetki verin
-          </Text>
+            <span className="nm-pill mono">{items.length} lokasyon</span>
+          </h1>
+          <div className="nm-page-sub">
+            Şube / site tanımları · kullanıcılara lokasyon bazl&#x131; yetki ataman&#x131;n temeli · cihazlar buraya bağlanır.
+          </div>
         </div>
-        <Space>
+        <div style={{ display: 'flex', gap: 8 }}>
           <Tooltip title="Yenile">
             <Button icon={<ReloadOutlined />} onClick={() => refetch()} />
           </Tooltip>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            Yeni Lokasyon
-          </Button>
-        </Space>
+          {canMutate && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              Yeni Lokasyon
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Summary cards */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 20 }}>
-        <Col xs={24} sm={8}>
-          <Card style={{ background: cardBg, border: `1px solid ${border}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <EnvironmentOutlined style={{ fontSize: 24, color: '#3b82f6' }} />
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>Toplam Lokasyon</Text>
-                <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>{items.length}</div>
-              </div>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={8}>
-          <Card style={{ background: cardBg, border: `1px solid ${border}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <LaptopOutlined style={{ fontSize: 24, color: '#22c55e' }} />
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>Atanmış Cihaz</Text>
-                <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>{totalDevices}</div>
-              </div>
-            </div>
-          </Card>
-        </Col>
-        <Col xs={24} sm={8}>
-          <Card style={{ background: cardBg, border: `1px solid ${border}` }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <TeamOutlined style={{ fontSize: 24, color: '#8b5cf6' }} />
-              <div>
-                <Text type="secondary" style={{ fontSize: 12 }}>Atanmış Kullanıcı</Text>
-                <div style={{ fontSize: 28, fontWeight: 700, lineHeight: 1.2 }}>{totalUsers}</div>
-              </div>
-            </div>
-          </Card>
-        </Col>
-      </Row>
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM LOKASYON</div>
+          <div className="nm-stat-val">{stats.total}</div>
+          <div className="nm-stat-delta">{stats.countries || 0} ülke</div>
+        </div>
+        <div className="nm-stat ok">
+          <div className="nm-stat-label">ATANMIŞ CİHAZ</div>
+          <div className="nm-stat-val">{stats.totalDevices}</div>
+          <div className="nm-stat-delta">{stats.total > 0 ? (stats.totalDevices / stats.total).toFixed(1) : '0'} / lokasyon</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">ATANMIŞ KULLANICI</div>
+          <div className="nm-stat-val">{stats.totalUsers}</div>
+          <div className="nm-stat-delta">lokasyon-rolleri toplamı</div>
+        </div>
+        <div className={`nm-stat ${stats.empty > 0 ? 'warn' : 'ok'}`}>
+          <div className="nm-stat-label">BOŞ LOKASYON</div>
+          <div className="nm-stat-val">{stats.empty}</div>
+          <div className="nm-stat-delta">cihazı yok</div>
+        </div>
+        <div className={`nm-stat ${stats.single > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">TEK CİHAZ</div>
+          <div className="nm-stat-val">{stats.single}</div>
+          <div className="nm-stat-delta">yedeksiz (kırılgan)</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">ÜLKE KAPSAMI</div>
+          <div className="nm-stat-val">{stats.countries}</div>
+          <div className="nm-stat-delta">distinct country</div>
+        </div>
+      </div>
 
-      {/* Table */}
-      <Card style={{ background: cardBg, border: `1px solid ${border}` }}>
-        <Table
-          columns={columns}
-          dataSource={items}
-          rowKey="id"
-          loading={isLoading}
-          pagination={false}
-          size="small"
-          locale={{ emptyText: 'Henüz lokasyon eklenmemiş — "Yeni Lokasyon" butonunu kullanın' }}
-        />
-      </Card>
+      {/* Location cards grid */}
+      <div className="nm-card" style={{ padding: 0 }}>
+        <div className="nm-card-hd">
+          <h3><EnvironmentOutlined /> Lokasyonlar</h3>
+          <span className="nm-pill mono">{items.length}</span>
+        </div>
+        <div style={{ padding: 12 }}>
+          {isLoading && (
+            <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)' }}>Yükleniyor…</div>
+          )}
+          {!isLoading && items.length === 0 && (
+            <NmEmpty
+              icon={<EnvironmentOutlined />}
+              title="Henüz lokasyon eklenmemiş"
+              description={canMutate
+                ? '&#x130;lk lokasyonu olu&#x15F;turmak için yukar&#x131;daki "Yeni Lokasyon" butonunu kullan&#x131;n. Her cihaz bir lokasyona bağl&#x131;d&#x131;r — kapsam baz&#x131;n&#x131;z burada başlar.'
+                : 'Bu organizasyonda henüz lokasyon tan&#x131;mlanmam&#x131;ş.'}
+              action={canMutate ? (
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                  Yeni Lokasyon
+                </Button>
+              ) : undefined}
+            />
+          )}
+          {!isLoading && items.length > 0 && (
+            <div className="nm-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+              {items.map((loc) => (
+                <LocationCard
+                  key={loc.id}
+                  loc={loc}
+                  onEdit={openEdit}
+                  onDelete={(id) => deleteMutation.mutate(id)}
+                  canMutate={canMutate}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
 
-      {/* Create/Edit Modal */}
+      {/* Create/Edit Modal — kept functional with antd */}
       <Modal
         title={editing ? 'Lokasyon Düzenle' : 'Yeni Lokasyon'}
         open={modalOpen}
@@ -356,15 +322,136 @@ export default function LocationsPage() {
             background: isDark ? '#0c2040' : '#eff6ff',
             border: `1px solid ${isDark ? '#1a3458' : '#bfdbfe'}`,
             borderRadius: 6, padding: '8px 12px', marginTop: 8,
+            fontSize: 12, color: isDark ? '#94a3b8' : '#475569',
           }}>
-            <Text style={{ fontSize: 12, color: subText }}>
-              <LaptopOutlined style={{ marginRight: 6 }} />
-              Bu lokasyona <strong>{editing.device_count}</strong> cihaz atanmış.
-              İsim değiştirilirse cihazların site alanı otomatik güncellenir.
-            </Text>
+            <LaptopOutlined style={{ marginRight: 6 }} />
+            Bu lokasyona <strong>{editing.device_count}</strong> cihaz atanmış.
+            İsim değiştirilirse cihazların site alanı otomatik güncellenir.
           </div>
         )}
       </Modal>
+    </div>
+  )
+}
+
+function LocationCard({
+  loc, onEdit, onDelete, canMutate,
+}: { loc: Location; onEdit: (l: Location) => void; onDelete: (id: number) => void; canMutate: boolean }) {
+  const color = loc.color || '#3b82f6'
+  const status = loc.device_count === 0 ? 'empty' : loc.device_count === 1 ? 'fragile' : 'ok'
+
+  return (
+    <div className="nm-card" style={{ padding: 12, position: 'relative' }}>
+      {/* Header: color dot + name + city/country */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
+        <div style={{
+          width: 32, height: 32, borderRadius: 8,
+          background: `${color}22`, border: `1px solid ${color}55`,
+          display: 'grid', placeItems: 'center', flexShrink: 0,
+        }}>
+          <EnvironmentOutlined style={{ color, fontSize: 16 }} />
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg-0)',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {loc.name}
+          </div>
+          {(loc.city || loc.country) && (
+            <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              <GlobalOutlined style={{ marginRight: 4, fontSize: 10 }} />
+              {[loc.city, loc.country].filter(Boolean).join(', ')}
+            </div>
+          )}
+        </div>
+        {/* Status pill */}
+        {status === 'empty' && (
+          <span className="nm-pill" style={{ color: 'var(--warn)', borderColor: 'var(--warn)', fontSize: 9.5 }}>BOŞ</span>
+        )}
+        {status === 'fragile' && (
+          <span className="nm-pill" style={{ color: 'var(--warn)', borderColor: 'var(--warn)', fontSize: 9.5 }}>YEDEKSİZ</span>
+        )}
+      </div>
+
+      {/* Address line (optional) */}
+      {loc.address && (
+        <div style={{
+          fontSize: 11, color: 'var(--fg-3)', marginBottom: 10,
+          padding: '6px 8px', background: 'var(--bg-2)', borderRadius: 4,
+          borderLeft: `2px solid ${color}`,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          {loc.address}
+        </div>
+      )}
+
+      {/* Metrics row */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+        padding: '8px 0', borderTop: '1px solid var(--border-0)',
+        borderBottom: '1px solid var(--border-0)', marginBottom: 10,
+      }}>
+        <Metric icon={<LaptopOutlined />} label="CİHAZ" value={loc.device_count}
+          color={loc.device_count === 0 ? 'var(--fg-3)' : loc.device_count === 1 ? 'var(--warn)' : 'var(--accent)'} />
+        <Metric icon={<TeamOutlined />} label="KULLANICI" value={loc.user_count || 0}
+          color={(loc.user_count || 0) === 0 ? 'var(--fg-3)' : 'var(--ok)'} />
+        <Metric icon={<ClockCircleOutlined />} label="ZAMAN DİLİMİ"
+          value={loc.timezone ? loc.timezone.split('/').pop() || '—' : '—'}
+          color="var(--fg-2)" small />
+      </div>
+
+      {/* Footer: created + actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }} className="mono">
+          {dayjs(loc.created_at).format('DD.MM.YYYY')}
+        </span>
+        {canMutate ? (
+          <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+            <Tooltip title="Düzenle">
+              <button onClick={() => onEdit(loc)}><EditOutlined /></button>
+            </Tooltip>
+            <Popconfirm
+              title="Lokasyonu sil"
+              description={loc.device_count > 0
+                ? `${loc.device_count} cihazın site alanı temizlenecek. Emin misiniz?`
+                : 'Bu lokasyonu silmek istediğinize emin misiniz?'}
+              okText="Sil"
+              cancelText="İptal"
+              okButtonProps={{ danger: true }}
+              onConfirm={() => onDelete(loc.id)}
+            >
+              <button><DeleteOutlined style={{ color: 'var(--crit)' }} /></button>
+            </Popconfirm>
+          </span>
+        ) : (
+          <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>salt-okuma</span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function Metric({
+  icon, label, value, color, small,
+}: {
+  icon: React.ReactNode
+  label: string
+  value: string | number
+  color: string
+  small?: boolean
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', minWidth: 0 }}>
+      <span style={{ fontSize: 9, color: 'var(--fg-3)', letterSpacing: 0.4 }}>{label}</span>
+      <span style={{
+        fontSize: small ? 11 : 16, fontWeight: small ? 400 : 600, color,
+        marginTop: 2,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%',
+      }} className={small ? 'mono' : ''}>
+        <span style={{ marginRight: 4, opacity: 0.7 }}>{icon}</span>{value}
+      </span>
     </div>
   )
 }

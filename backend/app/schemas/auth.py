@@ -21,6 +21,53 @@ class TokenResponse(BaseModel):
     permissions: Optional[dict] = None
 
 
+class MfaChallengeResponse(BaseModel):
+    """Returned by /auth/login when the user has MFA enabled. The
+    client trades `challenge_token` + the user's OTP at /auth/mfa/verify
+    for a real access token. No access_token here — by design."""
+    mfa_required: bool = True
+    challenge_token: str
+    mfa_methods: list[str]              # e.g. ['totp']
+    mfa_default_method: str             # frontend picks this initially
+    masked_email: Optional[str] = None  # for the 'email' method later
+
+
+class MfaVerifyRequest(BaseModel):
+    challenge_token: str
+    code: str           # 6-digit TOTP, or a recovery code if method='recovery'
+    method: str = "totp"
+
+
+class MfaEnrollResponse(BaseModel):
+    """Payload returned from /users/me/mfa/enroll/totp. The secret is
+    shown ONCE — the client renders the otpauth URI as a QR. The user
+    completes setup by POSTing a valid code to /confirm."""
+    secret: str
+    otpauth_uri: str
+    issuer: str
+
+
+class MfaConfirmRequest(BaseModel):
+    code: str           # First code from the authenticator, proves setup OK
+
+
+class MfaConfirmResponse(BaseModel):
+    mfa_enabled: bool = True
+    recovery_codes: list[str]   # plaintext, shown ONCE
+
+
+class MfaDisableRequest(BaseModel):
+    password: str       # Re-confirm password to disable MFA
+    code: Optional[str] = None  # OPTIONAL: TOTP or recovery; recommended
+
+
+class MfaStatusResponse(BaseModel):
+    mfa_enabled: bool
+    methods: list[str]
+    recovery_codes_remaining: int
+    enrolled_at: Optional[str] = None
+
+
 class InviteRequest(BaseModel):
     email: EmailStr
     full_name: Optional[str] = None

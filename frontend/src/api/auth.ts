@@ -1,9 +1,20 @@
 import client from './client'
-import type { TokenResponse, User, Permissions } from '@/types'
+import type { LoginResult, TokenResponse, User, Permissions } from '@/types'
 
 export const authApi = {
+  /** Login may return EITHER a real TokenResponse (no MFA) OR an
+   *  MfaChallengeResponse (caller must complete via verifyMfa). Callers
+   *  should narrow with `'mfa_required' in res`. */
   login: (username: string, password: string) =>
-    client.post<TokenResponse>('/auth/login', { username, password }).then((r) => r.data),
+    client.post<LoginResult>('/auth/login', { username, password }).then((r) => r.data),
+
+  /** Trade an MFA challenge_token + OTP (or recovery code) for a real
+   *  session. `method` defaults to 'totp'; pass 'recovery' for a code
+   *  from the user's recovery list. */
+  verifyMfa: (challenge_token: string, code: string, method: 'totp' | 'recovery' = 'totp') =>
+    client
+      .post<TokenResponse>('/auth/mfa/verify', { challenge_token, code, method })
+      .then((r) => r.data),
 
   me: () => client.get<User>('/auth/me').then((r) => r.data),
 

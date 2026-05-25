@@ -7,17 +7,29 @@ On new org creation:
   3. Create PG role org_role_{id} with a random password
   4. Grant schema usage + table privileges to the role
   5. Update organizations.schema_name, pg_role_name, pg_pass_enc
+
+Faz 7 RLS uses the shared `public` schema for isolation; the per-org
+schema + role infrastructure here is pre-RLS legacy that nothing in the
+runtime path currently reads. Org creation must NOT fail if the
+runtime DB user lacks `CREATE SCHEMA / CREATE ROLE` privileges (the
+secure-by-default app role won't have those — only the migration
+superuser does). We log + skip in that case; the org row + permission
+sets land normally, and the schema_name/pg_role_name columns stay NULL.
 """
 import copy
+import logging
 import secrets
 import string
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import encrypt_credential
 from app.models.shared.organization import Organization
 from app.models.shared.permission_set import PermissionSet, DEFAULT_PERMISSIONS
+
+log = logging.getLogger("netmanager.provisioner")
 
 
 def _random_password(length: int = 32) -> str:
@@ -30,35 +42,58 @@ class TenantProvisioner:
         """
         Called after the Organization row is flushed (org.id is available).
         Creates the PostgreSQL schema and role, then grants privileges.
+
+        Soft-fails if the DB user lacks the privilege to CREATE SCHEMA /
+        CREATE ROLE — the org_X schema is legacy infrastructure and the
+        runtime relies on RLS row-isolation in `public` instead. Schema
+        + role columns stay NULL in that branch.
         """
         schema = f"org_{org.id}"
         role = f"org_role_{org.id}"
         password = _random_password()
 
-        # Create schema
-        await db.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
+        # Wrap the DDL in a SAVEPOINT so a privilege failure only rolls back
+        # the per-org schema/role attempt — the surrounding transaction
+        # (the Organization row + DEFAULT permission sets inserted by the
+        # caller right after) survives intact.
+        try:
+            async with db.begin_nested():
+                # Create schema
+                await db.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
 
-        # Create PG role
-        await db.execute(text(
-            f"DO $$ BEGIN "
-            f"  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') "
-            f"  THEN CREATE ROLE \"{role}\" LOGIN PASSWORD '{password}'; "
-            f"  END IF; "
-            f"END $$"
-        ))
+                # Create PG role
+                await db.execute(text(
+                    f"DO $$ BEGIN "
+                    f"  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '{role}') "
+                    f"  THEN CREATE ROLE \"{role}\" LOGIN PASSWORD '{password}'; "
+                    f"  END IF; "
+                    f"END $$"
+                ))
 
-        # Grant schema + future tables
-        await db.execute(text(f'GRANT USAGE ON SCHEMA "{schema}" TO "{role}"'))
-        await db.execute(text(
-            f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" '
-            f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{role}"'
-        ))
+                # Grant schema + future tables
+                await db.execute(text(f'GRANT USAGE ON SCHEMA "{schema}" TO "{role}"'))
+                await db.execute(text(
+                    f'ALTER DEFAULT PRIVILEGES IN SCHEMA "{schema}" '
+                    f'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO "{role}"'
+                ))
 
-        # Update org record
-        org.schema_name = schema
-        org.pg_role_name = role
-        org.pg_pass_enc = encrypt_credential(password)
-        db.add(org)
+                # Update org record (only on success — SAVEPOINT commits with
+                # the exit; on failure these fields stay NULL)
+                org.schema_name = schema
+                org.pg_role_name = role
+                org.pg_pass_enc = encrypt_credential(password)
+                db.add(org)
+
+        except ProgrammingError as e:
+            # InsufficientPrivilege — runtime app user can't CREATE
+            # SCHEMA/ROLE (correct in a security-hardened deployment).
+            # Faz 7 RLS in `public` supersedes this isolation layer.
+            log.warning(
+                "tenant_provisioner: skipping per-org schema/role provision "
+                "(runtime DB user lacks CREATE privilege — Faz 7 RLS in "
+                "public schema is the active isolation layer): %s",
+                str(e.orig)[:200] if hasattr(e, "orig") else str(e)[:200],
+            )
 
     async def create_default_permission_sets(
         self, db: AsyncSession, org: Organization

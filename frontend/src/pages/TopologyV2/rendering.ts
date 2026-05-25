@@ -10,39 +10,42 @@ import type {
 } from './contract'
 
 // ── palette ───────────────────────────────────────────────────────────────
+// T8.4 NOC design palette — core teal · dist blue · access slate · edge
+// orange · wireless green · ghost purple (matches the Topoloji design
+// legend so the WebGL graph reads identically to the mockup).
 const LAYER_COLOR: Record<string, string> = {
-  core: '#3b82f6',
-  distribution: '#06b6d4',
-  access: '#22c55e',
-  edge: '#a855f7',
-  wireless: '#ec4899',
+  core: '#22d3c5',
+  distribution: '#3b82f6',
+  access: '#94a3b8',
+  edge: '#f97316',
+  wireless: '#22c55e',
   unknown: '#94a3b8',
 }
 const STATUS_COLOR: Record<string, string> = {
   offline: '#ef4444',
-  unreachable: '#f59e0b',
+  unreachable: '#f97316',
   unknown: '#64748b',
 }
 const TRAFFIC_COLOR: Record<TrafficClass, string> = {
   idle: '#334155',
   low: '#3b82f6',
   normal: '#22c55e',
-  high: '#f59e0b',
+  high: '#f97316',
   saturated: '#ef4444',
   unknown: '#475569',
 }
 const ANOMALY_COLOR: Partial<Record<EdgeAnomalyState, string>> = {
-  stale: '#f59e0b',
+  stale: '#eab308',
   asymmetric: '#f97316',
-  ghost: '#52617a',
+  ghost: '#a855f7',
 }
 const CLUSTER_COLOR: Record<string, string> = {
   location: '#6366f1',
-  layer: '#0ea5e9',
+  layer: '#22d3c5',
   rack: '#14b8a6',
 }
 
-export const GHOST_COLOR = '#52617a'
+export const GHOST_COLOR = '#a855f7'
 
 // ── nodes ───────────────────────────────────────────────────────────────────
 

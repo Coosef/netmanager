@@ -10,9 +10,10 @@ import {
   AppstoreOutlined, UnorderedListOutlined, DownOutlined, RightOutlined,
   ApiOutlined, SaveOutlined,
 } from '@ant-design/icons'
-import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
+import { useAuthStore } from '@/store/auth'
 import { devicesApi } from '@/api/devices'
 import type { Device, NetworkInterface } from '@/types'
 
@@ -65,21 +66,48 @@ interface DeviceSummaryRow {
   error: string | null
 }
 
+/**
+ * T8.4 perf — tek HTTP batch (cache hit'ler anında, miss'ler sunucuda
+ * paralel SSH). Eski N x useQueries pattern'i tarayıcının 6-paralel
+ * limitini aşamıyordu; ilk yüklemede 60+ switch için ~60 sn'lik kuyruk
+ * oluşuyordu. Şimdi tek istek, en yavaş SSH süresi kadar bekliyor.
+ *
+ * useQueries de kaldırıldı çünkü iki sistem aynı queryKey'i kullansa
+ * cache tutarlılığı bozulur — port-assignment tab'ı hala /vlans tek-cihaz
+ * endpoint'ini ['device-vlans', id] ile çekiyor, batch sonucu da o key'e
+ * yazılıyor (qc.setQueryData) → ikisi aynı cache'i paylaşır.
+ */
 function useAllDeviceVlans(devices: Device[]) {
-  const results = useQueries({
-    queries: devices.map((d) => ({
-      queryKey: ['device-vlans', d.id],
-      queryFn: () => devicesApi.getVlans(d.id),
-      staleTime: 120_000,
-      retry: 0,
-    })),
+  const qc = useQueryClient()
+  const ids = useMemo(() => devices.map((d) => d.id).sort((a, b) => a - b), [devices])
+  const cacheKey = ids.join(',')
+
+  const { data, isFetching } = useQuery({
+    // Cache key id-set'e bağlı; SiteContext değişirse devices değişir → re-fetch.
+    queryKey: ['device-vlans-batch', cacheKey],
+    queryFn: async () => {
+      if (ids.length === 0) return { items: {}, fetched: 0, from_cache: 0, errors: 0 }
+      const res = await devicesApi.getVlansBatch(ids)
+      // Per-device cache'i de doldur ki port-assignment tab tek-cihaz
+      // getVlans çağırınca yeni round-trip yapmasın.
+      for (const [didStr, payload] of Object.entries(res.items)) {
+        qc.setQueryData(['device-vlans', Number(didStr)], payload)
+      }
+      return res
+    },
+    staleTime: 120_000,
+    retry: 0,
   })
-  return devices.map((d, i) => ({
-    device: d,
-    vlans: results[i]?.data?.vlans || [],
-    loading: results[i]?.isLoading ?? false,
-    error: results[i]?.data?.error || (results[i]?.isError ? 'SSH bağlantı hatası' : null),
-  }))
+
+  return devices.map((d) => {
+    const item = data?.items?.[String(d.id)]
+    return {
+      device: d,
+      vlans: item?.vlans || [],
+      loading: isFetching && !item,
+      error: item?.error || (!item && !isFetching && data ? 'Yanıt yok' : null),
+    }
+  })
 }
 
 export default function VlanManagementPage() {
@@ -88,6 +116,11 @@ export default function VlanManagementPage() {
   const { activeSite } = useSite()
   const C = mkC(isDark)
   const qc = useQueryClient()
+
+  // RBAC — VLAN write = SSH config push to switches; gate on device:connect.
+  // Viewer sees the list (read-only matrix) but can't bulk-add/remove VLANs
+  // or commit port assignments. Backend re-enforces.
+  const canMutate = useAuthStore((s) => s.can('devices', 'connect'))
 
   const [viewMode, setViewMode] = useState<'vlan' | 'device' | 'port'>('vlan')
   const [search, setSearch] = useState('')
@@ -160,6 +193,7 @@ export default function VlanManagementPage() {
       devicesApi.deleteVlan(deviceId, vlanId),
     onSuccess: (_, { deviceId }) => {
       qc.invalidateQueries({ queryKey: ['device-vlans', deviceId] })
+      qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
     },
   })
 
@@ -261,6 +295,7 @@ export default function VlanManagementPage() {
           await devicesApi.deleteVlan(deviceId, values.vlan_id)
         }
         qc.invalidateQueries({ queryKey: ['device-vlans', deviceId] })
+        qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
         ok++
       } catch {
         fail++
@@ -433,95 +468,93 @@ export default function VlanManagementPage() {
 
   if (devicesLoading) return <Spin />
 
+  // ── Computed KPIs for the NOC stat bar ─────────────────────────────────────
+  const inconsistencyCount = partialCount  // alias for clarity in the tile
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{VLAN_CSS}</style>
 
-      {/* ── Header ── */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#8b5cf620' : C.border}`,
-        borderLeft: '4px solid #8b5cf6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        gap: 12,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#8b5cf620', border: '1px solid #8b5cf630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <ApiOutlined style={{ color: '#8b5cf6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>
-              VLAN Yönetimi
-              <span style={{ color: C.dim, fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
-                ({uniqueVlanCount} VLAN · {allDevices.length} switch)
-              </span>
-            </div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Tüm switchlerdeki VLAN dağılımını görüntüle ve toplu yönet</div>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>VLAN</span></div>
+          <h1 className="nm-page-title">
+            VLAN Yönetimi
+            <span className="nm-pill mono">{uniqueVlanCount} VLAN</span>
+            <span className="nm-pill mono">{allDevices.length} switch</span>
+          </h1>
+          <div className="nm-page-sub">
+            T&#xFC;m switchlerin VLAN da&#x11F;&#x131;l&#x131;m&#x131; &#xB7; bo&#x15F;luklar&#x131; renkle yakala &#xB7;
+            toplu VLAN ekle/sil &#xB7; port atamas&#x131; tek panelden.
           </div>
         </div>
         <Space>
           <Button
             icon={<SyncOutlined />}
-            onClick={() => allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))}
+            onClick={() => {
+              // T8.4 batch — tek invalidate, sunucu force=true ile cache'i atlar.
+              qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
+              allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))
+            }}
           >
             Tümünü Yenile
           </Button>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            disabled={selectedDeviceIds.length === 0}
-            onClick={() => { setBulkAction('add'); bulkForm.resetFields(); setBulkModalOpen(true) }}
-          >
-            VLAN Ekle {selectedDeviceIds.length > 0 && `(${selectedDeviceIds.length} switch)`}
-          </Button>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            disabled={selectedDeviceIds.length === 0}
-            onClick={() => { setBulkAction('delete'); bulkForm.resetFields(); setBulkModalOpen(true) }}
-          >
-            VLAN Sil
-          </Button>
+          {canMutate && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              disabled={selectedDeviceIds.length === 0}
+              onClick={() => { setBulkAction('add'); bulkForm.resetFields(); setBulkModalOpen(true) }}
+            >
+              VLAN Ekle {selectedDeviceIds.length > 0 && `(${selectedDeviceIds.length})`}
+            </Button>
+          )}
+          {canMutate && (
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={selectedDeviceIds.length === 0}
+              onClick={() => { setBulkAction('delete'); bulkForm.resetFields(); setBulkModalOpen(true) }}
+            >
+              VLAN Sil
+            </Button>
+          )}
         </Space>
       </div>
 
-      {/* ── Stats ── */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Toplam Switch', value: allDevices.length, color: '#3b82f6', suffix: undefined },
-          { label: 'Benzersiz VLAN', value: uniqueVlanCount, color: '#8b5cf6', suffix: undefined },
-          { label: 'Tüm Switchlerde', value: fullyConsistentCount, color: '#22c55e', suffix: 'VLAN' },
-          { label: 'Kısmi Dağıtım', value: partialCount, color: '#f59e0b', suffix: 'VLAN' },
-          {
-            label: loadingCount > 0 ? `${loadingCount} yükleniyor` : errorCount > 0 ? `${errorCount} hata` : 'Tümü hazır',
-            value: loadingCount > 0 ? loadingCount : errorCount,
-            color: loadingCount > 0 ? '#f59e0b' : errorCount > 0 ? '#ef4444' : '#22c55e',
-            suffix: undefined,
-          },
-        ].map((s) => (
-          <div key={s.label} style={{
-            background: isDark ? `linear-gradient(135deg, ${s.color}0d 0%, ${C.bg} 60%)` : C.bg,
-            border: `1px solid ${isDark ? s.color + '28' : C.border}`,
-            borderTop: isDark ? `2px solid ${s.color}55` : `2px solid ${s.color}`,
-            borderRadius: 10,
-            padding: '10px 16px',
-            flex: 1, minWidth: 110,
-          }}>
-            <div style={{ color: s.color, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>
-              {s.value}{s.suffix ? <span style={{ fontSize: 12, marginLeft: 3 }}>{s.suffix}</span> : null}
-            </div>
-            <div style={{ color: C.muted, fontSize: 11, marginTop: 3 }}>{s.label}</div>
-          </div>
-        ))}
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">SWITCH</div>
+          <div className="nm-stat-val">{allDevices.length}</div>
+          <div className="nm-stat-delta">VLAN sorgulanan</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">BENZERSİZ VLAN</div>
+          <div className="nm-stat-val">{uniqueVlanCount}</div>
+          <div className="nm-stat-delta">fleet genelinde</div>
+        </div>
+        <div className={`nm-stat ${fullyConsistentCount > 0 ? 'ok' : ''}`}>
+          <div className="nm-stat-label">TÜM SWITCHLERDE</div>
+          <div className="nm-stat-val">{fullyConsistentCount}</div>
+          <div className="nm-stat-delta">%100 kapsam VLAN</div>
+        </div>
+        <div className={`nm-stat ${inconsistencyCount > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">KISMI DAĞITIM</div>
+          <div className="nm-stat-val">{inconsistencyCount}</div>
+          <div className="nm-stat-delta">tutarsız (bazı switch'lerde yok)</div>
+        </div>
+        <div className={`nm-stat ${errorCount > 0 ? 'crit' : 'ok'}`}>
+          <div className="nm-stat-label">SSH HATA</div>
+          <div className="nm-stat-val">{errorCount}</div>
+          <div className="nm-stat-delta">VLAN bilgisi alınamadı</div>
+        </div>
+        <div className={`nm-stat ${loadingCount > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">YÜKLENİYOR</div>
+          <div className="nm-stat-val">{loadingCount}</div>
+          <div className="nm-stat-delta">aktif SSH sorgu</div>
+        </div>
       </div>
 
       {/* ── Error alert ── */}
@@ -536,7 +569,7 @@ export default function VlanManagementPage() {
       )}
 
       {/* ── Device selector (collapsible) ── */}
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, marginBottom: 0, padding: '8px 12px' }}>
+      <div className="nm-card" style={{ padding: '8px 12px' }}>
         <div
           style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
           onClick={() => setDevicePanelOpen((v) => !v)}
@@ -655,7 +688,7 @@ export default function VlanManagementPage() {
       </div>
 
       {viewMode === 'vlan' && (
-        <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+        <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
         <Table<VlanSummaryRow>
           dataSource={filteredVlanSummaries}
           rowKey="vlanId"
@@ -703,7 +736,7 @@ export default function VlanManagementPage() {
       )}
 
       {viewMode === 'device' && (
-        <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+        <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
         <Table<DeviceSummaryRow>
           dataSource={filteredDeviceSummaries}
           rowKey={(r) => r.device.id}
@@ -924,6 +957,8 @@ export default function VlanManagementPage() {
             title: '',
             width: 80,
             render: (_: unknown, r: NetworkInterface) => {
+              // Viewer cannot push VLAN-config to ports — backend rejects too.
+              if (!canMutate) return <span style={{ color: 'var(--fg-3)' }}>—</span>
               const edit = portEdits[r.name]
               const hasEdit = edit?.mode && (
                 edit.mode === 'trunk'

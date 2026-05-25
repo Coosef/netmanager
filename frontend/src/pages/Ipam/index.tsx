@@ -612,27 +612,20 @@ function SubnetUtilizationGrid({ subnets }: { subnets: IpamSubnet[] }) {
   if (subnets.length === 0) return null
 
   return (
-    <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, marginBottom: 16, overflow: 'hidden' }}>
-      <div style={{
-        padding: '10px 16px', borderBottom: `1px solid ${C.border}`,
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        background: isDark ? '#0f172a' : '#f8fafc',
-      }}>
-        <Space>
-          <BarChartOutlined style={{ color: '#3b82f6' }} />
-          <Text strong style={{ fontSize: 13, color: C.text }}>Subnet Doluluk Haritası</Text>
-          {criticalCount > 0 && (
-            <Tag style={{ color: '#ef4444', borderColor: '#ef444450', background: '#ef444418', fontSize: 11 }} icon={<WarningOutlined />}>
-              {criticalCount} kritik (≥90%)
-            </Tag>
-          )}
-          {warningCount > 0 && (
-            <Tag style={{ color: '#f59e0b', borderColor: '#f59e0b50', background: '#f59e0b18', fontSize: 11 }}>
-              {warningCount} uyarı (≥70%)
-            </Tag>
-          )}
-        </Space>
-        <Space style={{ fontSize: 11 }}>
+    <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
+      <div className="nm-card-hd">
+        <h3><BarChartOutlined /> Subnet Doluluk Haritası</h3>
+        {criticalCount > 0 && (
+          <span className="nm-pill" style={{ color: 'var(--crit)', borderColor: 'var(--crit)' }}>
+            <WarningOutlined style={{ marginRight: 4 }} />{criticalCount} kritik
+          </span>
+        )}
+        {warningCount > 0 && (
+          <span className="nm-pill" style={{ color: 'var(--warn)', borderColor: 'var(--warn)' }}>
+            {warningCount} uyarı
+          </span>
+        )}
+        <Space style={{ marginLeft: 'auto', fontSize: 11 }}>
           {[
             { color: '#3b82f6', label: 'Kullanılan' },
             { color: '#f59e0b', label: 'Rezerve' },
@@ -640,7 +633,7 @@ function SubnetUtilizationGrid({ subnets }: { subnets: IpamSubnet[] }) {
           ].map((l) => (
             <span key={l.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
               <span style={{ width: 10, height: 10, borderRadius: 2, background: l.color, display: 'inline-block' }} />
-              <Text style={{ fontSize: 11, color: C.muted }}>{l.label}</Text>
+              <Text style={{ fontSize: 11, color: 'var(--fg-3)' }}>{l.label}</Text>
             </span>
           ))}
         </Space>
@@ -819,87 +812,98 @@ export default function IpamPage() {
     },
   ]
 
+  // Derived per-subnet utilization stats — concrete capacity-planning signal.
+  const subnets = subnetsData?.items ?? []
+  const utilStats = useMemo(() => {
+    const critical = subnets.filter((s) => s.utilization_pct >= 90).length
+    const warning = subnets.filter((s) => s.utilization_pct >= 70 && s.utilization_pct < 90).length
+    const avgUtil = subnets.length === 0 ? 0
+      : Math.round(subnets.reduce((sum, s) => sum + s.utilization_pct, 0) / subnets.length)
+    return { critical, warning, avgUtil }
+  }, [subnets])
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{IPAM_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#3b82f620' : C.border}`,
-        borderLeft: '4px solid #3b82f6',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#3b82f620', border: '1px solid #3b82f630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <ClusterOutlined style={{ color: '#3b82f6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>IPAM — IP Adres Yönetimi</div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Subnet ve IP adresi takibi</div>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>IPAM</span></div>
+          <h1 className="nm-page-title">
+            IP Adres Yönetimi
+            <span className="nm-pill mono">{stats?.subnets ?? 0} subnet</span>
+          </h1>
+          <div className="nm-page-sub">
+            Subnet kataloğu · IP doluluk takibi · ARP/Ping keşif · adres → cihaz eşlemesi.
           </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditSubnet(null); setSubnetModal(true) }}
-          style={{ background: '#3b82f6', borderColor: '#3b82f6' }}>
+        <Button type="primary" icon={<PlusOutlined />}
+          onClick={() => { setEditSubnet(null); setSubnetModal(true) }}>
           Subnet Ekle
         </Button>
       </div>
 
-      {/* Stat Cards */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        {[
-          { label: 'Subnetler', value: stats?.subnets ?? 0, color: '#3b82f6', icon: <ClusterOutlined /> },
-          { label: 'Toplam Adres', value: stats?.addresses_total ?? 0, color: '#6366f1', icon: <BarChartOutlined /> },
-          { label: 'Dinamik', value: stats?.addresses_dynamic ?? 0, color: '#06b6d4', icon: <RadarChartOutlined /> },
-          { label: 'Statik', value: stats?.addresses_static ?? 0, color: '#22c55e', icon: <ClusterOutlined /> },
-          { label: 'Rezerve', value: stats?.addresses_reserved ?? 0, color: '#f59e0b', icon: <WarningOutlined /> },
-        ].map((s) => (
-          <div key={s.label} style={{
-            flex: 1, minWidth: 100,
-            background: isDark ? `linear-gradient(135deg, ${s.color}0d 0%, ${C.bg} 60%)` : C.bg,
-            border: `1px solid ${isDark ? s.color + '28' : C.border}`,
-            borderTop: isDark ? `2px solid ${s.color}55` : `2px solid ${s.color}`,
-            borderRadius: 10, padding: '12px 16px',
-            display: 'flex', alignItems: 'center', gap: 10,
-          }}>
-            <div style={{ width: 32, height: 32, borderRadius: 8, background: isDark ? `${s.color}20` : `${s.color}15`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ color: s.color, fontSize: 14 }}>{s.icon}</span>
-            </div>
-            <div>
-              <div style={{ color: s.color, fontSize: 20, fontWeight: 800, lineHeight: 1 }}>{s.value}</div>
-              <div style={{ color: C.muted, fontSize: 10, marginTop: 2 }}>{s.label}</div>
-            </div>
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">SUBNET</div>
+          <div className="nm-stat-val">{stats?.subnets ?? 0}</div>
+          <div className="nm-stat-delta">{subnets.length} listede</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM ADRES</div>
+          <div className="nm-stat-val">{stats?.addresses_total ?? 0}</div>
+          <div className="nm-stat-delta">dyn + sta + rez</div>
+        </div>
+        <div className={`nm-stat ${utilStats.avgUtil >= 70 ? 'warn' : utilStats.avgUtil >= 50 ? '' : 'ok'}`}>
+          <div className="nm-stat-label">ORT. DOLULUK</div>
+          <div className="nm-stat-val">{utilStats.avgUtil}<small>%</small></div>
+          <div className="nm-stat-delta">{subnets.length} subnet üzerinden</div>
+        </div>
+        <div className={`nm-stat ${utilStats.critical > 0 ? 'crit' : ''}`}>
+          <div className="nm-stat-label">KRİTİK (≥90%)</div>
+          <div className="nm-stat-val">{utilStats.critical}</div>
+          <div className="nm-stat-delta">kapasite tükeniyor</div>
+        </div>
+        <div className={`nm-stat ${utilStats.warning > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">UYARI (70-89%)</div>
+          <div className="nm-stat-val">{utilStats.warning}</div>
+          <div className="nm-stat-delta">izlemeye alın</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">DİNAMİK / STATİK</div>
+          <div className="nm-stat-val mono" style={{ fontSize: 18 }}>
+            {stats?.addresses_dynamic ?? 0}<span style={{ color: 'var(--fg-3)' }}> / </span>{stats?.addresses_static ?? 0}
           </div>
-        ))}
+          <div className="nm-stat-delta">{stats?.addresses_reserved ?? 0} rezerve</div>
+        </div>
       </div>
 
-      <SubnetUtilizationGrid subnets={subnetsData?.items ?? []} />
+      <SubnetUtilizationGrid subnets={subnets} />
 
-      {/* Toolbar */}
-      <div style={{ display: 'flex', gap: 8 }}>
-        <Input
-          placeholder="Ağ, ad, açıklama ara…"
-          prefix={<SearchOutlined style={{ color: C.muted }} />}
-          allowClear
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 300 }}
-        />
-        <Button icon={<ReloadOutlined />} onClick={() => qc.invalidateQueries({ queryKey: ['ipam-subnets'] })} />
-        <Text style={{ lineHeight: '32px', fontSize: 12, color: C.muted }}>
-          {subnetsData?.total ?? 0} subnet
-        </Text>
-      </div>
-
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+      {/* Subnets table */}
+      <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="nm-card-hd">
+          <h3><ClusterOutlined /> Subnetler</h3>
+          <span className="nm-pill mono">{subnetsData?.total ?? 0}</span>
+          {/* Inline search + reload */}
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+            <Input
+              placeholder="Ağ, ad, açıklama ara…"
+              prefix={<SearchOutlined />}
+              allowClear
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ width: 260 }}
+              size="small"
+            />
+            <Button icon={<ReloadOutlined />} size="small"
+              onClick={() => qc.invalidateQueries({ queryKey: ['ipam-subnets'] })} />
+          </div>
+        </div>
         <Table
-          dataSource={subnetsData?.items ?? []}
+          dataSource={subnets}
           columns={columns}
           rowKey="id"
           loading={isFetching}

@@ -47,6 +47,51 @@ def decode_access_token(token: str) -> Optional[dict]:
         return None
 
 
+# ── MFA challenge tokens ─────────────────────────────────────────────────────
+# Short-lived JWT returned by /auth/login when the user has MFA enabled.
+# Carries the user id with scope='mfa-challenge'; the client trades it
+# (plus the OTP) at /auth/mfa/verify for a real access token. Five-minute
+# expiry — long enough to fish the phone out of a pocket, short enough
+# that a stolen browser tab can't sit on it. The scope claim isolates
+# this token from a normal access token: even if leaked it can ONLY be
+# spent at /auth/mfa/verify, never to call protected endpoints.
+
+MFA_CHALLENGE_SCOPE = "mfa-challenge"
+MFA_CHALLENGE_TTL = timedelta(minutes=5)
+
+
+def create_mfa_challenge_token(user_id: int) -> str:
+    """Issue a short-lived JWT proving the user passed password but not
+    yet MFA. Never grants access; only valid at /auth/mfa/verify."""
+    return pyjwt.encode(
+        {
+            "sub": str(user_id),
+            "scope": MFA_CHALLENGE_SCOPE,
+            "exp": datetime.now(timezone.utc) + MFA_CHALLENGE_TTL,
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+
+
+def decode_mfa_challenge_token(token: str) -> Optional[int]:
+    """Return the user_id encoded in a valid MFA challenge token, else
+    None. Rejects tokens missing or with a wrong scope so an access
+    token can never be replayed as a challenge."""
+    try:
+        payload = pyjwt.decode(
+            token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM],
+        )
+    except JWTError:
+        return None
+    if payload.get("scope") != MFA_CHALLENGE_SCOPE:
+        return None
+    try:
+        return int(payload.get("sub"))
+    except (TypeError, ValueError):
+        return None
+
+
 def encrypt_credential(plaintext: str) -> str:
     return _get_fernet().encrypt(plaintext.encode()).decode()
 

@@ -23,6 +23,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     localStorage.setItem('nm-theme', mode)
     document.documentElement.setAttribute('data-theme', mode)
+    // noc.css'in `.theme-light` token override'ları sadece `.nm-app-shell`
+    // altında etkili — ama antd Modal/Drawer Portal ile document.body'ye
+    // render oluyor, dolayısıyla shell dışında kalıp dark default'lara
+    // düşüyor. `theme-light` class'ını <body>'e de uygulayarak her
+    // Portal-child'ın doğru CSS variables'ını almasını sağlıyoruz.
+    document.body.classList.toggle('theme-light', mode === 'light')
   }, [mode])
 
   const toggle = () => setMode((m) => (m === 'dark' ? 'light' : 'dark'))

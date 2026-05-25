@@ -1,14 +1,15 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   App, Button, Drawer, Form, Input, Popconfirm, Select,
-  Space, Table, Tag, Switch, Avatar, Badge, Modal, Tooltip,
+  Space, Tag, Switch, Avatar, Modal, Tooltip,
   Divider, Empty, Tabs,
 } from 'antd'
 import {
   PlusOutlined, EditOutlined, DeleteOutlined,
-  TeamOutlined, UserOutlined, SafetyOutlined, ApartmentOutlined,
+  TeamOutlined, UserOutlined, ApartmentOutlined,
   KeyOutlined, EnvironmentOutlined, MinusCircleOutlined,
   MailOutlined, LinkOutlined, StopOutlined, CheckCircleOutlined,
+  LockOutlined, UnlockOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { usersApi } from '@/api/users'
@@ -30,26 +31,27 @@ const USERS_CSS = `
 .users-row-inactive td { opacity: 0.55; }
 `
 
+// RBAC F2 — 4-role colour/label maps. Legacy keys (admin, org_viewer,
+// location_manager, location_operator, location_viewer, operator, member)
+// are kept as aliases that point at the same colour as their normalised
+// target so OLD invite tokens / persisted state still render correctly
+// while the backend setter is migrating values.
 const ROLE_HEX: Record<string, string> = {
-  super_admin: '#ef4444',
-  admin: '#f97316',
-  org_viewer: '#8b5cf6',
-  location_manager: '#06b6d4',
-  location_operator: '#3b82f6',
-  location_viewer: '#22c55e',
-  operator: '#3b82f6',
-  viewer: '#22c55e',
+  super_admin:    '#ef4444',
+  org_admin:      '#f97316',  admin:             '#f97316',
+  location_admin: '#06b6d4',  location_manager:  '#06b6d4',  location_operator: '#06b6d4',
+  viewer:         '#22c55e',  location_viewer:   '#22c55e',  org_viewer:        '#22c55e',
+                              operator:          '#22c55e',  member:            '#22c55e',
 }
 
 const ROLE_LABEL: Record<string, string> = {
-  super_admin: 'SUPER ADMIN',
-  admin: 'ADMIN',
-  org_viewer: 'ORG VIEWER',
-  location_manager: 'LOC. MANAGER',
-  location_operator: 'LOC. OPERATOR',
-  location_viewer: 'LOC. VIEWER',
-  operator: 'OPERATOR',
-  viewer: 'VIEWER',
+  super_admin:    'SÜPER ADMİN',
+  org_admin:      'ORG ADMİN',         admin:             'ORG ADMİN',
+  location_admin: 'LOKASYON ADMİN',    location_manager:  'LOKASYON ADMİN',
+                                       location_operator: 'LOKASYON ADMİN',
+  viewer:         'GÖRÜNTÜLEYİCİ',     location_viewer:   'GÖRÜNTÜLEYİCİ',
+  org_viewer:     'GÖRÜNTÜLEYİCİ',     operator:          'GÖRÜNTÜLEYİCİ',
+  member:         'GÖRÜNTÜLEYİCİ',
 }
 
 function mkC(isDark: boolean) {
@@ -63,38 +65,18 @@ function mkC(isDark: boolean) {
   }
 }
 
-function RoleStatCard({ role, count, isDark }: { role: string; count: number; isDark: boolean }) {
-  const hex = ROLE_HEX[role] || '#64748b'
-  const C = mkC(isDark)
-  return (
-    <div style={{
-      background: isDark ? `${hex}12` : C.bg,
-      border: `1px solid ${isDark ? hex + '28' : C.border}`,
-      borderTop: `2px solid ${hex}60`,
-      borderRadius: 10, padding: '12px 16px',
-      display: 'flex', alignItems: 'center', gap: 10,
-      flex: 1, minWidth: 120,
-    }}>
-      <div style={{
-        width: 32, height: 32, borderRadius: 8,
-        background: isDark ? `${hex}20` : `${hex}15`,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        <SafetyOutlined style={{ color: hex, fontSize: 14 }} />
-      </div>
-      <div>
-        <div style={{ color: hex, fontSize: 18, fontWeight: 800, lineHeight: 1 }}>{count}</div>
-        <div style={{ color: C.muted, fontSize: 10, marginTop: 2, letterSpacing: 0.5 }}>{ROLE_LABEL[role]}</div>
-      </div>
-    </div>
-  )
-}
+// Note: bespoke RoleStatCard removed — superseded by the NOC `nm-statbar`
+// in the page header which shows 6 KPIs (total/active/MFA/24h/invites/roles).
+// `mkC()` is still referenced by drawer/modal styling below, kept for now.
 
 export default function UsersPage() {
   const { message } = App.useApp()
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const { user: currentUser, isSuperAdmin } = useAuthStore()
+  // RBAC F10 — `users` module = org-admin scope. Viewer / location_admin
+  // see the list but cannot create / edit / delete / reset / invite.
+  const canMutateUsers = useAuthStore((s) => s.canMutate('users'))
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const isSA = isSuperAdmin()
@@ -256,193 +238,215 @@ export default function UsersPage() {
     roleCounts[u.role] = (roleCounts[u.role] || 0) + 1
   }
 
+  // ── Stats for the NOC stat bar (real numbers, never mock) ─────────────
+  // 24h = users that logged in within the last 24h. mfa = mfa_enabled column
+  // surfaced by UserResponse. activeInvites = invites neither used nor expired.
+  const stats = useMemo(() => {
+    const now = dayjs()
+    const active = userList.filter((u) => u.is_active).length
+    const mfa = userList.filter((u) => (u as any).mfa_enabled).length
+    const last24h = userList.filter((u) =>
+      u.last_login && now.diff(dayjs(u.last_login), 'hour') <= 24,
+    ).length
+    const pendingInvites = (invites || []).filter((i: any) => !i.is_used && !i.is_expired).length
+    const distinctRoles = new Set(userList.map((u) => u.role)).size
+    return { total: userList.length, active, mfa, last24h, pendingInvites, distinctRoles }
+  }, [userList, invites])
+
+  // Only a super-admin may grant another user the super_admin role; org
+  // admins may not create / promote to super_admin or to org_admin.
   const ROLE_OPTIONS_FILTERED = isSA
     ? ROLE_OPTIONS
-    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin' && o.value !== 'admin')
+    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin' && o.value !== 'org_admin')
 
   const locNameMap = Object.fromEntries(
     (locationsData?.items || []).map((l) => [l.id, l.name])
   )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{USERS_CSS}</style>
 
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#3b82f620' : C.border}`,
-        borderLeft: '4px solid #3b82f6',
-        borderRadius: 12, padding: '16px 20px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#3b82f620', border: '1px solid #3b82f630',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <TeamOutlined style={{ color: '#3b82f6', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>
-              {t('users.title')}
-              <span style={{ color: C.dim, fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
-                ({userList.length})
-              </span>
-            </div>
-            <div style={{ color: C.muted, fontSize: 12 }}>{t('users.subtitle')}</div>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Yönetim</span><span>{t('users.title')}</span></div>
+          <h1 className="nm-page-title">
+            {t('users.title')}
+            <span className="nm-pill mono">{userList.length} kullanıcı</span>
+          </h1>
+          <div className="nm-page-sub">
+            {t('users.subtitle', 'Kullanıcı kayıtları · rol & lokasyon ataması · davet linkleri ve şifre yönetimi.')}
           </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>
-          {t('users.add')}
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canMutateUsers && (
+            <Button icon={<MailOutlined />}
+              onClick={() => { inviteForm.resetFields(); setLastInviteLink(null); setInviteModalOpen(true) }}>
+              Davet Oluştur
+            </Button>
+          )}
+          {canMutateUsers && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => openDrawer()}>
+              {t('users.add')}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* Role stat cards — show top 4 most useful */}
-      {userList.length > 0 && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {(['super_admin', 'admin', 'location_manager', 'location_operator', 'org_viewer', 'viewer'] as const)
-            .filter((r) => (roleCounts[r] || 0) > 0)
-            .map((role) => (
-              <RoleStatCard key={role} role={role} count={roleCounts[role] || 0} isDark={isDark} />
-            ))}
+      {/* NOC stat bar — 6 real KPIs */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM KULLANICI</div>
+          <div className="nm-stat-val">{stats.total}</div>
+          <div className="nm-stat-delta">{stats.distinctRoles} farklı rol</div>
         </div>
-      )}
+        <div className={`nm-stat ${stats.active === stats.total ? 'ok' : ''}`}>
+          <div className="nm-stat-label">AKTİF</div>
+          <div className="nm-stat-val">{stats.active}</div>
+          <div className="nm-stat-delta">{stats.total - stats.active} pasif</div>
+        </div>
+        <div className={`nm-stat ${stats.mfa > 0 ? 'ok' : 'warn'}`}>
+          <div className="nm-stat-label">MFA AÇIK</div>
+          <div className="nm-stat-val">{stats.mfa}</div>
+          <div className="nm-stat-delta">{stats.total > 0 ? Math.round((stats.mfa / stats.total) * 100) : 0}% kapsam</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SON 24SA GİRİŞ</div>
+          <div className="nm-stat-val">{stats.last24h}</div>
+          <div className="nm-stat-delta">son aktivite penceresi</div>
+        </div>
+        <div className={`nm-stat ${stats.pendingInvites > 0 ? 'warn' : ''}`}>
+          <div className="nm-stat-label">BEKLEYEN DAVET</div>
+          <div className="nm-stat-val">{stats.pendingInvites}</div>
+          <div className="nm-stat-delta">aktif link</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SÜPER ADMİN</div>
+          <div className="nm-stat-val">{roleCounts['super_admin'] || 0}</div>
+          <div className="nm-stat-delta">{roleCounts['admin'] || 0} org admin</div>
+        </div>
+      </div>
 
-      {/* Table */}
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-        <Table<User>
-          dataSource={userList}
-          rowKey="id"
-          loading={isLoading}
-          size="small"
-          rowClassName={(r) => !r.is_active ? 'users-row-inactive' : ''}
-          onRow={() => ({ style: { animation: 'usersRowIn 0.2s ease-out' } })}
-          pagination={false}
-          columns={[
-            {
-              title: '',
-              width: 44,
-              render: (_, r) => {
+      {/* Users table — nm-table look */}
+      <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="nm-card-hd">
+          <h3><TeamOutlined /> Kullanıcılar</h3>
+          <span className="nm-pill mono">{userList.length}</span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table className="nm-table">
+            <thead>
+              <tr>
+                <th style={{ width: 42 }}></th>
+                <th>{t('users.col_username')}</th>
+                <th style={{ width: 130 }}>{t('users.col_role')}</th>
+                {isSA && <th style={{ width: 160 }}>{t('users.organization')}</th>}
+                <th style={{ width: 100 }}>{t('users.col_active')}</th>
+                <th style={{ width: 90 }}>MFA</th>
+                <th style={{ width: 140 }}>{t('users.col_last_login')}</th>
+                <th className="col-actions" style={{ width: 150 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading && (
+                <tr><td colSpan={isSA ? 8 : 7} style={{ textAlign: 'center', padding: 24, color: 'var(--fg-3)' }}>Yükleniyor…</td></tr>
+              )}
+              {!isLoading && userList.length === 0 && (
+                <tr><td colSpan={isSA ? 8 : 7} style={{ textAlign: 'center', padding: 30, color: 'var(--fg-3)' }}>Henüz kullanıcı yok</td></tr>
+              )}
+              {!isLoading && userList.map((r) => {
                 const hex = ROLE_HEX[r.role] || '#64748b'
+                const mfaOn = !!(r as any).mfa_enabled
+                const isMe = r.id === currentUser?.id
+                // Org admins cannot delete super_admin or other org_admin
+                // accounts — only super-admins (platform) can; never delete self.
+                const isProtected = isMe || (!isSA && (r.role === 'org_admin' || r.role === 'super_admin'))
                 return (
-                  <Avatar size={28} style={{ background: isDark ? `${hex}30` : `${hex}20`, color: hex, fontSize: 12, border: `1px solid ${hex}40` }}>
-                    {r.username?.[0]?.toUpperCase()}
-                  </Avatar>
+                  <tr key={r.id} className={!r.is_active ? 'users-row-inactive' : ''}>
+                    <td>
+                      <Avatar size={28} style={{ background: `${hex}25`, color: hex, fontSize: 12, border: `1px solid ${hex}50` }}>
+                        {r.username?.[0]?.toUpperCase()}
+                      </Avatar>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>{r.username}</div>
+                      <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>
+                        {r.email}
+                        {isMe && <span className="nm-pill" style={{ marginLeft: 6, padding: '0 6px', fontSize: 9.5, color: 'var(--accent)', borderColor: 'var(--accent)' }}>SİZ</span>}
+                        {r.locations && r.locations.length > 0 && (
+                          <span className="nm-pill" style={{ marginLeft: 6, padding: '0 6px', fontSize: 9.5 }}>
+                            <EnvironmentOutlined style={{ marginRight: 3 }} />{r.locations.length} lok
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <span className="nm-pill mono" style={{ color: hex, borderColor: hex + '55', background: hex + '12' }}>
+                        {ROLE_LABEL[r.role] || r.role}
+                      </span>
+                    </td>
+                    {isSA && (
+                      <td style={{ fontSize: 12, color: 'var(--fg-2)' }}>
+                        {r.organization_name ? (
+                          <span><ApartmentOutlined style={{ fontSize: 11, marginRight: 4 }} />{r.organization_name}</span>
+                        ) : <span style={{ color: 'var(--fg-3)' }}>—</span>}
+                      </td>
+                    )}
+                    <td>
+                      <span className={`nm-status-dot ${r.is_active ? 'ok' : 'crit'} pulse`} />
+                      <span style={{ fontSize: 12, marginLeft: 6 }}>{r.is_active ? t('users.active') : t('users.inactive')}</span>
+                    </td>
+                    <td>
+                      {mfaOn ? (
+                        <span className="nm-pill mono" style={{ color: 'var(--ok)', borderColor: 'var(--ok)', background: 'transparent' }}>
+                          <LockOutlined style={{ marginRight: 3 }} />AÇIK
+                        </span>
+                      ) : (
+                        <span className="nm-pill mono" style={{ color: 'var(--fg-3)', borderColor: 'var(--border-0)', background: 'transparent' }}>
+                          <UnlockOutlined style={{ marginRight: 3 }} />KAPALI
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ fontSize: 12, color: 'var(--fg-2)' }}>
+                      {r.last_login
+                        ? <span className="mono">{dayjs(r.last_login).format('DD.MM.YY HH:mm')}</span>
+                        : <span style={{ color: 'var(--fg-3)' }}>—</span>}
+                    </td>
+                    <td className="col-actions">
+                      {canMutateUsers ? (
+                        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                          <Tooltip title={t('common.edit')}>
+                            <button onClick={() => openDrawer(r, 'general')}><EditOutlined /></button>
+                          </Tooltip>
+                          <Tooltip title="Org & Lokasyonlar">
+                            <button onClick={() => openDrawer(r, 'locations')}><EnvironmentOutlined /></button>
+                          </Tooltip>
+                          <Tooltip title={t('users.reset_password')}>
+                            <button onClick={() => { setResetUser(r); resetForm.resetFields() }}>
+                              <KeyOutlined style={{ color: 'var(--warn)' }} />
+                            </button>
+                          </Tooltip>
+                          <Popconfirm
+                            title={t('users.delete_confirm', { name: r.username })}
+                            disabled={isProtected}
+                            onConfirm={() => deleteMutation.mutate(r.id)}
+                          >
+                            <button disabled={isProtected}>
+                              <DeleteOutlined style={{ color: isProtected ? 'var(--fg-3)' : 'var(--crit)' }} />
+                            </button>
+                          </Popconfirm>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
                 )
-              },
-            },
-            {
-              title: t('users.col_username'),
-              dataIndex: 'username',
-              render: (v, r) => (
-                <div>
-                  <span style={{ fontWeight: 600, color: C.text, fontSize: 13 }}>{v}</span>
-                  {r.id === currentUser?.id && (
-                    <Tag style={{ marginLeft: 6, fontSize: 10, color: '#3b82f6', borderColor: '#3b82f640', background: '#3b82f615' }}>me</Tag>
-                  )}
-                  {!r.is_active && (
-                    <Tag style={{ marginLeft: 4, fontSize: 10, color: C.dim, borderColor: C.border, background: C.bg2 }}>inactive</Tag>
-                  )}
-                  {/* Show location count badge for location-scoped users */}
-                  {r.locations && r.locations.length > 0 && (
-                    <Tag style={{ marginLeft: 4, fontSize: 10, color: '#06b6d4', borderColor: '#06b6d440', background: '#06b6d415' }}>
-                      <EnvironmentOutlined style={{ marginRight: 2 }} />{r.locations.length}
-                    </Tag>
-                  )}
-                </div>
-              ),
-            },
-            {
-              title: t('users.col_role'),
-              dataIndex: 'role',
-              width: 150,
-              render: (v) => {
-                const hex = ROLE_HEX[v] || '#64748b'
-                return (
-                  <Tag style={{ color: hex, borderColor: hex + '50', background: hex + '18', fontSize: 11 }}>
-                    {ROLE_LABEL[v] || v}
-                  </Tag>
-                )
-              },
-            },
-            ...(isSA ? [{
-              title: t('users.organization'),
-              dataIndex: 'organization_name',
-              width: 160,
-              render: (v: string | null) => v
-                ? (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: C.muted, fontSize: 12 }}>
-                    <ApartmentOutlined style={{ fontSize: 11 }} />
-                    {v}
-                  </span>
-                )
-                : <span style={{ color: C.dim, fontSize: 12 }}>—</span>,
-            }] : []),
-            {
-              title: t('users.col_active'),
-              dataIndex: 'is_active',
-              width: 80,
-              render: (v) => (
-                <Badge
-                  status={v ? 'success' : 'error'}
-                  text={<span style={{ fontSize: 12, color: C.muted }}>{v ? t('users.active') : t('users.inactive')}</span>}
-                />
-              ),
-            },
-            {
-              title: t('users.col_last_login'),
-              dataIndex: 'last_login',
-              width: 130,
-              render: (v) => v
-                ? <span style={{ fontSize: 12, color: C.muted }}>{dayjs(v).format('DD.MM.YY HH:mm')}</span>
-                : <span style={{ color: C.dim }}>—</span>,
-            },
-            {
-              title: '',
-              width: 130,
-              render: (_, r) => (
-                <Space size={4}>
-                  <Tooltip title={t('common.edit')}>
-                    <Button
-                      size="small"
-                      icon={<EditOutlined />}
-                      style={{ color: C.muted, borderColor: C.border }}
-                      onClick={() => openDrawer(r, 'general')}
-                    />
-                  </Tooltip>
-                  <Tooltip title="Organizasyon & Lokasyonlar">
-                    <Button
-                      size="small"
-                      icon={<EnvironmentOutlined />}
-                      style={{ color: '#06b6d4', borderColor: '#06b6d440' }}
-                      onClick={() => openDrawer(r, 'locations')}
-                    />
-                  </Tooltip>
-                  <Button
-                    size="small"
-                    icon={<KeyOutlined />}
-                    style={{ color: '#f59e0b', borderColor: '#f59e0b50' }}
-                    onClick={() => { setResetUser(r); resetForm.resetFields() }}
-                    title={t('users.reset_password')}
-                  />
-                  <Popconfirm
-                    title={t('users.delete_confirm', { name: r.username })}
-                    disabled={r.id === currentUser?.id || (!isSA && (r.role === 'admin' || r.role === 'super_admin'))}
-                    onConfirm={() => deleteMutation.mutate(r.id)}
-                  >
-                    <Button
-                      size="small" icon={<DeleteOutlined />} danger
-                      disabled={r.id === currentUser?.id || (!isSA && (r.role === 'admin' || r.role === 'super_admin'))}
-                    />
-                  </Popconfirm>
-                </Space>
-              ),
-            },
-          ]}
-        />
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Password Reset Modal */}
@@ -564,15 +568,19 @@ export default function UsersPage() {
                       <>
                         <div style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>Organizasyon</div>
                         <Form.Item name="organization_id" style={{ marginBottom: 16 }}>
-                          <Select options={tenantOptions} allowClear placeholder={t('users.tenant_placeholder')} />
+                          <Select options={tenantOptions} allowClear placeholder="Organizasyon seçin" />
                         </Form.Item>
                         <Divider style={{ margin: '0 0 16px', borderColor: C.border }} />
                       </>
                     )}
-                    <div style={{ color: C.muted, fontSize: 12, marginBottom: 10 }}>
-                      Kullanıcının erişebileceği lokasyonları ve rolünü belirleyin.
+                    <div style={{ color: C.muted, fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
+                      Kullanıcının erişebileceği lokasyonları ve oradaki rolünü belirleyin.
                       <br />
-                      <span style={{ color: '#f59e0b' }}>Admin ve Org Viewer rolleri tüm lokasyonlara otomatik erişir.</span>
+                      <span style={{ color: '#22c55e' }}>• <strong>Süper Admin</strong> tüm organizasyonların tüm lokasyonlarına erişir (atama gerekmez).</span>
+                      <br />
+                      <span style={{ color: '#f97316' }}>• <strong>Org Admin</strong> kendi organizasyonunun tüm lokasyonlarına otomatik erişir.</span>
+                      <br />
+                      <span style={{ color: '#06b6d4' }}>• <strong>Lokasyon Admin</strong> ve <strong>Görüntüleyici</strong> için aşağıdan lokasyon atayın — atanmamış lokasyonu göremez.</span>
                     </div>
 
                     {/* Add location */}
@@ -627,7 +635,8 @@ export default function UsersPage() {
                                 value={a.loc_role}
                                 onChange={(v) => updateLocRole(a.location_id, v)}
                                 size="small"
-                                style={{ width: 155 }}
+                                style={{ width: 180 }}
+                                popupMatchSelectWidth={false}
                                 options={LOC_ROLE_OPTIONS}
                               />
                               <Button size="small" type="text" danger icon={<MinusCircleOutlined />}
@@ -652,80 +661,78 @@ export default function UsersPage() {
       </Drawer>
 
       {/* ── Invite Management ──────────────────────────────────────────── */}
-      <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 20px', borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <MailOutlined style={{ color: '#3b82f6' }} />
-            <span style={{ color: C.text, fontWeight: 600, fontSize: 14 }}>Davet Linkleri</span>
-            <span style={{ color: C.muted, fontSize: 12 }}>— Kullanıcıları e-posta yerine link ile davet edin</span>
-          </div>
-          <Button type="primary" size="small" icon={<PlusOutlined />} onClick={() => { inviteForm.resetFields(); setLastInviteLink(null); setInviteModalOpen(true) }}>
-            Davet Oluştur
-          </Button>
+      <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
+        <div className="nm-card-hd">
+          <h3><MailOutlined /> Davet Linkleri</h3>
+          <span className="nm-pill mono">{(invites || []).length}</span>
         </div>
-        <Table<Invite>
-          size="small"
-          dataSource={invites ?? []}
-          rowKey="id"
-          pagination={false}
-          locale={{ emptyText: 'Henüz davet oluşturulmamış' }}
-          columns={[
-            {
-              title: 'E-posta',
-              dataIndex: 'email',
-              render: (email: string) => <span style={{ fontSize: 13 }}>{email}</span>,
-            },
-            {
-              title: 'Rol',
-              dataIndex: 'role',
-              width: 130,
-              render: (role: string) => (
-                <Tag style={{ fontSize: 11, color: ROLE_HEX[role] || '#94a3b8', borderColor: (ROLE_HEX[role] || '#94a3b8') + '40', background: (ROLE_HEX[role] || '#94a3b8') + '15' }}>
-                  {ROLE_LABEL[role] || role.toUpperCase()}
-                </Tag>
-              ),
-            },
-            {
-              title: 'Bitiş',
-              dataIndex: 'expires_at',
-              width: 130,
-              render: (v: string) => <span style={{ fontSize: 12, color: C.muted }}>{dayjs(v).format('DD.MM.YYYY HH:mm')}</span>,
-            },
-            {
-              title: 'Durum',
-              width: 110,
-              render: (_: unknown, rec: Invite) => rec.is_used
-                ? <Tag icon={<CheckCircleOutlined />} color="success" style={{ fontSize: 11 }}>Kullanıldı</Tag>
-                : rec.is_expired
-                  ? <Tag color="default" style={{ fontSize: 11 }}>Süresi Doldu</Tag>
-                  : <Tag color="processing" style={{ fontSize: 11 }}>Aktif</Tag>,
-            },
-            {
-              title: '',
-              width: 80,
-              render: (_: unknown, rec: Invite) => (
-                <Space size={4}>
-                  {!rec.is_used && !rec.is_expired && (
-                    <Tooltip title="Linki Kopyala">
-                      <Button
-                        size="small" type="text"
-                        icon={<LinkOutlined />}
-                        onClick={() => {
-                          message.info('Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun')
-                        }}
-                      />
-                    </Tooltip>
-                  )}
-                  <Popconfirm title="Daveti iptal et?" onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
-                    <Tooltip title="İptal Et">
-                      <Button size="small" type="text" danger icon={<StopOutlined />} />
-                    </Tooltip>
-                  </Popconfirm>
-                </Space>
-              ),
-            },
-          ]}
-        />
+        <div style={{ overflowX: 'auto' }}>
+          <table className="nm-table">
+            <thead>
+              <tr>
+                <th>E-posta</th>
+                <th style={{ width: 130 }}>Rol</th>
+                <th style={{ width: 150 }}>Bitiş</th>
+                <th style={{ width: 110 }}>Durum</th>
+                <th className="col-actions" style={{ width: 90 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {(!invites || invites.length === 0) && (
+                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--fg-3)' }}>Henüz davet oluşturulmamış</td></tr>
+              )}
+              {(invites || []).map((rec: Invite) => {
+                const hex = ROLE_HEX[rec.role] || '#94a3b8'
+                return (
+                  <tr key={rec.id}>
+                    <td style={{ fontSize: 13 }}>{rec.email}</td>
+                    <td>
+                      <span className="nm-pill mono" style={{ color: hex, borderColor: hex + '55', background: hex + '12' }}>
+                        {ROLE_LABEL[rec.role] || rec.role.toUpperCase()}
+                      </span>
+                    </td>
+                    <td className="mono" style={{ fontSize: 12, color: 'var(--fg-2)' }}>
+                      {dayjs(rec.expires_at).format('DD.MM.YYYY HH:mm')}
+                    </td>
+                    <td>
+                      {rec.is_used ? (
+                        <span className="nm-pill" style={{ color: 'var(--ok)', borderColor: 'var(--ok)' }}>
+                          <CheckCircleOutlined style={{ marginRight: 4 }} />Kullanıldı
+                        </span>
+                      ) : rec.is_expired ? (
+                        <span className="nm-pill" style={{ color: 'var(--fg-3)', borderColor: 'var(--border-0)' }}>Süresi Doldu</span>
+                      ) : (
+                        <span className="nm-pill" style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}>
+                          <span className="nm-status-dot ok pulse" style={{ marginRight: 4 }} />Aktif
+                        </span>
+                      )}
+                    </td>
+                    <td className="col-actions">
+                      {canMutateUsers ? (
+                        <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
+                          {!rec.is_used && !rec.is_expired && (
+                            <Tooltip title="Linki Kopyala">
+                              <button onClick={() => message.info('Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun')}>
+                                <LinkOutlined />
+                              </button>
+                            </Tooltip>
+                          )}
+                          <Popconfirm title="Daveti iptal et?" onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
+                            <Tooltip title="İptal Et">
+                              <button><StopOutlined style={{ color: 'var(--crit)' }} /></button>
+                            </Tooltip>
+                          </Popconfirm>
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: 'var(--fg-3)' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {/* Create invite modal */}

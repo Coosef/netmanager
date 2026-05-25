@@ -61,7 +61,7 @@ export default function InviteAcceptPage() {
           }}>
             <WifiOutlined style={{ color: '#fff', fontSize: 24 }} />
           </div>
-          <div style={{ color: '#f1f5f9', fontWeight: 800, fontSize: 18 }}>NetManager</div>
+          <div style={{ color: '#f1f5f9', fontWeight: 800, fontSize: 18 }}>Charon</div>
           <div style={{ color: '#64748b', fontSize: 11, letterSpacing: 2 }}>NETWORK INTELLIGENCE PLATFORM</div>
         </div>
 

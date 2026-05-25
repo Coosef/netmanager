@@ -15,6 +15,11 @@ export interface UiPrefs {
   viewMode: ViewMode
   layoutMode: LayoutMode3D
   overlayLayers: OverlayLayer[]
+  /** T4.3 wall-screen / presentation default for the kiosk/NOC display.
+   *  When true, the page enters presentation+fullscreen on mount; chrome
+   *  is hidden and the status bar dims after idle. Overridden by the
+   *  `?wall=1` URL parameter when present. */
+  wallMode?: boolean
 }
 
 function storage(explicit?: Storage): Storage | null {
@@ -42,6 +47,7 @@ export function loadUiPrefs(explicit?: Storage): Partial<UiPrefs> {
     if (Array.isArray(parsed.overlayLayers)) {
       out.overlayLayers = parsed.overlayLayers.filter((l: unknown) => typeof l === 'string')
     }
+    if (typeof parsed.wallMode === 'boolean') out.wallMode = parsed.wallMode
     return out
   } catch {
     return {}

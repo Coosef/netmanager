@@ -741,8 +741,11 @@ function ErrorInterfacesTab() {
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function BandwidthMonitorPage() {
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
+  const { isDark: _isDark } = useTheme()
+  // C / mkC no longer needed at this level — page-level statbar uses
+  // nm-* tokens; the inner TrafficTab / ErrorInterfacesTab still derive
+  // their own C from useTheme.
+  void _isDark
   const navigate = useNavigate()
   const queryClient = useQueryClient()
 
@@ -775,44 +778,31 @@ export default function BandwidthMonitorPage() {
   const noSnmpEnabled = snmpStatus && snmpStatus.snmp_enabled === 0
   const hasData = snmpStatus && snmpStatus.poll_results > 0
 
+  const totalDevs = snmpStatus?.total_devices ?? 0
+  const enabledDevs = snmpStatus?.snmp_enabled ?? 0
+  const enabledPct = totalDevs > 0 ? Math.round((enabledDevs / totalDevs) * 100) : 0
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* Header */}
-      <div style={{
-        background: isDark ? 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' : C.bg,
-        border: `1px solid ${isDark ? '#06b6d420' : C.border}`,
-        borderLeft: '4px solid #06b6d4',
-        borderRadius: 12,
-        padding: '16px 20px',
-        display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 40, height: 40, borderRadius: 10,
-            background: '#06b6d420', border: '1px solid #06b6d430',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-          }}>
-            <DashboardOutlined style={{ color: '#06b6d4', fontSize: 20 }} />
-          </div>
-          <div>
-            <div style={{ color: C.text, fontWeight: 700, fontSize: 16 }}>Bant Genişliği & Hata Monitörü</div>
-            <div style={{ color: C.muted, fontSize: 12 }}>
-              Anlık trafik hızı (Mbps) · SNMP counter delta hesabı
-            </div>
+    <div className="nm-page" style={{ padding: '4px 2px' }}>
+      {/* NOC header */}
+      <div className="nm-page-hd">
+        <div className="title-block">
+          <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>Bant Genişliği</span></div>
+          <h1 className="nm-page-title">
+            Bant Genişliği & Hata Monitörü
+            <span className="nm-pill mono">{enabledDevs} / {totalDevs} SNMP</span>
+            {snmpStatus?.last_poll_at && (
+              <span className="nm-pill mono" style={{ color: 'var(--fg-2)' }}>
+                {dayjs(snmpStatus.last_poll_at).fromNow()}
+              </span>
+            )}
+          </h1>
+          <div className="nm-page-sub">
+            An&#x131;k trafik h&#x131;z&#x131; (Mbps) &#xB7; SNMP counter delta hesab&#x131; &#xB7;
+            interface CRC + drop hatalar&#x131;.
           </div>
         </div>
         <Space>
-          {snmpStatus && (
-            <Tag style={{ padding: '4px 10px', color: '#06b6d4', borderColor: '#06b6d450', background: '#06b6d418' }}>
-              <WifiOutlined style={{ marginRight: 6 }} />
-              {snmpStatus.snmp_enabled}/{snmpStatus.total_devices} cihaz SNMP aktif
-              {snmpStatus.last_poll_at && (
-                <Text style={{ marginLeft: 8, fontSize: 11, color: C.muted }}>
-                  · Son: {dayjs(snmpStatus.last_poll_at).fromNow()}
-                </Text>
-              )}
-            </Tag>
-          )}
           <Button
             icon={<ThunderboltOutlined />}
             type="primary"
@@ -828,6 +818,38 @@ export default function BandwidthMonitorPage() {
             SNMP Ayarları
           </Button>
         </Space>
+      </div>
+
+      {/* NOC stat bar — 4 KPIs (concise; the per-tab StatCard set
+          (TrafficTab) keeps its detailed Mbps tiles which need the chart
+          context). */}
+      <div className="nm-statbar">
+        <div className="nm-stat">
+          <div className="nm-stat-label">TOPLAM CİHAZ</div>
+          <div className="nm-stat-val">{totalDevs}</div>
+          <div className="nm-stat-delta">monitor kapsam&#x131;</div>
+        </div>
+        <div className={`nm-stat ${enabledDevs > 0 ? 'ok' : 'warn'}`}>
+          <div className="nm-stat-label">SNMP AKTİF</div>
+          <div className="nm-stat-val">{enabledDevs}</div>
+          <div className="nm-stat-delta">{enabledPct}% kapsam</div>
+        </div>
+        <div className={`nm-stat ${noSnmpEnabled ? 'crit' : hasData ? 'ok' : 'warn'}`}>
+          <div className="nm-stat-label">POLL DURUMU</div>
+          <div className="nm-stat-val" style={{ fontSize: 18 }}>
+            {noSnmpEnabled ? 'KAPALI' : hasData ? 'AKTİF' : 'BEKLİYOR'}
+          </div>
+          <div className="nm-stat-delta">{snmpStatus?.poll_results ?? 0} kay&#x131;t</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">SON POLL</div>
+          <div className="nm-stat-val mono" style={{ fontSize: 15 }}>
+            {snmpStatus?.last_poll_at ? dayjs(snmpStatus.last_poll_at).format('HH:mm') : '—'}
+          </div>
+          <div className="nm-stat-delta">
+            {snmpStatus?.last_poll_at ? dayjs(snmpStatus.last_poll_at).format('DD.MM') : 'henüz çal&#x131;şmadı'}
+          </div>
+        </div>
       </div>
 
       {noSnmpEnabled && (

@@ -38,7 +38,19 @@ class WsScope:
     allowed_location_ids: tuple[int, ...] = ()
     # The connection's active location filter. None = all (org-wide).
     active_location_id: Optional[int] = None
+    # RBAC F7 — carried so action-level WS endpoints (SSH terminal, agent
+    # WS) can gate without re-fetching the user. Same enum as
+    # backend.app.models.user.SystemRole.
+    system_role: Optional[str] = None
     ok: bool = False
+
+    def has_permission(self, perm: str) -> bool:
+        """Mirror of User.has_permission() — checks the role-default grant
+        map. Used by WS endpoints to gate mutating actions (e.g. SSH
+        terminal requires `device:connect`)."""
+        from app.models.user import SYSTEM_ROLE_PERMISSIONS
+        perms = SYSTEM_ROLE_PERMISSIONS.get(self.system_role or "", [])
+        return "*" in perms or perm in perms
 
 
 async def _resolve_ws_scope(
@@ -78,7 +90,7 @@ async def _resolve_ws_scope(
         )
 
     if not ctx.has_location_access:
-        return WsScope(user_id=user.id, ok=False)
+        return WsScope(user_id=user.id, system_role=user.system_role, ok=False)
     return WsScope(
         user_id=user.id,
         organization_id=ctx.organization_id,
@@ -86,6 +98,7 @@ async def _resolve_ws_scope(
         is_org_wide=ctx.is_org_wide,
         allowed_location_ids=ctx.allowed_location_ids,
         active_location_id=ctx.active_location_id,
+        system_role=user.system_role,
         ok=True,
     )
 
@@ -350,6 +363,13 @@ async def ssh_terminal_ws(
     scope = await _resolve_ws_scope(token or "", location)
     if not scope.ok:
         await websocket.close(code=4003)  # org-less / no-location user
+        return
+
+    # RBAC F7 — opening an SSH terminal IS a mutating action against the
+    # device (live shell + audit footprint + keystroke history). Plain
+    # 'logged in + scope ok' is not enough; require `device:connect`.
+    if not scope.has_permission("device:connect"):
+        await websocket.close(code=4003)  # forbidden
         return
 
     # Look the device up under the caller's RLS context — Faz 8 Phase E:

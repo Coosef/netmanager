@@ -13,6 +13,7 @@ import i18n from './i18n'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
+import { CustomizeProvider } from '@/contexts/CustomizeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
 import { authApi } from '@/api/auth'
@@ -24,12 +25,15 @@ import TasksPage from '@/pages/Tasks'
 import UsersPage from '@/pages/Users'
 import AuditLogPage from '@/pages/AuditLog'
 import MonitorPage from '@/pages/Monitor'
+import LiveMonitorPage from '@/pages/LiveMonitor'
 import TopologyPage from '@/pages/Topology'
 import TopologyV2Page from '@/pages/TopologyV2'
+import { featureFlags } from '@/config/featureFlags'
 import LldpInventoryPage from '@/pages/LldpInventory'
 import AgentsPage from '@/pages/Agents'
 import ReportsPage from '@/pages/Reports'
 import SettingsPage from '@/pages/Settings'
+import ProfilePage from '@/pages/Profile'
 import PlaybooksPage from '@/pages/Playbooks'
 import ApprovalsPage from '@/pages/Approvals'
 import MacArpPage from '@/pages/MacArp'
@@ -73,33 +77,45 @@ const queryClient = new QueryClient({
   },
 })
 
+// T8.4 — dark theme retuned to the NOC design palette (canvas #070b18,
+// panels #0e1729, borders #1c2538, teal accent #22d3c5) + IBM Plex Sans.
+const NOC_FONT = "'IBM Plex Sans', system-ui, -apple-system, sans-serif"
+// Dark tokens — netmanager/project/styles.css'ten oklch değerlerinin
+// yaklaşık hex karşılıkları. noc.css'in :root --bg-X tokenleriyle senkron.
+// oklch(0.16 0.012 250) ≈ #21262e (page); 0.19/0.22/0.26 katman.
 const DARK_TOKENS = {
   algorithm: theme.darkAlgorithm,
   token: {
     colorPrimary: '#3b82f6',
-    colorBgBase: '#030c1e',
-    colorBgContainer: '#0e1e38',
-    colorBgElevated: '#0e1e38',
-    colorBgLayout: '#030c1e',
-    colorBorder: '#1a3458',
-    colorBorderSecondary: '#112240',
-    colorText: '#f1f5f9',
-    colorTextSecondary: '#94a3b8',
-    colorTextTertiary: '#64748b',
+    colorInfo: '#22d3c5',
+    colorBgBase: '#21262e',
+    colorBgContainer: '#272d36',
+    colorBgElevated: '#272d36',
+    colorBgLayout: '#21262e',
+    colorBorder: '#3b4250',
+    colorBorderSecondary: '#323843',
+    colorText: '#e5e7eb',
+    colorTextSecondary: '#9ca3af',
+    colorTextTertiary: '#6b7280',
     borderRadius: 8,
+    fontFamily: NOC_FONT,
   },
   components: {
-    Layout: { siderBg: '#030c1e', headerBg: '#030c1e', bodyBg: '#030c1e' },
-    Menu: { darkItemBg: '#030c1e', darkSubMenuItemBg: '#030c1e', darkItemSelectedBg: '#1d4ed8', darkItemHoverBg: '#0e1e38' },
-    Card: { colorBgContainer: '#0e1e38', colorBorderSecondary: '#1a3458' },
-    Table: { colorBgContainer: '#0e1e38', headerBg: '#071224', rowHoverBg: '#122040' },
-    Modal: { contentBg: '#0e1e38', headerBg: '#0e1e38', footerBg: '#0e1e38' },
-    Drawer: { colorBgElevated: '#0e1e38' },
-    Select: { colorBgContainer: '#0e1e38', colorBgElevated: '#0e1e38' },
-    Input: { colorBgContainer: '#0e1e38', colorBorder: '#1a3458' },
-    Tabs: { colorBorderSecondary: '#1a3458' },
-    Popover: { colorBgElevated: '#0e1e38' },
-    Tooltip: { colorBgSpotlight: '#1a3458' },
+    Layout: { siderBg: '#272d36', headerBg: '#272d36', bodyBg: '#21262e' },
+    Menu: {
+      darkItemBg: '#272d36', darkSubMenuItemBg: '#272d36',
+      darkItemSelectedBg: 'rgba(59,130,246,0.20)', darkItemSelectedColor: '#60a5fa',
+      darkItemHoverBg: '#2d343f',
+    },
+    Card: { colorBgContainer: '#272d36', colorBorderSecondary: '#3b4250' },
+    Table: { colorBgContainer: '#272d36', headerBg: '#21262e', rowHoverBg: '#2d343f' },
+    Modal: { contentBg: '#272d36', headerBg: '#272d36', footerBg: '#272d36' },
+    Drawer: { colorBgElevated: '#272d36' },
+    Select: { colorBgContainer: '#272d36', colorBgElevated: '#272d36' },
+    Input: { colorBgContainer: '#272d36', colorBorder: '#3b4250' },
+    Tabs: { colorBorderSecondary: '#3b4250' },
+    Popover: { colorBgElevated: '#272d36' },
+    Tooltip: { colorBgSpotlight: '#3b4250' },
     Segmented: { itemSelectedBg: '#3b82f6' },
   },
 }
@@ -109,6 +125,7 @@ const LIGHT_TOKENS = {
   token: {
     colorPrimary: '#3b82f6',
     borderRadius: 8,
+    fontFamily: NOC_FONT,
   },
 }
 
@@ -145,32 +162,35 @@ function PermRoute({ children, module, action }: { children: React.ReactNode; mo
   return can(module, action) ? <>{children}</> : <Navigate to="/" replace />
 }
 
+// GLOBAL_CSS_DARK — DARK_TOKENS ile aynı palet. Orijinal NOC tasarımı
+// (netmanager styles.css) oklch(0.16/0.19/0.22/0.26 0.012-0.014 250)
+// → hex #21262e / #272d36 / #2d343f / #353d49.
 const GLOBAL_CSS_DARK = `
   :root { color-scheme: dark; }
   ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: #030c1e; }
-  ::-webkit-scrollbar-thumb { background: #1a3458; border-radius: 4px; }
-  ::-webkit-scrollbar-thumb:hover { background: #234870; }
-  ::selection { background: #3b82f640; color: #f1f5f9; }
+  ::-webkit-scrollbar-track { background: #21262e; }
+  ::-webkit-scrollbar-thumb { background: #3b4250; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4a5263; }
+  ::selection { background: #22d3c540; color: #e5e7eb; }
   .ant-card { transition: box-shadow 0.2s, border-color 0.2s; }
-  .ant-card:hover { box-shadow: 0 4px 20px rgba(59,130,246,0.08) !important; }
+  .ant-card:hover { box-shadow: 0 4px 20px rgba(34,211,197,0.08) !important; }
   .ant-table-row { transition: background 0.1s; }
   .ant-btn-primary { box-shadow: 0 0 12px rgba(59,130,246,0.25) !important; }
   .ant-table-placeholder { background: transparent !important; }
-  .ant-table-placeholder .ant-empty-description { color: #475569 !important; }
+  .ant-table-placeholder .ant-empty-description { color: #6b7280 !important; }
   .ant-table-placeholder .ant-empty-image svg { opacity: 0.25; }
   .ant-table-placeholder td { border-bottom: none !important; }
-  .perm-user-row td { border-bottom: 1px solid #112240 !important; }
+  .perm-user-row td { border-bottom: 1px solid #323843 !important; }
   .perm-user-row:last-child td { border-bottom: none !important; }
-  .ant-modal-content { background: #0e1e38 !important; border: 1px solid #1a3458 !important; }
-  .ant-modal-header { background: #0e1e38 !important; border-bottom: 1px solid #1a3458 !important; }
-  .ant-modal-footer { border-top: 1px solid #1a3458 !important; }
-  .ant-modal-title { color: #f1f5f9 !important; }
-  .ant-select-dropdown { background: #0e1e38 !important; border: 1px solid #1a3458 !important; }
-  .ant-select-item { color: #94a3b8 !important; }
-  .ant-select-item-option-active { background: #122040 !important; }
-  .ant-select-item-option-selected { background: #1d4ed820 !important; color: #3b82f6 !important; }
-  .ant-select-dropdown .ant-empty-description { color: #475569 !important; }
+  .ant-modal-content { background: #272d36 !important; border: 1px solid #3b4250 !important; }
+  .ant-modal-header { background: #272d36 !important; border-bottom: 1px solid #3b4250 !important; }
+  .ant-modal-footer { border-top: 1px solid #3b4250 !important; }
+  .ant-modal-title { color: #e5e7eb !important; }
+  .ant-select-dropdown { background: #272d36 !important; border: 1px solid #3b4250 !important; }
+  .ant-select-item { color: #9ca3af !important; }
+  .ant-select-item-option-active { background: #2d343f !important; }
+  .ant-select-item-option-selected { background: #1d4ed820 !important; color: #60a5fa !important; }
+  .ant-select-dropdown .ant-empty-description { color: #6b7280 !important; }
 `
 
 const GLOBAL_CSS_LIGHT = `
@@ -223,15 +243,28 @@ function ThemedApp() {
               <Route index element={<DashboardPage />} />
               <Route path="devices" element={<DevicesPage />} />
               <Route path="tasks" element={<TasksPage />} />
-              <Route path="topology" element={<TopologyPage />} />
+              {/* T4.6 cutover — V2 canonical at /topology when the flag is on.
+                  /topology-classic is a permanent kill-switch / escape hatch:
+                  the legacy React Flow page is always reachable by URL even
+                  when the flag flips on, so operators with muscle memory
+                  can still get the old view if V2 surfaces an unexpected
+                  issue. /topology-next stays as the explicit "next" alias
+                  so any deep links still work. */}
+              <Route path="topology"
+                element={featureFlags.topologyV2Canonical ? <TopologyV2Page /> : <TopologyPage />} />
+              <Route path="topology-classic" element={<TopologyPage />} />
               <Route path="topology-next" element={<TopologyV2Page />} />
               <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
+              <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
               <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
               <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
               <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
               <Route path="settings" element={<PermRoute module="settings" action="view"><SettingsPage /></PermRoute>} />
+              {/* Profil — her authenticated kullanıcı kendi sayfası. Permission
+                  gate yok; içerideki /users/me endpoint'leri zaten self-only. */}
+              <Route path="profile" element={<ProfilePage />} />
               <Route path="playbooks" element={<PermRoute module="playbooks" action="view"><PlaybooksPage /></PermRoute>} />
               <Route path="approvals" element={<RoleRoute minRole="location_manager"><ApprovalsPage /></RoleRoute>} />
               <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
@@ -277,9 +310,11 @@ export default function App() {
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
-          <SiteProvider>
-            <ThemedApp />
-          </SiteProvider>
+          <CustomizeProvider>
+            <SiteProvider>
+              <ThemedApp />
+            </SiteProvider>
+          </CustomizeProvider>
         </ThemeProvider>
       </QueryClientProvider>
     </ErrorBoundary>

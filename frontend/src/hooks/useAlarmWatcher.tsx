@@ -19,6 +19,7 @@ import {
 } from '@ant-design/icons'
 import { monitorApi } from '@/api/monitor'
 import type { NetworkEvent } from '@/api/monitor'
+import { useCustomize } from '@/contexts/CustomizeContext'
 
 const { Text } = Typography
 
@@ -461,6 +462,7 @@ export function useAlarmWatcher() {
   const { notification } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
+  const { playBeep } = useCustomize()
   const seenRef = useRef<Set<number>>(new Set())
   const seededRef = useRef(false)
 
@@ -490,6 +492,11 @@ export function useAlarmWatcher() {
       if (location.pathname === '/monitor') continue
       if (shown >= 3) break
       shown++
+
+      // Sound alert — kritik olaylarda beep (CustomizeContext'te soundEnabled
+      // açıksa). Şu an sadece critical için; warning'lere bilinçli olarak
+      // çalmıyor — kullanıcı odaklı NOC için sadece "go look now" sinyali.
+      if (ev.severity === 'critical') playBeep()
 
       const cfg = EVENT_CONFIG[ev.event_type] ?? FALLBACK_CONFIG
       const notifKey = `alarm-${ev.id}`

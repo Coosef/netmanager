@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import {
-  App, Button, Col, Form, InputNumber, Modal, Popconfirm, Row, Select,
+  App, Button, Col, Form, Input, InputNumber, Modal, Popconfirm, Row, Select,
   Segmented, Space, Spin, Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
   CrownOutlined, LaptopOutlined, TeamOutlined, EnvironmentOutlined,
   AlertOutlined, ReloadOutlined, PoweroffOutlined, EditOutlined,
   CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined,
-  GlobalOutlined, SwapOutlined, RobotOutlined,
+  GlobalOutlined, SwapOutlined, RobotOutlined, PlusOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -334,6 +334,7 @@ function ResourceAssignTab({ orgs }: { orgs: OrganizationWithCounts[] }) {
 
 export default function SuperAdminPage() {
   const { isDark } = useTheme()
+  const { message } = App.useApp()
   const qc = useQueryClient()
   const [activeTab, setActiveTab] = useState<'overview' | 'assign'>('overview')
   const [quotaModal, setQuotaModal] = useState<OrganizationWithCounts | null>(null)
@@ -366,6 +367,40 @@ export default function SuperAdminPage() {
       setQuotaModal(null)
     },
   })
+
+  // RBAC F5 — create organization (super-admin only, atomic with first admin)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createForm] = Form.useForm()
+  const createOrgMutation = useMutation({
+    mutationFn: (payload: Parameters<typeof superadminApi.createOrg>[0]) =>
+      superadminApi.createOrg(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orgs-with-counts'] })
+      qc.invalidateQueries({ queryKey: ['superadmin-stats'] })
+      message.success('Organizasyon ve ilk admin oluşturuldu')
+      createForm.resetFields()
+      setCreateOpen(false)
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Organizasyon oluşturulamadı'),
+  })
+
+  const handleCreateOrg = async () => {
+    const vals = await createForm.validateFields()
+    createOrgMutation.mutate(vals)
+  }
+
+  // Auto-derive slug from name (lowercase, replace spaces, strip non-allowed).
+  const onNameChange = (name: string) => {
+    const current = createForm.getFieldValue('slug')
+    // Only overwrite if the user hasn't manually edited the slug.
+    if (!current || current === (createForm.getFieldValue('_lastAutoSlug') ?? '')) {
+      const slug = name.toLowerCase()
+        .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ç/g, 'c')
+        .replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ö/g, 'o')
+        .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
+      createForm.setFieldsValue({ slug, _lastAutoSlug: slug })
+    }
+  }
 
   const toggleOrgStatus = (org: OrganizationWithCounts) => {
     const next = org.status === 'active' ? 'suspended' : 'active'
@@ -590,9 +625,15 @@ export default function SuperAdminPage() {
 
           {/* Organizations table */}
           <div style={{ background: cardBg, border: `1px solid ${border}`, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text strong>Tüm Organizasyonlar</Text>
-              <Text type="secondary" style={{ fontSize: 12 }}>{orgs.length} toplam</Text>
+            <div style={{ padding: '14px 18px', borderBottom: `1px solid ${border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+              <div>
+                <Text strong>Tüm Organizasyonlar</Text>
+                <Text type="secondary" style={{ fontSize: 12, marginLeft: 8 }}>{orgs.length} toplam</Text>
+              </div>
+              <Button type="primary" icon={<PlusOutlined />}
+                onClick={() => { createForm.resetFields(); createForm.setFieldsValue({ trial_days: 14 }); setCreateOpen(true) }}>
+                Yeni Organizasyon
+              </Button>
             </div>
             <Table
               columns={columns}
@@ -643,6 +684,99 @@ export default function SuperAdminPage() {
               </Form.Item>
             </Col>
           </Row>
+        </Form>
+      </Modal>
+
+      {/* RBAC F5 — create-organization modal (super-admin only).
+          Form mirrors the OrgCreate Pydantic schema; the backend
+          provisions the org + its first admin user atomically. */}
+      <Modal
+        title={<Space><PlusOutlined /> Yeni Organizasyon</Space>}
+        open={createOpen}
+        onOk={handleCreateOrg}
+        onCancel={() => setCreateOpen(false)}
+        okText="Oluştur"
+        cancelText="İptal"
+        confirmLoading={createOrgMutation.isPending}
+        width={560}
+        destroyOnClose
+      >
+        <Form form={createForm} layout="vertical" style={{ marginTop: 12 }} initialValues={{ trial_days: 14 }}>
+          <Row gutter={12}>
+            <Col span={14}>
+              <Form.Item label="Organizasyon Adı" name="name" rules={[{ required: true, message: 'Zorunlu' }]}>
+                <Input placeholder="örn. Acme Networks A.Ş."
+                  onChange={(e) => onNameChange(e.target.value)} />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item label="Slug" name="slug"
+                rules={[
+                  { required: true, message: 'Zorunlu' },
+                  { pattern: /^[a-z0-9-]+$/, message: 'Yalnız küçük harf · rakam · tire' },
+                ]}
+                extra="URL'lerde kullanılır — değişmez">
+                <Input placeholder="acme-networks" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.Item label="Açıklama" name="description">
+            <Input.TextArea rows={2} placeholder="İsteğe bağlı" />
+          </Form.Item>
+          <Row gutter={12}>
+            <Col span={14}>
+              <Form.Item label="İletişim E-postası" name="contact_email"
+                rules={[{ type: 'email', message: 'Geçerli e-posta' }]}>
+                <Input placeholder="ops@acme-networks.com" />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item label="Deneme süresi (gün)" name="trial_days"
+                rules={[{ required: true }]}>
+                <InputNumber min={0} max={365} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <div style={{ margin: '4px 0 12px', padding: '6px 10px',
+            background: isDark ? '#0c2040' : '#eff6ff',
+            border: `1px solid ${isDark ? '#1a3458' : '#bfdbfe'}`,
+            borderRadius: 6, fontSize: 12,
+            color: isDark ? '#94a3b8' : '#475569',
+          }}>
+            <CrownOutlined style={{ marginRight: 6, color: '#f97316' }} />
+            <strong>İlk Org Admin</strong> — bu organizasyona ilk giriş yapacak hesap.
+            Org Admin sadece bu organizasyonun lokasyon ve kaynaklarına erişebilir.
+          </div>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item label="Admin kullanıcı adı" name="admin_username"
+                rules={[{ required: true, message: 'Zorunlu' }, { min: 3, max: 32 }]}>
+                <Input placeholder="acme.admin" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item label="Admin tam adı" name="admin_full_name">
+                <Input placeholder="Ali Veli" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={14}>
+              <Form.Item label="Admin e-posta" name="admin_email"
+                rules={[{ required: true, type: 'email', message: 'Geçerli e-posta' }]}>
+                <Input placeholder="admin@acme-networks.com" />
+              </Form.Item>
+            </Col>
+            <Col span={10}>
+              <Form.Item label="İlk şifre" name="admin_password"
+                rules={[{ required: true, min: 8, message: 'En az 8 karakter' }]}>
+                <Input.Password placeholder="••••••••" />
+              </Form.Item>
+            </Col>
+          </Row>
+          {/* Hidden — used by onNameChange auto-slug heuristic */}
+          <Form.Item name="_lastAutoSlug" noStyle hidden><Input type="hidden" /></Form.Item>
         </Form>
       </Modal>
     </div>
