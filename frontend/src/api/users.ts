@@ -30,6 +30,11 @@ export const usersApi = {
   getLocations: (id: number) =>
     client.get<UserLocationItem[]>(`/users/${id}/locations`).then((r) => r.data),
 
+  // T8.4 — kullanıcı kendi profil sayfasında lokasyon assignment'larını
+  // görebilsin. /users/{id}/locations admin-only; bu self-only versiyonu.
+  getMyLocations: () =>
+    client.get<UserLocationItem[]>('/users/me/locations').then((r) => r.data),
+
   setLocations: (id: number, assignments: { location_id: number; loc_role: string }[]) =>
     client.put<{ success: boolean; count: number }>(`/users/${id}/locations`, assignments).then((r) => r.data),
 }

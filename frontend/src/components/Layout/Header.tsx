@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { App, Dropdown, Avatar, Space, Input, Tooltip, Typography, Popover, Button, Tag, Empty, Modal, Form } from 'antd'
 import {
-  LogoutOutlined, KeyOutlined,
+  LogoutOutlined, KeyOutlined, UserOutlined,
   BellOutlined, ReloadOutlined, SearchOutlined,
   SunOutlined, MoonOutlined, CheckOutlined,
   WarningOutlined, CloseCircleOutlined, InfoCircleOutlined,
@@ -137,6 +137,10 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
       ), disabled: true,
     },
     { type: 'divider' as const },
+    // T8.4 — Profil sayfası: kimlik bilgileri, lokasyonlar, şifre + MFA tek
+    // sayfada. Eski "Şifre Değiştir" modal kısayolu da korunuyor (hızlı
+    // erişim için), MFA yönetimi sadece Profile sayfasında.
+    { key: 'profile', icon: <UserOutlined />, label: 'Profilim', onClick: () => navigate('/profile') },
     { key: 'change-password', icon: <KeyOutlined />, label: t('header.change_password'), onClick: () => { pwForm.resetFields(); setPwModalOpen(true) } },
     { type: 'divider' as const },
     { key: 'logout', icon: <LogoutOutlined />, label: t('header.logout'), danger: true, onClick: handleLogout },

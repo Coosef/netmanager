@@ -33,6 +33,7 @@ import LldpInventoryPage from '@/pages/LldpInventory'
 import AgentsPage from '@/pages/Agents'
 import ReportsPage from '@/pages/Reports'
 import SettingsPage from '@/pages/Settings'
+import ProfilePage from '@/pages/Profile'
 import PlaybooksPage from '@/pages/Playbooks'
 import ApprovalsPage from '@/pages/Approvals'
 import MacArpPage from '@/pages/MacArp'
@@ -261,6 +262,9 @@ function ThemedApp() {
               <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
               <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
               <Route path="settings" element={<PermRoute module="settings" action="view"><SettingsPage /></PermRoute>} />
+              {/* Profil — her authenticated kullanıcı kendi sayfası. Permission
+                  gate yok; içerideki /users/me endpoint'leri zaten self-only. */}
+              <Route path="profile" element={<ProfilePage />} />
               <Route path="playbooks" element={<PermRoute module="playbooks" action="view"><PlaybooksPage /></PermRoute>} />
               <Route path="approvals" element={<RoleRoute minRole="location_manager"><ApprovalsPage /></RoleRoute>} />
               <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />

@@ -15,7 +15,7 @@ import {
   CodeOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import DriverTemplatesPage from '@/pages/DriverTemplates'
-import MfaTab from '@/pages/Settings/MfaTab'
+// MfaTab artık /profile sayfasında reuse ediliyor; Settings tab'ı kaldırıldı.
 import { apiTokensApi, ApiToken } from '@/api/apiTokens'
 import dayjs from 'dayjs'
 import { useTheme } from '@/contexts/ThemeContext'
@@ -2188,7 +2188,10 @@ export default function SettingsPage() {
       {(() => {
         const TABS: { key: string; label: string; icon: React.ReactNode; content: React.ReactNode }[] = [
           { key: 'general',          label: 'Genel',              icon: <GlobalOutlined />, content: generalContent },
-          { key: 'mfa',              label: 'Çok Faktörlü Doğrulama', icon: <SafetyOutlined />, content: <MfaTab /> },
+          // T8.4 — MFA artık kullanıcı bazlı /profile sayfasında (her
+          // authenticated kullanıcı kendi MFA'sını yönetebilsin diye).
+          // Settings org-admin gated; viewer/location_admin buradan kendi
+          // MFA'sına ulaşamıyordu. Kaldırıldı.
           { key: 'notifications',    label: 'Bildirimler',        icon: <BellOutlined />,   content: <NotificationChannelsTab /> },
           { key: 'alert-rules',      label: 'Uyarı Kuralları',    icon: <AlertOutlined />,  content: <AlertRulesTab /> },
           { key: 'maintenance',      label: 'Bakım Pencereleri',  icon: <ToolOutlined />,   content: <MaintenanceWindowsTab /> },
