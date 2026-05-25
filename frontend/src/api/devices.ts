@@ -70,17 +70,49 @@ export const devicesApi = {
       `/devices/${id}/vlans`, { params: force ? { force: true } : undefined }
     ).then((r) => r.data),
 
-  // T8.4 perf — tek HTTP call ile N cihaz için VLAN listesi. Cache hit'ler
-  // anında, miss'ler backend'de asyncio.gather ile paralel SSH. Browser'ın
-  // 6-paralel concurrent connection limitini aşar, VLAN sayfası ilk açılışı
-  // 60+ switch'te ~60 sn → ~12 sn (en yavaş SSH süresi) düşer.
-  getVlansBatch: (deviceIds: number[], force = false) =>
+  // T8.4 v2 — DB snapshot read. Hiç SSH yok; backend device_vlan_snapshots
+  // tablosundan okur. Snapshot yoksa items[devId].no_snapshot=true döner →
+  // UI empty state "Henüz taranmadı". SSH refresh için refreshVlansBatch.
+  getVlansBatch: (deviceIds: number[]) =>
     client.post<{
-      items: Record<string, { success: boolean; vlans: Vlan[]; error?: string }>
-      fetched: number
-      from_cache: number
-      errors: number
-    }>('/devices/vlans-batch', { device_ids: deviceIds, force }).then((r) => r.data),
+      items: Record<string, {
+        success: boolean
+        vlans: Vlan[]
+        error?: string
+        fetched_at?: string
+        fetched_by?: string
+        from_snapshot?: boolean
+        no_snapshot?: boolean
+      }>
+      from_snapshot: number
+      missing: number
+      newest_fetched_at: string | null
+      oldest_fetched_at: string | null
+    }>('/devices/vlans-batch', { device_ids: deviceIds }).then((r) => r.data),
+
+  // T8.4 v2 — SSH paralel + DB snapshot upsert + diff hesabı. UI "Tümünü
+  // Yenile" tuşunda tetiklenir. Response per-device added/removed VLAN
+  // id'leri + global diff_summary döndürür (UI banner için).
+  refreshVlansBatch: (deviceIds: number[]) =>
+    client.post<{
+      items: Record<string, {
+        success: boolean
+        hostname?: string
+        error?: string
+        added: number[]
+        removed: number[]
+        fetched_at: string
+      }>
+      diff_summary: {
+        added: number
+        removed: number
+        added_devices: number
+        removed_devices: number
+        errors: number
+      }
+      fetched_at: string
+      fetched_by: string
+    }>('/devices/vlans-refresh', { device_ids: deviceIds }).then((r) => r.data),
 
   createVlan: (id: number, vlan_id: number, name: string) =>
     client.post<{ success: boolean; error?: string }>(

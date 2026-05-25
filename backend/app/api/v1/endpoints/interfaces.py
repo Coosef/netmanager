@@ -1,6 +1,7 @@
 import json
 import re
 import time
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -413,12 +414,11 @@ async def get_vlans(
     return response
 
 
-# ─── VLAN batch (T8.4 perf) ─────────────────────────────────────────────────
-# Tek HTTP call ile birden fazla cihazın VLAN listesi. Cache hit'ler anında,
-# cache miss'ler sunucuda asyncio.gather ile paralel SSH atılır (tarayıcının
-# 6-paralel concurrent connection limitini aşar). VLAN sayfası 60+ switch'i
-# tek istekle çekebilir → ilk yükleme 1 round-trip + en yavaş cihazın
-# SSH süresi (eskiden N × round-trip).
+# ─── VLAN batch — DB SNAPSHOT (T8.4 v2) ────────────────────────────────────
+# v1: her çağrı SSH (60+ cihazda 10-60 saniye, switch'lere her sayfa açılışında
+# yük). v2: DB'den device_vlan_snapshots tablosunu okur. SSH yalnız kullanıcı
+# "Tümünü Yenile" dediğinde tetiklenir (vlans-refresh endpoint'i). Snapshot
+# yoksa frontend empty state gösterir + "İlk tarama" davet eder.
 
 @router.post("/vlans-batch")
 async def get_vlans_batch(
@@ -429,18 +429,17 @@ async def get_vlans_batch(
     if not current_user.has_permission("config:view"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    import asyncio
     body = await request.json()
     raw_ids = body.get("device_ids", [])
-    force = bool(body.get("force", False))
     try:
         device_ids = [int(x) for x in raw_ids]
     except (ValueError, TypeError):
         raise HTTPException(status_code=400, detail="device_ids must be a list of integers")
     if not device_ids:
-        return {"items": {}, "fetched": 0, "from_cache": 0, "errors": 0}
-    if len(device_ids) > 200:
-        raise HTTPException(status_code=400, detail="device_ids capped at 200 per batch")
+        return {"items": {}, "from_snapshot": 0, "missing": 0,
+                "newest_fetched_at": None, "oldest_fetched_at": None}
+    if len(device_ids) > 500:
+        raise HTTPException(status_code=400, detail="device_ids capped at 500 per batch")
 
     # 1) RLS-scoped device fetch — un-authorized IDs silently drop.
     devices = (await db.execute(
@@ -448,60 +447,204 @@ async def get_vlans_batch(
     )).scalars().all()
     dev_by_id = {d.id: d for d in devices}
 
-    # 2) Cache-first pass.
+    # 2) Read snapshots from DB (RLS already scoped).
+    from app.models.device_vlan_snapshot import DeviceVlanSnapshot
+    snapshots = (await db.execute(
+        select(DeviceVlanSnapshot).where(
+            DeviceVlanSnapshot.device_id.in_(device_ids)
+        )
+    )).scalars().all()
+    snap_by_id = {s.device_id: s for s in snapshots}
+
     items: dict[str, dict] = {}
-    from_cache = 0
-    misses: list[Device] = []
+    from_snapshot = 0
+    missing = 0
+    fetched_ats: list[datetime] = []
     for did in device_ids:
         dev = dev_by_id.get(did)
         if not dev:
             items[str(did)] = {"success": False, "vlans": [], "error": "Cihaz bulunamadı"}
             continue
-        ck = _scoped_cache_key(did, "vlans")
-        cached = _cache_get(ck) if not force else None
-        if cached:
-            items[str(did)] = cached
-            from_cache += 1
-        else:
-            misses.append(dev)
+        snap = snap_by_id.get(did)
+        if snap is None:
+            # Snapshot yok — UI "henüz taranmadı" göstersin.
+            items[str(did)] = {
+                "success": False, "vlans": [],
+                "error": "Henüz taranmadı — 'Tümünü Yenile' ile başlat",
+                "no_snapshot": True,
+            }
+            missing += 1
+            continue
+        items[str(did)] = {
+            "success": snap.error is None,
+            "vlans": snap.vlans or [],
+            "error": snap.error,
+            "fetched_at": snap.fetched_at.isoformat(),
+            "fetched_by": snap.fetched_by,
+            "from_snapshot": True,
+        }
+        from_snapshot += 1
+        fetched_ats.append(snap.fetched_at)
 
-    # 3) Parallel SSH for misses (per-device timeout, gather-with-exceptions).
-    async def fetch_one(dev: Device) -> tuple[int, dict]:
+    return {
+        "items": items,
+        "from_snapshot": from_snapshot,
+        "missing": missing,
+        "newest_fetched_at": max(fetched_ats).isoformat() if fetched_ats else None,
+        "oldest_fetched_at": min(fetched_ats).isoformat() if fetched_ats else None,
+    }
+
+
+# ─── VLAN refresh — SSH paralel + DB snapshot update + diff ────────────────
+# Kullanıcı "Tümünü Yenile" dediğinde tetiklenir. Mevcut snapshot ile yeni
+# SSH sonucunu kıyaslayıp per-device diff (added/removed VLAN id'leri)
+# döndürür. Snapshot da güncellenir.
+
+@router.post("/vlans-refresh")
+async def refresh_vlans_batch(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("config:view"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    import asyncio
+    from app.models.device_vlan_snapshot import DeviceVlanSnapshot
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    body = await request.json()
+    raw_ids = body.get("device_ids", [])
+    try:
+        device_ids = [int(x) for x in raw_ids]
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="device_ids must be a list of integers")
+    if not device_ids:
+        return {"items": {}, "diff_summary": {"added": 0, "removed": 0,
+                "added_devices": 0, "removed_devices": 0, "errors": 0}}
+    if len(device_ids) > 200:
+        raise HTTPException(status_code=400, detail="device_ids capped at 200 per refresh")
+
+    devices = (await db.execute(
+        select(Device).where(Device.id.in_(device_ids))
+    )).scalars().all()
+    dev_by_id = {d.id: d for d in devices}
+
+    # Mevcut snapshot (diff için)
+    old_snaps = (await db.execute(
+        select(DeviceVlanSnapshot).where(
+            DeviceVlanSnapshot.device_id.in_(device_ids)
+        )
+    )).scalars().all()
+    old_vlan_ids: dict[int, set[int]] = {}
+    for s in old_snaps:
+        vids = set()
+        for v in (s.vlans or []):
+            try: vids.add(int(v.get("id")))
+            except (TypeError, ValueError): pass
+        old_vlan_ids[s.device_id] = vids
+
+    # Paralel SSH (mevcut vlans-batch pattern'i)
+    async def fetch_one(dev: Device) -> tuple[int, dict, list[int]]:
         try:
             result = await asyncio.wait_for(
                 ssh_manager.execute_command(dev, _vlan_cmd(dev.os_type)),
                 timeout=12.0,
             )
         except asyncio.TimeoutError:
-            return dev.id, {"success": False, "vlans": [], "error": "SSH zaman aşımı (12s)"}
+            return dev.id, {"success": False, "error": "SSH zaman aşımı (12s)"}, []
         except Exception as exc:
-            return dev.id, {"success": False, "vlans": [], "error": str(exc)[:200]}
+            return dev.id, {"success": False, "error": str(exc)[:200]}, []
         if not result.success:
-            return dev.id, {"success": False, "vlans": [], "error": result.error}
-        resp = {
-            "success": True,
-            "vlans": _parse_vlans(result.output, dev.os_type),
-            "raw": result.output,
-            "fetched_at": time.time(),
-            "cached": False,
-        }
-        try:
-            _cache_set(_scoped_cache_key(dev.id, "vlans"), {**resp, "cached": True}, _VLAN_CACHE_TTL)
-        except Exception:
-            pass
-        return dev.id, resp
+            return dev.id, {"success": False, "error": result.error}, []
+        parsed = _parse_vlans(result.output, dev.os_type)
+        vids = sorted({int(v["id"]) for v in parsed if v.get("id") is not None})
+        return dev.id, {"success": True, "vlans": parsed}, vids
 
-    if misses:
-        results = await asyncio.gather(*(fetch_one(d) for d in misses), return_exceptions=False)
-        for did, resp in results:
-            items[str(did)] = resp
+    sem = asyncio.Semaphore(10)
+    async def bounded(d):
+        async with sem:
+            return await fetch_one(d)
 
-    errors = sum(1 for v in items.values() if not v.get("success"))
+    results = await asyncio.gather(*(bounded(d) for d in devices))
+
+    # Per-device diff hesapla + snapshot upsert + items payload
+    items: dict[str, dict] = {}
+    diff_summary = {
+        "added": 0, "removed": 0,
+        "added_devices": 0, "removed_devices": 0,
+        "errors": 0,
+    }
+    now = datetime.now(timezone.utc)
+    user_label = getattr(current_user, "username", None) or str(getattr(current_user, "id", "?"))
+
+    for did, payload, new_vids in results:
+        dev = dev_by_id.get(did)
+        if dev is None:
+            continue
+        old_set = old_vlan_ids.get(did, set())
+        new_set = set(new_vids)
+        added = sorted(new_set - old_set)
+        removed = sorted(old_set - new_set)
+
+        if not payload.get("success"):
+            # Hata — snapshot'u silmiyoruz (eski veri kalsın), sadece error yaz.
+            stmt = (
+                pg_insert(DeviceVlanSnapshot)
+                .values(
+                    device_id=did,
+                    vlans=[],
+                    error=payload.get("error", "unknown")[:255],
+                    fetched_at=now,
+                    fetched_by=user_label,
+                    # org/loc _scoping before_insert hook'tan device parent ile dolar
+                )
+                .on_conflict_do_update(
+                    constraint="uq_device_vlan_snapshot_device",
+                    set_={"error": payload.get("error", "unknown")[:255],
+                          "fetched_at": now, "fetched_by": user_label},
+                )
+            )
+            await db.execute(stmt)
+            items[str(did)] = {
+                "success": False, "error": payload.get("error"),
+                "hostname": dev.hostname, "added": [], "removed": [], "fetched_at": now.isoformat(),
+            }
+            diff_summary["errors"] += 1
+        else:
+            stmt = (
+                pg_insert(DeviceVlanSnapshot)
+                .values(
+                    device_id=did,
+                    vlans=payload.get("vlans", []),
+                    error=None,
+                    fetched_at=now,
+                    fetched_by=user_label,
+                )
+                .on_conflict_do_update(
+                    constraint="uq_device_vlan_snapshot_device",
+                    set_={"vlans": payload.get("vlans", []), "error": None,
+                          "fetched_at": now, "fetched_by": user_label},
+                )
+            )
+            await db.execute(stmt)
+            items[str(did)] = {
+                "success": True, "hostname": dev.hostname,
+                "added": added, "removed": removed,
+                "fetched_at": now.isoformat(),
+            }
+            diff_summary["added"] += len(added)
+            diff_summary["removed"] += len(removed)
+            if added: diff_summary["added_devices"] += 1
+            if removed: diff_summary["removed_devices"] += 1
+
+    await db.commit()
+
     return {
         "items": items,
-        "fetched": len(misses),
-        "from_cache": from_cache,
-        "errors": errors,
+        "diff_summary": diff_summary,
+        "fetched_at": now.isoformat(),
+        "fetched_by": user_label,
     }
 
 

@@ -49,6 +49,7 @@ from app.models.synthetic_probe import SyntheticProbe, SyntheticProbeResult
 from app.models.agent_peer_latency import AgentPeerLatency
 from app.models.escalation_rule import EscalationRule, EscalationNotificationLog
 from app.models.compliance_profile import ComplianceProfile
+from app.models.device_vlan_snapshot import DeviceVlanSnapshot
 
 __all__ = [
     "User", "SystemRole",

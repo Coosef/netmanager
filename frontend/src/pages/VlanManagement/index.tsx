@@ -2,8 +2,11 @@ import { useState, useMemo } from 'react'
 import {
   Typography, Table, Tag, Button, Space, Input, Modal, Form,
   InputNumber, Spin, Alert, Tooltip, Popconfirm, App, Checkbox,
-  Segmented, Progress, Select,
+  Segmented, Progress, Select, Collapse,
 } from 'antd'
+import dayjs from 'dayjs'
+import relativeTime from 'dayjs/plugin/relativeTime'
+dayjs.extend(relativeTime)
 import {
   PlusOutlined, DeleteOutlined, ReloadOutlined, SearchOutlined,
   SyncOutlined, CheckCircleOutlined, WarningOutlined,
@@ -67,15 +70,11 @@ interface DeviceSummaryRow {
 }
 
 /**
- * T8.4 perf — tek HTTP batch (cache hit'ler anında, miss'ler sunucuda
- * paralel SSH). Eski N x useQueries pattern'i tarayıcının 6-paralel
- * limitini aşamıyordu; ilk yüklemede 60+ switch için ~60 sn'lik kuyruk
- * oluşuyordu. Şimdi tek istek, en yavaş SSH süresi kadar bekliyor.
- *
- * useQueries de kaldırıldı çünkü iki sistem aynı queryKey'i kullansa
- * cache tutarlılığı bozulur — port-assignment tab'ı hala /vlans tek-cihaz
- * endpoint'ini ['device-vlans', id] ile çekiyor, batch sonucu da o key'e
- * yazılıyor (qc.setQueryData) → ikisi aynı cache'i paylaşır.
+ * T8.4 v2 — DB snapshot read. Eski v1 her sayfa açılışında SSH atıyordu
+ * (60+ cihaz, switch'lere gereksiz yük). v2: backend device_vlan_snapshots
+ * tablosundan okur (SSH yok, anlık). SSH yalnız kullanıcı "Tümünü Yenile"
+ * dediğinde tetiklenir (refreshVlansBatch). staleTime: Infinity →
+ * sayfa içinde re-fetch yok, refetch on window focus kapalı.
  */
 function useAllDeviceVlans(devices: Device[]) {
   const qc = useQueryClient()
@@ -83,31 +82,46 @@ function useAllDeviceVlans(devices: Device[]) {
   const cacheKey = ids.join(',')
 
   const { data, isFetching } = useQuery({
-    // Cache key id-set'e bağlı; SiteContext değişirse devices değişir → re-fetch.
     queryKey: ['device-vlans-batch', cacheKey],
     queryFn: async () => {
-      if (ids.length === 0) return { items: {}, fetched: 0, from_cache: 0, errors: 0 }
+      if (ids.length === 0) return {
+        items: {}, from_snapshot: 0, missing: 0,
+        newest_fetched_at: null, oldest_fetched_at: null,
+      }
       const res = await devicesApi.getVlansBatch(ids)
-      // Per-device cache'i de doldur ki port-assignment tab tek-cihaz
-      // getVlans çağırınca yeni round-trip yapmasın.
+      // Per-device cache'i de doldur (port-assignment tab tek-cihaz
+      // /vlans çağrısı yapmasın).
       for (const [didStr, payload] of Object.entries(res.items)) {
         qc.setQueryData(['device-vlans', Number(didStr)], payload)
       }
       return res
     },
-    staleTime: 120_000,
+    staleTime: Infinity,           // sayfa içinde re-fetch yok
+    refetchOnWindowFocus: false,   // sekme dönüşünde de yok
     retry: 0,
   })
 
-  return devices.map((d) => {
+  const rows = devices.map((d) => {
     const item = data?.items?.[String(d.id)]
     return {
       device: d,
       vlans: item?.vlans || [],
       loading: isFetching && !item,
       error: item?.error || (!item && !isFetching && data ? 'Yanıt yok' : null),
+      noSnapshot: Boolean(item?.no_snapshot),
+      fetchedAt: item?.fetched_at,
     }
   })
+  return {
+    rows,
+    meta: {
+      newestFetchedAt: data?.newest_fetched_at ?? null,
+      oldestFetchedAt: data?.oldest_fetched_at ?? null,
+      missing: data?.missing ?? 0,
+      fromSnapshot: data?.from_snapshot ?? 0,
+      isFetching,
+    },
+  }
 }
 
 export default function VlanManagementPage() {
@@ -145,7 +159,37 @@ export default function VlanManagementPage() {
   })
 
   const allDevices: Device[] = devicesData?.items || []
-  const deviceVlans = useAllDeviceVlans(allDevices)
+  const { rows: deviceVlans, meta: vlanMeta } = useAllDeviceVlans(allDevices)
+
+  // T8.4 v2 — "Tümünü Yenile" mutation. SSH paralel + DB snapshot upsert +
+  // per-device diff. Response diff_summary'i UI banner'a yansır.
+  const [lastDiff, setLastDiff] = useState<{
+    summary: { added: number; removed: number; added_devices: number; removed_devices: number; errors: number }
+    items: Record<string, { hostname?: string; added: number[]; removed: number[]; error?: string }>
+    fetched_at: string
+  } | null>(null)
+  const [diffBannerOpen, setDiffBannerOpen] = useState(false)
+  const refreshMutation = useMutation({
+    mutationFn: () => devicesApi.refreshVlansBatch(allDevices.map((d) => d.id)),
+    onSuccess: (res) => {
+      setLastDiff({ summary: res.diff_summary, items: res.items as any, fetched_at: res.fetched_at })
+      setDiffBannerOpen(true)
+      qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
+      allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))
+      const { added, removed, added_devices, removed_devices, errors } = res.diff_summary
+      if (added === 0 && removed === 0 && errors === 0) {
+        message.success(`Tarama tamam — değişiklik yok (${allDevices.length} cihaz)`)
+      } else {
+        message.info(
+          `Tarama tamam — ${added_devices} cihazda ${added} VLAN eklendi, ${removed_devices} cihazda ${removed} silindi` +
+          (errors > 0 ? ` · ${errors} cihazda hata` : '')
+        )
+      }
+    },
+    onError: (e: any) => {
+      message.error(e?.response?.data?.detail || 'Yenileme başarısız')
+    },
+  })
 
   // Port assignment tab queries
   const { data: portIfaceData, isLoading: portIfaceLoading } = useQuery({
@@ -483,6 +527,20 @@ export default function VlanManagementPage() {
             VLAN Yönetimi
             <span className="nm-pill mono">{uniqueVlanCount} VLAN</span>
             <span className="nm-pill mono">{allDevices.length} switch</span>
+            {/* T8.4 v2 — Snapshot zaman damgası pill. DB'den okuyor; SSH yok.
+                Tarama eski olursa kullanıcı "Tümünü Yenile"yi tetikleyebilir. */}
+            {vlanMeta.newestFetchedAt && (
+              <Tooltip title={`En son: ${dayjs(vlanMeta.newestFetchedAt).format('DD.MM.YYYY HH:mm')}${vlanMeta.oldestFetchedAt && vlanMeta.oldestFetchedAt !== vlanMeta.newestFetchedAt ? ` · en eski: ${dayjs(vlanMeta.oldestFetchedAt).format('DD.MM HH:mm')}` : ''}`}>
+                <span className="nm-pill mono" style={{ color: 'var(--fg-2)' }}>
+                  Snapshot: {dayjs(vlanMeta.newestFetchedAt).fromNow()}
+                </span>
+              </Tooltip>
+            )}
+            {vlanMeta.missing > 0 && (
+              <Tooltip title="Bu cihazlar için henüz hiç VLAN taraması yapılmadı. 'Tümünü Yenile' ile tara.">
+                <span className="nm-pill warn">{vlanMeta.missing} cihaz taranmadı</span>
+              </Tooltip>
+            )}
           </h1>
           <div className="nm-page-sub">
             T&#xFC;m switchlerin VLAN da&#x11F;&#x131;l&#x131;m&#x131; &#xB7; bo&#x15F;luklar&#x131; renkle yakala &#xB7;
@@ -490,16 +548,16 @@ export default function VlanManagementPage() {
           </div>
         </div>
         <Space>
-          <Button
-            icon={<SyncOutlined />}
-            onClick={() => {
-              // T8.4 batch — tek invalidate, sunucu force=true ile cache'i atlar.
-              qc.invalidateQueries({ queryKey: ['device-vlans-batch'] })
-              allDevices.forEach((d) => qc.invalidateQueries({ queryKey: ['device-vlans', d.id] }))
-            }}
-          >
-            Tümünü Yenile
-          </Button>
+          <Tooltip title="Tüm switch'lere SSH ile bağlanıp VLAN listesini tazeler, eklenen/silinen VLAN'ları raporlar. DB snapshot güncellenir.">
+            <Button
+              icon={<SyncOutlined spin={refreshMutation.isPending} />}
+              type={vlanMeta.missing > 0 ? 'primary' : 'default'}
+              loading={refreshMutation.isPending}
+              onClick={() => refreshMutation.mutate()}
+            >
+              {refreshMutation.isPending ? `Tarıyor… (${allDevices.length} switch)` : 'Tümünü Yenile'}
+            </Button>
+          </Tooltip>
           {canMutate && (
             <Button
               type="primary"
@@ -522,6 +580,76 @@ export default function VlanManagementPage() {
           )}
         </Space>
       </div>
+
+      {/* T8.4 v2 — Refresh sonrası diff banner. "Tümünü Yenile" çağrısı
+          tamamlandığında: değişiklik varsa ekle/sil ozeti + hangi cihazlarda
+          olduğunu collapse içinde göster. Kapanabilir. */}
+      {diffBannerOpen && lastDiff && (
+        (lastDiff.summary.added > 0 || lastDiff.summary.removed > 0 || lastDiff.summary.errors > 0) ? (
+          <Alert
+            type={lastDiff.summary.errors > 0 ? 'warning' : 'info'}
+            showIcon
+            closable
+            onClose={() => setDiffBannerOpen(false)}
+            style={{ marginBottom: 12 }}
+            message={
+              <Space>
+                <strong>Tarama tamamlandı</strong>
+                <Tag color="green">+{lastDiff.summary.added} VLAN ({lastDiff.summary.added_devices} cihaz)</Tag>
+                <Tag color="red">−{lastDiff.summary.removed} VLAN ({lastDiff.summary.removed_devices} cihaz)</Tag>
+                {lastDiff.summary.errors > 0 && (
+                  <Tag color="orange">{lastDiff.summary.errors} cihaz erişilemedi</Tag>
+                )}
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  {dayjs(lastDiff.fetched_at).format('DD.MM.YYYY HH:mm:ss')}
+                </Text>
+              </Space>
+            }
+            description={
+              <Collapse ghost size="small" style={{ marginTop: 4 }}>
+                <Collapse.Panel key="d" header={<span style={{ fontSize: 12 }}>Cihaz detayı</span>}>
+                  <div style={{ maxHeight: 200, overflowY: 'auto', fontSize: 12 }}>
+                    {Object.entries(lastDiff.items)
+                      .filter(([, v]) => v.added.length > 0 || v.removed.length > 0 || v.error)
+                      .slice(0, 50)
+                      .map(([did, v]) => (
+                        <div key={did} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', borderBottom: '1px solid var(--line-soft)' }}>
+                          <Text strong style={{ fontFamily: 'monospace', minWidth: 200 }}>{v.hostname || `#${did}`}</Text>
+                          {v.error ? (
+                            <Text type="danger" style={{ fontSize: 11 }}>{v.error}</Text>
+                          ) : (
+                            <>
+                              {v.added.length > 0 && (
+                                <Tag color="green" style={{ fontFamily: 'monospace', fontSize: 10 }}>
+                                  +{v.added.join(', ')}
+                                </Tag>
+                              )}
+                              {v.removed.length > 0 && (
+                                <Tag color="red" style={{ fontFamily: 'monospace', fontSize: 10 }}>
+                                  −{v.removed.join(', ')}
+                                </Tag>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </Collapse.Panel>
+              </Collapse>
+            }
+          />
+        ) : (
+          <Alert
+            type="success"
+            showIcon
+            closable
+            onClose={() => setDiffBannerOpen(false)}
+            style={{ marginBottom: 12 }}
+            message={`Tarama tamamlandı — ${allDevices.length} cihazda değişiklik yok`}
+            description={`Snapshot güncellendi: ${dayjs(lastDiff.fetched_at).format('DD.MM.YYYY HH:mm:ss')}`}
+          />
+        )
+      )}
 
       {/* NOC stat bar — 6 real KPIs */}
       <div className="nm-statbar">
