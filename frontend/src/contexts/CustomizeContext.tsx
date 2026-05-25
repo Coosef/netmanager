@@ -116,6 +116,8 @@ export const ALL_WIDGETS: WidgetMeta[] = [
   { id: 'probes',    label: 'Synthetic Probes',    cat: 'monitoring' },
   { id: 'anomalies', label: 'Anomali Feed',        cat: 'intelligence' },
   { id: 'vendors',   label: 'Vendor Dağılımı',     cat: 'inventory' },
+  // T8.4 — yeni widget: 24h saat-bazında event yoğunluğu heatmap'i
+  { id: 'activity',  label: 'Aktivite Yoğunluğu',  cat: 'monitoring' },
 ]
 const DEFAULT_ORDER = ALL_WIDGETS.map((w) => w.id)
 

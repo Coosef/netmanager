@@ -498,6 +498,78 @@
   50% { opacity: 1; box-shadow: 0 0 12px var(--crit); }
 }
 
+/* ─────────────────────────────────────────────────────────────────────
+ * T8.4 — KPI tile canlandırması (Dashboard hero)
+ *
+ * Eski: düz beyaz/var(--bg-1) + sayı + küçük sparkline gözle algılanmıyordu.
+ * Yeni:
+ *  - Status'a göre subtle alt-soluk gradient (üstten saydam → renge bürünmüş)
+ *  - Sparkline %50 → %72 yüksekliğe çıkarıldı, opacity 0.7 → 0.85
+ *  - Sayı font-size 32 → 38 (büyük status için fluid)
+ *  - Hover: yön rengiyle 0 → 12px glow + scale 1.005
+ *  - .nm-kpi.crit-pulse (mevcut) animasyonu güçlendirildi (halo + 2x shadow)
+ * Light tema: gradient alpha düşük; dark tema: gradient daha canlı.
+ * ────────────────────────────────────────────────────────────────── */
+.nm-kpi {
+  background:
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 70%, transparent 100%),
+    var(--bg-2);
+}
+/* Status-aware bg gradient: tile altında soluk renkli yıkım */
+.nm-kpi[style*="--ok"],
+.nm-kpi.ok {
+  background:
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 60%, color-mix(in oklch, var(--ok) 14%, transparent) 100%),
+    var(--bg-2);
+}
+.nm-kpi.crit {
+  background:
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 55%, color-mix(in oklch, var(--crit) 18%, transparent) 100%),
+    var(--bg-2);
+}
+.nm-kpi.warn {
+  background:
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 60%, color-mix(in oklch, var(--warn) 16%, transparent) 100%),
+    var(--bg-2);
+}
+.nm-kpi.info {
+  background:
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-1) 60%, color-mix(in oklch, var(--info) 14%, transparent) 100%),
+    var(--bg-2);
+}
+
+/* Daha büyük + okunaklı sayı, daha belirgin sparkline */
+.nm-kpi-value { font-size: 38px; font-weight: 600; }
+.density-spacious .nm-kpi-value { font-size: 46px; }
+.nm-kpi-spark {
+  width: 70%;
+  height: 60%;
+  opacity: 0.85;
+}
+
+/* Hover'da yönlü glow + hafif scale */
+.nm-kpi.ok:hover   { box-shadow: 0 6px 20px color-mix(in oklch, var(--ok) 18%, transparent); }
+.nm-kpi.crit:hover { box-shadow: 0 6px 20px color-mix(in oklch, var(--crit) 22%, transparent); }
+.nm-kpi.warn:hover { box-shadow: 0 6px 20px color-mix(in oklch, var(--warn) 22%, transparent); }
+.nm-kpi.info:hover { box-shadow: 0 6px 20px color-mix(in oklch, var(--info) 18%, transparent); }
+
+/* crit-pulse animasyonunu güçlendir — halo + saniye geçince koyulan glow */
+.nm-kpi.crit-pulse {
+  animation: nmKpiCritPulse 1.6s ease-in-out infinite;
+}
+@keyframes nmKpiCritPulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 0 color-mix(in oklch, var(--crit) 35%, transparent),
+      0 4px 14px color-mix(in oklch, var(--crit) 15%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px color-mix(in oklch, var(--crit) 12%, transparent),
+      0 8px 26px color-mix(in oklch, var(--crit) 35%, transparent);
+  }
+}
+
 /* ─── Grids ─── */
 .nm-grid {
   display: grid;
