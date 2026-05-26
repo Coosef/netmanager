@@ -471,19 +471,49 @@ async def ssh_terminal_ws(
                 on_output=_on_output, on_close=_on_close, timeout=20.0,
             )
         except Exception as exc:
-            await websocket.send_text(f"\r\nAgent shell open hata: {exc}\r\n")
+            # T9 follow-up: agent-scope reddinde kullanıcıya net hata göster.
+            # 'AgentScopeError' yaygın — agent başka lokasyonda, cihaz başka
+            # lokasyonda. Kullanıcı 'WebSocket closed' yerine ne yapacağını
+            # söyleyen mesaj görsün.
+            msg = str(exc)
+            if "Cross-location" in msg or "is not in the agent" in msg:
+                await websocket.send_text(
+                    "\r\n\x1b[31m═══════════════════════════════════════════\r\n"
+                    "  AGENT–CİHAZ LOKASYON UYUŞMAZLIĞI\r\n"
+                    "═══════════════════════════════════════════\x1b[0m\r\n"
+                    f"  Cihaz   : {device.hostname} ({device.ip_address})\r\n"
+                    f"            org={device.organization_id}, location={device.location_id}\r\n"
+                    f"  Agent   : {device.agent_id}\r\n"
+                    "\r\n"
+                    "  Bu cihaza atanan agent, cihazın lokasyonunda değil.\r\n"
+                    "  Aynı lokasyondaki bir agent atayın veya\r\n"
+                    "  cihazı agent'in lokasyonuna taşıyın.\r\n"
+                    "\r\n"
+                    "  → Cihazlar > [cihaz adı] > Agent Atama\r\n\r\n"
+                )
+            else:
+                await websocket.send_text(f"\r\n\x1b[31mAgent shell open hata: {exc}\x1b[0m\r\n")
             try: await websocket.close()
             except Exception: pass
             revalidator.cancel()
+            try:
+                await _term_logger.close(_AsyncSessionLocal, exit_reason="agent_scope_error")
+            except Exception:
+                pass
             return
 
         await websocket.send_text("\r\nConnected (via agent).\r\n")
 
         try:
             while not closed_evt.is_set():
+                # Bloklu bekle — tarayıcı tab kapatılınca WebSocketDisconnect
+                # anında gelir. Eski 30s timeout idle session'ı sessizce
+                # öldürüyordu (kullanıcı sadece output bekliyor olabilir).
                 try:
-                    raw = await asyncio.wait_for(websocket.receive(), timeout=30)
-                except (asyncio.TimeoutError, WebSocketDisconnect):
+                    raw = await websocket.receive()
+                except WebSocketDisconnect:
+                    break
+                except Exception:
                     break
                 if raw.get("type") == "websocket.disconnect":
                     break
@@ -587,7 +617,10 @@ async def ssh_terminal_ws(
         """Forward WebSocket input to SSH."""
         while not stop_event.is_set():
             try:
-                raw = await asyncio.wait_for(websocket.receive(), timeout=30)
+                # Bloklu receive — tab kapatılınca WebSocketDisconnect anında
+                # gelir; 30s idle timeout kullanmıyoruz çünkü kullanıcı
+                # sadece output bekliyor olabilir.
+                raw = await websocket.receive()
                 if raw["type"] == "websocket.disconnect":
                     break
                 text = raw.get("text") or (raw.get("bytes") or b"").decode("utf-8", errors="replace")
@@ -606,7 +639,7 @@ async def ssh_terminal_ws(
                 _input_bytes = text.encode("utf-8", errors="replace")
                 _term_logger.log_input(_input_bytes)  # T9 Tur 3A audit
                 await loop.run_in_executor(None, channel.sendall, _input_bytes)
-            except (asyncio.TimeoutError, WebSocketDisconnect):
+            except WebSocketDisconnect:
                 break
             except Exception:
                 break

@@ -194,7 +194,9 @@ async def get_poe_status(
     path stays as fallback in poe_tasks.py for legacy gear that doesn't
     speak POWER-ETHERNET-MIB.
     """
-    client = _make_client(host, community, version, port, timeout=5, **_client_kwargs(v3))
+    # 5s → 3s: paralel gather'da bir yavaş cihazın diğerlerini bekletmemesi
+    # için. Non-PoE cihazlar UDP'ye hızlıca timeout dönecek.
+    client = _make_client(host, community, version, port, timeout=3, **_client_kwargs(v3))
 
     try:
         admin_t  = await _walk_table(client, OID_PETH_PSE_PORT_ADMIN)

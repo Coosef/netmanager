@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.workers.tasks.poe_tasks",
         "app.workers.tasks.ipam_tasks",
         "app.workers.tasks.firmware_tasks",
+        "app.workers.tasks.terminal_session_tasks",
     ],
 )
 
@@ -200,6 +201,12 @@ celery_app.conf.update(
         },
         "check-subnet-utilization-hourly": {
             "task": "app.workers.tasks.ipam_tasks.check_subnet_utilization",
+            "schedule": 3600.0,
+        },
+        # T9 Tur 3A follow-up — WebSocket disconnect detect edilemezse
+        # "Devam ediyor" kalan eski oturumları her saat kapat.
+        "cleanup-stale-terminal-sessions-hourly": {
+            "task": "app.workers.tasks.terminal_session_tasks.cleanup_stale_sessions",
             "schedule": 3600.0,
         },
     },
