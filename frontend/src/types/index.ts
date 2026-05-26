@@ -189,6 +189,8 @@ export interface Device {
   is_active: boolean
   is_readonly: boolean
   approval_required: boolean
+  // T9 Tur 4 #7+#14 — Cihaz yaşam döngüsü durumu
+  lifecycle_status?: 'production' | 'passive' | 'stock' | 'archived'
   snmp_enabled: boolean
   snmp_community_set?: boolean
   snmp_version: string

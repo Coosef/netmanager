@@ -3,6 +3,7 @@ import re
 
 import csv
 import io
+from typing import Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
@@ -1006,6 +1007,69 @@ async def get_device(device_id: int, db: AsyncSession = Depends(get_db), current
     device = await _get_device_scoped(db, device_id, current_user)
     # F11 — fill agent_name / agent_status (transient) before serialisation
     await _enrich_agent_display(db, [device])
+    return device
+
+
+class _LifecycleTransitionPayload(BaseModel):
+    """T9 Tur 4 #7+#14 — Cihaz lifecycle state geçişi payload."""
+    new_state: str  # 'production' | 'passive' | 'stock' | 'archived'
+    reason: Optional[str] = None  # Audit log'a düşmesi için opsiyonel açıklama
+
+
+@router.patch("/{device_id}/lifecycle", response_model=DeviceResponse)
+async def update_device_lifecycle(
+    device_id: int,
+    payload: _LifecycleTransitionPayload,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 Tur 4 — Cihaz yaşam döngüsü durumunu değiştir.
+
+    State geçiş kuralları services/device_lifecycle_service.py'da:
+      production ⇄ passive ⇄ stock      (her yön, org_admin)
+      *          → archived              (her state'ten arşive)
+      archived   → *                     (yalnız super_admin)
+
+    is_active otomatik senkron: production/passive/stock → True,
+    archived → False (devices listesinde gizlenir, soft-delete pattern).
+    """
+    if not (current_user.is_super_admin or current_user.is_org_admin):
+        raise HTTPException(status_code=403, detail="Yetersiz yetki")
+
+    device = (await db.execute(
+        select(Device).where(Device.id == device_id)
+    )).scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Cihaz bulunamadı")
+
+    from app.services import device_lifecycle_service as _lc
+    allowed, err = _lc.can_transition(
+        from_state=device.lifecycle_status or "production",
+        to_state=payload.new_state,
+        actor=current_user,
+    )
+    if not allowed:
+        raise HTTPException(status_code=400, detail=err)
+
+    diff = _lc.apply_transition(device, payload.new_state)
+    await db.commit()
+    await db.refresh(device)
+
+    # Audit log
+    await log_action(
+        db, current_user,
+        "device_lifecycle_changed",
+        "device", device_id, device.hostname,
+        details={
+            "from": diff["before"]["lifecycle_status"],
+            "to": diff["after"]["lifecycle_status"],
+            "reason": payload.reason,
+        },
+        before_state=diff["before"],
+        after_state=diff["after"],
+        request=request,
+    )
     return device
 
 

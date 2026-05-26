@@ -131,6 +131,8 @@ class DeviceResponse(BaseModel):
     is_active: bool
     is_readonly: bool
     approval_required: bool
+    # T9 Tur 4 — Yaşam döngüsü durumu (production|passive|stock|archived)
+    lifecycle_status: str = "production"
     snmp_enabled: bool
     snmp_community_set: bool = False
     snmp_version: str
