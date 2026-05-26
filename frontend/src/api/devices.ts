@@ -269,6 +269,32 @@ export const devicesApi = {
       '/devices/bulk-update-agent', { device_ids, agent_id }
     ).then((r) => r.data),
 
+  /** T9 Tur 5 E1 — bulk lifecycle transition.
+   *  new_state: 'production' | 'passive' | 'stock' | 'archived'
+   *  Per-device validation; non-transitionable cihazlar `skipped` listesinde döner. */
+  bulkLifecycle: (device_ids: number[], new_state: string, reason?: string) =>
+    client.post<{
+      updated: { device_id: number; hostname: string; from: string; to: string }[]
+      skipped: { device_id: number; hostname: string; reason: string }[]
+      missing_ids: number[]
+      updated_count: number
+      skipped_count: number
+    }>('/devices/bulk-lifecycle', { device_ids, new_state, reason: reason || null })
+      .then((r) => r.data),
+
+  /** T9 Tur 5 E1 — bulk move-location.
+   *  Hedef lokasyon TEK ortak (aynı org). Her cihaz tek tek doğrulanır;
+   *  başarısızlar skipped'a düşer, kalanlar yeniden konumlandırılır. */
+  bulkMoveLocation: (device_ids: number[], target_location_id: number, reason?: string) =>
+    client.post<{
+      moved: { device_id: number; hostname: string; previous_location_id: number | null; new_location_id: number; relocated_rows: Record<string, number> }[]
+      skipped: { device_id: number; hostname: string; reason: string }[]
+      missing_ids: number[]
+      moved_count: number
+      skipped_count: number
+    }>('/devices/bulk-move-location', { device_ids, target_location_id, reason: reason || null })
+      .then((r) => r.data),
+
   downloadBackup: (deviceId: number, backupId: number) =>
     client.get(`/devices/${deviceId}/backups/${backupId}/download`, { responseType: 'blob' }).then((res) => {
       const url = URL.createObjectURL(new Blob([res.data], { type: 'text/plain' }))
