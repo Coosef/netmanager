@@ -53,6 +53,7 @@ from app.models.device_vlan_snapshot import DeviceVlanSnapshot
 from app.models.user_session import UserSession
 from app.models.system_setting import SystemSetting
 from app.models.password_policy import PasswordPolicy
+from app.models.terminal_session_log import TerminalSessionLog
 
 __all__ = [
     "User", "SystemRole",
