@@ -129,16 +129,31 @@ async def _run():
 
 async def _read_via_snmp(device, snmp_service) -> list[dict]:
     """Return normalized PoE rows via SNMP. Empty list when device has no
-    SNMP credential or POWER-ETHERNET-MIB isn't supported."""
+    SNMP credential or POWER-ETHERNET-MIB isn't supported.
+
+    NB: snmp_community stored Fernet-encrypted in DB — `decrypt_credential_safe`
+    MUST be called before sending to the device, otherwise the device sees
+    a raw 'gAAAA...' base64 string and rejects with AuthFailure.
+    """
+    from app.core.security import decrypt_credential_safe
+
     if not device.snmp_community or not device.ip_address:
+        return []
+    community = decrypt_credential_safe(device.snmp_community)
+    if not community:
         return []
     try:
         rows = await snmp_service.get_poe_status(
             host=device.ip_address,
-            community=device.snmp_community,
+            community=community,
             version=device.snmp_version or "v2c",
             port=device.snmp_port or 161,
             vendor=(device.vendor or "").lower(),
+            v3_username=getattr(device, "snmp_v3_username", None),
+            v3_auth_protocol=getattr(device, "snmp_v3_auth_protocol", None),
+            v3_auth_passphrase=decrypt_credential_safe(getattr(device, "snmp_v3_auth_passphrase", None)),
+            v3_priv_protocol=getattr(device, "snmp_v3_priv_protocol", None),
+            v3_priv_passphrase=decrypt_credential_safe(getattr(device, "snmp_v3_priv_passphrase", None)),
         )
         return rows or []
     except Exception as exc:  # noqa: BLE001
