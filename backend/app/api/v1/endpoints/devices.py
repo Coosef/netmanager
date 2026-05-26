@@ -2344,6 +2344,99 @@ async def download_backup(
     )
 
 
+class _RestoreBackupRequest(BaseModel):
+    reason: Optional[str] = None
+    confirm: bool = False
+
+
+@router.post("/{device_id}/backups/{backup_id}/restore", status_code=202)
+async def restore_backup(
+    device_id: int,
+    backup_id: int,
+    payload: _RestoreBackupRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 Tur 5 #12+E3 — Push a historic ConfigBackup back to the device.
+
+    Creates a `Task` row, dispatches `restore_backup_task` to Celery, and
+    returns the task id so the FE can watch progress on the standard
+    `tasks/{id}` channel. Worker takes a fresh PRE-RESTORE snapshot before
+    pushing, so the user can always step back one more time.
+    """
+    from app.models.task import Task, TaskStatus, TaskType
+    from app.workers.tasks.backup_tasks import restore_backup_task
+
+    # Restore = push config → same permission as config push.
+    if not current_user.has_permission("config:push"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Restore must be confirmed (set `confirm: true`).",
+        )
+
+    # Validate device + backup pair under the caller's RLS scope.
+    device = await _get_device_scoped(db, device_id, current_user)
+    backup = (await db.execute(
+        select(ConfigBackup).where(
+            ConfigBackup.id == backup_id,
+            ConfigBackup.device_id == device_id,
+        )
+    )).scalar_one_or_none()
+    if not backup:
+        raise HTTPException(status_code=404, detail="Backup not found")
+
+    # Refuse to restore while the device is offline — we'd just queue a
+    # certain-to-fail Celery job. Operator can take the device online first.
+    if device.status == "offline":
+        raise HTTPException(
+            status_code=409,
+            detail="Device is offline — bring it online before restoring config.",
+        )
+
+    task = Task(
+        name=f"Restore #{backup_id} → {device.hostname}",
+        type=TaskType.RESTORE_CONFIG.value,
+        status=TaskStatus.PENDING.value,
+        device_ids=[device_id],
+        parameters={
+            "device_id": device_id,
+            "backup_id": backup_id,
+            "reason": payload.reason,
+        },
+        total_devices=1,
+        created_by=current_user.id,
+    )
+    db.add(task)
+    await db.commit()
+    await db.refresh(task)
+
+    restore_backup_task.delay(
+        task.id, device_id, backup_id, current_user.id, payload.reason,
+    )
+
+    await log_action(
+        db, current_user, "config_backup_restore_initiated",
+        "device", device_id, device.hostname, request=request,
+        details={
+            "backup_id": backup_id,
+            "backup_created_at": backup.created_at.isoformat(),
+            "backup_hash": backup.config_hash,
+            "task_id": task.id,
+            "reason": payload.reason,
+        },
+    )
+
+    return {
+        "task_id": task.id,
+        "device_id": device_id,
+        "backup_id": backup_id,
+        "message": "Restore queued",
+    }
+
+
 @router.post("/{device_id}/backups/{backup_id}/set-golden")
 async def set_golden_backup(
     device_id: int,
