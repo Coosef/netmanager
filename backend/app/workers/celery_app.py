@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.workers.tasks.maintenance_tasks",
         "app.workers.tasks.poe_tasks",
         "app.workers.tasks.ipam_tasks",
+        "app.workers.tasks.firmware_tasks",
     ],
 )
 

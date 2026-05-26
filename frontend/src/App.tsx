@@ -47,6 +47,7 @@ import BandwidthMonitorPage from '@/pages/BandwidthMonitor'
 import ConfigTemplatesPage from '@/pages/ConfigTemplates'
 import ConfigBuilderPage from '@/pages/ConfigBuilder'
 import PoeDashboardPage from '@/pages/PoeDashboard'
+import FirmwarePage from '@/pages/Firmware'
 import ChangeManagementPage from '@/pages/ChangeManagement'
 import SlaReportPage from '@/pages/SlaReport'
 import VlanManagementPage from '@/pages/VlanManagement'
@@ -282,6 +283,7 @@ function ThemedApp() {
               <Route path="config-templates" element={<PermRoute module="driver_templates" action="view"><ConfigTemplatesPage /></PermRoute>} />
               <Route path="config-builder" element={<PermRoute module="config_backups" action="view"><ConfigBuilderPage /></PermRoute>} />
               <Route path="poe" element={<RoleRoute minRole="org_viewer"><PoeDashboardPage /></RoleRoute>} />
+              <Route path="firmware" element={<RoleRoute minRole="org_admin"><FirmwarePage /></RoleRoute>} />
               <Route path="change-management" element={<RoleRoute minRole="location_manager"><ChangeManagementPage /></RoleRoute>} />
               <Route path="sla" element={<RoleRoute minRole="org_viewer"><SlaReportPage /></RoleRoute>} />
               <Route path="vlan" element={<RoleRoute minRole="org_viewer"><VlanManagementPage /></RoleRoute>} />
