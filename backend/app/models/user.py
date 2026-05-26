@@ -125,6 +125,15 @@ class User(Base):
     # Auth endpoint login + mfa/verify'da check eder; eşleşmezse 403.
     allowed_ips: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # ── Password tracking (T9 Tur 2 #3 — password policy) ────────────────────
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
+    # bcrypt hash listesi — son N şifre tekrar engellemek için. JSON dizisi.
+    password_history: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
+    # Yeni hesap / reset sonrası login'de zorla şifre değiştir
+    must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     def has_permission(self, permission: str) -> bool:
         """Simple permission check driven by the user's system role.
         Returns True if the role's default grants include `permission`

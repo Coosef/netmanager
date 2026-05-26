@@ -70,6 +70,11 @@ async def _build_token_response(
     ))
     await db.commit()
 
+    # T9 Tur 2 #3 — Password policy hint'leri
+    from app.services import password_policy_service as _pwp
+    policy = await _pwp.get_effective_policy(db, user.organization_id)
+    password_expired = _pwp.is_expired(user, policy)
+
     return TokenResponse(
         access_token=create_access_token({"sub": str(user.id), "jti": jti}),
         user_id=user.id,
@@ -82,6 +87,8 @@ async def _build_token_response(
         system_role=user.system_role,
         org_id=user.organization_id,
         permissions=permissions,
+        must_change_password=bool(user.must_change_password),
+        password_expired=password_expired,
     )
 
 

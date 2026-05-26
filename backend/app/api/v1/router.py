@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, system_settings, tasks, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, system_settings, tasks, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
@@ -26,6 +26,7 @@ api_router.include_router(ipam.router, prefix="/ipam", tags=["IPAM"])
 api_router.include_router(security_audit.router, prefix="/security-audit", tags=["Security Audit"])
 api_router.include_router(asset_lifecycle.router, prefix="/asset-lifecycle", tags=["Asset Lifecycle"])
 api_router.include_router(system_settings.router, prefix="/system-settings", tags=["System Settings"])
+api_router.include_router(password_policy.router, prefix="/password-policy", tags=["Password Policy"])
 api_router.include_router(diagnostics.router, prefix="/diagnostics", tags=["Diagnostics"])
 api_router.include_router(snmp.router, prefix="/snmp", tags=["SNMP"])
 api_router.include_router(alert_rules.router, prefix="/alert-rules", tags=["Alert Rules"])

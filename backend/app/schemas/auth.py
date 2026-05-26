@@ -19,6 +19,9 @@ class TokenResponse(BaseModel):
     system_role: str
     org_id: Optional[int] = None
     permissions: Optional[dict] = None
+    # T9 Tur 2 #3 — Password policy hints (UI'da zorla şifre değişim modali için)
+    must_change_password: bool = False
+    password_expired: bool = False
 
 
 class MfaChallengeResponse(BaseModel):
