@@ -57,14 +57,14 @@ function DevicePoeDrawer({
     },
     {
       title: (
-        <Tooltip title="Tahmini çekiş — cihaz vendor'ı gerçek mW raporlamıyorsa PD class'tan IEEE 802.3 max bütçesi kullanılır.">
+        <Tooltip title="Gerçek anlık çekiş. Yalnız Cisco gibi vendor proprietary MIB raporlayan cihazlardan gelir; diğer vendor'larda '—' gösterilir. Tahmini bütçe için 'Sınıf' kolonuna bakın.">
           <span>Güç (W) <span style={{ color: '#94a3b8', fontSize: 11 }}>ⓘ</span></span>
         </Tooltip>
       ),
       dataIndex: 'power_watts', width: 130,
       sorter: (a: PoePort, b: PoePort) => (a.power_mw || 0) - (b.power_mw || 0),
       render: (v: number, r: PoePort) =>
-        r.oper_status === 'on'
+        r.oper_status === 'on' && (r.power_mw || 0) > 0
           ? <Text strong style={{ color: '#22c55e' }}>{v} W</Text>
           : <Text style={{ color: C.muted }}>—</Text>,
     },
