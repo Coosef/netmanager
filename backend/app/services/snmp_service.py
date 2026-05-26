@@ -232,10 +232,12 @@ async def get_poe_status(
     except Exception:
         return []
 
-    # Map (group, port) → ifName via Cisco's port→ifIndex mapping table.
-    # Standard MIB doesn't include the binding, but most platforms expose
-    # ifName at the same suffix; we attempt to use the port part of the
-    # composite index as an ifIndex hint. Fallback: synth name "PoE-<grp>/<port>".
+    # Map (group, port) → ifName. POWER-ETHERNET-MIB index'i
+    # "groupIndex.portIndex" (örn '100.1') şeklinde; çoğu vendor'da
+    # portIndex doğrudan ifIndex'e eşittir (örn Ruijie 'Gi0/1' = ifIndex 1).
+    # Önce ifName tablosunu çek (suffix=ifIndex), sonra portu lookup et.
+    # Cisco'da cpeExtPsePortIfIndex precise mapping verir — şimdilik
+    # portIndex==ifIndex varsayımıyla başlıyoruz.
     if_name_t: dict[str, Any] = {}
     try:
         async for varbind in client.walk(ObjectIdentifier(OID_IF_NAME)):
@@ -259,6 +261,11 @@ async def get_poe_status(
         except Exception:
             pass
 
+    # IEEE 802.3af/at PD power classes — Watts max (PSE budget).
+    # Class 4 = PoE+ (25.5W), 5-8 = PoE++ (UPOE) 45-90W.
+    class_max_mw = {1: 3840, 2: 6490, 3: 12950, 4: 25500,
+                    5: 45000, 6: 60000, 7: 75000, 8: 90000}
+
     out: list[dict] = []
     detection_label = {
         1: "off", 2: "searching", 3: "on", 4: "faulty", 5: "test", 6: "faulty",
@@ -271,8 +278,20 @@ async def get_poe_status(
         class_int = _int(full_index_class.get(idx))
         device_class = f"Class {class_int}" if class_int and 1 <= class_int <= 8 else None
         power_mw = _int(pwr_t.get(idx)) or 0
-        # Port name: try ifName at the same composite index; fallback to synth.
-        port_name = _str(if_name_t.get(idx)) or f"PoE-{idx}"
+        # Vendor power_mw vermiyorsa (Ruijie / standart MIB), class'tan
+        # tahmini max çekiş kullan — sayfa "0 W" görüntülemesin.
+        if power_mw == 0 and oper == "on" and class_int:
+            power_mw = class_max_mw.get(class_int, 0)
+
+        # Port name: PSE composite '<group>.<portIndex>' → portIndex çoğu
+        # vendor'da ifIndex'e eşit. Sondaki nokta sonrası int'i ifName
+        # tablosunda ara; bulamazsa fallback synth.
+        port_name = None
+        if "." in idx:
+            tail = idx.rsplit(".", 1)[-1]
+            port_name = _str(if_name_t.get(tail))
+        if port_name is None:
+            port_name = _str(if_name_t.get(idx)) or f"PoE-{idx}"
         out.append({
             "port": port_name,
             "oper_status": oper,
