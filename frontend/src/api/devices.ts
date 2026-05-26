@@ -281,6 +281,14 @@ export const devicesApi = {
       `/devices/${deviceId}/backups/${backupId}/set-golden`
     ).then((r) => r.data),
 
+  /** T9 Tur 5 #12+E3 — Push a historic ConfigBackup back to the device.
+   *  Returns task_id; worker takes a PRE-RESTORE snapshot first. */
+  restoreBackup: (deviceId: number, backupId: number, reason?: string) =>
+    client.post<{ task_id: number; device_id: number; backup_id: number; message: string }>(
+      `/devices/${deviceId}/backups/${backupId}/restore`,
+      { confirm: true, reason: reason || null },
+    ).then((r) => r.data),
+
   getConfigDrift: (deviceId: number) =>
     client.get<{
       has_golden: boolean

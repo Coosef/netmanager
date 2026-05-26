@@ -11,6 +11,7 @@ import {
   LoadingOutlined, DiffOutlined, DatabaseOutlined, PlusOutlined,
   EditOutlined, DeleteOutlined, ClockCircleOutlined, CalendarOutlined,
   PlayCircleOutlined, SearchOutlined, CrownOutlined, HistoryOutlined,
+  RollbackOutlined, ExclamationCircleOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { reportsApi } from '@/api/reports'
@@ -541,6 +542,11 @@ function ConfigSearchTab({ isDark, C }: { isDark: boolean; C: ReturnType<typeof 
 function DeviceBackupsExpanded({ deviceId, C, isDark }: { deviceId: number; C: ReturnType<typeof mkC>; isDark: boolean }) {
   const { message } = App.useApp()
   const qc = useQueryClient()
+  // Restore = push config → uses the `edit` action (only ORG_ADMIN +
+  // SUPER_ADMIN by default; backend re-gates with `config:push`).
+  const canPush = useAuthStore((s) => s.can('config_backups', 'edit'))
+  const [restoreTarget, setRestoreTarget] = useState<ConfigBackup | null>(null)
+  const [restoreTaskId, setRestoreTaskId] = useState<number | null>(null)
 
   const { data: backups = [], isLoading } = useQuery<ConfigBackup[]>({
     queryKey: ['device-backups', deviceId],
@@ -557,13 +563,78 @@ function DeviceBackupsExpanded({ deviceId, C, isDark }: { deviceId: number; C: R
     onError: () => message.error('Golden ayarlanamadı'),
   })
 
+  // Poll the restore task until it terminates — same shape as bulk-backup
+  // progress on the main table, just for one device.
+  const { data: restoreTask } = useQuery({
+    queryKey: ['restore-task', restoreTaskId],
+    queryFn: () => tasksApi.get(restoreTaskId!),
+    enabled: restoreTaskId !== null,
+    refetchInterval: (q) => {
+      const s = (q.state.data as { status?: string } | undefined)?.status
+      return s === 'pending' || s === 'running' ? 2000 : false
+    },
+  })
+
+  useEffect(() => {
+    if (!restoreTask) return
+    const s = restoreTask.status
+    if (s === 'success') {
+      const result = Object.values(restoreTask.result || {})[0] as
+        | { skipped?: boolean; message?: string; pre_restore_backup_id?: number }
+        | undefined
+      if (result?.skipped) {
+        message.info(result.message || 'Cihaz zaten bu konfigürasyonda — değişiklik yapılmadı.')
+      } else if (result?.pre_restore_backup_id) {
+        message.success(
+          `Geri yükleme tamamlandı — pre-restore yedek #${result.pre_restore_backup_id} oluşturuldu.`,
+          6,
+        )
+      } else {
+        message.success('Geri yükleme tamamlandı')
+      }
+      qc.invalidateQueries({ queryKey: ['device-backups', deviceId] })
+      qc.invalidateQueries({ queryKey: ['backup-report'] })
+      setRestoreTaskId(null)
+    } else if (s === 'failed') {
+      const result = Object.values(restoreTask.result || {})[0] as { error?: string } | undefined
+      message.error(`Geri yükleme başarısız: ${result?.error || 'bilinmeyen hata'}`, 8)
+      qc.invalidateQueries({ queryKey: ['device-backups', deviceId] })
+      setRestoreTaskId(null)
+    }
+  }, [restoreTask?.status])
+
   if (isLoading) return <div style={{ padding: '12px 0', textAlign: 'center' }}><Spin size="small" /></div>
   if (!backups.length) return <div style={{ padding: '12px 24px', color: C.muted, fontSize: 12 }}>Yedek bulunamadı</div>
 
+  const latestBackup = backups[0]
+
   return (
     <div style={{ padding: '8px 40px 8px 52px' }}>
+      {restoreTask && (restoreTask.status === 'pending' || restoreTask.status === 'running') && (
+        <Alert
+          type="info"
+          icon={<LoadingOutlined spin />}
+          showIcon
+          style={{ marginBottom: 8 }}
+          message={
+            <Space size={6}>
+              <span>Geri yükleme çalışıyor…</span>
+              <Tag color={restoreTask.status === 'running' ? 'processing' : 'default'} style={{ margin: 0 }}>
+                {restoreTask.name}
+              </Tag>
+            </Space>
+          }
+          description={
+            <Text style={{ fontSize: 11, color: C.muted }}>
+              Pre-restore yedeği alınıyor → konfigürasyon push'lanıyor → running-config kayıt ediliyor.
+            </Text>
+          }
+        />
+      )}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {backups.map((b) => (
+        {backups.map((b, idx) => {
+          const isLatest = idx === 0
+          return (
           <div
             key={b.id}
             style={{
@@ -589,6 +660,9 @@ function DeviceBackupsExpanded({ deviceId, C, isDark }: { deviceId: number; C: R
             <Text style={{ color: C.dim, fontSize: 10, fontFamily: 'monospace', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {b.config_hash?.slice(0, 12)}
             </Text>
+            {isLatest && (
+              <Tag color="blue" style={{ fontSize: 10, flexShrink: 0, margin: 0 }}>Güncel</Tag>
+            )}
             {b.is_golden && (
               <Tag color="warning" style={{ fontSize: 10, flexShrink: 0 }}>Golden</Tag>
             )}
@@ -612,10 +686,212 @@ function DeviceBackupsExpanded({ deviceId, C, isDark }: { deviceId: number; C: R
                 onClick={() => devicesApi.downloadBackup(deviceId, b.id)}
               />
             </Tooltip>
+            {canPush && (
+              <Tooltip title={isLatest
+                ? 'Bu zaten en güncel yedek — geri yüklemenin etkisi olmayabilir'
+                : 'Bu Yedeğe Geri Dön — pre-restore snapshot otomatik alınır'}>
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<RollbackOutlined />}
+                  danger={!isLatest}
+                  style={{ color: isLatest ? C.muted : undefined, flexShrink: 0 }}
+                  disabled={restoreTaskId !== null}
+                  onClick={() => setRestoreTarget(b)}
+                />
+              </Tooltip>
+            )}
           </div>
-        ))}
+          )
+        })}
       </div>
+
+      <RestoreBackupModal
+        open={restoreTarget !== null}
+        onClose={() => setRestoreTarget(null)}
+        deviceId={deviceId}
+        backup={restoreTarget}
+        latestBackup={latestBackup}
+        isDark={isDark}
+        onQueued={(taskId) => {
+          setRestoreTaskId(taskId)
+          setRestoreTarget(null)
+          message.info('Geri yükleme kuyruğa alındı — durum aşağıda canlı izlenir', 5)
+        }}
+      />
     </div>
+  )
+}
+
+// ── Restore confirmation modal (with live diff preview) ──────────────────────
+
+function RestoreBackupModal({
+  open,
+  onClose,
+  deviceId,
+  backup,
+  latestBackup,
+  isDark,
+  onQueued,
+}: {
+  open: boolean
+  onClose: () => void
+  deviceId: number
+  backup: ConfigBackup | null
+  latestBackup: ConfigBackup | undefined
+  isDark: boolean
+  onQueued: (taskId: number) => void
+}) {
+  const { message } = App.useApp()
+  const C = mkC(isDark)
+  const [reason, setReason] = useState('')
+  const [diff, setDiff] = useState<{ added: number; removed: number; diff: string } | null>(null)
+  const [diffLoading, setDiffLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open || !backup || !latestBackup || backup.id === latestBackup.id) {
+      setDiff(null)
+      return
+    }
+    setDiffLoading(true)
+    devicesApi
+      .getConfigDiff(deviceId, latestBackup.id, backup.id)
+      .then((d) => setDiff({ added: d.added, removed: d.removed, diff: d.diff }))
+      .catch(() => setDiff(null))
+      .finally(() => setDiffLoading(false))
+    setReason('')
+  }, [open, backup?.id, latestBackup?.id, deviceId])
+
+  const restoreMut = useMutation({
+    mutationFn: () => devicesApi.restoreBackup(deviceId, backup!.id, reason.trim() || undefined),
+    onSuccess: (r) => onQueued(r.task_id),
+    onError: (e: any) => message.error(
+      e?.response?.data?.detail || 'Geri yükleme başlatılamadı', 6,
+    ),
+  })
+
+  if (!backup) return null
+  const isSameAsLatest = latestBackup?.id === backup.id
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      title={
+        <Space>
+          <RollbackOutlined style={{ color: '#ef4444' }} />
+          <span style={{ color: C.text }}>Bu Yedeğe Geri Dön</span>
+          <Tag color="red" style={{ fontSize: 10 }}>
+            Backup #{backup.id} · {dayjs(backup.created_at).format('DD.MM.YYYY HH:mm')}
+          </Tag>
+        </Space>
+      }
+      width={780}
+      okText="Geri Yüklemeyi Başlat"
+      okButtonProps={{ danger: true, loading: restoreMut.isPending, disabled: isSameAsLatest }}
+      cancelText="Vazgeç"
+      onOk={() => restoreMut.mutate()}
+      styles={{
+        content: { background: C.bg, border: `1px solid ${C.border}` },
+        header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
+      }}
+    >
+      <Alert
+        type={isSameAsLatest ? 'info' : 'warning'}
+        showIcon
+        icon={<ExclamationCircleOutlined />}
+        message={isSameAsLatest
+          ? 'Seçilen yedek zaten en güncel — geri yüklemenin etkisi olmayacak.'
+          : 'Bu işlem cihaza eski bir konfigürasyonu uygular.'}
+        description={
+          isSameAsLatest ? null : (
+            <div style={{ fontSize: 12 }}>
+              Sistem önce <b>otomatik bir pre-restore yedeği</b> alır (geri dönüş güvencesi),
+              ardından seçili yedekteki tüm komutları cihaza uygular ve{' '}
+              <Text code style={{ fontSize: 11 }}>write memory</Text> yapar. Cihaz çevrimdışı olursa görev başarısız olur.
+            </div>
+          )
+        }
+        style={{ marginBottom: 12 }}
+      />
+
+      <div style={{
+        display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12,
+      }}>
+        <div style={{ padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}>
+          <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, letterSpacing: 0.5 }}>ŞU AN AKTİF</div>
+          <div style={{ fontSize: 12, color: C.text, marginTop: 2 }}>
+            #{latestBackup?.id} · {latestBackup ? dayjs(latestBackup.created_at).format('DD.MM.YYYY HH:mm') : '—'}
+          </div>
+          <div style={{ fontSize: 10, color: C.dim, fontFamily: 'monospace', marginTop: 1 }}>
+            {latestBackup?.config_hash?.slice(0, 16)}
+          </div>
+        </div>
+        <div style={{ padding: 8, border: `1px solid ${C.border}`, borderRadius: 6 }}>
+          <div style={{ fontSize: 10, color: '#ef4444', fontWeight: 600, letterSpacing: 0.5 }}>GERİ YÜKLENECEK</div>
+          <div style={{ fontSize: 12, color: C.text, marginTop: 2 }}>
+            #{backup.id} · {dayjs(backup.created_at).format('DD.MM.YYYY HH:mm')}
+          </div>
+          <div style={{ fontSize: 10, color: C.dim, fontFamily: 'monospace', marginTop: 1 }}>
+            {backup.config_hash?.slice(0, 16)}
+          </div>
+        </div>
+      </div>
+
+      {!isSameAsLatest && (
+        <div style={{
+          background: isDark ? '#0d1117' : '#f8fafc',
+          border: `1px solid ${C.border}`,
+          borderRadius: 6,
+          padding: 10,
+          marginBottom: 12,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <DiffOutlined style={{ color: C.muted }} />
+            <Text style={{ color: C.text, fontWeight: 600, fontSize: 12 }}>Önizleme — fark</Text>
+            {diff && (
+              <>
+                <Tag color="green" style={{ fontSize: 10, margin: 0 }}>+{diff.added}</Tag>
+                <Tag color="red" style={{ fontSize: 10, margin: 0 }}>-{diff.removed}</Tag>
+              </>
+            )}
+          </div>
+          {diffLoading && <Spin size="small" />}
+          {!diffLoading && diff && (
+            <pre style={{
+              maxHeight: 220, overflow: 'auto', margin: 0, fontSize: 11,
+              fontFamily: 'monospace', color: C.text, lineHeight: 1.5,
+              whiteSpace: 'pre',
+            }}>
+              {diff.diff.split('\n').slice(0, 200).map((ln, i) => {
+                const color = ln.startsWith('+') && !ln.startsWith('+++') ? '#22c55e'
+                  : ln.startsWith('-') && !ln.startsWith('---') ? '#ef4444'
+                  : ln.startsWith('@@') ? '#3b82f6' : C.dim
+                return <div key={i} style={{ color }}>{ln || ' '}</div>
+              })}
+            </pre>
+          )}
+          {!diffLoading && !diff && (
+            <Text style={{ fontSize: 11, color: C.muted }}>
+              Fark hesaplanamadı — yine de geri yüklemek istiyorsanız "Başlat" diyebilirsiniz.
+            </Text>
+          )}
+        </div>
+      )}
+
+      <div>
+        <Text style={{ fontSize: 12, color: C.muted, fontWeight: 600 }}>Sebep (opsiyonel, audit log için)</Text>
+        <Input.TextArea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="örn. 'Dünkü VLAN değişikliği port erişimini bozdu, eski konfige dön.'"
+          rows={2}
+          maxLength={400}
+          showCount
+          style={{ marginTop: 4 }}
+        />
+      </div>
+    </Modal>
   )
 }
 
