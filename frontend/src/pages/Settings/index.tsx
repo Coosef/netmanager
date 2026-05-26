@@ -15,6 +15,7 @@ import {
   CodeOutlined, RobotOutlined,
 } from '@ant-design/icons'
 import DriverTemplatesPage from '@/pages/DriverTemplates'
+import SystemSettingsTab from '@/pages/Settings/SystemSettingsTab'
 // MfaTab artık /profile sayfasında reuse ediliyor; Settings tab'ı kaldırıldı.
 import { apiTokensApi, ApiToken } from '@/api/apiTokens'
 import dayjs from 'dayjs'
@@ -2188,6 +2189,7 @@ export default function SettingsPage() {
       {(() => {
         const TABS: { key: string; label: string; icon: React.ReactNode; content: React.ReactNode }[] = [
           { key: 'general',          label: 'Genel',              icon: <GlobalOutlined />, content: generalContent },
+          { key: 'system',           label: 'Sistem (Tarama)',    icon: <ClockCircleOutlined />, content: <SystemSettingsTab /> },
           // T8.4 — MFA artık kullanıcı bazlı /profile sayfasında (her
           // authenticated kullanıcı kendi MFA'sını yönetebilsin diye).
           // Settings org-admin gated; viewer/location_admin buradan kendi
