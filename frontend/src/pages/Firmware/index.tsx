@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Alert, App, Button, Card, Col, Drawer, Form, Input,
   Modal, Popconfirm, Row, Select, Space, Table, Tabs, Tag, Tooltip,
-  Typography, Upload, type UploadFile,
+  Typography, Upload,
 } from 'antd'
 import {
   CheckCircleOutlined, CloseCircleOutlined, CloudUploadOutlined,
@@ -59,15 +59,17 @@ function UploadArtifactModal({ open, onClose }: { open: boolean; onClose: () => 
   const qc = useQueryClient()
   const { message } = App.useApp()
   const [form] = Form.useForm()
-  const [file, setFile] = useState<UploadFile | null>(null)
+  // Native File yerleştir — antd UploadFile / RcFile cast'i bazı sürümlerde
+  // sayfayı çökertiyordu (originFileObj nullable, render path crash'lerdi).
+  const [file, setFile] = useState<File | null>(null)
 
   const mut = useMutation({
     mutationFn: async (vals: any) => {
-      if (!file?.originFileObj) throw new Error('Dosya seçilmedi')
+      if (!file) throw new Error('Dosya seçilmedi')
       const fd = new FormData()
-      fd.append('file', file.originFileObj as Blob, file.name)
+      fd.append('file', file, file.name)
       Object.entries(vals).forEach(([k, v]) => {
-        if (v !== undefined && v !== null) fd.append(k, String(v))
+        if (v !== undefined && v !== null && v !== '') fd.append(k, String(v))
       })
       return firmwareApi.uploadArtifact(fd)
     },
@@ -94,14 +96,21 @@ function UploadArtifactModal({ open, onClose }: { open: boolean; onClose: () => 
       <Form form={form} layout="vertical" onFinish={(v) => mut.mutate(v)}>
         <Form.Item label="Dosya" required>
           <Upload
-            beforeUpload={(f) => { setFile({ uid: '-1', name: f.name, originFileObj: f as any }); return false }}
-            onRemove={() => setFile(null)}
-            fileList={file ? [file] : []}
+            beforeUpload={(f) => { setFile(f as File); return false }}
+            showUploadList={false}
             maxCount={1}
             accept=".bin,.img,.tar,.swi,.upg,.zip"
           >
-            <Button icon={<CloudUploadOutlined />}>Dosya seç</Button>
+            <Button icon={<CloudUploadOutlined />}>
+              {file ? file.name : 'Dosya seç'}
+            </Button>
           </Upload>
+          {file && (
+            <Space style={{ marginTop: 6 }}>
+              <Tag color="blue">{(file.size / 1024 / 1024).toFixed(1)} MB</Tag>
+              <Button size="small" type="text" danger onClick={() => setFile(null)}>Kaldır</Button>
+            </Space>
+          )}
         </Form.Item>
         <Row gutter={12}>
           <Col span={12}>

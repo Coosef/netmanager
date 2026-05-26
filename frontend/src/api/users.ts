@@ -37,4 +37,19 @@ export const usersApi = {
 
   setLocations: (id: number, assignments: { location_id: number; loc_role: string }[]) =>
     client.put<{ success: boolean; count: number }>(`/users/${id}/locations`, assignments).then((r) => r.data),
+
+  // T9 Tur 2 #4 — kullanıcı kendi login IP'sini sorgulasın.
+  getMyLoginIp: () =>
+    client.get<{
+      client_ip: string | null
+      allowed_ips: string | null
+      matches_current_allowlist: boolean
+    }>('/users/me/login-ip').then((r) => r.data),
+
+  // T9 Tur 2 #4 follow-up — self-edit allowed_ips. CSV "10.0.0.0/8,10.1.1.5"
+  // — boş veya "" gönderince kısıt kalkar; mevcut IP listede yoksa 409.
+  updateMyAllowedIps: (allowed_ips: string | null) =>
+    client.patch<{ allowed_ips: string | null }>(
+      '/users/me/login-ip', { allowed_ips }
+    ).then((r) => r.data),
 }

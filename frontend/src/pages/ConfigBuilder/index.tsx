@@ -312,10 +312,11 @@ export default function ConfigBuilderPage() {
   const [previewOpen, setPreviewOpen] = useState(false)
   const [pushModalOpen, setPushModalOpen] = useState(false)
 
-  const { data: operations = [] } = useQuery({
+  const { data: operations = [], error: opsError, isLoading: opsLoading } = useQuery({
     queryKey: ['config-builder-operations'],
     queryFn: () => configBuilderApi.listOperations(),
     staleTime: 600_000,
+    retry: 1,
   })
 
   const { data: devicesData } = useQuery({
@@ -398,6 +399,30 @@ export default function ConfigBuilderPage() {
           </div>
         </div>
       </div>
+
+      {!opsLoading && operations.length === 0 && (
+        <Alert
+          type="error"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message="Operasyon listesi yüklenemedi"
+          description={
+            <div>
+              <div>Backend <Text code style={{ fontSize: 11 }}>GET /api/v1/config-builder/operations</Text> isteği boş döndü.</div>
+              <div style={{ marginTop: 6, fontSize: 12 }}>
+                Olası sebep: Backend container yeni endpoint'leri yüklemek için <b>yeniden başlatılmamış</b>.
+                Local'de: <Text code style={{ fontSize: 11 }}>docker-compose restart backend</Text> ·
+                VPS'te: deploy script'ini yeniden çalıştırın.
+              </div>
+              {opsError && (
+                <div style={{ marginTop: 6, fontSize: 11, color: '#ef4444', fontFamily: 'monospace' }}>
+                  Detay: {(opsError as any)?.response?.data?.detail || (opsError as Error).message || 'bilinmeyen hata'}
+                </div>
+              )}
+            </div>
+          }
+        />
+      )}
 
       <Row gutter={14}>
         {/* Left: operation picker */}

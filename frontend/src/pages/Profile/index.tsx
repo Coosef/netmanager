@@ -17,6 +17,7 @@ import { Alert, Button, Card, Form, Input, Space, Tabs, Tag, Tooltip, Typography
 import {
   UserOutlined, MailOutlined, EnvironmentOutlined, ApartmentOutlined,
   SafetyOutlined, KeyOutlined, LockOutlined, CrownOutlined,
+  GlobalOutlined, CheckCircleOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { authApi } from '@/api/auth'
@@ -229,6 +230,148 @@ function PasswordTab() {
   )
 }
 
+// ── Sub: IP Allowlist tab (T9 Tur 2 #4 follow-up) ──────────────────────────
+function IpAllowlistTab() {
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
+
+  const { data: status, refetch } = useQuery({
+    queryKey: ['my-login-ip'],
+    queryFn: () => usersApi.getMyLoginIp(),
+  })
+
+  // Sync form with backend value the first time data loads.
+  useState(() => {
+    // no-op — Form.Item initialValue handles it via key on data change below.
+  })
+
+  const save = useMutation({
+    mutationFn: (allowed_ips: string | null) => usersApi.updateMyAllowedIps(allowed_ips),
+    onSuccess: () => {
+      message.success('IP allowlist güncellendi')
+      refetch()
+    },
+    onError: (e: any) => {
+      message.error(e?.response?.data?.detail || 'Kaydedilemedi', 8)
+    },
+  })
+
+  const currentIp = status?.client_ip || '—'
+  const currentAllow = status?.allowed_ips || ''
+  const matches = status?.matches_current_allowlist ?? true
+  const isUnrestricted = !currentAllow.trim()
+
+  return (
+    <div style={{ maxWidth: 640 }}>
+      <Alert
+        type="info"
+        showIcon
+        icon={<GlobalOutlined />}
+        message="Hangi IP'lerden giriş yapabileceğinizi siz belirleyin"
+        description={
+          <span>
+            CSV formatında IP veya CIDR girin: <Text code>10.0.0.5</Text>,{' '}
+            <Text code>192.168.1.0/24</Text>. Boş bırakırsanız her yerden giriş açıktır.
+            <br />
+            Kayıt sırasında mevcut IP'niz listede yoksa kabul edilmez (self-lockout koruması).
+          </span>
+        }
+        style={{ marginBottom: 16 }}
+      />
+
+      {/* Current IP card */}
+      <Card
+        size="small"
+        style={{ marginBottom: 16, background: 'var(--bg-2)' }}
+        title={<><GlobalOutlined /> Şu Anki Bağlantı</>}
+      >
+        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text type="secondary">IP:</Text>
+            <Text code style={{ fontSize: 14, fontWeight: 600 }}>{currentIp}</Text>
+            <Tooltip title="Bu satırı kopyalayıp aşağıdaki kutuya yapıştırabilirsiniz">
+              <Button
+                size="small" type="link"
+                onClick={() => {
+                  if (status?.client_ip) {
+                    navigator.clipboard?.writeText(status.client_ip)
+                    message.info('Kopyalandı')
+                  }
+                }}
+              >
+                Kopyala
+              </Button>
+            </Tooltip>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Text type="secondary">Mevcut durum:</Text>
+            {isUnrestricted ? (
+              <Tag>Kısıt yok — her yerden giriş açık</Tag>
+            ) : matches ? (
+              <Tag color="green" icon={<CheckCircleOutlined />}>Bu IP listede</Tag>
+            ) : (
+              <Tag color="red" icon={<WarningOutlined />}>Bu IP listede DEĞİL</Tag>
+            )}
+          </div>
+        </Space>
+      </Card>
+
+      <Form
+        layout="vertical"
+        form={form}
+        key={status?.allowed_ips ?? '__unset__'}
+        initialValues={{ allowed_ips: currentAllow }}
+        onFinish={(v: { allowed_ips: string }) => {
+          const csv = (v.allowed_ips || '').trim()
+          save.mutate(csv || null)
+        }}
+      >
+        <Form.Item
+          name="allowed_ips"
+          label="İzinli IP / CIDR Listesi (CSV)"
+          help="Örnek: 10.0.0.0/8, 192.168.1.5, 78.135.0.0/16"
+        >
+          <Input.TextArea
+            rows={4}
+            placeholder="Boş bırak = kısıt yok"
+            allowClear
+          />
+        </Form.Item>
+        <Space>
+          <Button
+            type="primary" htmlType="submit" loading={save.isPending}
+            icon={<SafetyOutlined />}
+          >
+            Kaydet
+          </Button>
+          <Button
+            onClick={() => {
+              if (!status?.client_ip) return
+              const cur = (form.getFieldValue('allowed_ips') || '').trim()
+              const next = cur ? `${cur}, ${status.client_ip}` : status.client_ip
+              form.setFieldValue('allowed_ips', next)
+            }}
+            disabled={!status?.client_ip}
+          >
+            Mevcut IP'mi Ekle
+          </Button>
+          <Button
+            danger
+            onClick={() => {
+              form.setFieldValue('allowed_ips', '')
+              save.mutate(null)
+            }}
+            loading={save.isPending}
+          >
+            Kısıtı Kaldır (Hepsine Aç)
+          </Button>
+        </Space>
+      </Form>
+    </div>
+  )
+}
+
+
 // ── Main page ───────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   return (
@@ -264,6 +407,11 @@ export default function ProfilePage() {
                 key: 'mfa',
                 label: <Space><SafetyOutlined />Çok Faktörlü Doğrulama</Space>,
                 children: <div style={{ padding: 16 }}><MfaTab /></div>,
+              },
+              {
+                key: 'ip-allowlist',
+                label: <Space><GlobalOutlined />IP Allowlist</Space>,
+                children: <div style={{ padding: 16 }}><IpAllowlistTab /></div>,
               },
             ]}
           />

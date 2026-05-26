@@ -69,4 +69,7 @@ export const poeApi = {
     }).then((r) => r.data),
   device: (deviceId: number) =>
     client.get<DevicePoe>(`/poe/devices/${deviceId}`).then((r) => r.data),
+  // T9 Tur 6B follow-up — operatör tarafından tetiklenen anlık snapshot.
+  snapshotNow: () =>
+    client.post<{ queued: boolean; message: string }>('/poe/snapshot-now').then((r) => r.data),
 }
