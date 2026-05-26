@@ -158,3 +158,41 @@ def recovery_code_fingerprint(code: str) -> str:
     code itself (the bcrypt hash is per-code-salted so isn't comparable
     cross-row). SHA-256 truncated to 12 hex chars = log-safe identifier."""
     return hashlib.sha256(_normalize(code).encode()).hexdigest()[:12]
+
+
+# ── Email / SMS one-shot OTP (T9 Tur 2 #2b) ────────────────────────────────
+# Generic 6-digit, time-bounded OTP. Saklama Redis'tedir (bcrypt hash +
+# TTL). TOTP'nin aksine her enrollment / verify aşamasında yeni kod gönderilir
+# (TOTP'de secret persist eder; email'de her OTP single-use).
+#
+# Key formatı:
+#   mfa:otp:enroll:email:{user_id}    — kullanıcının email kanalını enroll'urken
+#   mfa:otp:enroll:sms:{user_id}      — (sonraki) SMS enrollment
+#   mfa:otp:challenge:email:{user_id} — login challenge sırasında verify için
+#   mfa:otp:resend:email:{user_id}    — resend rate-limit (60s)
+#
+# 6 hane + 10 dk TTL; recovery codes ile aynı bcrypt context'i kullanıyor.
+
+OTP_DIGITS = 6
+OTP_DEFAULT_TTL_SEC = 600       # 10 dk
+OTP_RESEND_COOLDOWN_SEC = 60    # Aynı kanaldan en az 1dk arayla yeni OTP
+
+
+def generate_otp() -> str:
+    """6-digit (000000–999999), sıfır-padded. secrets.randbelow → constant-time."""
+    return f"{secrets.randbelow(10**OTP_DIGITS):0{OTP_DIGITS}d}"
+
+
+def hash_otp(code: str) -> str:
+    """bcrypt hash. Saklama için."""
+    return _recovery_context.hash(code.strip())
+
+
+def verify_otp_hash(code: str, code_hash: str) -> bool:
+    """Constant-time verify (bcrypt)."""
+    if not code or not code_hash:
+        return False
+    try:
+        return _recovery_context.verify(code.strip(), code_hash)
+    except Exception:
+        return False

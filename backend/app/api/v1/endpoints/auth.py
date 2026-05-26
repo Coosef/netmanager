@@ -232,6 +232,11 @@ async def mfa_verify(
         if ok:
             user.mfa_recovery_codes = remaining
             consumed_recovery = True
+    elif method == "email":
+        # T9 Tur 2 #2b — login challenge'da email kanalı doğrulama.
+        # OTP /auth/mfa/send-email-code ile Redis'e konmuştu; consume.
+        from app.services import mfa_email_service as _emsvc
+        ok = _emsvc.verify_and_consume(user.id, "challenge", payload.code)
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported MFA method: {method}")
 
@@ -254,6 +259,53 @@ async def mfa_verify(
         audit_details["recovery_codes_remaining"] = len(user.mfa_recovery_codes or [])
     await log_action(db, user, "login_mfa_success", details=audit_details, request=request)
     return token_resp
+
+
+# T9 Tur 2 #2b — Login challenge sırasında email OTP yolla.
+# Akış: login → MfaChallenge (method='email' seçimi) → /auth/mfa/send-email-code →
+# kullanıcı email'den kodu alır → /auth/mfa/verify (method='email', code=...).
+@router.post("/mfa/send-email-code")
+@limiter.limit("3/minute")
+async def mfa_send_email_code(
+    request: Request,
+    payload: dict,  # {"challenge_token": str}
+    db: AsyncSession = Depends(get_db),
+):
+    challenge_token = payload.get("challenge_token") if isinstance(payload, dict) else None
+    if not challenge_token:
+        raise HTTPException(status_code=400, detail="challenge_token gerekli")
+    user_id = decode_mfa_challenge_token(challenge_token)
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="MFA challenge süresi doldu — yeniden giriş yapın",
+        )
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active or not user.mfa_enabled:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+    methods = [m.strip() for m in (user.mfa_methods or "").split(",") if m.strip()]
+    if "email" not in methods:
+        raise HTTPException(
+            status_code=400,
+            detail="Bu hesap için email MFA kanalı aktif değil",
+        )
+
+    from app.services import mfa_email_service as _emsvc
+    result = await _emsvc.send_otp(db, user, purpose="challenge")
+    if not result.get("ok"):
+        # Retry hint için 429 (rate-limit) veya 400 (config)
+        code = 429 if "saniye" in (result.get("message") or "") else 400
+        raise HTTPException(status_code=code, detail=result.get("message"))
+
+    await log_action(
+        db, user, "mfa_email_otp_sent_for_login",
+        details={"email_masked": result.get("email_masked")}, request=request,
+    )
+    return {
+        "ok": True,
+        "email_masked": result.get("email_masked"),
+        "ttl_sec": result.get("ttl_sec"),
+    }
 
 
 @router.post("/logout", status_code=204)

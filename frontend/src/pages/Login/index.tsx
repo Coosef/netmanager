@@ -307,6 +307,12 @@ export default function LoginPage() {
   // the 6-digit OTP grid so the user doesn't fight the per-cell input.
   const [recoveryCode, setRecoveryCode] = useState('')
   const [useRecovery, setUseRecovery] = useState(false)
+  // T9 Tur 2 #2b — Email MFA kanalı seçim akışı.
+  // useEmail=true iken kullanıcı önce "Yolla" butonuna basar (backend OTP
+  // emaile gönderir, emailSent=true olur), sonra 6-haneli input görür.
+  const [useEmail, setUseEmail] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
+  const [emailError, setEmailError] = useState('')
   const [timer, setTimer] = useState(30)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
 
@@ -358,6 +364,9 @@ export default function LoginPage() {
         setOtp(['', '', '', '', '', ''])
         setRecoveryCode('')
         setUseRecovery(false)
+        setUseEmail(false)
+        setEmailSent(false)
+        setEmailError('')
         setStep(2)
       } else if ('access_token' in res) {
         finalizeSession(res)
@@ -369,10 +378,30 @@ export default function LoginPage() {
     } finally { setLoading(false) }
   }
 
+  const sendEmailCode = async () => {
+    if (!mfa.challengeToken) {
+      setError('Doğrulama oturumu yok — tekrar giriş yapın'); return
+    }
+    setLoading(true); setEmailError('')
+    try {
+      const res = await authApi.sendMfaEmailCode(mfa.challengeToken)
+      setEmailSent(true)
+      // backend mevcut masked_email'i bu yanıtla yenileyebilir
+      setMfa((m) => ({ ...m, maskedEmail: res.email_masked || m.maskedEmail }))
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail
+      setEmailError(detail || 'Email gönderilemedi')
+    } finally { setLoading(false) }
+  }
+
   const submitStep2 = async () => {
     if (!mfa.challengeToken) { setError('Doğrulama oturumu yok — tekrar giriş yapın'); return }
+    // Email modu: input 6-haneli (otp grid), yöntem 'email'
+    // Recovery: textbox 11-char, yöntem 'recovery'
+    // TOTP (default): 6-haneli grid, yöntem 'totp'
     const code = useRecovery ? recoveryCode.trim() : otp.join('')
-    const method: 'totp' | 'recovery' = useRecovery ? 'recovery' : 'totp'
+    const method: 'totp' | 'recovery' | 'email' =
+      useEmail ? 'email' : (useRecovery ? 'recovery' : 'totp')
     if (!useRecovery && code.length !== 6) { setError('6 haneli kod girin'); return }
     if (useRecovery && code.replace(/[-\s]/g, '').length < 8) { setError('Kurtarma kodunu eksiksiz girin'); return }
     setLoading(true); setError('')
@@ -519,17 +548,24 @@ export default function LoginPage() {
                 <div className="charon-step-label">— Adım 2 / 2 · Doğrulama —</div>
                 <h2 className="charon-title">Kimliğinizi doğrulayın</h2>
                 <p className="charon-sub">
-                  {!useRecovery && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
+                  {!useRecovery && !useEmail && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
+                  {useEmail && !emailSent && <>Doğrulama kodunu emailinize göndermek için aşağıdaki butona basın.</>}
+                  {useEmail && emailSent && <>Email'inize gönderilen <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
                   {useRecovery && <>Tek-kullanımlık <strong style={{ color: 'var(--c-fg)' }}>kurtarma kodunuzu</strong> girin (XXXXX-XXXXX).</>}
                 </p>
 
-                {error && <div className="charon-err">{error}</div>}
+                {(error || emailError) && <div className="charon-err">{error || emailError}</div>}
 
                 <div className="charon-mfa-info">
                   <div className="ico">
-                    {!useRecovery && (
+                    {!useRecovery && !useEmail && (
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                         <rect x="5" y="2" width="14" height="20" rx="2" /><path d="M9 7h6M12 18v.01" />
+                      </svg>
+                    )}
+                    {useEmail && (
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" />
                       </svg>
                     )}
                     {useRecovery && (
@@ -539,16 +575,47 @@ export default function LoginPage() {
                     )}
                   </div>
                   <div className="info">
-                    <div className="name">{useRecovery ? 'Kurtarma Kodu' : 'Authenticator App'}</div>
-                    <div className="sub">{useRecovery ? 'Tek kullanımlık · MFA kayıt sırasında verildi' : 'Google · Microsoft · Authy · 1Password'}</div>
+                    <div className="name">
+                      {useEmail ? 'Email Doğrulama' : useRecovery ? 'Kurtarma Kodu' : 'Authenticator App'}
+                    </div>
+                    <div className="sub">
+                      {useEmail
+                        ? (mfa.maskedEmail || 'Kayıtlı email adresinize gönderilir')
+                        : useRecovery
+                          ? 'Tek kullanımlık · MFA kayıt sırasında verildi'
+                          : 'Google · Microsoft · Authy · 1Password'}
+                    </div>
                   </div>
-                  <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
-                    onClick={() => { setUseRecovery((v) => !v); setError('') }}>
-                    {useRecovery ? 'Authenticator' : 'Kurtarma'}
-                  </span>
+                  {/* Method switcher — methods'a göre 2 veya 3 mod */}
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    {(useRecovery || useEmail) && (
+                      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
+                        onClick={() => { setUseRecovery(false); setUseEmail(false); setEmailSent(false); setError(''); setEmailError('') }}>
+                        Authenticator
+                      </span>
+                    )}
+                    {mfa.methods?.includes('email') && !useEmail && (
+                      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
+                        onClick={() => { setUseEmail(true); setUseRecovery(false); setEmailSent(false); setError(''); setEmailError(''); setOtp(['', '', '', '', '', '']) }}>
+                        Email
+                      </span>
+                    )}
+                    {!useRecovery && (
+                      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
+                        onClick={() => { setUseRecovery(true); setUseEmail(false); setError(''); setEmailError('') }}>
+                        Kurtarma
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                {!useRecovery ? (
+                {/* Input alanı: mod'a göre */}
+                {useEmail && !emailSent ? (
+                  <button type="button" className="charon-btn-primary"
+                    disabled={loading} onClick={sendEmailCode} style={{ marginBottom: 12 }}>
+                    {loading ? 'GÖNDERİLİYOR…' : 'KODU EMAİL\'E GÖNDER'}
+                  </button>
+                ) : !useRecovery ? (
                   <div className="charon-otp-row">
                     {otp.map((d, i) => (
                       <input key={i}
@@ -571,24 +638,33 @@ export default function LoginPage() {
                   />
                 )}
 
-                {!useRecovery && (
+                {!useRecovery && !useEmail && (
                   <div className="charon-resend">
                     <span>Kod 30 sn'de bir yenilenir.</span>
                     {timer > 0 && <span className="timer">{`00:${String(timer).padStart(2, '0')}`}</span>}
                   </div>
                 )}
+                {useEmail && emailSent && (
+                  <div className="charon-resend">
+                    <span>Email gönderildi · {mfa.maskedEmail || ''}</span>
+                    <span className="timer" style={{ cursor: 'pointer' }} onClick={sendEmailCode}>YENİDEN YOLLA</span>
+                  </div>
+                )}
                 {useRecovery && <div style={{ height: 12 }} />}
 
-                <button type="button" className="charon-btn-primary"
-                  disabled={loading || (useRecovery
-                    ? recoveryCode.replace(/[-\s]/g, '').length < 8
-                    : otp.join('').length !== 6)}
-                  onClick={submitStep2}>
-                  {loading ? 'DOĞRULANIYOR…' : 'DOĞRULA VE GEÇ'}
-                  {!loading && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>}
-                </button>
+                {/* Doğrula butonu — email modunda emailSent=true ise aktif */}
+                {(!useEmail || emailSent) && (
+                  <button type="button" className="charon-btn-primary"
+                    disabled={loading || (useRecovery
+                      ? recoveryCode.replace(/[-\s]/g, '').length < 8
+                      : otp.join('').length !== 6)}
+                    onClick={submitStep2}>
+                    {loading ? 'DOĞRULANIYOR…' : 'DOĞRULA VE GEÇ'}
+                    {!loading && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+                      <path d="M5 12h14M13 6l6 6-6 6" />
+                    </svg>}
+                  </button>
+                )}
               </div>
             )}
           </div>
