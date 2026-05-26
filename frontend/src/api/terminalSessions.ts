@@ -57,4 +57,16 @@ export const terminalSessionsApi = {
 
   stats: () =>
     client.get<SessionStats>('/terminal-sessions/_stats').then((r) => r.data),
+
+  /** T9 Tur 3B — AI ile session özetle (manuel trigger).
+   *  3-8 saniye sürebilir; ai_summary tamamlanınca response döner. */
+  summarize: (session_id: string) =>
+    client.post<{
+      status: string
+      ai_summary?: string
+      provider?: string
+      model?: string
+      tokens_used?: number
+    }>(`/terminal-sessions/${encodeURIComponent(session_id)}/summarize`)
+      .then((r) => r.data),
 }
