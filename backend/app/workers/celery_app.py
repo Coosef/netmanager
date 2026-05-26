@@ -30,6 +30,7 @@ celery_app = Celery(
         "app.workers.tasks.escalation_tasks",
         "app.workers.tasks.metrics_tasks",
         "app.workers.tasks.cache_warmer_tasks",
+        "app.workers.tasks.maintenance_tasks",
     ],
 )
 
@@ -178,6 +179,11 @@ celery_app.conf.update(
         "warm-aggregation-cache-every-60s": {
             "task": "app.workers.tasks.cache_warmer_tasks.warm_aggregation_cache",
             "schedule": 60.0,
+        },
+        # T9 Tur 6A — materialize cyclic maintenance-window instances
+        "spawn-cyclic-maintenance-windows-hourly": {
+            "task": "app.workers.tasks.maintenance_tasks.spawn_cyclic_maintenance_windows",
+            "schedule": 3600.0,
         },
     },
 )
