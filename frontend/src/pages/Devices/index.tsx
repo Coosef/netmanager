@@ -3,7 +3,7 @@ import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
   App, Button, Card, Col, Form, Input, Modal, Popconfirm, Progress, Row, Select, Space,
-  Tag, Tooltip, Drawer, Alert, Radio,
+  Tag, Tooltip, Drawer, Alert, Radio, Tabs, Empty, Table,
 } from 'antd'
 import {
   PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined, InboxOutlined, ApiOutlined,
@@ -13,12 +13,13 @@ import {
   ApartmentOutlined,
   DatabaseOutlined, UploadOutlined, DownloadOutlined, FileTextOutlined,
   CheckCircleOutlined, CloseCircleOutlined, LoadingOutlined,
-  SwapOutlined, CodeOutlined,
+  SwapOutlined, CodeOutlined, EnvironmentOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
 import { useAuthStore } from '@/store/auth'
 import { agentsApi } from '@/api/agents'
+import { locationsApi } from '@/api/locations'
 import { snmpApi } from '@/api/snmp'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
@@ -396,6 +397,241 @@ function BulkAgentModal({
   )
 }
 
+// ── T9 Tur 5 E1 — BulkLifecycleModal ────────────────────────────────────────
+
+function BulkLifecycleModal({
+  selectedIds, onClose, onSuccess,
+}: { selectedIds: number[]; onClose: () => void; onSuccess: () => void }) {
+  const { message } = App.useApp()
+  const [newState, setNewState] = useState<'production' | 'passive' | 'stock' | 'archived'>('passive')
+  const [reason, setReason] = useState('')
+  const [result, setResult] = useState<Awaited<ReturnType<typeof devicesApi.bulkLifecycle>> | null>(null)
+
+  const mut = useMutation({
+    mutationFn: () => devicesApi.bulkLifecycle(selectedIds, newState, reason.trim() || undefined),
+    onSuccess: (r) => {
+      setResult(r)
+      if (r.skipped_count === 0) message.success(`${r.updated_count} cihazda durum güncellendi.`)
+      else if (r.updated_count === 0) message.warning('Hiçbir cihazda durum değişmedi.')
+      else message.warning(`${r.updated_count} güncellendi, ${r.skipped_count} atlandı.`)
+      onSuccess()
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Toplu güncelleme başarısız', 6),
+  })
+
+  const stateOptions = [
+    { value: 'production', label: '🟢 Üretim (production)' },
+    { value: 'passive',    label: '🟡 Pasif (passive)' },
+    { value: 'stock',      label: '🔵 Stok (stock)' },
+    { value: 'archived',   label: '⚫ Arşiv (archived)' },
+  ]
+
+  return (
+    <Modal
+      open
+      onCancel={onClose}
+      title={<Space><InboxOutlined style={{ color: '#0ea5e9' }} />Toplu Yaşam Döngüsü — {selectedIds.length} cihaz</Space>}
+      onOk={() => result ? onClose() : mut.mutate()}
+      confirmLoading={mut.isPending}
+      okText={result ? 'Kapat' : 'Uygula'}
+      cancelButtonProps={result ? { style: { display: 'none' } } : undefined}
+      width={620}
+    >
+      {!result ? (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Geçiş kuralları"
+            description={
+              <div style={{ fontSize: 12 }}>
+                <div>• production ⇄ passive ⇄ stock — her yön (org_admin)</div>
+                <div>• * → archived — her durumdan arşive geçilebilir</div>
+                <div>• archived → * — yalnız super_admin</div>
+              </div>
+            }
+          />
+          <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 600 }}>Yeni durum</div>
+          <Select
+            style={{ width: '100%' }}
+            value={newState}
+            onChange={(v) => setNewState(v)}
+            options={stateOptions}
+          />
+          <div style={{ marginTop: 14, marginBottom: 6, fontSize: 12, fontWeight: 600 }}>Sebep (opsiyonel — audit log)</div>
+          <Input.TextArea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="örn. 'Hat kapatma — kullanım dışı.'"
+            rows={2}
+            maxLength={400}
+            showCount
+          />
+        </>
+      ) : (
+        <Tabs
+          defaultActiveKey="updated"
+          items={[
+            {
+              key: 'updated', label: `Güncellendi (${result.updated_count})`,
+              children: result.updated.length === 0 ? <Empty description="Yok" /> : (
+                <Table
+                  dataSource={result.updated}
+                  rowKey="device_id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: 'Cihaz', dataIndex: 'hostname' },
+                    { title: 'Önce', dataIndex: 'from', width: 110, render: (v: string) => <Tag>{v}</Tag> },
+                    { title: 'Sonra', dataIndex: 'to', width: 110, render: (v: string) => <Tag color="green">{v}</Tag> },
+                  ]}
+                />
+              ),
+            },
+            {
+              key: 'skipped', label: `Atlandı (${result.skipped_count})`,
+              children: result.skipped.length === 0 ? <Empty description="Yok" /> : (
+                <Table
+                  dataSource={result.skipped}
+                  rowKey="device_id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: 'Cihaz', dataIndex: 'hostname' },
+                    { title: 'Sebep', dataIndex: 'reason', render: (v: string) => <span style={{ color: '#ef4444', fontSize: 12 }}>{v}</span> },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      )}
+    </Modal>
+  )
+}
+
+// ── T9 Tur 5 E1 — BulkMoveLocationModal ─────────────────────────────────────
+
+function BulkMoveLocationModal({
+  selectedIds, onClose, onSuccess,
+}: { selectedIds: number[]; onClose: () => void; onSuccess: () => void }) {
+  const { message } = App.useApp()
+  const [targetId, setTargetId] = useState<number | null>(null)
+  const [reason, setReason] = useState('')
+  const [result, setResult] = useState<Awaited<ReturnType<typeof devicesApi.bulkMoveLocation>> | null>(null)
+
+  const { data: locsData } = useQuery({
+    queryKey: ['locations-for-bulk-move'],
+    queryFn: () => locationsApi.list(),
+    staleTime: 120_000,
+  })
+
+  const mut = useMutation({
+    mutationFn: () => devicesApi.bulkMoveLocation(selectedIds, targetId!, reason.trim() || undefined),
+    onSuccess: (r) => {
+      setResult(r)
+      if (r.skipped_count === 0) message.success(`${r.moved_count} cihaz taşındı.`)
+      else if (r.moved_count === 0) message.warning('Hiçbir cihaz taşınmadı.')
+      else message.warning(`${r.moved_count} taşındı, ${r.skipped_count} atlandı.`)
+      onSuccess()
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Toplu taşıma başarısız', 6),
+  })
+
+  const locationOptions = (locsData?.items || []).map((l: any) => ({
+    value: l.id,
+    label: `${l.name}${l.organization_name ? ' — ' + l.organization_name : ''}`,
+  }))
+
+  return (
+    <Modal
+      open
+      onCancel={onClose}
+      title={<Space><EnvironmentOutlined style={{ color: '#16a34a' }} />Toplu Lokasyon Taşı — {selectedIds.length} cihaz</Space>}
+      onOk={() => result ? onClose() : mut.mutate()}
+      confirmLoading={mut.isPending}
+      okText={result ? 'Kapat' : `${selectedIds.length} cihazı taşı`}
+      okButtonProps={{ disabled: !result && !targetId }}
+      cancelButtonProps={result ? { style: { display: 'none' } } : undefined}
+      width={620}
+    >
+      {!result ? (
+        <>
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Cross-org taşıma yasak"
+            description="Hedef lokasyon kaynak cihazla AYNI organizasyonda olmalı. Yetersiz yetkili veya cross-org cihazlar otomatik atlanır."
+          />
+          <div style={{ marginBottom: 8, fontSize: 12, fontWeight: 600 }}>Hedef lokasyon</div>
+          <Select
+            showSearch
+            style={{ width: '100%' }}
+            value={targetId ?? undefined}
+            onChange={setTargetId}
+            options={locationOptions}
+            placeholder="Hedef lokasyon seçin"
+            optionFilterProp="label"
+          />
+          <div style={{ marginTop: 14, marginBottom: 6, fontSize: 12, fontWeight: 600 }}>Sebep (opsiyonel — audit log)</div>
+          <Input.TextArea
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="örn. 'Site konsolidasyonu — DC1 → DC2.'"
+            rows={2}
+            maxLength={400}
+            showCount
+          />
+        </>
+      ) : (
+        <Tabs
+          defaultActiveKey="moved"
+          items={[
+            {
+              key: 'moved', label: `Taşındı (${result.moved_count})`,
+              children: result.moved.length === 0 ? <Empty description="Yok" /> : (
+                <Table
+                  dataSource={result.moved}
+                  rowKey="device_id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: 'Cihaz', dataIndex: 'hostname' },
+                    {
+                      title: 'İlişkili veri', width: 200,
+                      render: (_: unknown, r: { relocated_rows: Record<string, number> }) => {
+                        const total = Object.values(r.relocated_rows || {}).reduce((a, b) => a + b, 0)
+                        return <Tag color="blue">{total} satır taşındı</Tag>
+                      },
+                    },
+                  ]}
+                />
+              ),
+            },
+            {
+              key: 'skipped', label: `Atlandı (${result.skipped_count})`,
+              children: result.skipped.length === 0 ? <Empty description="Yok" /> : (
+                <Table
+                  dataSource={result.skipped}
+                  rowKey="device_id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    { title: 'Cihaz', dataIndex: 'hostname' },
+                    { title: 'Sebep', dataIndex: 'reason', render: (v: string) => <span style={{ color: '#ef4444', fontSize: 12 }}>{v}</span> },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      )}
+    </Modal>
+  )
+}
+
 // ── BulkFetchProgressModal ─────────────────────────────────────────────────────
 
 interface FetchResult {
@@ -647,6 +883,9 @@ export default function DevicesPage() {
   const [bulkTagOpen, setBulkTagOpen] = useState(false)
   const [bulkTagValue, setBulkTagValue] = useState('')
   const [bulkTagAction, setBulkTagAction] = useState<'add' | 'remove'>('add')
+  // T9 Tur 5 E1 — bulk lifecycle + bulk move-location
+  const [bulkLifecycleOpen, setBulkLifecycleOpen] = useState(false)
+  const [bulkMoveOpen, setBulkMoveOpen] = useState(false)
   const pageSize = 50
 
   useTaskProgress(backupTaskId, {
@@ -856,6 +1095,12 @@ export default function DevicesPage() {
               <Tag color="blue" style={{ padding: '4px 10px', fontSize: 13 }}>{t('devices.selected', { count: selectedRowKeys.length })}</Tag>
               <Button icon={<TagOutlined />} onClick={() => setBulkTagOpen(true)} style={{ borderColor: '#13c2c2', color: '#008080' }}>
                 Etiket İşlemi
+              </Button>
+              <Button icon={<InboxOutlined />} onClick={() => setBulkLifecycleOpen(true)} style={{ borderColor: '#0ea5e9', color: '#0369a1' }}>
+                Yaşam Döngüsü
+              </Button>
+              <Button icon={<EnvironmentOutlined />} onClick={() => setBulkMoveOpen(true)} style={{ borderColor: '#16a34a', color: '#15803d' }}>
+                Lokasyon Taşı
               </Button>
               <Button icon={<RobotOutlined />} onClick={() => setBulkAgentOpen(true)} style={{ borderColor: '#722ed1', color: '#531dab' }}>
                 {t('devices.bulk_agent')}
@@ -1246,6 +1491,31 @@ export default function DevicesPage() {
           </div>
         </Space>
       </Modal>
+
+      {/* T9 Tur 5 E1 — Bulk Lifecycle Modal */}
+      {bulkLifecycleOpen && (
+        <BulkLifecycleModal
+          selectedIds={selectedRowKeys as number[]}
+          onClose={() => setBulkLifecycleOpen(false)}
+          onSuccess={() => {
+            setBulkLifecycleOpen(false); setSelectedRowKeys([])
+            queryClient.invalidateQueries({ queryKey: ['devices'] })
+            queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+          }}
+        />
+      )}
+
+      {/* T9 Tur 5 E1 — Bulk Move-Location Modal */}
+      {bulkMoveOpen && (
+        <BulkMoveLocationModal
+          selectedIds={selectedRowKeys as number[]}
+          onClose={() => setBulkMoveOpen(false)}
+          onSuccess={() => {
+            setBulkMoveOpen(false); setSelectedRowKeys([])
+            queryClient.invalidateQueries({ queryKey: ['devices'] })
+          }}
+        />
+      )}
     </div>
   )
 }

@@ -1279,6 +1279,179 @@ async def bulk_update_agent(
     return {"updated": len(devices), "agent_id": agent_id}
 
 
+class _BulkLifecycleRequest(BaseModel):
+    """T9 Tur 5 E1 — bulk lifecycle transition payload."""
+    device_ids: list[int]
+    new_state: str  # 'production' | 'passive' | 'stock' | 'archived'
+    reason: Optional[str] = None
+
+
+@router.post("/bulk-lifecycle", response_model=dict)
+async def bulk_lifecycle(
+    payload: _BulkLifecycleRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 Tur 5 E1 — change lifecycle_status across many devices in one call.
+
+    Each device is validated through device_lifecycle_service.can_transition
+    independently — a device whose current state can't transition to the
+    target (e.g. archived → production by a non-super-admin) is reported in
+    the `skipped` list, not failed-out the whole batch.
+    """
+    if not (current_user.is_super_admin or current_user.is_org_admin):
+        raise HTTPException(status_code=403, detail="Yetersiz yetki")
+    if not payload.device_ids:
+        raise HTTPException(status_code=400, detail="device_ids boş olamaz")
+
+    from app.services import device_lifecycle_service as _lc
+
+    devices = (await db.execute(
+        select(Device).where(Device.id.in_(payload.device_ids))
+    )).scalars().all()
+    found_ids = {d.id for d in devices}
+
+    updated: list[dict] = []
+    skipped: list[dict] = []
+    for device in devices:
+        from_state = device.lifecycle_status or "production"
+        if from_state == payload.new_state:
+            skipped.append({"device_id": device.id, "hostname": device.hostname,
+                            "reason": "already in target state"})
+            continue
+        allowed, err = _lc.can_transition(
+            from_state=from_state,
+            to_state=payload.new_state,
+            actor=current_user,
+        )
+        if not allowed:
+            skipped.append({"device_id": device.id, "hostname": device.hostname, "reason": err})
+            continue
+        diff = _lc.apply_transition(device, payload.new_state)
+        updated.append({
+            "device_id": device.id, "hostname": device.hostname,
+            "from": diff["before"]["lifecycle_status"],
+            "to": diff["after"]["lifecycle_status"],
+        })
+
+    await db.commit()
+
+    await log_action(
+        db, current_user,
+        "bulk_device_lifecycle_changed",
+        "device", None, None,
+        details={
+            "new_state": payload.new_state,
+            "reason": payload.reason,
+            "updated_count": len(updated),
+            "skipped_count": len(skipped),
+            "missing_ids": [i for i in payload.device_ids if i not in found_ids],
+        },
+        request=request,
+    )
+
+    return {
+        "updated": updated, "skipped": skipped,
+        "missing_ids": [i for i in payload.device_ids if i not in found_ids],
+        "updated_count": len(updated), "skipped_count": len(skipped),
+    }
+
+
+class _BulkMoveRequest(BaseModel):
+    """T9 Tur 5 E1 — bulk move-location payload."""
+    device_ids: list[int]
+    target_location_id: int
+    reason: Optional[str] = None
+
+
+@router.post("/bulk-move-location", response_model=dict)
+async def bulk_move_location(
+    payload: _BulkMoveRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+    ctx: RequestContext = None,
+):
+    """T9 Tur 5 E1 — move many devices into the SAME target location.
+
+    Each device runs through the same validation as
+    POST /devices/{id}/move-location:
+      - caller must hold both source and target (org_admin holds all)
+      - target must be in the same organization, not archived
+      - device-bound child data is relocated via relocate_device_data
+    A failure on one device only marks it skipped — the others go through.
+    """
+    if not current_user.has_permission("device:move"):
+        raise HTTPException(status_code=403, detail="device:move yetkisi gerekli")
+    if not payload.device_ids:
+        raise HTTPException(status_code=400, detail="device_ids boş olamaz")
+
+    target_loc = await db.get(Location, payload.target_location_id)
+    if target_loc is None:
+        raise HTTPException(status_code=404, detail="Hedef lokasyon bulunamadı")
+    if target_loc.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Hedef lokasyon arşivlenmiş")
+    if not (ctx and ctx.is_super_admin) and payload.target_location_id not in (
+        ctx.allowed_location_ids if ctx else ()
+    ):
+        raise HTTPException(status_code=403, detail="Hedef lokasyona taşıma yetkiniz yok")
+
+    devices = (await db.execute(
+        select(Device).where(Device.id.in_(payload.device_ids))
+    )).scalars().all()
+    found_ids = {d.id for d in devices}
+
+    moved: list[dict] = []
+    skipped: list[dict] = []
+    for device in devices:
+        if device.location_id == payload.target_location_id:
+            skipped.append({"device_id": device.id, "hostname": device.hostname,
+                            "reason": "already in target location"})
+            continue
+        if device.organization_id != target_loc.organization_id:
+            skipped.append({"device_id": device.id, "hostname": device.hostname,
+                            "reason": "cross-organization move not allowed"})
+            continue
+        if not (ctx and ctx.is_super_admin) and device.location_id not in (
+            ctx.allowed_location_ids if ctx else ()
+        ):
+            skipped.append({"device_id": device.id, "hostname": device.hostname,
+                            "reason": "not authorized to move from current location"})
+            continue
+
+        previous = device.location_id
+        device.location_id = payload.target_location_id
+        relocated = await relocate_device_data(db, device.id, payload.target_location_id)
+        moved.append({
+            "device_id": device.id, "hostname": device.hostname,
+            "previous_location_id": previous,
+            "new_location_id": payload.target_location_id,
+            "relocated_rows": relocated,
+        })
+
+    await db.commit()
+    await log_action(
+        db, current_user,
+        "bulk_device_moved",
+        "location", payload.target_location_id, target_loc.name,
+        details={
+            "target_location_id": payload.target_location_id,
+            "reason": payload.reason,
+            "moved_count": len(moved),
+            "skipped_count": len(skipped),
+            "missing_ids": [i for i in payload.device_ids if i not in found_ids],
+        },
+        request=request,
+    )
+
+    return {
+        "moved": moved, "skipped": skipped,
+        "missing_ids": [i for i in payload.device_ids if i not in found_ids],
+        "moved_count": len(moved), "skipped_count": len(skipped),
+    }
+
+
 @router.post("/bulk-delete", response_model=dict)
 async def bulk_delete_devices(
     request: Request,
