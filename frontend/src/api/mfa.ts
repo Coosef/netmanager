@@ -36,4 +36,25 @@ export const mfaApi = {
   regenerateRecoveryCodes: (code: string) =>
     client.post<MfaConfirmResponse>('/users/me/mfa/recovery-codes/regenerate',
       { code }).then((r) => r.data),
+
+  // T9 Tur 2 #2b — Email kanalı
+  /** Email kanalına OTP yolla (enrollment). Kullanıcı emailini alır →
+   *  confirmEmail() ile doğrular. */
+  enrollEmail: () =>
+    client.post<{ ok: boolean; email_masked: string; ttl_sec: number }>(
+      '/users/me/mfa/enroll/email', {},
+    ).then((r) => r.data),
+
+  /** Enrollment kodunu doğrula → mfa_methods'a 'email' eklenir.
+   *  İlk MFA kanalı email ise recovery codes mint edilir + döner. */
+  confirmEmail: (code: string) =>
+    client.post<{ mfa_enabled: boolean; methods: string[]; recovery_codes?: string[] }>(
+      '/users/me/mfa/confirm-email', { code },
+    ).then((r) => r.data),
+
+  /** Email method'unu kaldır (son MFA değilse). Son ise /disable kullan. */
+  removeEmail: () =>
+    client.delete<{ removed: boolean; methods?: string[]; note?: string }>(
+      '/users/me/mfa/methods/email',
+    ).then((r) => r.data),
 }

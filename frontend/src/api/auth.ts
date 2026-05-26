@@ -9,11 +9,26 @@ export const authApi = {
     client.post<LoginResult>('/auth/login', { username, password }).then((r) => r.data),
 
   /** Trade an MFA challenge_token + OTP (or recovery code) for a real
-   *  session. `method` defaults to 'totp'; pass 'recovery' for a code
-   *  from the user's recovery list. */
-  verifyMfa: (challenge_token: string, code: string, method: 'totp' | 'recovery' = 'totp') =>
+   *  session. `method` defaults to 'totp'; 'recovery' (recovery code),
+   *  'email' (T9 Tur 2 #2b — email OTP), 'sms' (future). */
+  verifyMfa: (
+    challenge_token: string,
+    code: string,
+    method: 'totp' | 'recovery' | 'email' | 'sms' = 'totp',
+  ) =>
     client
       .post<TokenResponse>('/auth/mfa/verify', { challenge_token, code, method })
+      .then((r) => r.data),
+
+  /** T9 Tur 2 #2b — Login challenge sırasında email OTP yolla.
+   *  Backend kullanıcının kayıtlı email adresine 6-haneli kod gönderir;
+   *  kullanıcı kodu girip verifyMfa(..., 'email') ile session açar.
+   *  Rate-limited (3/min). */
+  sendMfaEmailCode: (challenge_token: string) =>
+    client
+      .post<{ ok: boolean; email_masked: string; ttl_sec: number }>(
+        '/auth/mfa/send-email-code', { challenge_token },
+      )
       .then((r) => r.data),
 
   me: () => client.get<User>('/auth/me').then((r) => r.data),

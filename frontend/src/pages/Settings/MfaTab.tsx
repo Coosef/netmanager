@@ -23,6 +23,7 @@ import {
   SafetyOutlined, SyncOutlined, WarningFilled,
 } from '@ant-design/icons'
 import { mfaApi } from '@/api/mfa'
+import MfaEmailCard from '@/pages/Settings/MfaEmailCard'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -152,9 +153,11 @@ export default function MfaTab() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 16 }}>
           <Card size="small">
-            <Text type="secondary" style={{ fontSize: 11 }}>YÖNTEM</Text>
-            <div style={{ fontSize: 16, marginTop: 4 }}>
-              {status.methods.includes('totp') && <Tag color="green">Authenticator (TOTP)</Tag>}
+            <Text type="secondary" style={{ fontSize: 11 }}>YÖNTEMLER</Text>
+            <div style={{ fontSize: 14, marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {status.methods.includes('totp') && <Tag color="green">Authenticator</Tag>}
+              {status.methods.includes('email') && <Tag color="cyan">Email</Tag>}
+              {status.methods.includes('sms') && <Tag color="blue">SMS</Tag>}
             </div>
           </Card>
           <Card size="small">
@@ -166,6 +169,14 @@ export default function MfaTab() {
               )}
             </div>
           </Card>
+        </div>
+
+        {/* T9 Tur 2 #2b — Email MFA kanalı */}
+        <div style={{ marginBottom: 16 }}>
+          <MfaEmailCard
+            methods={status.methods}
+            onRecoveryCodes={(codes) => setRecoveryCodes(codes)}
+          />
         </div>
 
         {recoveryCodes && (

@@ -197,6 +197,131 @@ async def mfa_disable(
     return {"mfa_enabled": False}
 
 
+# ── Email channel (T9 Tur 2 #2b) ─────────────────────────────────────────────
+
+
+@router.post("/me/mfa/enroll/email")
+async def mfa_enroll_email(
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Enrollment: kullanıcının kayıtlı email adresine 6-haneli OTP yollar.
+    Kullanıcı kodu girip /me/mfa/confirm-email çağırırsa email kanalı
+    `mfa_methods` CSV'sine eklenir. Email kanalı TOTP'siz tek başına da
+    olabilir (yine de TOTP önerilir — recovery kodlar TOTP ile mint edilir).
+    """
+    user = await db.get(User, current_user.id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.services import mfa_email_service as _emsvc
+    result = await _emsvc.send_otp(db, user, purpose="enroll")
+    if not result.get("ok"):
+        await log_action(
+            db, user, "mfa_email_enroll_send_failed",
+            details={"reason": result.get("message")},
+            status="failure", request=request,
+        )
+        raise HTTPException(status_code=400, detail=result.get("message"))
+
+    await log_action(
+        db, user, "mfa_email_enroll_otp_sent",
+        details={"email_masked": result.get("email_masked")}, request=request,
+    )
+    return {
+        "ok": True,
+        "email_masked": result.get("email_masked"),
+        "ttl_sec": result.get("ttl_sec"),
+    }
+
+
+class _MfaEmailConfirmPayload(MfaConfirmRequest):
+    """code: kullanıcının email'den aldığı 6-haneli OTP."""
+    pass
+
+
+@router.post("/me/mfa/confirm-email")
+async def mfa_confirm_email(
+    payload: MfaConfirmRequest,
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Email enrollment OTP'sini doğrula, `mfa_methods`'a 'email' ekle.
+    Hesabın mfa_enabled durumu:
+      - Eğer ilk MFA kanalı ise (totp da yok) → mfa_enabled=True, recovery codes mint
+      - Eğer TOTP zaten varsa → sadece methods'a email eklenir, recovery'ler aynen
+    """
+    user = await db.get(User, current_user.id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from app.services import mfa_email_service as _emsvc
+    if not _emsvc.verify_and_consume(user.id, "enroll", payload.code):
+        await log_action(
+            db, user, "mfa_email_enroll_confirm_failed",
+            details={"reason": "bad_or_expired_code"},
+            status="failure", request=request,
+        )
+        raise HTTPException(status_code=400, detail="Geçersiz veya süresi dolmuş kod")
+
+    methods = [m.strip() for m in (user.mfa_methods or "").split(",") if m.strip()]
+    if "email" not in methods:
+        methods.append("email")
+    user.mfa_methods = ",".join(methods) if methods else "email"
+
+    response: dict = {"mfa_enabled": True, "methods": methods}
+
+    if not user.mfa_enabled:
+        # İlk MFA kanalı email — recovery codes ile aktive et
+        plain_recovery = generate_recovery_codes()
+        user.mfa_recovery_codes = hash_recovery_codes(plain_recovery)
+        user.mfa_enabled = True
+        user.mfa_enrolled_at = datetime.now(timezone.utc)
+        response["recovery_codes"] = plain_recovery
+
+    await db.commit()
+    await log_action(
+        db, user, "mfa_email_enrolled",
+        details={"methods": methods}, request=request,
+    )
+    return response
+
+
+@router.delete("/me/mfa/methods/email")
+async def mfa_remove_email(
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Email kanalını mfa_methods CSV'sinden çıkar. Email son aktif method
+    ise tüm MFA'yı kapatmaz — kullanıcı /me/mfa/disable ile yapsın (şifre
+    re-auth + audit). Sadece method silinir.
+    """
+    user = await db.get(User, current_user.id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    methods = [m.strip() for m in (user.mfa_methods or "").split(",") if m.strip()]
+    if "email" not in methods:
+        return {"removed": False, "note": "Email zaten kayıtlı değil"}
+    if len(methods) == 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Son MFA kanalı email — önce TOTP ekleyin veya /me/mfa/disable kullanın",
+        )
+
+    methods.remove("email")
+    user.mfa_methods = ",".join(methods)
+    await db.commit()
+    await log_action(
+        db, user, "mfa_email_removed",
+        details={"methods_remaining": methods}, request=request,
+    )
+    return {"removed": True, "methods": methods}
+
+
 @router.post("/me/mfa/recovery-codes/regenerate", response_model=MfaConfirmResponse)
 async def mfa_regenerate_recovery_codes(
     payload: MfaConfirmRequest,    # reuse — needs a current TOTP to authorise
