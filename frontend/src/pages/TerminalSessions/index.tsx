@@ -10,14 +10,14 @@
  */
 import { useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Drawer, Input, Select, Space, Table,
+  Alert, Badge, Button, Card, Drawer, Input, message, Select, Space, Table,
   Tag, Typography,
 } from 'antd'
 import {
-  CodeOutlined, DesktopOutlined,
+  CodeOutlined, DesktopOutlined, RobotOutlined,
   ReloadOutlined, SafetyOutlined, UserOutlined,
 } from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { terminalSessionsApi, TerminalSessionListItem } from '@/api/terminalSessions'
 import dayjs from 'dayjs'
 
@@ -50,11 +50,30 @@ function ExitTag({ reason }: { reason: string | null }) {
 }
 
 export default function TerminalSessionsPage() {
+  const qc = useQueryClient()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'closed'>('all')
   const [page, setPage] = useState(0)
   const [pageSize] = useState(50)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // T9 Tur 3B — AI özet trigger
+  const summarizeMut = useMutation({
+    mutationFn: (sid: string) => terminalSessionsApi.summarize(sid),
+    onSuccess: (data) => {
+      message.success(
+        data.status === 'completed'
+          ? `AI özet hazırlandı (${data.provider || '?'} / ${data.tokens_used || 0} token)`
+          : `Status: ${data.status}`,
+      )
+      // Re-fetch detail to pick up ai_summary
+      qc.invalidateQueries({ queryKey: ['terminal-session-detail', selectedId] })
+      qc.invalidateQueries({ queryKey: ['terminal-sessions-list'] })
+    },
+    onError: (e: any) => message.error(
+      e?.response?.data?.detail || 'AI özet üretilemedi',
+    ),
+  })
 
   const statsQ = useQuery({
     queryKey: ['terminal-sessions-stats'],
@@ -316,19 +335,58 @@ export default function TerminalSessionsPage() {
               </div>
             </Card>
 
-            {/* AI summary */}
-            {detailQ.data.ai_summary ? (
-              <Card size="small" title={<Space><SafetyOutlined /> AI Özet</Space>}>
+            {/* T9 Tur 3B — AI özet kartı */}
+            <Card
+              size="small"
+              title={
+                <Space>
+                  <RobotOutlined style={{ color: 'var(--accent)' }} />
+                  AI Özet
+                  {detailQ.data.ai_summary_status && (
+                    <Tag color={
+                      detailQ.data.ai_summary_status === 'completed' ? 'green' :
+                      detailQ.data.ai_summary_status === 'running' ? 'processing' :
+                      detailQ.data.ai_summary_status === 'failed' ? 'red' : 'default'
+                    }>
+                      {detailQ.data.ai_summary_status}
+                    </Tag>
+                  )}
+                </Space>
+              }
+              extra={
+                detailQ.data.session_id && (
+                  <Button
+                    type="primary" size="small"
+                    icon={<RobotOutlined />}
+                    loading={summarizeMut.isPending}
+                    disabled={detailQ.data.ai_summary_status === 'running'}
+                    onClick={() => summarizeMut.mutate(detailQ.data.session_id)}
+                  >
+                    {detailQ.data.ai_summary ? 'Yeniden Üret' : 'Özet Üret'}
+                  </Button>
+                )
+              }
+            >
+              {detailQ.data.ai_summary ? (
                 <Paragraph style={{ marginBottom: 0, whiteSpace: 'pre-wrap' }}>
                   {detailQ.data.ai_summary}
                 </Paragraph>
-              </Card>
-            ) : (
-              <Alert
-                type="info" message="AI özet bu turda eklenmedi"
-                description={`Status: ${detailQ.data.ai_summary_status || 'disabled'} · Tur 3B'de aktive edilecek`}
-              />
-            )}
+              ) : detailQ.data.ai_summary_status === 'running' ? (
+                <Text style={{ color: 'var(--fg-3)' }}>
+                  AI özet üretiliyor… (3-8 saniye)
+                </Text>
+              ) : (
+                <Space direction="vertical" size={6}>
+                  <Text style={{ color: 'var(--fg-3)' }}>
+                    Bu session için henüz AI özet üretilmedi.
+                  </Text>
+                  <Text style={{ fontSize: 11, color: 'var(--fg-3)' }}>
+                    AI Asistanı aktif provider'ı kullanır (Settings → AI Asistanı).
+                    Provider configure değilse hata alırsınız.
+                  </Text>
+                </Space>
+              )}
+            </Card>
 
             {/* Commands */}
             <Card size="small" title={

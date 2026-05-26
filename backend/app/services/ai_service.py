@@ -683,3 +683,106 @@ async def _ollama_chat(settings: AISettings, system: str, messages: list[dict]) 
         "model": model_name,
         "tokens_used": 0,
     }
+
+
+# ── T9 Tur 3B — SSH terminal session özetleme ────────────────────────────────
+# Network context (build_*_context) burada gereksiz; sadece session'ın kendi
+# içeriği özetleniyor. Mevcut active_provider hangisiyse onu kullan; provider
+# yoksa ValueError fırlat (kullanıcı önce Settings → AI Asistanı'ndan key girer).
+
+_SESSION_SUMMARIZER_SYSTEM = (
+    "Sen NetManager ağ yönetim platformunda bir güvenlik audit "
+    "asistanısın. Sana browser→cihaz arası interaktif bir SSH terminal "
+    "session'ının komut listesi ve çıktı özeti verilecek. Görevin:\n"
+    "1) Kullanıcının session boyunca NE yaptığını 2-4 cümlede özetle.\n"
+    "2) Yapılan değişiklikleri / VLAN/port/config işlemlerini varsa madde "
+    "halinde listele.\n"
+    "3) Riskli komutlar varsa (örn. config push, reload, shutdown, password "
+    "change) açıkça belirt.\n"
+    "4) Türkçe yaz. Kısa ve net ol; gereksiz tekrar yapma.\n"
+    "Cevap markdown formatında olabilir."
+)
+
+
+def _format_session_for_ai(
+    *,
+    device_hostname: str | None,
+    device_ip: str | None,
+    username: str | None,
+    duration_ms: int | None,
+    commands: list[dict],
+    output_excerpt: str | None,
+) -> str:
+    """Session'ı AI'ye gönderilecek text formatına çevir."""
+    lines: list[str] = []
+    lines.append(f"## SSH Session özeti")
+    lines.append(f"- Kullanıcı: {username or '(bilinmiyor)'}")
+    lines.append(f"- Cihaz: {device_hostname or '(bilinmiyor)'} ({device_ip or '?'})")
+    if duration_ms:
+        secs = duration_ms / 1000
+        if secs < 60:
+            lines.append(f"- Süre: {secs:.1f} saniye")
+        elif secs < 3600:
+            lines.append(f"- Süre: {secs/60:.1f} dakika")
+        else:
+            lines.append(f"- Süre: {secs/3600:.1f} saat")
+    lines.append("")
+    lines.append(f"## Çıkartılan Komutlar ({len(commands)})")
+    if commands:
+        for c in commands[:80]:  # cap — token budget
+            offset_ms = c.get("t", 0)
+            offset_sec = offset_ms / 1000
+            lines.append(f"  - [+{offset_sec:.0f}s] $ {c.get('cmd', '')}")
+        if len(commands) > 80:
+            lines.append(f"  - … ve {len(commands)-80} komut daha")
+    else:
+        lines.append("  (komut çıkarılmadı)")
+    lines.append("")
+    if output_excerpt:
+        excerpt = output_excerpt[-4000:] if len(output_excerpt) > 4000 else output_excerpt
+        lines.append("## Çıktı (son segment)")
+        lines.append("```")
+        lines.append(excerpt)
+        lines.append("```")
+    return "\n".join(lines)
+
+
+async def summarize_terminal_session(
+    db: AsyncSession,
+    *,
+    device_hostname: str | None,
+    device_ip: str | None,
+    username: str | None,
+    duration_ms: int | None,
+    commands: list[dict],
+    output_excerpt: str | None,
+) -> dict[str, Any]:
+    """SSH terminal session'ını özetle. AI provider configure değilse
+    ValueError fırlatır. Mevcut chat() pattern'ini kullanır (provider
+    dispatch + decrypt API key)."""
+    settings = await _get_or_create_settings(db)
+    if not settings.active_provider:
+        raise ValueError(
+            "AI sağlayıcısı yapılandırılmamış. Lütfen Ayarlar → AI Asistanı "
+            "bölümünden bir sağlayıcı seçin ve API anahtarı girin."
+        )
+
+    session_text = _format_session_for_ai(
+        device_hostname=device_hostname, device_ip=device_ip,
+        username=username, duration_ms=duration_ms,
+        commands=commands, output_excerpt=output_excerpt,
+    )
+
+    messages = [{"role": "user", "content": session_text}]
+    system = _SESSION_SUMMARIZER_SYSTEM
+
+    provider = settings.active_provider
+    if provider == "claude":
+        return await _claude_chat(settings, system, messages)
+    elif provider == "openai":
+        return await _openai_chat(settings, system, messages)
+    elif provider == "gemini":
+        return await _gemini_chat(settings, system, messages)
+    elif provider == "ollama":
+        return await _ollama_chat(settings, system, messages)
+    raise ValueError(f"Bilinmeyen sağlayıcı: {provider}")

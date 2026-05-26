@@ -177,3 +177,75 @@ async def get_session(
     if row.device_id:
         device = (await db.execute(select(Device).where(Device.id == row.device_id))).scalar_one_or_none()
     return _serialize_detail(row, user, device)
+
+
+@router.post("/{session_id}/summarize")
+async def summarize_session(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 Tur 3B — AI ile session özetle (manuel trigger).
+
+    Async olarak Claude API çağırır + ai_summary alanını doldurur.
+    Tipik tamamlanma: 3-8 saniye (network + tokens).
+    `ai_summary_status` durumlar:
+      - 'pending'   → ilk insert (henüz çalışmamış)
+      - 'running'   → bu çağrı sırasında
+      - 'completed' → ai_summary text'i hazır
+      - 'failed'    → exception (mesaj ai_summary alanına yazılır)
+    """
+    row = (await db.execute(
+        select(TerminalSessionLog).where(TerminalSessionLog.session_id == session_id)
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Session bulunamadı")
+
+    if row.ai_summary_status == "running":
+        return {"status": "running", "note": "Özet üretimi zaten devam ediyor"}
+
+    # 'running' olarak işaretle (lock — eş zamanlı tetiklemeleri engelle)
+    row.ai_summary_status = "running"
+    await db.commit()
+
+    # User + device meta'sını al
+    user = None
+    if row.user_id:
+        user = (await db.execute(select(User).where(User.id == row.user_id))).scalar_one_or_none()
+    device = None
+    if row.device_id:
+        device = (await db.execute(select(Device).where(Device.id == row.device_id))).scalar_one_or_none()
+
+    try:
+        from app.services import ai_service as _ai
+        result = await _ai.summarize_terminal_session(
+            db,
+            device_hostname=device.hostname if device else None,
+            device_ip=device.ip_address if device else None,
+            username=user.username if user else None,
+            duration_ms=row.duration_ms,
+            commands=row.commands_extracted or [],
+            output_excerpt=row.output_excerpt,
+        )
+        summary_text = result.get("message", "")
+        row.ai_summary = summary_text
+        row.ai_summary_status = "completed"
+        await db.commit()
+        return {
+            "status": "completed",
+            "ai_summary": summary_text,
+            "provider": result.get("provider"),
+            "model": result.get("model"),
+            "tokens_used": result.get("tokens_used"),
+        }
+    except ValueError as e:
+        # AI provider configure değil veya geçersiz key
+        row.ai_summary = f"[Hata] {e}"
+        row.ai_summary_status = "failed"
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        row.ai_summary = f"[Hata] {e}"
+        row.ai_summary_status = "failed"
+        await db.commit()
+        raise HTTPException(status_code=500, detail=f"AI özet üretilemedi: {e}")
