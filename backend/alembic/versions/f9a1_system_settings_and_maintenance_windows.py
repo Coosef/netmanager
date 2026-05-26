@@ -24,7 +24,10 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "f9a1sysset"
-down_revision = "f8a9vlansnap"
+# f9a1 ilk yazıldığında down_revision=f8a9vlansnap idi; ama main'de paralel
+# olarak f8a10sessions (user_sessions) eklendiği için iki head oluştu.
+# Fix: f8a10sessions'a chain et — alembic upgrade head tek zincir görür.
+down_revision = "f8a10sessions"
 branch_labels = None
 depends_on = None
 
