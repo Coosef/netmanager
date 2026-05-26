@@ -52,6 +52,7 @@ from app.models.compliance_profile import ComplianceProfile
 from app.models.device_vlan_snapshot import DeviceVlanSnapshot
 from app.models.user_session import UserSession
 from app.models.system_setting import SystemSetting
+from app.models.password_policy import PasswordPolicy
 
 __all__ = [
     "User", "SystemRole",

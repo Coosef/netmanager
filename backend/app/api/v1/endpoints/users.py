@@ -113,6 +113,14 @@ async def create_user(
     if existing.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already exists")
 
+    # T9 Tur 2 #3 — initial password policy + force-change-on-first-login
+    from app.services import password_policy_service as _pwp
+    policy = await _pwp.get_effective_policy(db, org_id)
+    ok, errs = _pwp.validate_password(payload.password, policy)
+    if not ok:
+        raise HTTPException(status_code=400, detail={"errors": errs, "policy_source": policy.source})
+
+    from datetime import datetime as _dt, timezone as _tz
     user = User(
         username=payload.username,
         email=payload.email,
@@ -121,6 +129,8 @@ async def create_user(
         role=payload.role,
         notes=payload.notes,
         organization_id=org_id,
+        password_changed_at=_dt.now(_tz.utc),
+        must_change_password=policy.force_change_on_first_login,
     )
     db.add(user)
     await db.commit()
@@ -233,7 +243,16 @@ async def admin_reset_password(
     if not _is_platform_admin(current_user) and user.system_role == SystemRole.SUPER_ADMIN:
         raise HTTPException(status_code=403, detail="Cannot reset SUPER_ADMIN password")
 
-    user.hashed_password = hash_password(payload.new_password)
+    # T9 Tur 2 #3 — Admin password reset de policy'ye karşı validate
+    from app.services import password_policy_service as _pwp
+    policy = await _pwp.get_effective_policy(db, user.organization_id)
+    ok, errs = _pwp.validate_password(payload.new_password, policy)
+    if not ok:
+        raise HTTPException(status_code=400, detail={"errors": errs, "policy_source": policy.source})
+
+    _pwp.register_password_change(user, payload.new_password, policy)
+    # Admin reset → kullanıcı bir sonraki login'de zorla değişim
+    user.must_change_password = True
     await db.commit()
     await log_action(db, current_user, "password_reset", "user", user_id, user.username, request=request)
 
@@ -250,7 +269,19 @@ async def change_my_password(
     if not verify_password(payload.current_password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Mevcut şifre hatalı")
 
-    user.hashed_password = hash_password(payload.new_password)
+    # T9 Tur 2 #3 — Policy validation + reuse check
+    from app.services import password_policy_service as _pwp
+    policy = await _pwp.get_effective_policy(db, user.organization_id)
+    ok, errs = _pwp.validate_password(payload.new_password, policy)
+    if not ok:
+        raise HTTPException(status_code=400, detail={"errors": errs, "policy_source": policy.source})
+    if _pwp.is_reused(payload.new_password, user.password_history):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Bu şifre son {policy.history_count} şifre arasında — yeni bir tane seçin",
+        )
+
+    _pwp.register_password_change(user, payload.new_password, policy)
     await db.commit()
     await log_action(db, user, "password_changed", "user", user.id, request=request)
 
