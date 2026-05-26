@@ -70,6 +70,8 @@ export interface User {
   created_at: string
   locations?: UserLocationItem[]
   mfa_enabled?: boolean    // surfaced by /users list (UserResponse.mfa_enabled)
+  // T9 Tur 2 #4 — IP allowlist (comma-separated CIDR; null/boş → kısıt yok)
+  allowed_ips?: string | null
 }
 
 export interface TokenResponse {

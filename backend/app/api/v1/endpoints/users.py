@@ -170,6 +170,18 @@ async def update_user(
         if data.get("role") in ("super_admin",):
             raise HTTPException(status_code=403, detail="Cannot elevate to SUPER_ADMIN")
 
+    # T9 Tur 2 #4 — allowed_ips strict validation (geçersiz CIDR ile
+    # kullanıcının kendini kilitlemesini engelle)
+    if "allowed_ips" in data and data["allowed_ips"] is not None:
+        from app.services.ip_allowlist import validate_csv as _ip_validate
+        # Boş string'i NULL'a normalize et — "kısıt yok"
+        if not data["allowed_ips"].strip():
+            data["allowed_ips"] = None
+        else:
+            ok, err = _ip_validate(data["allowed_ips"])
+            if not ok:
+                raise HTTPException(status_code=400, detail=err)
+
     for field, value in data.items():
         setattr(user, field, value)
 
@@ -244,6 +256,23 @@ async def change_my_password(
 
 
 # ── Self profile — viewable by any authenticated user ─────────────────────────
+
+
+@router.get("/me/login-ip")
+async def my_login_ip(request: Request, current_user: CurrentUser):
+    """T9 Tur 2 #4 — Mevcut kullanıcının login IP'sini döndürür.
+    UI'da Users drawer'da 'Şu anki IP'm: X' göstererek allowlist'e dahil
+    edip etmediğini kullanıcının görmesi için. allowed_ips listesine karşı
+    kullanıcının yanlışlıkla kendini kilitlemesini engelleyen safety net."""
+    from app.services.ip_allowlist import is_allowed as _ip_allowed
+    client_ip = request.client.host if request.client else None
+    return {
+        "client_ip": client_ip,
+        "allowed_ips": current_user.allowed_ips,
+        # Kullanıcının mevcut allowlist'i kabul edip etmediği (UI'da uyarı):
+        "matches_current_allowlist": _ip_allowed(client_ip, current_user.allowed_ips),
+    }
+
 
 @router.get("/me/locations", response_model=list[dict])
 async def get_my_locations(

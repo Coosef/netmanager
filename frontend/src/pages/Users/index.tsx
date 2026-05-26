@@ -518,8 +518,8 @@ export default function UsersPage() {
         <Form
           layout="vertical"
           initialValues={editUser
-            ? { email: editUser.email, full_name: editUser.full_name, role: editUser.role, is_active: editUser.is_active, organization_id: editUser.org_id }
-            : { role: 'viewer', is_active: true }
+            ? { email: editUser.email, full_name: editUser.full_name, role: editUser.role, is_active: editUser.is_active, organization_id: editUser.org_id, allowed_ips: editUser.allowed_ips ?? '' }
+            : { role: 'viewer', is_active: true, allowed_ips: '' }
           }
           onFinish={onSubmit}
         >
@@ -555,6 +555,35 @@ export default function UsersPage() {
                     </Form.Item>
                     <Form.Item label={t('users.form_active')} name="is_active" valuePropName="checked">
                       <Switch />
+                    </Form.Item>
+
+                    {/* T9 Tur 2 #4 — IP Allowlist */}
+                    <Divider style={{ margin: '8px 0 12px', borderColor: C.border }} />
+                    <Form.Item
+                      label={
+                        <span>
+                          <LockOutlined style={{ marginRight: 6, color: '#f59e0b' }} />
+                          İzin Verilen IP'ler (opsiyonel)
+                        </span>
+                      }
+                      name="allowed_ips"
+                      tooltip={
+                        <span>
+                          Kullanıcı sadece bu IP/CIDR'lardan giriş yapabilir.
+                          Boş bırakırsanız kısıtlama yok. Virgülle ayırarak birden çok yazın.
+                          Örnek: <code>10.0.0.0/8, 192.168.1.5, 1.2.3.4/32</code>
+                        </span>
+                      }
+                      extra={
+                        <span style={{ fontSize: 11, color: C.muted }}>
+                          Boş = kısıt yok · IPv4/IPv6 + CIDR (örn: 10.0.0.0/8)
+                        </span>
+                      }
+                    >
+                      <Input
+                        placeholder="10.0.0.0/8, 192.168.1.5"
+                        style={{ fontFamily: 'monospace' }}
+                      />
                     </Form.Item>
                   </div>
                 ),

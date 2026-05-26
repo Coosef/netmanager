@@ -118,6 +118,13 @@ class User(Base):
     mfa_recovery_codes: Mapped[Optional[Any]] = mapped_column(JSON, nullable=True)
     mfa_enrolled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
+    # ── Login IP allowlist (T9 Tur 2 #4) ─────────────────────────────────────
+    # Comma-separated CIDR'lar. NULL veya boş string → kısıt yok (mevcut
+    # davranış aynen). Tek IP de "/32" ile veya tek IP olarak verilebilir
+    # (ipaddress.ip_network'a strict=False ile geçirilir).
+    # Auth endpoint login + mfa/verify'da check eder; eşleşmezse 403.
+    allowed_ips: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
     def has_permission(self, permission: str) -> bool:
         """Simple permission check driven by the user's system role.
         Returns True if the role's default grants include `permission`
