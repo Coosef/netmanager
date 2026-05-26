@@ -51,6 +51,7 @@ from app.models.escalation_rule import EscalationRule, EscalationNotificationLog
 from app.models.compliance_profile import ComplianceProfile
 from app.models.device_vlan_snapshot import DeviceVlanSnapshot
 from app.models.user_session import UserSession
+from app.models.system_setting import SystemSetting
 
 __all__ = [
     "User", "SystemRole",
