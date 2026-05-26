@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom'
 import {
   Typography, Switch, Divider, Tag, Table, Button, Modal, Form,
   Input, Select, Space, message, Popconfirm, Tooltip, InputNumber, Alert, DatePicker,
+  Checkbox, Row, Col,
 } from 'antd'
 import {
   GlobalOutlined, BgColorsOutlined, SunOutlined, MoonOutlined,
@@ -1453,7 +1454,7 @@ function MaintenanceWindowsTab() {
 
   const { data: windows = [], isLoading } = useQuery({
     queryKey: ['maintenance-windows'],
-    queryFn: maintenanceWindowsApi.list,
+    queryFn: () => maintenanceWindowsApi.list(false),
   })
 
   const { data: devices = [] } = useQuery({
@@ -1464,13 +1465,19 @@ function MaintenanceWindowsTab() {
   const saveMutation = useMutation({
     mutationFn: async (values: any) => {
       const [start, end] = values.time_range
-      const payload = {
+      const recurrence = (values.recurrence ?? null) as ('daily' | 'weekly' | 'monthly' | null)
+      const payload: any = {
         name: values.name,
         description: values.description || null,
         start_time: start.toISOString(),
         end_time: end.toISOString(),
         applies_to_all: !!values.applies_to_all,
         device_ids: values.applies_to_all ? [] : (values.device_ids || []),
+        recurrence,
+        recur_days_of_week: recurrence === 'weekly' ? (values.recur_days_of_week || []) : null,
+        recur_day_of_month: recurrence === 'monthly' ? (values.recur_day_of_month ?? null) : null,
+        recur_count_max: recurrence ? (values.recur_count_max ?? null) : null,
+        recur_until: recurrence && values.recur_until ? values.recur_until.toISOString() : null,
       }
       if (editing) return maintenanceWindowsApi.update(editing.id, payload)
       return maintenanceWindowsApi.create(payload)
@@ -1508,8 +1515,28 @@ function MaintenanceWindowsTab() {
       time_range: [dayjs(w.start_time), dayjs(w.end_time)],
       applies_to_all: w.applies_to_all,
       device_ids: w.device_ids,
+      recurrence: w.recurrence,
+      recur_days_of_week: w.recur_days_of_week,
+      recur_day_of_month: w.recur_day_of_month,
+      recur_count_max: w.recur_count_max,
+      recur_until: w.recur_until ? dayjs(w.recur_until) : null,
     })
     setModalOpen(true)
+  }
+
+  // T9 Tur 6A — turkce gun adları (Pazartesi=0)
+  const DAY_LABELS_SHORT = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
+  const DAY_LABELS_LONG = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar']
+
+  function recurrenceLabel(w: MaintenanceWindow): string {
+    if (!w.recurrence) return ''
+    if (w.recurrence === 'daily') return 'Her gün'
+    if (w.recurrence === 'weekly') {
+      const days = (w.recur_days_of_week || []).map((d) => DAY_LABELS_SHORT[d]).join('/')
+      return `Haftalık: ${days}`
+    }
+    if (w.recurrence === 'monthly') return `Aylık (ayın ${w.recur_day_of_month}.)`
+    return w.recurrence
   }
 
   const columns = [
@@ -1521,6 +1548,11 @@ function MaintenanceWindowsTab() {
             ? <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f97316', display: 'inline-block' }} />
             : <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#475569', display: 'inline-block' }} />}
           <strong>{v}</strong>
+          {r.is_recurrence_template && (
+            <Tag color="purple" style={{ fontSize: 10 }}>
+              {recurrenceLabel(r)} · {r.recur_instances_spawned} örnek
+            </Tag>
+          )}
           {r.description && <Text type="secondary" style={{ fontSize: 12 }}>{r.description}</Text>}
         </Space>
       ),
@@ -1642,6 +1674,83 @@ function MaintenanceWindowsTab() {
               </Form.Item>
             )}
           </Form.Item>
+
+          {/* T9 Tur 6A — Cyclic recurrence (only editable on templates) */}
+          {(!editing || !editing.parent_window_id) && (
+            <>
+              <Divider orientation="left" plain style={{ fontSize: 12, marginTop: 8, marginBottom: 8 }}>
+                Tekrar (opsiyonel)
+              </Divider>
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 10, fontSize: 12 }}
+                message="Tekrar tanımlarsanız ileriki 14 gün için otomatik örnek pencereler oluşturulur."
+                description="Tarih/saat aralığı bir 'şablon' olur; örnek pencereler her tekrarda aynı süreyi kullanır."
+              />
+              <Form.Item label="Tekrar" name="recurrence">
+                <Select
+                  allowClear
+                  placeholder="Tek seferlik (tekrar yok)"
+                  options={[
+                    { value: 'daily', label: 'Her gün' },
+                    { value: 'weekly', label: 'Haftalık (seçili günler)' },
+                    { value: 'monthly', label: 'Aylık (seçili gün)' },
+                  ]}
+                />
+              </Form.Item>
+              <Form.Item
+                noStyle
+                shouldUpdate={(prev, cur) => prev.recurrence !== cur.recurrence}
+              >
+                {({ getFieldValue }) => {
+                  const rec = getFieldValue('recurrence')
+                  return (
+                    <>
+                      {rec === 'weekly' && (
+                        <Form.Item
+                          label="Hangi günler"
+                          name="recur_days_of_week"
+                          rules={[{ required: true, message: 'En az bir gün seçin' }]}
+                        >
+                          <Checkbox.Group>
+                            <Space wrap>
+                              {DAY_LABELS_LONG.map((label, i) => (
+                                <Checkbox key={i} value={i}>{label}</Checkbox>
+                              ))}
+                            </Space>
+                          </Checkbox.Group>
+                        </Form.Item>
+                      )}
+                      {rec === 'monthly' && (
+                        <Form.Item
+                          label="Ayın hangi günü (1-28)"
+                          name="recur_day_of_month"
+                          rules={[{ required: true, type: 'number', min: 1, max: 28 }]}
+                        >
+                          <InputNumber min={1} max={28} style={{ width: 120 }} />
+                        </Form.Item>
+                      )}
+                      {rec && (
+                        <Row gutter={12}>
+                          <Col span={12}>
+                            <Form.Item label="Bitiş tarihi (ops.)" name="recur_until">
+                              <DatePicker style={{ width: '100%' }} format="DD.MM.YYYY" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={12}>
+                            <Form.Item label="Maks. örnek sayısı (ops.)" name="recur_count_max">
+                              <InputNumber min={1} max={1000} style={{ width: '100%' }} placeholder="sınırsız" />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      )}
+                    </>
+                  )
+                }}
+              </Form.Item>
+            </>
+          )}
         </Form>
       </Modal>
     </div>
