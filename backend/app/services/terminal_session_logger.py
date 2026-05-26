@@ -144,23 +144,68 @@ class TerminalSessionLogger:
         return logger
 
     def log_input(self, data: bytes) -> None:
-        """Browser → device input. Sync; sadece in-memory buffer."""
+        """Browser → device input. Sync; sadece in-memory buffer.
+
+        T9 Tur 3A fix: byte-byte tarama. Önceki versiyon raw byte'ı buffer'a
+        append edip CR/LF'te split ediyordu; ama interactive shell'de
+        backspace (0x08/0x7f), Ctrl-C (0x03), ok tuşları ve ESC sequence'leri
+        buffer'da birikip 'lls --llaann' gibi tekrarlanmış komutlar üretiyordu.
+        Şimdi:
+          - printable ASCII (0x20-0x7e) buffer'a eklenir
+          - backspace/DEL son karakteri kaldırır (gerçek shell davranışı)
+          - Ctrl-C / Ctrl-U buffer'ı sıfırlar
+          - ESC sequence'leri (ok tuşları vs.) tamamen yok sayılır
+          - CR/LF komut commit'i tetikler
+        """
         if self._closed or not data:
             return
         self._input_bytes += len(data)
-        # Komut çıkarma için buffer'a ekle
-        self._input_buf += data
-        # Newline'larda komutları çıkar
-        parts = _LINE_BREAK_RE.split(self._input_buf)
-        if len(parts) > 1:
-            # Son parça yarım komut — buffer'da tut
-            self._input_buf = parts[-1]
-            for raw in parts[:-1]:
-                cmd = self._clean_command(raw)
-                if cmd:
-                    self._append_command(cmd)
-        # Komut buffer'ı çok uzarsa truncate (vim, less gibi tam-ekran
-        # uygulamalarda her tuş bir 'input' olur ama newline gelmez)
+
+        i = 0
+        n = len(data)
+        while i < n:
+            ch = data[i]
+            # ESC dizisi atla — '\x1b[<...>' tipinde 2-3 byte tipik
+            if ch == 0x1b:
+                i += 1
+                # CSI parametre + final
+                if i < n and data[i] == 0x5b:  # '['
+                    i += 1
+                    while i < n and not (0x40 <= data[i] <= 0x7e):
+                        i += 1
+                i += 1
+                continue
+            if ch in (0x0a, 0x0d):  # \n, \r — commit
+                if self._input_buf:
+                    cmd = self._clean_command(self._input_buf)
+                    if cmd:
+                        self._append_command(cmd)
+                    self._input_buf = b""
+                i += 1
+                continue
+            if ch in (0x08, 0x7f):  # backspace, DEL
+                if self._input_buf:
+                    self._input_buf = self._input_buf[:-1]
+                i += 1
+                continue
+            if ch in (0x03, 0x15):  # Ctrl-C, Ctrl-U — clear line
+                self._input_buf = b""
+                i += 1
+                continue
+            if 0x20 <= ch <= 0x7e:  # printable ASCII
+                self._input_buf += bytes([ch])
+                i += 1
+                continue
+            # UTF-8 high bytes (Türkçe karakter vs.) — keep
+            if ch >= 0x80:
+                self._input_buf += bytes([ch])
+                i += 1
+                continue
+            # Diğer kontrol karakterleri (TAB vb.) yoksay
+            i += 1
+
+        # Komut buffer'ı çok uzarsa truncate (vim, less, ssh-into-ssh
+        # senaryolarında newline gelmeyebilir)
         if len(self._input_buf) > 4096:
             self._input_buf = self._input_buf[-2048:]
 

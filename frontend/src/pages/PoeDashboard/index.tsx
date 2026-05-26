@@ -146,7 +146,7 @@ export default function PoeDashboardPage() {
   const snapshotMut = useMutation({
     mutationFn: () => poeApi.snapshotNow(),
     onSuccess: () => {
-      message.success('Snapshot kuyruğa alındı — birkaç saniye sonra sonuç gelir', 5)
+      message.success('Veri çekme kuyruğa alındı — birkaç saniye sonra sonuç gelir', 5)
       // 5s sonra otomatik yenile — worker'ın çoğunlukla bitmesi için makul bir gecikme.
       setTimeout(() => refetch(), 5000)
     },
@@ -250,7 +250,7 @@ export default function PoeDashboardPage() {
             loading={snapshotMut.isPending}
             onClick={() => snapshotMut.mutate()}
           >
-            Şimdi Snapshot
+            Veri Çek (Anlık)
           </Button>
           <Button icon={<ReloadOutlined />} onClick={() => { refetch(); message.info('Yenilendi') }}>
             Yenile
