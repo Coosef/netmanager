@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, port_control, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, system_settings, tasks, terminal_sessions, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_builder, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, port_control, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, system_settings, tasks, terminal_sessions, topology, topology_twin, users, ws
 
 api_router = APIRouter()
 
@@ -36,6 +36,7 @@ api_router.include_router(maintenance_windows.router, prefix="/maintenance-windo
 api_router.include_router(credential_profiles.router, prefix="/credential-profiles", tags=["Credential Profiles"])
 api_router.include_router(config_templates.router, prefix="/config-templates", tags=["Config Templates"])
 api_router.include_router(change_rollouts.router, prefix="/change-rollouts", tags=["Change Rollouts"])
+api_router.include_router(config_builder.router, prefix="/config-builder", tags=["Config Builder"])
 api_router.include_router(sla.router, prefix="/sla", tags=["SLA"])
 api_router.include_router(synthetic.router, prefix="/synthetic-probes", tags=["Synthetic Probes"])
 api_router.include_router(incidents.router, prefix="/incidents", tags=["Incidents"])
