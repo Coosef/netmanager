@@ -2,7 +2,7 @@
 // 3-pane layout: zones (left) → subnets (middle) → subnet detail (right).
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Alert, App, Button, Card, Col, Drawer, Empty, Form, Input,
+  Alert, App, AutoComplete, Button, Card, Col, Drawer, Empty, Form, Input,
   InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Switch,
   Table, Tag, Tooltip, Typography,
 } from 'antd'
@@ -47,6 +47,17 @@ function ZoneFormModal({
   const { data: zones = [] } = useQuery({
     queryKey: ['ipam-zones'], queryFn: ipamApi.listZones,
   })
+  // Kullanıcının erişim hakkı olan lokasyonlar — Ad önerisi olarak
+  // doldururlar; operatör isterse listede olmayan custom ad da yazabilir.
+  const { data: myLocations = [] } = useQuery({
+    queryKey: ['my-locations-for-zone'],
+    queryFn: () => import('@/api/users').then(m => m.usersApi.getMyLocations()),
+  })
+  // Org-wide kullanıcı (super_admin / org_admin) için tüm lokasyonlar
+  const { data: allLocs } = useQuery({
+    queryKey: ['locations-for-zone'],
+    queryFn: () => import('@/api/locations').then(m => m.locationsApi.list()),
+  })
 
   useEffect(() => {
     if (open) {
@@ -67,6 +78,22 @@ function ZoneFormModal({
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata', 6),
   })
 
+  // T9 follow-up — birleşik lokasyon önerisi (auto-suggest).
+  // Org-wide kullanıcı için tüm lokasyonlar; location-scoped için yalnız
+  // kendi atandığı lokasyonlar listelenir. Listede olmayan custom ad
+  // serbest yazılabilir (AutoComplete free-text destekler).
+  const allLocsList = (allLocs as any)?.items as { id: number; name: string }[] | undefined
+  const locSource = allLocsList && allLocsList.length > 0
+    ? allLocsList
+    : (myLocations as any[]).map((l) => ({ id: l.location_id, name: l.location_name }))
+  const locOptions = (locSource || []).map((l) => ({ value: l.name }))
+  // Ad alanı için lokasyon ID seçimini de yapalım — operatör listeden
+  // seçince location_id otomatik form'a düşer.
+  const onNamePicked = (val: string) => {
+    const match = (locSource || []).find((l) => l.name === val)
+    if (match) form.setFieldValue('location_id', match.id)
+  }
+
   return (
     <Modal
       open={open}
@@ -77,8 +104,28 @@ function ZoneFormModal({
       destroyOnClose
     >
       <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)}>
-        <Form.Item name="name" label="Ad" rules={[{ required: true }]}>
-          <Input placeholder="örn. Istanbul-DC1" />
+        <Form.Item
+          name="name"
+          label="Ad"
+          rules={[{ required: true }]}
+          help="Kendi lokasyonlarınızdan birini seçin ya da elle özel bir ad yazın."
+        >
+          <AutoComplete
+            options={locOptions}
+            onSelect={onNamePicked}
+            placeholder="örn. Istanbul-DC1 (lokasyon seç ya da elle yaz)"
+            filterOption={(input, opt) =>
+              String(opt?.value ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            allowClear
+          />
+        </Form.Item>
+        <Form.Item name="location_id" label="Bağlı Lokasyon (ops.)" tooltip="Zone'u bir lokasyona bağlamak isterseniz seçin">
+          <Select
+            allowClear
+            placeholder="Bağımsız zone — herhangi bir lokasyona bağlı değil"
+            options={(locSource || []).map((l) => ({ value: l.id, label: l.name }))}
+          />
         </Form.Item>
         <Form.Item name="zone_type" label="Tür" initialValue="site">
           <Select

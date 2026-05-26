@@ -39,15 +39,8 @@ async def _run():
     from app.models.device import Device
     from app.models.poe_port_snapshot import PoEPortSnapshot
     from app.services import snmp_service
-    from app.services.ssh_manager import ssh_manager
-    from app.services.topology_service import (
-        EXTENDED_COMMANDS, _parse_power_inline,
-    )
-
-    # SSH fallback is only viable for OS types that have a parsed
-    # `show power inline` command in topology_service. SNMP works for any
-    # POWER-ETHERNET-MIB-speaking device regardless of os_type.
-    ssh_fallback_os = set(k for k, v in EXTENDED_COMMANDS.items() if "power" in v)
+    # SSH fallback DEFAULT OFF — paralel SSH 63 cihaza ağır geliyor.
+    # SNMP yeterli (POWER-ETHERNET-MIB her vendor'da destekli).
     factory = make_worker_session()
     async with factory() as db:
         with superadmin_context():
@@ -55,29 +48,33 @@ async def _run():
                 select(Device).where(Device.is_active.is_(True))
             )).scalars().all()
 
-        log.info("poe: snapshotting up to %d active devices", len(devices))
+        log.info("poe: snapshotting up to %d active devices (parallel)", len(devices))
         success_snmp = 0
-        success_ssh = 0
         failed = 0
         ports_seen = 0
 
-        for device in devices:
-            poe_rows = await _read_via_snmp(device, snmp_service)
+        # T9 follow-up: paralel SNMP probe. Sıralı yöntemle 63 cihaz × 5s = 5+
+        # dakika sürüyordu, kullanıcı 'şimdi snapshot'ı 30sn'de bekliyor.
+        # asyncio.gather ile aynı anda tüm cihazlara SNMP gönder — her biri
+        # ayrı UDP, paralel olarak.
+        snmp_results = await asyncio.gather(
+            *[_read_via_snmp(d, snmp_service) for d in devices],
+            return_exceptions=True,
+        )
+
+        # SSH fallback DEFAULT KAPALI — 63 cihaza paralel SSH oturumu
+        # açmak çok ağır, 15+ dakika sürebiliyor ve worker time_limit'e
+        # yaklaşıyor. SNMP yeterli (POWER-ETHERNET-MIB her vendor'da
+        # destekli). Bir cihaz SNMP yanıt vermiyorsa, snapshot tablosunda
+        # eksik kalır — operatör cihazın SNMP credential'ını kontrol
+        # eder. SSH yolu için ayrı bir on-demand endpoint düşünülebilir.
+        for i, device in enumerate(devices):
+            snmp_res = snmp_results[i]
+            poe_rows = snmp_res if isinstance(snmp_res, list) else []
             source = "snmp"
 
-            # SSH fallback when SNMP unavailable OR returned no rows.
-            if not poe_rows and device.os_type in ssh_fallback_os:
-                ssh_rows = await _read_via_ssh(device, ssh_manager, EXTENDED_COMMANDS, _parse_power_inline)
-                if ssh_rows:
-                    poe_rows = ssh_rows
-                    source = "ssh"
-
             if not poe_rows:
-                # Device is not PoE-capable OR unreachable on both paths.
-                # Don't churn the snapshot table either way.
-                if device.os_type in ssh_fallback_os:
-                    # PoE-capable but failed — count as failed for telemetry.
-                    failed += 1
+                failed += 1
                 continue
 
             with org_context(device.organization_id, device.location_id):
@@ -122,14 +119,11 @@ async def _run():
                 ports_seen += len(seen_ports)
 
             await db.commit()
-            if source == "snmp":
-                success_snmp += 1
-            else:
-                success_ssh += 1
+            success_snmp += 1
 
         log.info(
-            "poe: snapshot done — snmp_ok=%d ssh_ok=%d failed=%d ports=%d",
-            success_snmp, success_ssh, failed, ports_seen,
+            "poe: snapshot done — snmp_ok=%d failed=%d ports=%d",
+            success_snmp, failed, ports_seen,
         )
 
 
