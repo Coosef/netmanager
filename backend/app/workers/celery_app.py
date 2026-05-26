@@ -21,6 +21,7 @@ celery_app = Celery(
         "app.workers.tasks.rollout_tasks",
         "app.workers.tasks.behavior_analytics_tasks",
         "app.workers.tasks.retention_tasks",
+        "app.workers.tasks.port_rollback_tasks",
         "app.workers.tasks.sla_tasks",
         "app.workers.tasks.availability_tasks",
         "app.workers.tasks.correlation_tasks",

@@ -54,6 +54,7 @@ from app.models.user_session import UserSession
 from app.models.system_setting import SystemSetting
 from app.models.password_policy import PasswordPolicy
 from app.models.terminal_session_log import TerminalSessionLog
+from app.models.port_change_rollback import PortChangeRollback
 
 __all__ = [
     "User", "SystemRole",
