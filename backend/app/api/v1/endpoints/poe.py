@@ -26,6 +26,19 @@ router = APIRouter()
 STALE_AFTER = timedelta(minutes=45)
 
 
+@router.post("/snapshot-now", status_code=202)
+async def trigger_snapshot_now(_: CurrentUser = None):
+    """T9 Tur 6B follow-up — operatörden tetiklenen anlık PoE snapshot.
+
+    Beat task 15 dakikada bir çalışır; ilk kurulumda veya credential
+    değişiminde 'şimdi çek' butonu için bu endpoint kullanılır. Celery
+    task hemen kuyruğa girer; sonuç /poe/summary'de görünür.
+    """
+    from app.workers.tasks.poe_tasks import snapshot_poe_status
+    snapshot_poe_status.delay()
+    return {"queued": True, "message": "PoE snapshot kuyruğa alındı (SNMP-first, SSH fallback)."}
+
+
 @router.get("/summary")
 async def get_poe_summary(
     location_id: Optional[int] = None,

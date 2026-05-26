@@ -1,4 +1,7 @@
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -287,6 +290,55 @@ async def change_my_password(
 
 
 # ── Self profile — viewable by any authenticated user ─────────────────────────
+
+
+class _MyAllowedIpsPayload(BaseModel):
+    """T9 Tur 2 #4 follow-up — self-edit payload."""
+    allowed_ips: Optional[str] = None  # CSV "10.0.0.0/8,192.168.1.5"; "" = clear
+
+
+@router.patch("/me/login-ip")
+async def update_my_login_ip(
+    payload: _MyAllowedIpsPayload,
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """T9 Tur 2 #4 follow-up — kullanıcı kendi allowed_ips listesini günceller.
+
+    Self-lockout koruması: gelen CSV mevcut isteğin client IP'sini içermiyorsa
+    409 ile reddedilir (kullanıcı boş string göndererek allowlist'i hep
+    temizleyebilir). Strict CIDR doğrulaması admin update path'iyle aynıdır.
+    """
+    from app.services.ip_allowlist import validate_csv as _ip_validate
+    from app.services.ip_allowlist import is_allowed as _ip_allowed
+
+    raw = payload.allowed_ips
+    if raw is None or not raw.strip():
+        # Empty / null clears the allowlist — no validation needed.
+        current_user.allowed_ips = None
+    else:
+        ok, err = _ip_validate(raw)
+        if not ok:
+            raise HTTPException(status_code=400, detail=err)
+        client_ip = request.client.host if request.client else None
+        if client_ip and not _ip_allowed(client_ip, raw):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Yeni allowlist mevcut IP'nizi ({client_ip}) içermiyor — "
+                    f"kaydedilseydi bu oturumdan sonra giremezdiniz. "
+                    f"IP'nizi ekleyin veya listeyi boş bırakın."
+                ),
+            )
+        current_user.allowed_ips = raw
+
+    await db.commit()
+    await log_action(
+        db, current_user, "user_allowed_ips_self_updated",
+        "user", current_user.id, current_user.username, request=request,
+    )
+    return {"allowed_ips": current_user.allowed_ips}
 
 
 @router.get("/me/login-ip")

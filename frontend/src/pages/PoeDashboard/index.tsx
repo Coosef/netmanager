@@ -4,9 +4,9 @@ import {
 } from 'antd'
 import {
   ApiOutlined, BulbOutlined, ClockCircleOutlined, PoweroffOutlined,
-  ReloadOutlined, ThunderboltOutlined, WarningOutlined,
+  ReloadOutlined, SyncOutlined, ThunderboltOutlined, WarningOutlined,
 } from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { poeApi, type PoeDeviceRow, type PoePort } from '@/api/poe'
 import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
@@ -143,6 +143,16 @@ export default function PoeDashboardPage() {
     refetchInterval: 60_000,
   })
 
+  const snapshotMut = useMutation({
+    mutationFn: () => poeApi.snapshotNow(),
+    onSuccess: () => {
+      message.success('Snapshot kuyruğa alındı — birkaç saniye sonra sonuç gelir', 5)
+      // 5s sonra otomatik yenile — worker'ın çoğunlukla bitmesi için makul bir gecikme.
+      setTimeout(() => refetch(), 5000)
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Tetiklenemedi', 5),
+  })
+
   const totalWatts = data?.summary.total_power_watts ?? 0
   const totalActive = data?.summary.active_ports ?? 0
   const totalPorts = data?.summary.total_ports ?? 0
@@ -233,9 +243,19 @@ export default function PoeDashboardPage() {
             Eski snapshot'lar turuncu rozetli; periyot içinde ulaşılamayan cihazlar.
           </div>
         </div>
-        <Button icon={<ReloadOutlined />} onClick={() => { refetch(); message.info('Yenilendi') }}>
-          Yenile
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<SyncOutlined />}
+            loading={snapshotMut.isPending}
+            onClick={() => snapshotMut.mutate()}
+          >
+            Şimdi Snapshot
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={() => { refetch(); message.info('Yenilendi') }}>
+            Yenile
+          </Button>
+        </Space>
       </div>
 
       {data && data.summary.stale_devices > 0 && (
