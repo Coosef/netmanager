@@ -6,7 +6,7 @@ import {
   Tag, Tooltip, Drawer, Alert, Radio,
 } from 'antd'
 import {
-  PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined,
+  PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined, InboxOutlined,
   EyeOutlined, ReloadOutlined, KeyOutlined, CheckCircleFilled,
   CloseCircleFilled, QuestionCircleFilled, ExclamationCircleFilled,
   SaveOutlined, RobotOutlined, SyncOutlined, TagOutlined, InfoCircleOutlined,
@@ -67,13 +67,31 @@ const DEVICE_TYPE_COLOR: Record<string, string> = {
   ap: 'purple', ups: 'gold', server: 'cyan', other: 'default',
 }
 
-function DeviceCard({ device, isDark, onDetail, onEdit, onTest, onDelete, utilization }: {
+// T9 Tur 4 #7+#14 — Lifecycle state badge yardımcısı
+const LIFECYCLE_CONFIG: Record<string, { label: string; color: string }> = {
+  production: { label: 'Üretim',  color: '#16a34a' },
+  passive:    { label: 'Pasif',   color: '#94a3b8' },
+  stock:      { label: 'Stok',    color: '#0ea5e9' },
+  archived:   { label: 'Arşiv',   color: '#64748b' },
+}
+
+function LifecycleBadge({ status }: { status?: string }) {
+  const cfg = LIFECYCLE_CONFIG[status || 'production'] || LIFECYCLE_CONFIG.production
+  return (
+    <Tag color={cfg.color} style={{ fontSize: 10, lineHeight: '16px', padding: '0 6px', borderColor: 'transparent' }}>
+      {cfg.label}
+    </Tag>
+  )
+}
+
+function DeviceCard({ device, isDark, onDetail, onEdit, onTest, onDelete, onArchive, utilization }: {
   device: Device
   isDark: boolean
   onDetail: () => void
   onEdit: () => void
   onTest: () => void
   onDelete: () => void
+  onArchive: () => void
   utilization?: { maxPct: number; inPct: number; outPct: number }
 }) {
   const accent = VENDOR_HEX[device.vendor?.toLowerCase() ?? ''] ?? VENDOR_HEX.other
@@ -137,6 +155,10 @@ function DeviceCard({ device, isDark, onDetail, onEdit, onTest, onDelete, utiliz
             <span style={{ color: textColor, fontWeight: 700, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {device.hostname}
             </span>
+            {/* T9 Tur 4 — Lifecycle badge */}
+            {device.lifecycle_status && device.lifecycle_status !== 'production' && (
+              <LifecycleBadge status={device.lifecycle_status} />
+            )}
           </div>
           {device.alias && (
             <div style={{ color: mutedColor, fontSize: 11, marginLeft: 14 }}>{device.alias}</div>
@@ -229,6 +251,20 @@ function DeviceCard({ device, isDark, onDetail, onEdit, onTest, onDelete, utiliz
         <Tooltip title="Detay"><Button size="small" type="text" icon={<EyeOutlined />} onClick={onDetail} /></Tooltip>
         <Tooltip title="Bağlantı Test"><Button size="small" type="text" icon={<ThunderboltOutlined style={{ color: '#faad14' }} />} onClick={onTest} /></Tooltip>
         <Tooltip title="Düzenle"><Button size="small" type="text" icon={<EditOutlined style={{ color: '#1677ff' }} />} onClick={onEdit} /></Tooltip>
+        {/* T9 Tur 4 — Arşive Al (archived state'ine geçirir; super_admin geri açar) */}
+        {device.lifecycle_status !== 'archived' && (
+          <Popconfirm
+            title="Arşive al"
+            description="Cihaz arşive taşınır (geri yükleme yalnız super_admin). Devam edilsin mi?"
+            onConfirm={onArchive}
+            okButtonProps={{ danger: false }}
+            okText="Arşive Al" cancelText="İptal"
+          >
+            <Tooltip title="Arşive Al">
+              <Button size="small" type="text" icon={<InboxOutlined style={{ color: '#64748b' }} />} />
+            </Tooltip>
+          </Popconfirm>
+        )}
         <Popconfirm title="Cihaz silinsin mi?" onConfirm={onDelete} okButtonProps={{ danger: true }}>
           <Button size="small" type="text" icon={<DeleteOutlined style={{ color: '#f5222d' }} />} />
         </Popconfirm>
@@ -674,6 +710,18 @@ export default function DevicesPage() {
     onError: (err: any) => message.error(apiErr(err, t('devices.delete_error'))),
   })
 
+  // T9 Tur 4 #7+#14 — Lifecycle state transition (archived dahil)
+  const lifecycleMutation = useMutation({
+    mutationFn: ({ id, state, reason }: { id: number; state: string; reason?: string }) =>
+      devicesApi.updateLifecycle(id, state, reason),
+    onSuccess: (d) => {
+      message.success(`${d.hostname}: ${LIFECYCLE_CONFIG[d.lifecycle_status || 'production']?.label || d.lifecycle_status}`)
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+      queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+    },
+    onError: (err: any) => message.error(apiErr(err, 'Yaşam döngüsü değiştirilemedi')),
+  })
+
   const bulkDeleteMutation = useMutation({
     mutationFn: devicesApi.bulkDelete,
     onSuccess: () => {
@@ -928,6 +976,7 @@ export default function DevicesPage() {
               onEdit={() => { setEditDevice(device); setDrawerOpen(true) }}
               onTest={() => testMutation.mutate(device.id)}
               onDelete={() => deleteMutation.mutate(device.id)}
+              onArchive={() => lifecycleMutation.mutate({ id: device.id, state: 'archived' })}
               utilization={utilizationMap.get(device.id)}
             />
           ))}

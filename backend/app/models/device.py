@@ -67,6 +67,18 @@ class DeviceStatus(str, Enum):
     UNREACHABLE = "unreachable"
 
 
+class DeviceLifecycleStatus(str, Enum):
+    """T9 Tur 4 #7+#14 — Envanter yaşam döngüsü durumu.
+
+    DeviceStatus (online/offline) real-time erişilebilirlik; bu ise
+    operasyonel/envanter durumu. State transition kuralları
+    services/device_lifecycle_service.py içinde."""
+    PRODUCTION = "production"  # Aktif kullanımda
+    PASSIVE = "passive"        # Geçici devre dışı ama envanterde
+    STOCK = "stock"            # Depoda, henüz kullanılmamış
+    ARCHIVED = "archived"      # Devreden çıkmış (geri yükleme super_admin)
+
+
 class DeviceGroup(Base):
     __tablename__ = "device_groups"
 
@@ -146,6 +158,11 @@ class Device(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_readonly: Mapped[bool] = mapped_column(Boolean, default=True)  # blocks non-show CLI commands
     approval_required: Mapped[bool] = mapped_column(Boolean, default=False)  # config changes need admin approval
+    # T9 Tur 4 #7+#14 — Yaşam döngüsü durumu (envanter). DeviceStatus
+    # online/offline'dan bağımsız. Default production (yeni cihaz aktif).
+    lifecycle_status: Mapped[str] = mapped_column(
+        String(16), default=DeviceLifecycleStatus.PRODUCTION, nullable=False,
+    )
 
     # Availability scoring — computed daily by availability_tasks.compute_availability_scores
     availability_24h:  Mapped[Optional[float]] = mapped_column(Float, nullable=True, default=None)

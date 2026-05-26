@@ -187,6 +187,13 @@ export const devicesApi = {
     return final
   },
 
+  // T9 Tur 4 #7+#14 — Lifecycle state transition
+  updateLifecycle: (id: number, new_state: string, reason?: string) =>
+    client.patch<Device>(
+      `/devices/${id}/lifecycle`,
+      { new_state, ...(reason ? { reason } : {}) },
+    ).then((r) => r.data),
+
   createVlan: (id: number, vlan_id: number, name: string) =>
     client.post<{ success: boolean; error?: string }>(
       `/devices/${id}/vlans`, { vlan_id, name }
