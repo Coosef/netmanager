@@ -543,20 +543,42 @@ async def ssh_terminal_ws(
         return
 
     channel = await loop.run_in_executor(None, lambda: ssh_client.invoke_shell(term="xterm-256color", width=cols, height=rows))
-    channel.settimeout(0.05)
+    # Aggressive non-blocking — 0 timeout + recv_ready loop. Eski 0.05s
+    # timeout her keystroke için 50ms latency ekliyordu; bu özellikle
+    # 'show running-config' gibi büyük çıktılarda 'takılma' hissi yarattı.
+    channel.setblocking(False)
     await websocket.send_text("\r\nConnected.\r\n")
 
     stop_event = asyncio.Event()
 
+    def _drain_channel(ch, max_total: int = 65536) -> bytes:
+        """Non-blocking: ch.recv_ready ise sırayla read; max_total'a kadar
+        biriktir. Tek round-trip'te birden çok küçük chunk gelirse hepsini
+        birleştirir — frontend tek bir term.write() çağırır, akıcılık artar."""
+        out = bytearray()
+        try:
+            while ch.recv_ready() and len(out) < max_total:
+                chunk = ch.recv(min(16384, max_total - len(out)))
+                if not chunk:
+                    break
+                out.extend(chunk)
+        except Exception:
+            pass
+        return bytes(out)
+
     async def read_from_ssh():
-        """Forward SSH output to WebSocket."""
+        """Forward SSH output to WebSocket — aggressively drained."""
         while not stop_event.is_set():
             try:
-                data = await loop.run_in_executor(None, channel.recv, 4096)
-                if not data:
+                data = await loop.run_in_executor(None, _drain_channel, channel)
+                if data:
+                    _term_logger.log_output(data)
+                    await websocket.send_bytes(data)
+                elif channel.exit_status_ready() and not channel.recv_ready():
                     break
-                _term_logger.log_output(data)  # T9 Tur 3A audit
-                await websocket.send_bytes(data)
+                else:
+                    # Hiç veri yoksa 10ms uyu — 0.05s'den 5× daha hızlı.
+                    await asyncio.sleep(0.01)
             except Exception:
                 await asyncio.sleep(0.05)
         stop_event.set()
