@@ -1377,14 +1377,15 @@ async def agent_websocket(
                     "has_snmp": msg.get("has_snmp", False),
                     "has_crypto": msg.get("has_crypto", False),
                 })
-                # T8.5 — Hello persist explicit UPDATE.
-                # Eskiden ORM attribute set + db.commit() yapıyorduk; sessizce
-                # fail oluyordu (DB'de agent.version 1.3.16'da kalıyordu,
-                # canlı agentlar v1.4.0 hello attığı halde). Muhtemel sebep:
-                # bu WS task'ının uzun ömürlü transaction'ında SQLAlchemy
-                # change-tracking heartbeat update'lerden sonra dirty flag'i
-                # düşürüyor. Explicit UPDATE SQL + log ile değişiklikleri
-                # garanti ediyoruz.
+                # T8.5 — Hello persist explicit UPDATE + RLS GUC reset.
+                # İlk denemede explicit UPDATE eklemiştik ama DB hala 1.3.16
+                # gözüküyordu. Sebep: agents tablosunda Faz 7 RLS aktif;
+                # `is_local := true` GUC'lar önceki transaction commit'iyle
+                # sıfırlanıyordu → UPDATE WITH CHECK policy 0 row affected
+                # üretiyordu (exception YOK, satır SILENTLY filtered).
+                # Şimdi UPDATE'ten önce GUC'ları yeni transaction'a enjekte
+                # ediyoruz + rowcount'u log'luyoruz ki silent fail görünür
+                # olsun.
                 from sqlalchemy import update as _sa_update
                 _hello_vals = {
                     "platform": msg.get("platform"),
@@ -1395,16 +1396,26 @@ async def agent_websocket(
                     _hello_vals["local_ip"] = msg.get("local_ip")
                 _agent_logger = logging.getLogger("agent_manager")
                 try:
-                    await db.execute(
+                    # RLS GUC reset — commit sonrası kaybolan transaction-local
+                    # ayarları yeniden uygula. is_super_admin=off + agent'ın
+                    # kendi org_id/location_id'si ile WITH CHECK match eder.
+                    await db.execute(_sql_text(
+                        "SELECT set_config('app.is_super_admin','off',true),"
+                        "       set_config('app.current_org_id', :o, true),"
+                        "       set_config('app.current_location_id', :l, true)"
+                    ), {"o": str(agent.organization_id),
+                        "l": str(agent.location_id) if agent.location_id is not None else ''})
+                    _res = await db.execute(
                         _sa_update(Agent).where(Agent.id == agent_id).values(**_hello_vals)
                     )
                     await db.commit()
-                    # ORM in-memory state'i de sync et (sonraki agent.* okumalar tutar)
+                    # ORM in-memory state'i de sync et
                     for _k, _v in _hello_vals.items():
                         setattr(agent, _k, _v)
                     _agent_logger.info(
-                        "hello persist OK: agent=%s ver=%s platform=%s",
-                        agent_id, _hello_vals.get("version"), _hello_vals.get("platform"),
+                        "hello persist: agent=%s ver=%s platform=%s rows_affected=%s",
+                        agent_id, _hello_vals.get("version"),
+                        _hello_vals.get("platform"), _res.rowcount,
                     )
                 except Exception as _exc:
                     await db.rollback()
