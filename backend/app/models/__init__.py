@@ -15,7 +15,7 @@ from app.models.playbook import Playbook, PlaybookRun
 from app.models.approval import ApprovalRequest
 from app.models.notification import NotificationChannel, NotificationLog
 from app.models.mac_arp import MacAddressEntry, ArpEntry
-from app.models.ipam import IpamSubnet, IpamAddress
+# T9 Tur 7 — IPAM rebuild: see consolidated import below.
 from app.models.security_audit import SecurityAudit
 from app.models.asset_lifecycle import AssetLifecycle
 from app.models.snmp_metric import SnmpPollResult
@@ -56,6 +56,7 @@ from app.models.password_policy import PasswordPolicy
 from app.models.terminal_session_log import TerminalSessionLog
 from app.models.port_change_rollback import PortChangeRollback
 from app.models.poe_port_snapshot import PoEPortSnapshot
+from app.models.ipam import IpamZone, IpamSubnet, IpamAssignment
 
 __all__ = [
     "User", "SystemRole",
@@ -108,4 +109,5 @@ __all__ = [
     "AgentPeerLatency",
     "EscalationRule", "EscalationNotificationLog",
     "PoEPortSnapshot",
+    "IpamZone", "IpamSubnet", "IpamAssignment",
 ]

@@ -1,543 +1,523 @@
-"""IPAM — IP Address Management endpoints."""
-import asyncio
-import ipaddress
+"""T9 Tur 7 — IPAM endpoints (enterprise rebuild).
+
+Surfaces:
+  /ipam/zones                         list + CRUD
+  /ipam/subnets                       list + CRUD (utilization, overlap check)
+  /ipam/subnets/{id}                  detail (with utilization stats)
+  /ipam/subnets/{id}/assignments      list + create-assignment
+  /ipam/subnets/{id}/free-ips         suggest N free IPs
+  /ipam/subnets/{id}/overlap          conflict check before save
+  /ipam/assignments/{id}              update/delete
+  /ipam/lookup?ip=                    find subnet + assignment for an IP
+  /ipam/summary                       org-wide utilization breakdown
+"""
+from __future__ import annotations
+
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from pydantic import BaseModel
-from sqlalchemy import func, select, delete as _del
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
-from app.models.ipam import IpamAddress, IpamSubnet
-from app.models.mac_arp import ArpEntry, MacAddressEntry
+from app.core.org_context import get_current_org_id
+from app.models.ipam import IpamAssignment, IpamSubnet, IpamZone
+from app.services import ipam_service
 from app.services.audit_service import log_action
 
 router = APIRouter()
 
 
-# ── Schemas ──────────────────────────────────────────────────────────────────
+# ─── Pydantic ───────────────────────────────────────────────────────────────
 
-class SubnetCreate(BaseModel):
-    network: str
+class ZoneIn(BaseModel):
+    name: str
+    description: Optional[str] = None
+    zone_type: str = "site"
+    parent_zone_id: Optional[int] = None
+    location_id: Optional[int] = None
+
+
+class ZoneUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
-    vlan_id: Optional[int] = None
-    site: Optional[str] = None
+    zone_type: Optional[str] = None
+    parent_zone_id: Optional[int] = None
+    location_id: Optional[int] = None
+
+
+class SubnetIn(BaseModel):
+    zone_id: int
+    cidr: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    vlan_id: Optional[int] = Field(default=None, ge=1, le=4094)
     gateway: Optional[str] = None
-    dns_servers: Optional[str] = None
+    dhcp_enabled: bool = False
+    dhcp_server: Optional[str] = None
+    dhcp_range_start: Optional[str] = None
+    dhcp_range_end: Optional[str] = None
+    dns_servers: Optional[list[str]] = None
+    parent_subnet_id: Optional[int] = None
+    utilization_warn_pct: int = 80
+    location_id: Optional[int] = None
 
 
 class SubnetUpdate(BaseModel):
+    zone_id: Optional[int] = None
     name: Optional[str] = None
     description: Optional[str] = None
-    vlan_id: Optional[int] = None
-    site: Optional[str] = None
+    vlan_id: Optional[int] = Field(default=None, ge=1, le=4094)
     gateway: Optional[str] = None
-    dns_servers: Optional[str] = None
-    is_active: Optional[bool] = None
+    dhcp_enabled: Optional[bool] = None
+    dhcp_server: Optional[str] = None
+    dhcp_range_start: Optional[str] = None
+    dhcp_range_end: Optional[str] = None
+    dns_servers: Optional[list[str]] = None
+    parent_subnet_id: Optional[int] = None
+    utilization_warn_pct: Optional[int] = Field(default=None, ge=1, le=100)
+    location_id: Optional[int] = None
 
 
-class AddressCreate(BaseModel):
+class AssignmentIn(BaseModel):
     ip_address: str
-    mac_address: Optional[str] = None
     hostname: Optional[str] = None
-    description: Optional[str] = None
-    status: str = "static"  # static | reserved
-
-
-class AddressUpdate(BaseModel):
     mac_address: Optional[str] = None
-    hostname: Optional[str] = None
     description: Optional[str] = None
-    status: Optional[str] = None
+    type: str = "static"
+    device_id: Optional[int] = None
+    interface: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
-def _subnet_stats(network: str, used: int, reserved: int, total_hosts: int) -> dict:
-    free = max(0, total_hosts - used - reserved)
-    pct = round((used + reserved) / total_hosts * 100, 1) if total_hosts else 0
-    return {"total_hosts": total_hosts, "used": used, "reserved": reserved, "free": free, "utilization_pct": pct}
-
-
-def _net_total_hosts(network: str) -> int:
-    try:
-        net = ipaddress.ip_network(network, strict=False)
-        hosts = net.num_addresses - 2  # exclude network + broadcast for /prefix < 31
-        return max(1, hosts)
-    except Exception:
-        return 0
+class AssignmentUpdate(BaseModel):
+    hostname: Optional[str] = None
+    mac_address: Optional[str] = None
+    description: Optional[str] = None
+    type: Optional[str] = None
+    device_id: Optional[int] = None
+    interface: Optional[str] = None
+    expires_at: Optional[datetime] = None
 
 
-# ── Subnet CRUD ───────────────────────────────────────────────────────────────
+# ─── Serializers ────────────────────────────────────────────────────────────
 
-@router.get("/subnets", response_model=dict)
+def _zone(z: IpamZone) -> dict:
+    return {
+        "id": z.id, "name": z.name, "description": z.description,
+        "zone_type": z.zone_type, "parent_zone_id": z.parent_zone_id,
+        "location_id": z.location_id,
+        "created_at": z.created_at.isoformat() if z.created_at else None,
+        "updated_at": z.updated_at.isoformat() if z.updated_at else None,
+        "deleted_at": z.deleted_at.isoformat() if z.deleted_at else None,
+    }
+
+
+def _subnet(s: IpamSubnet, *, util: dict | None = None) -> dict:
+    return {
+        "id": s.id, "zone_id": s.zone_id, "cidr": str(s.cidr),
+        "name": s.name, "description": s.description, "vlan_id": s.vlan_id,
+        "gateway": str(s.gateway) if s.gateway else None,
+        "dhcp_enabled": s.dhcp_enabled,
+        "dhcp_server": str(s.dhcp_server) if s.dhcp_server else None,
+        "dhcp_range_start": str(s.dhcp_range_start) if s.dhcp_range_start else None,
+        "dhcp_range_end": str(s.dhcp_range_end) if s.dhcp_range_end else None,
+        "dns_servers": s.dns_servers or [],
+        "parent_subnet_id": s.parent_subnet_id,
+        "utilization_warn_pct": s.utilization_warn_pct,
+        "site_hint": s.site_hint,
+        "location_id": s.location_id,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+        "deleted_at": s.deleted_at.isoformat() if s.deleted_at else None,
+        "utilization": util,
+    }
+
+
+def _assignment(a: IpamAssignment) -> dict:
+    return {
+        "id": a.id, "subnet_id": a.subnet_id, "ip_address": str(a.ip_address),
+        "hostname": a.hostname, "mac_address": a.mac_address,
+        "description": a.description, "type": a.type, "source": a.source,
+        "device_id": a.device_id, "interface": a.interface,
+        "expires_at": a.expires_at.isoformat() if a.expires_at else None,
+        "last_seen_at": a.last_seen_at.isoformat() if a.last_seen_at else None,
+        "location_id": a.location_id,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+        "updated_at": a.updated_at.isoformat() if a.updated_at else None,
+    }
+
+
+# ─── Helpers ────────────────────────────────────────────────────────────────
+
+async def _get_subnet_or_404(db: AsyncSession, subnet_id: int) -> IpamSubnet:
+    s = (await db.execute(
+        select(IpamSubnet).where(
+            IpamSubnet.id == subnet_id, IpamSubnet.deleted_at.is_(None),
+        )
+    )).scalar_one_or_none()
+    if s is None:
+        raise HTTPException(status_code=404, detail="Subnet bulunamadı")
+    return s
+
+
+def _require_org() -> int:
+    org = get_current_org_id()
+    if not org:
+        raise HTTPException(status_code=403, detail="Organizasyon bağlamı yok")
+    return org
+
+
+# ─── Zones ──────────────────────────────────────────────────────────────────
+
+@router.get("/zones")
+async def list_zones(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
+    rows = (await db.execute(
+        select(IpamZone).where(IpamZone.deleted_at.is_(None))
+        .order_by(IpamZone.name)
+    )).scalars().all()
+    return [_zone(z) for z in rows]
+
+
+@router.post("/zones", status_code=201)
+async def create_zone(
+    body: ZoneIn, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    z = IpamZone(
+        name=body.name, description=body.description, zone_type=body.zone_type,
+        parent_zone_id=body.parent_zone_id, location_id=body.location_id,
+        created_by=current_user.id,
+    )
+    db.add(z)
+    await db.commit()
+    await db.refresh(z)
+    await log_action(db, current_user, "ipam_zone_created", "ipam_zone", z.id, z.name, request=request)
+    return _zone(z)
+
+
+@router.patch("/zones/{zone_id}")
+async def update_zone(
+    zone_id: int, body: ZoneUpdate, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    z = (await db.execute(select(IpamZone).where(IpamZone.id == zone_id))).scalar_one_or_none()
+    if z is None:
+        raise HTTPException(status_code=404, detail="Zone bulunamadı")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(z, field, value)
+    await db.commit()
+    await db.refresh(z)
+    await log_action(db, current_user, "ipam_zone_updated", "ipam_zone", z.id, z.name, request=request)
+    return _zone(z)
+
+
+@router.delete("/zones/{zone_id}", status_code=204)
+async def delete_zone(
+    zone_id: int, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    z = (await db.execute(select(IpamZone).where(IpamZone.id == zone_id))).scalar_one_or_none()
+    if z is None:
+        raise HTTPException(status_code=404, detail="Zone bulunamadı")
+    has_sub = (await db.execute(
+        select(func.count(IpamSubnet.id)).where(
+            IpamSubnet.zone_id == zone_id, IpamSubnet.deleted_at.is_(None),
+        )
+    )).scalar_one()
+    if has_sub:
+        raise HTTPException(status_code=409, detail=f"Zone içinde {has_sub} subnet var — önce taşıyın/silin.")
+    z.deleted_at = datetime.now(timezone.utc)
+    await db.commit()
+    await log_action(db, current_user, "ipam_zone_deleted", "ipam_zone", zone_id, z.name, request=request)
+
+
+# ─── Subnets ────────────────────────────────────────────────────────────────
+
+@router.get("/subnets")
 async def list_subnets(
-    db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
-    search: Optional[str] = Query(None),
-    site: Optional[str] = Query(None),
-    vlan_id: Optional[int] = Query(None),
+    zone_id: Optional[int] = None, vlan_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db), _: CurrentUser = None,
 ):
-    query = select(IpamSubnet).where(IpamSubnet.is_active == True)
-    # Location RBAC
-    if search:
-        query = query.where(
-            IpamSubnet.network.ilike(f"%{search}%") |
-            IpamSubnet.name.ilike(f"%{search}%") |
-            IpamSubnet.description.ilike(f"%{search}%")
-        )
-    if site:
-        query = query.where(IpamSubnet.site == site)
+    q = select(IpamSubnet).where(IpamSubnet.deleted_at.is_(None))
+    if zone_id is not None:
+        q = q.where(IpamSubnet.zone_id == zone_id)
     if vlan_id is not None:
-        query = query.where(IpamSubnet.vlan_id == vlan_id)
-
-    result = await db.execute(query.order_by(IpamSubnet.network))
-    subnets = result.scalars().all()
-
-    items = []
-    for s in subnets:
-        used_r = await db.execute(
-            select(func.count()).select_from(IpamAddress).where(
-                IpamAddress.subnet_id == s.id,
-                IpamAddress.status.in_(["dynamic", "static"]),
-            )
-        )
-        reserved_r = await db.execute(
-            select(func.count()).select_from(IpamAddress).where(
-                IpamAddress.subnet_id == s.id,
-                IpamAddress.status == "reserved",
-            )
-        )
-        total_hosts = _net_total_hosts(s.network)
-        used = used_r.scalar() or 0
-        reserved = reserved_r.scalar() or 0
-        items.append({
-            "id": s.id,
-            "network": s.network,
-            "name": s.name,
-            "description": s.description,
-            "vlan_id": s.vlan_id,
-            "site": s.site,
-            "gateway": s.gateway,
-            "dns_servers": s.dns_servers,
-            "is_active": s.is_active,
-            "created_at": s.created_at.isoformat(),
-            **_subnet_stats(s.network, used, reserved, total_hosts),
-        })
-
-    return {"total": len(items), "items": items}
+        q = q.where(IpamSubnet.vlan_id == vlan_id)
+    rows = (await db.execute(q.order_by(IpamSubnet.cidr))).scalars().all()
+    out = []
+    for s in rows:
+        util = await ipam_service.compute_utilization(db, s)
+        out.append(_subnet(s, util=util))
+    return out
 
 
-@router.post("/subnets", response_model=dict, status_code=201)
+@router.post("/subnets", status_code=201)
 async def create_subnet(
-    payload: SubnetCreate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+    body: SubnetIn, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:create"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    # Validate network
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
     try:
-        ipaddress.ip_network(payload.network, strict=False)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid network: {payload.network}")
+        ipam_service.parse_cidr(body.cidr)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    existing = await db.execute(select(IpamSubnet).where(IpamSubnet.network == payload.network))
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Subnet already exists")
+    org_id = _require_org()
+    overlap = await ipam_service.find_overlapping_subnets(db, body.cidr, org_id)
+    if overlap:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bu CIDR mevcut subnet(ler) ile çakışıyor: {', '.join(str(s.cidr) for s in overlap)}",
+        )
 
-    subnet = IpamSubnet(**payload.model_dump())
-    db.add(subnet)
+    s = IpamSubnet(
+        zone_id=body.zone_id, cidr=body.cidr, name=body.name,
+        description=body.description, vlan_id=body.vlan_id,
+        gateway=body.gateway, dhcp_enabled=body.dhcp_enabled,
+        dhcp_server=body.dhcp_server, dhcp_range_start=body.dhcp_range_start,
+        dhcp_range_end=body.dhcp_range_end, dns_servers=body.dns_servers,
+        parent_subnet_id=body.parent_subnet_id,
+        utilization_warn_pct=body.utilization_warn_pct,
+        location_id=body.location_id, created_by=current_user.id,
+    )
+    db.add(s)
     await db.commit()
-    await db.refresh(subnet)
-    await log_action(db, current_user, "ipam_subnet_created", "ipam", subnet.id, subnet.network, request=request)
-    return {"id": subnet.id, "network": subnet.network, "name": subnet.name}
+    await db.refresh(s)
+    await log_action(db, current_user, "ipam_subnet_created", "ipam_subnet", s.id, body.cidr, request=request)
+    util = await ipam_service.compute_utilization(db, s)
+    return _subnet(s, util=util)
 
 
-@router.patch("/subnets/{subnet_id}", response_model=dict)
-async def update_subnet(
-    subnet_id: int,
-    payload: SubnetUpdate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+@router.get("/subnets/{subnet_id}")
+async def get_subnet(
+    subnet_id: int, db: AsyncSession = Depends(get_db), _: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:edit"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    s = await _get_subnet_or_404(db, subnet_id)
+    util = await ipam_service.compute_utilization(db, s)
+    return _subnet(s, util=util)
 
-    q = select(IpamSubnet).where(IpamSubnet.id == subnet_id)
-    subnet = (await db.execute(q)).scalar_one_or_none()
-    if not subnet:
-        raise HTTPException(status_code=404, detail="Subnet not found")
 
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        setattr(subnet, k, v)
-
+@router.patch("/subnets/{subnet_id}")
+async def update_subnet(
+    subnet_id: int, body: SubnetUpdate, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    s = await _get_subnet_or_404(db, subnet_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(s, field, value)
     await db.commit()
-    await db.refresh(subnet)
-    await log_action(db, current_user, "ipam_subnet_updated", "ipam", subnet_id, subnet.network, request=request)
-    return {"id": subnet.id, "network": subnet.network}
+    await db.refresh(s)
+    await log_action(db, current_user, "ipam_subnet_updated", "ipam_subnet", s.id, str(s.cidr), request=request)
+    util = await ipam_service.compute_utilization(db, s)
+    return _subnet(s, util=util)
 
 
 @router.delete("/subnets/{subnet_id}", status_code=204)
 async def delete_subnet(
-    subnet_id: int,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+    subnet_id: int, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:delete"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    q = select(IpamSubnet).where(IpamSubnet.id == subnet_id)
-    subnet = (await db.execute(q)).scalar_one_or_none()
-    if not subnet:
-        raise HTTPException(status_code=404, detail="Subnet not found")
-
-    await db.execute(_del(IpamAddress).where(IpamAddress.subnet_id == subnet_id))
-    await db.delete(subnet)
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    s = await _get_subnet_or_404(db, subnet_id)
+    s.deleted_at = datetime.now(timezone.utc)
     await db.commit()
-    await log_action(db, current_user, "ipam_subnet_deleted", "ipam", subnet_id, subnet.network, request=request)
+    await log_action(db, current_user, "ipam_subnet_deleted", "ipam_subnet", subnet_id, str(s.cidr), request=request)
 
 
-# ── Address CRUD ──────────────────────────────────────────────────────────────
-
-@router.get("/subnets/{subnet_id}/addresses", response_model=dict)
-async def list_addresses(
-    subnet_id: int,
-    db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
-    status: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    skip: int = 0,
-    limit: int = Query(200, le=500),
+@router.get("/subnets/{subnet_id}/overlap")
+async def check_subnet_overlap(
+    subnet_id: int, cidr: str,
+    db: AsyncSession = Depends(get_db), _: CurrentUser = None,
 ):
-    result = await db.execute(select(IpamSubnet).where(IpamSubnet.id == subnet_id))
-    subnet = result.scalar_one_or_none()
-    if not subnet:
-        raise HTTPException(status_code=404, detail="Subnet not found")
-
-    query = select(IpamAddress).where(IpamAddress.subnet_id == subnet_id)
-    if status:
-        query = query.where(IpamAddress.status == status)
-    if search:
-        query = query.where(
-            IpamAddress.ip_address.ilike(f"%{search}%") |
-            IpamAddress.hostname.ilike(f"%{search}%") |
-            IpamAddress.mac_address.ilike(f"%{search}%") |
-            IpamAddress.description.ilike(f"%{search}%")
-        )
-
-    total_r = await db.execute(select(func.count()).select_from(query.subquery()))
-    total = total_r.scalar()
-
-    addr_result = await db.execute(
-        query.order_by(IpamAddress.ip_address).offset(skip).limit(limit)
-    )
-    addresses = addr_result.scalars().all()
-
+    org_id = _require_org()
+    overlaps = await ipam_service.find_overlapping_subnets(db, cidr, org_id, exclude_id=subnet_id)
     return {
-        "subnet": {"id": subnet.id, "network": subnet.network, "name": subnet.name},
-        "total": total,
-        "items": [
-            {
-                "id": a.id,
-                "ip_address": a.ip_address,
-                "mac_address": a.mac_address,
-                "hostname": a.hostname,
-                "description": a.description,
-                "status": a.status,
-                "device_id": a.device_id,
-                "last_seen": a.last_seen.isoformat() if a.last_seen else None,
-                "updated_at": a.updated_at.isoformat(),
-            }
-            for a in addresses
-        ],
+        "cidr": cidr,
+        "overlaps": [{"id": s.id, "cidr": str(s.cidr), "name": s.name} for s in overlaps],
     }
 
 
-@router.post("/subnets/{subnet_id}/addresses", response_model=dict, status_code=201)
-async def create_address(
-    subnet_id: int,
-    payload: AddressCreate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+@router.get("/subnets/{subnet_id}/free-ips")
+async def get_free_ips(
+    subnet_id: int, count: int = Query(1, ge=1, le=50),
+    db: AsyncSession = Depends(get_db), _: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:create"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    s = await _get_subnet_or_404(db, subnet_id)
+    ips = await ipam_service.suggest_free_ips(db, s, count=count)
+    return {"subnet_id": subnet_id, "cidr": str(s.cidr), "free_ips": ips}
 
-    result = await db.execute(select(IpamSubnet).where(IpamSubnet.id == subnet_id))
-    subnet = result.scalar_one_or_none()
-    if not subnet:
-        raise HTTPException(status_code=404, detail="Subnet not found")
 
-    # Validate IP is within subnet
-    try:
-        net = ipaddress.ip_network(subnet.network, strict=False)
-        ip = ipaddress.ip_address(payload.ip_address)
-        if ip not in net:
-            raise HTTPException(status_code=400, detail=f"{payload.ip_address} is not in {subnet.network}")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+# ─── Assignments ────────────────────────────────────────────────────────────
 
-    existing = await db.execute(
-        select(IpamAddress).where(
-            IpamAddress.subnet_id == subnet_id,
-            IpamAddress.ip_address == payload.ip_address,
+@router.get("/subnets/{subnet_id}/assignments")
+async def list_assignments(
+    subnet_id: int, db: AsyncSession = Depends(get_db), _: CurrentUser = None,
+):
+    await _get_subnet_or_404(db, subnet_id)
+    rows = (await db.execute(
+        select(IpamAssignment).where(IpamAssignment.subnet_id == subnet_id)
+        .order_by(IpamAssignment.ip_address)
+    )).scalars().all()
+    return [_assignment(a) for a in rows]
+
+
+@router.post("/subnets/{subnet_id}/assignments", status_code=201)
+async def create_assignment(
+    subnet_id: int, body: AssignmentIn, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
+):
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    s = await _get_subnet_or_404(db, subnet_id)
+    if not ipam_service.is_ip_in_subnet(body.ip_address, str(s.cidr)):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{body.ip_address} bu subnet'in ({s.cidr}) içinde değil.",
         )
+    existing = (await db.execute(
+        select(IpamAssignment).where(
+            IpamAssignment.subnet_id == subnet_id,
+            IpamAssignment.ip_address == body.ip_address,
+        )
+    )).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=409, detail=f"{body.ip_address} zaten atanmış.")
+
+    a = IpamAssignment(
+        subnet_id=subnet_id, ip_address=body.ip_address,
+        hostname=body.hostname, mac_address=body.mac_address,
+        description=body.description, type=body.type, source="manual",
+        device_id=body.device_id, interface=body.interface,
+        expires_at=body.expires_at, location_id=s.location_id,
+        created_by=current_user.id,
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="IP address already exists in this subnet")
-
-    addr = IpamAddress(subnet_id=subnet_id, **payload.model_dump())
-    db.add(addr)
+    db.add(a)
     await db.commit()
-    await db.refresh(addr)
-    return {"id": addr.id, "ip_address": addr.ip_address, "status": addr.status}
+    await db.refresh(a)
+    await log_action(
+        db, current_user, "ipam_assignment_created", "ipam_assignment",
+        a.id, body.ip_address, request=request,
+        details={"subnet_id": subnet_id, "type": body.type},
+    )
+    return _assignment(a)
 
 
-@router.patch("/addresses/{address_id}", response_model=dict)
-async def update_address(
-    address_id: int,
-    payload: AddressUpdate,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+@router.patch("/assignments/{assignment_id}")
+async def update_assignment(
+    assignment_id: int, body: AssignmentUpdate, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:edit"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    result = await db.execute(select(IpamAddress).where(IpamAddress.id == address_id))
-    addr = result.scalar_one_or_none()
-    if not addr:
-        raise HTTPException(status_code=404, detail="Address not found")
-
-    for k, v in payload.model_dump(exclude_unset=True).items():
-        setattr(addr, k, v)
-
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    a = (await db.execute(
+        select(IpamAssignment).where(IpamAssignment.id == assignment_id)
+    )).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(status_code=404, detail="Atama bulunamadı")
+    for field, value in body.model_dump(exclude_unset=True).items():
+        setattr(a, field, value)
     await db.commit()
-    await db.refresh(addr)
-    return {"id": addr.id, "ip_address": addr.ip_address, "status": addr.status}
+    await db.refresh(a)
+    await log_action(
+        db, current_user, "ipam_assignment_updated", "ipam_assignment",
+        a.id, str(a.ip_address), request=request,
+    )
+    return _assignment(a)
 
 
-@router.delete("/addresses/{address_id}", status_code=204)
-async def delete_address(
-    address_id: int,
-    request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+@router.delete("/assignments/{assignment_id}", status_code=204)
+async def delete_assignment(
+    assignment_id: int, request: Request,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:delete"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    result = await db.execute(select(IpamAddress).where(IpamAddress.id == address_id))
-    addr = result.scalar_one_or_none()
-    if not addr:
-        raise HTTPException(status_code=404, detail="Address not found")
-
-    await db.delete(addr)
-    await db.commit()
-
-
-# ── ARP Scan → import into subnet ────────────────────────────────────────────
-
-async def _ping_sweep(net: ipaddress.IPv4Network, concurrency: int = 50) -> set[str]:
-    """ICMP ping sweep; returns set of responding IP strings."""
-    live: set[str] = set()
-    sem = asyncio.Semaphore(concurrency)
-
-    async def _ping(ip: str) -> None:
-        async with sem:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "ping", "-c", "1", "-W", "1", ip,
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await proc.wait()
-                if proc.returncode == 0:
-                    live.add(ip)
-            except Exception:
-                pass
-
-    hosts = list(net.hosts())
-    await asyncio.gather(*[_ping(str(h)) for h in hosts])
-    return live
-
-
-@router.post("/subnets/{subnet_id}/scan", response_model=dict)
-async def scan_subnet_from_arp(
-    subnet_id: int,
-    request: Request,
-    ping_sweep: bool = Query(False, description="Fall back to ICMP ping sweep if ARP yields nothing"),
-    db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
-):
-    """Import ARP-discovered IPs that fall within this subnet into IPAM addresses."""
-    if not current_user.has_permission("config:view"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
-    result = await db.execute(select(IpamSubnet).where(IpamSubnet.id == subnet_id))
-    subnet = result.scalar_one_or_none()
-    if not subnet:
-        raise HTTPException(status_code=404, detail="Subnet not found")
-
-    try:
-        net = ipaddress.ip_network(subnet.network, strict=False)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid subnet network")
-
-    # Fetch all ARP entries
-    arp_result = await db.execute(select(ArpEntry))
-    arp_entries = arp_result.scalars().all()
-
-    now = datetime.now(timezone.utc)
-    imported = updated = 0
-
-    for arp in arp_entries:
-        try:
-            ip = ipaddress.ip_address(arp.ip_address)
-        except ValueError:
-            continue
-        if ip not in net:
-            continue
-
-        existing = await db.execute(
-            select(IpamAddress).where(
-                IpamAddress.subnet_id == subnet_id,
-                IpamAddress.ip_address == arp.ip_address,
-            )
-        )
-        addr = existing.scalar_one_or_none()
-
-        if addr:
-            # Update dynamic info if status is dynamic
-            if addr.status == "dynamic":
-                addr.mac_address = arp.mac_address
-                addr.hostname = addr.hostname or arp.device_hostname
-                addr.last_seen = now
-            updated += 1
-        else:
-            db.add(IpamAddress(
-                subnet_id=subnet_id,
-                ip_address=arp.ip_address,
-                mac_address=arp.mac_address,
-                hostname=None,
-                status="dynamic",
-                last_seen=now,
-            ))
-            imported += 1
-
-    # Second pass: if subnet has a vlan_id, cross-reference MacAddressEntry → ArpEntry
-    # This catches hosts whose IPs appear in ARP tables of *other* devices (e.g. firewalls
-    # not yet in the system) but whose MACs were learned via Port Intelligence MAC table.
-    if subnet.vlan_id is not None:
-        mac_rows = (await db.execute(
-            select(MacAddressEntry.mac_address).where(
-                MacAddressEntry.vlan_id == subnet.vlan_id
-            ).distinct()
-        )).scalars().all()
-
-        for mac in mac_rows:
-            arp_for_mac = (await db.execute(
-                select(ArpEntry).where(ArpEntry.mac_address == mac)
-            )).scalars().first()
-            if not arp_for_mac:
-                continue
-            try:
-                ip = ipaddress.ip_address(arp_for_mac.ip_address)
-            except ValueError:
-                continue
-            if ip not in net:
-                continue
-
-            existing = await db.execute(
-                select(IpamAddress).where(
-                    IpamAddress.subnet_id == subnet_id,
-                    IpamAddress.ip_address == arp_for_mac.ip_address,
-                )
-            )
-            addr = existing.scalar_one_or_none()
-            if addr:
-                if addr.status == "dynamic":
-                    addr.mac_address = mac
-                    addr.last_seen = now
-                updated += 1
-            else:
-                db.add(IpamAddress(
-                    subnet_id=subnet_id,
-                    ip_address=arp_for_mac.ip_address,
-                    mac_address=mac,
-                    hostname=None,
-                    status="dynamic",
-                    last_seen=now,
-                ))
-                imported += 1
-
-    # Third pass: ICMP ping sweep when explicitly requested and ARP/MAC passes found nothing
-    ping_discovered = 0
-    if ping_sweep and (imported + updated) == 0:
-        live_ips = await _ping_sweep(net)
-        for ip_str in live_ips:
-            existing = await db.execute(
-                select(IpamAddress).where(
-                    IpamAddress.subnet_id == subnet_id,
-                    IpamAddress.ip_address == ip_str,
-                )
-            )
-            addr = existing.scalar_one_or_none()
-            if addr:
-                if addr.status == "dynamic":
-                    addr.last_seen = now
-                updated += 1
-            else:
-                db.add(IpamAddress(
-                    subnet_id=subnet_id,
-                    ip_address=ip_str,
-                    mac_address=None,
-                    hostname=None,
-                    status="dynamic",
-                    last_seen=now,
-                ))
-                imported += 1
-                ping_discovered += 1
-
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    a = (await db.execute(
+        select(IpamAssignment).where(IpamAssignment.id == assignment_id)
+    )).scalar_one_or_none()
+    if a is None:
+        raise HTTPException(status_code=404, detail="Atama bulunamadı")
+    ip = str(a.ip_address)
+    await db.delete(a)
     await db.commit()
     await log_action(
-        db, current_user, "ipam_scan_completed", "ipam", subnet_id, subnet.network,
-        details={"imported": imported, "updated": updated, "ping_discovered": ping_discovered},
-        request=request,
+        db, current_user, "ipam_assignment_deleted", "ipam_assignment",
+        assignment_id, ip, request=request,
     )
-    return {"subnet": subnet.network, "imported": imported, "updated": updated, "ping_discovered": ping_discovered}
 
 
-# ── Stats overview ────────────────────────────────────────────────────────────
+# ─── Lookups ────────────────────────────────────────────────────────────────
 
-@router.get("/stats", response_model=dict)
-async def ipam_stats(
-    db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+@router.get("/lookup")
+async def ip_lookup(
+    ip: str, db: AsyncSession = Depends(get_db), _: CurrentUser = None,
 ):
-    subnet_count = (await db.execute(
-        select(func.count()).select_from(IpamSubnet).where(IpamSubnet.is_active == True)
-    )).scalar()
+    org_id = _require_org()
+    try:
+        ipam_service.parse_ip(ip)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    subnet = await ipam_service.find_containing_subnet(db, ip, org_id)
+    assignment = None
+    if subnet is not None:
+        a = (await db.execute(
+            select(IpamAssignment).where(
+                IpamAssignment.subnet_id == subnet.id,
+                IpamAssignment.ip_address == ip,
+            )
+        )).scalar_one_or_none()
+        if a is not None:
+            assignment = _assignment(a)
+    return {
+        "ip": ip,
+        "subnet": _subnet(subnet) if subnet else None,
+        "assignment": assignment,
+    }
 
-    addr_counts = (await db.execute(
-        select(IpamAddress.status, func.count()).group_by(IpamAddress.status)
-    )).all()
-    counts = {row[0]: row[1] for row in addr_counts}
+
+# ─── Org-wide summary ──────────────────────────────────────────────────────
+
+@router.get("/summary")
+async def get_summary(db: AsyncSession = Depends(get_db), _: CurrentUser = None):
+    """Aggregate stats — used by the IPAM dashboard tile."""
+    zone_count = (await db.execute(
+        select(func.count(IpamZone.id)).where(IpamZone.deleted_at.is_(None))
+    )).scalar_one()
+    subnet_count = (await db.execute(
+        select(func.count(IpamSubnet.id)).where(IpamSubnet.deleted_at.is_(None))
+    )).scalar_one()
+    assignment_count = (await db.execute(
+        select(func.count(IpamAssignment.id))
+    )).scalar_one()
+
+    subnets = (await db.execute(
+        select(IpamSubnet).where(IpamSubnet.deleted_at.is_(None))
+    )).scalars().all()
+    high = []
+    for s in subnets:
+        u = await ipam_service.compute_utilization(db, s)
+        if u["is_high"]:
+            high.append({"id": s.id, "cidr": str(s.cidr), "name": s.name,
+                         "used": u["used"], "total": u["total"], "pct": u["pct"]})
+    high.sort(key=lambda x: x["pct"], reverse=True)
 
     return {
-        "subnets": subnet_count,
-        "addresses_dynamic": counts.get("dynamic", 0),
-        "addresses_static": counts.get("static", 0),
-        "addresses_reserved": counts.get("reserved", 0),
-        "addresses_total": sum(counts.values()),
+        "zone_count": int(zone_count or 0),
+        "subnet_count": int(subnet_count or 0),
+        "assignment_count": int(assignment_count or 0),
+        "high_utilization": high,
     }

@@ -1,354 +1,104 @@
-import { useState, useMemo } from 'react'
+// T9 Tur 7 — IPAM page (sıfırdan rebuild).
+// 3-pane layout: zones (left) → subnets (middle) → subnet detail (right).
+import { useEffect, useMemo, useState } from 'react'
 import {
-  Button, Drawer, Form, Input, InputNumber, message,
-  Modal, Popconfirm, Progress, Select, Space, Table,
-  Tag, Tooltip, Typography,
+  Alert, App, Button, Card, Col, Drawer, Empty, Form, Input,
+  InputNumber, Modal, Popconfirm, Progress, Row, Select, Space, Switch,
+  Table, Tag, Tooltip, Typography,
 } from 'antd'
 import {
-  AppstoreOutlined, BarChartOutlined, ClusterOutlined, DeleteOutlined,
-  EditOutlined, PlusOutlined, RadarChartOutlined, ReloadOutlined,
-  SearchOutlined, TableOutlined, WarningOutlined,
+  ApartmentOutlined, ApiOutlined, DeleteOutlined, EditOutlined,
+  GlobalOutlined, PlusOutlined, ReloadOutlined, SearchOutlined,
+  WarningOutlined,
 } from '@ant-design/icons'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ipamApi, IpamSubnet, IpamAddress } from '@/api/ipam'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  ipamApi, type IpamAssignment, type IpamSubnet, type IpamZone,
+} from '@/api/ipam'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useSite } from '@/contexts/SiteContext'
+import { useAuthStore } from '@/store/auth'
 
 const { Text } = Typography
 
-const IPAM_CSS = `
-@keyframes ipamRowIn {
-  from { opacity: 0; transform: translateX(-4px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-@keyframes ipamCellPop {
-  from { transform: scale(0.7); opacity: 0; }
-  to   { transform: scale(1);   opacity: 1; }
-}
-.ipam-cell:hover { transform: scale(1.35) !important; z-index: 10; }
-`
-
-// ── Subnet IP heatmap helpers ────────────────────────────────────────────────
-
-function cidrToHostList(cidr: string): string[] {
-  const [base, prefixStr] = cidr.split('/')
-  const prefix = parseInt(prefixStr ?? '24')
-  if (prefix < 22) return []
-  const parts = base.split('.').map(Number)
-  const total = Math.pow(2, 32 - prefix)
-  const startIp = (((parts[0] ?? 0) << 24) | ((parts[1] ?? 0) << 16) | ((parts[2] ?? 0) << 8) | (parts[3] ?? 0)) >>> 0
-  return Array.from({ length: total }, (_, i) => {
-    const ip = (startIp + i) >>> 0
-    return [24, 16, 8, 0].map((s) => (ip >> s) & 0xff).join('.')
-  })
-}
-
-function SubnetHeatmap({
-  subnet, allAddresses, onClickIp,
-}: {
-  subnet: IpamSubnet
-  allAddresses: IpamAddress[]
-  onClickIp: (ip: string, addr?: IpamAddress) => void
-}) {
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
-  const prefix = parseInt(subnet.network.split('/')[1] ?? '24')
-
-  const addrMap = useMemo(() => {
-    const m = new Map<string, IpamAddress>()
-    for (const a of allAddresses) m.set(a.ip_address, a)
-    return m
-  }, [allAddresses])
-
-  const ips = useMemo(() => cidrToHostList(subnet.network), [subnet.network])
-
-  if (prefix < 22) {
-    return (
-      <div style={{ padding: '32px 0', textAlign: 'center', color: C.muted }}>
-        <AppstoreOutlined style={{ fontSize: 32, marginBottom: 8, display: 'block', opacity: 0.4 }} />
-        /{prefix} subnet için IP ızgarası çok büyük — tablo görünümünü kullanın
-      </div>
-    )
-  }
-
-  const COLS = 16
-  const rows = Math.ceil(ips.length / COLS)
-  const lastOctetBase = parseInt(subnet.network.split('.')[3] ?? '0')
-  const cellSize = ips.length > 256 ? 16 : 20
-
-  const CELL_COLORS = {
-    dynamic:  '#3b82f6',
-    static:   '#22c55e',
-    reserved: '#f59e0b',
-    gateway:  '#a78bfa',
-    free:     isDark ? '#1a3458' : '#dde5f0',
-  }
-
-  return (
-    <div>
-      {/* Legend */}
-      <div style={{ display: 'flex', gap: 14, marginBottom: 12, flexWrap: 'wrap', fontSize: 11, color: C.muted }}>
-        {Object.entries({ free: 'Boş', dynamic: 'Dinamik', static: 'Statik', reserved: 'Rezerve', gateway: 'Gateway' }).map(([k, label]) => (
-          <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 12, height: 12, borderRadius: 2, background: CELL_COLORS[k as keyof typeof CELL_COLORS], display: 'inline-block', border: `1px solid ${isDark ? '#ffffff10' : '#00000010'}` }} />
-            {label}
-          </span>
-        ))}
-        <span style={{ marginLeft: 'auto' }}>{ips.length} IP · {addrMap.size} kayıtlı</span>
-      </div>
-
-      {/* Column header (0-15) */}
-      <div style={{ display: 'flex', marginBottom: 3, paddingLeft: 46 }}>
-        {Array.from({ length: Math.min(COLS, ips.length) }, (_, c) => (
-          <div key={c} style={{ width: cellSize + 2, textAlign: 'center', fontSize: 9, color: C.dim, userSelect: 'none', lineHeight: 1 }}>
-            {c === 0 || c % 4 === 0 ? c : ''}
-          </div>
-        ))}
-      </div>
-
-      {/* Grid */}
-      <div style={{ overflowY: 'auto', maxHeight: 500 }}>
-        {Array.from({ length: rows }, (_, row) => {
-          const rowIps = ips.slice(row * COLS, (row + 1) * COLS)
-          const rowLastOctet = lastOctetBase + row * COLS
-          return (
-            <div key={row} style={{ display: 'flex', alignItems: 'center', marginBottom: 2 }}>
-              {/* Row label */}
-              <div style={{ width: 44, fontSize: 9, color: C.muted, textAlign: 'right', marginRight: 2, flexShrink: 0, userSelect: 'none' }}>
-                .{rowLastOctet}
-              </div>
-              {rowIps.map((ip) => {
-                const addr = addrMap.get(ip)
-                const isGateway = ip === subnet.gateway
-                const status = isGateway ? 'gateway' : (addr?.status as keyof typeof CELL_COLORS | undefined) ?? 'free'
-                const color = CELL_COLORS[status] ?? CELL_COLORS.free
-                return (
-                  <Tooltip
-                    key={ip}
-                    mouseEnterDelay={0.1}
-                    title={
-                      <div style={{ fontFamily: 'monospace', fontSize: 12 }}>
-                        <div style={{ fontWeight: 700 }}>{ip}</div>
-                        {isGateway && <div style={{ color: '#c4b5fd' }}>Gateway</div>}
-                        {addr && <div style={{ color: color }}>{STATUS_LABEL[addr.status] || addr.status}</div>}
-                        {addr?.hostname && <div>{addr.hostname}</div>}
-                        {addr?.mac_address && <div style={{ color: '#94a3b8' }}>{addr.mac_address}</div>}
-                        {!addr && !isGateway && <div style={{ color: '#475569' }}>Boş</div>}
-                      </div>
-                    }
-                  >
-                    <div
-                      className="ipam-cell"
-                      onClick={() => onClickIp(ip, addr)}
-                      style={{
-                        width: cellSize,
-                        height: cellSize,
-                        borderRadius: 2,
-                        background: color,
-                        margin: '0 1px',
-                        flexShrink: 0,
-                        cursor: addr || isGateway ? 'pointer' : 'default',
-                        border: `1px solid ${isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.07)'}`,
-                        transition: 'transform 0.1s ease',
-                        animation: 'ipamCellPop 0.15s ease-out',
-                      }}
-                    />
-                  </Tooltip>
-                )
-              })}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 function mkC(isDark: boolean) {
   return {
-    bg:     isDark ? '#1e293b' : '#ffffff',
-    bg2:    isDark ? '#0f172a' : '#f8fafc',
+    bg: isDark ? '#1e293b' : '#ffffff',
+    bg2: isDark ? '#0f172a' : '#f8fafc',
     border: isDark ? '#334155' : '#e2e8f0',
-    text:   isDark ? '#f1f5f9' : '#1e293b',
-    muted:  isDark ? '#64748b' : '#94a3b8',
-    dim:    isDark ? '#475569' : '#cbd5e1',
+    text: isDark ? '#f1f5f9' : '#1e293b',
+    muted: isDark ? '#64748b' : '#94a3b8',
+    dim: isDark ? '#475569' : '#cbd5e1',
   }
 }
 
-// ── Status helpers ────────────────────────────────────────────────────────────
-const STATUS_HEX: Record<string, string> = {
-  dynamic: '#3b82f6', static: '#22c55e', reserved: '#f59e0b',
-}
-const STATUS_LABEL: Record<string, string> = {
-  dynamic: 'Dinamik', static: 'Statik', reserved: 'Rezerve',
+const TYPE_COLOR: Record<string, string> = {
+  static: 'blue', dhcp: 'cyan', reserved: 'purple', gateway: 'gold',
+  broadcast: 'magenta', network: 'magenta', dynamic: 'default',
 }
 
-// ── Utilization bar ───────────────────────────────────────────────────────────
-function UtilBar({ subnet }: { subnet: IpamSubnet }) {
-  const { isDark } = useTheme()
-  const usedPct = subnet.total_hosts ? (subnet.used / subnet.total_hosts) * 100 : 0
-  const resPct = subnet.total_hosts ? (subnet.reserved / subnet.total_hosts) * 100 : 0
-  const color = subnet.utilization_pct >= 90 ? '#ef4444' : subnet.utilization_pct >= 70 ? '#f59e0b' : '#3b82f6'
+// ─── Zone form ─────────────────────────────────────────────────────────────
 
-  return (
-    <Tooltip title={`Kullanılan: ${subnet.used} | Rezerve: ${subnet.reserved} | Boş: ${subnet.free} / ${subnet.total_hosts}`}>
-      <div style={{ minWidth: 120 }}>
-        <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: isDark ? '#334155' : '#e2e8f0' }}>
-          <div style={{ width: `${usedPct}%`, background: color, transition: 'width 0.3s' }} />
-          <div style={{ width: `${resPct}%`, background: '#f59e0b', transition: 'width 0.3s' }} />
-        </div>
-        <div style={{ fontSize: 11, color, marginTop: 2, fontWeight: 600 }}>{subnet.utilization_pct}%</div>
-      </div>
-    </Tooltip>
-  )
-}
-
-// ── Subnet Form Modal ─────────────────────────────────────────────────────────
-function SubnetModal({ open, subnet, onClose }: { open: boolean; subnet: IpamSubnet | null; onClose: () => void }) {
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
-  const [form] = Form.useForm()
+function ZoneFormModal({
+  open, onClose, editing,
+}: { open: boolean; onClose: () => void; editing: IpamZone | null }) {
   const qc = useQueryClient()
-
-  const createMut = useMutation({
-    mutationFn: ipamApi.createSubnet,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ipam-subnets'] }); qc.invalidateQueries({ queryKey: ['ipam-stats'] }); onClose() },
-    onError: (e: any) => message.error(e.response?.data?.detail || 'Hata'),
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
+  const { data: zones = [] } = useQuery({
+    queryKey: ['ipam-zones'], queryFn: ipamApi.listZones,
   })
 
-  const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: any }) => ipamApi.updateSubnet(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ipam-subnets'] }); onClose() },
-    onError: (e: any) => message.error(e.response?.data?.detail || 'Hata'),
-  })
+  useEffect(() => {
+    if (open) {
+      if (editing) form.setFieldsValue(editing)
+      else form.resetFields()
+    }
+  }, [open, editing, form])
 
-  const handleOk = async () => {
-    const vals = await form.validateFields()
-    if (subnet) updateMut.mutate({ id: subnet.id, data: vals })
-    else createMut.mutate(vals)
-  }
-
-  return (
-    <Modal
-      open={open}
-      title={<span style={{ color: C.text }}>{subnet ? 'Subnet Düzenle' : 'Yeni Subnet Ekle'}</span>}
-      onOk={handleOk}
-      onCancel={onClose}
-      okText={subnet ? 'Güncelle' : 'Ekle'}
-      cancelText="İptal"
-      confirmLoading={createMut.isPending || updateMut.isPending}
-      destroyOnClose
-      afterOpenChange={(o) => o && form.setFieldsValue(subnet ?? {})}
-      styles={{
-        content: { background: C.bg, border: `1px solid ${C.border}` },
-        header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
-      }}
-    >
-      <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
-        {!subnet && (
-          <Form.Item name="network" label="Ağ (CIDR)" rules={[{ required: true, message: 'Zorunlu' }]}>
-            <Input placeholder="192.168.1.0/24" />
-          </Form.Item>
-        )}
-        <Form.Item name="name" label="Ad">
-          <Input placeholder="Ofis LAN" />
-        </Form.Item>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Form.Item name="site" label="Site / Lokasyon" style={{ flex: 1 }}>
-            <Input placeholder="İstanbul" />
-          </Form.Item>
-          <Form.Item name="vlan_id" label="VLAN ID" style={{ flex: 1 }}>
-            <InputNumber min={1} max={4094} style={{ width: '100%' }} />
-          </Form.Item>
-        </div>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Form.Item name="gateway" label="Gateway" style={{ flex: 1 }}>
-            <Input placeholder="192.168.1.1" />
-          </Form.Item>
-          <Form.Item name="dns_servers" label="DNS Sunucuları" style={{ flex: 1 }}>
-            <Input placeholder="8.8.8.8,8.8.4.4" />
-          </Form.Item>
-        </div>
-        <Form.Item name="description" label="Açıklama">
-          <Input.TextArea rows={2} />
-        </Form.Item>
-        {subnet && (
-          <Form.Item name="is_active" label="Durum">
-            <Select options={[{ value: true, label: 'Aktif' }, { value: false, label: 'Pasif' }]} />
-          </Form.Item>
-        )}
-      </Form>
-    </Modal>
-  )
-}
-
-// ── Address Form Modal ────────────────────────────────────────────────────────
-function AddressModal({ open, subnetId, address, onClose }: { open: boolean; subnetId: number; address: IpamAddress | null; onClose: () => void }) {
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
-  const [form] = Form.useForm()
-  const qc = useQueryClient()
-
-  const createMut = useMutation({
-    mutationFn: (data: any) => ipamApi.createAddress(subnetId, data),
+  const save = useMutation({
+    mutationFn: (vals: any) => editing
+      ? ipamApi.updateZone(editing.id, vals)
+      : ipamApi.createZone(vals),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['ipam-addresses', subnetId] })
-      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
-      qc.invalidateQueries({ queryKey: ['ipam-stats'] })
+      qc.invalidateQueries({ queryKey: ['ipam-zones'] })
+      message.success(editing ? 'Zone güncellendi' : 'Zone oluşturuldu')
       onClose()
     },
-    onError: (e: any) => message.error(e.response?.data?.detail || 'Hata'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata', 6),
   })
-
-  const updateMut = useMutation({
-    mutationFn: (data: any) => ipamApi.updateAddress(address!.id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['ipam-addresses', subnetId] }); onClose() },
-    onError: (e: any) => message.error(e.response?.data?.detail || 'Hata'),
-  })
-
-  const handleOk = async () => {
-    const vals = await form.validateFields()
-    if (address) updateMut.mutate(vals)
-    else createMut.mutate(vals)
-  }
 
   return (
     <Modal
       open={open}
-      title={<span style={{ color: C.text }}>{address ? 'IP Adresi Düzenle' : 'IP Adresi Ekle'}</span>}
-      onOk={handleOk}
       onCancel={onClose}
-      okText={address ? 'Güncelle' : 'Ekle'}
-      cancelText="İptal"
-      confirmLoading={createMut.isPending || updateMut.isPending}
+      title={editing ? `Zone Düzenle: ${editing.name}` : 'Yeni Zone'}
+      onOk={() => form.submit()}
+      confirmLoading={save.isPending}
       destroyOnClose
-      afterOpenChange={(o) => o && form.setFieldsValue(address ?? { status: 'static' })}
-      styles={{
-        content: { background: C.bg, border: `1px solid ${C.border}` },
-        header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
-      }}
     >
-      <Form form={form} layout="vertical" style={{ marginTop: 8 }}>
-        {!address && (
-          <Form.Item name="ip_address" label="IP Adresi" rules={[{ required: true, message: 'Zorunlu' }]}>
-            <Input placeholder="192.168.1.100" />
-          </Form.Item>
-        )}
-        <Form.Item name="status" label="Durum" rules={[{ required: true }]}>
-          <Select options={[
-            { value: 'static', label: 'Statik' },
-            { value: 'reserved', label: 'Rezerve' },
-            { value: 'dynamic', label: 'Dinamik' },
-          ]} />
+      <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)}>
+        <Form.Item name="name" label="Ad" rules={[{ required: true }]}>
+          <Input placeholder="örn. Istanbul-DC1" />
         </Form.Item>
-        <div style={{ display: 'flex', gap: 12 }}>
-          <Form.Item name="mac_address" label="MAC Adresi" style={{ flex: 1 }}>
-            <Input placeholder="aa:bb:cc:dd:ee:ff" />
-          </Form.Item>
-          <Form.Item name="hostname" label="Hostname" style={{ flex: 1 }}>
-            <Input placeholder="server-01" />
-          </Form.Item>
-        </div>
+        <Form.Item name="zone_type" label="Tür" initialValue="site">
+          <Select
+            options={[
+              { value: 'site', label: 'Site' },
+              { value: 'environment', label: 'Environment (prod/dev/test)' },
+              { value: 'vpc', label: 'VPC' },
+              { value: 'rir_block', label: 'RIR Allocation' },
+              { value: 'custom', label: 'Özel' },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item name="parent_zone_id" label="Üst Zone (ops.)">
+          <Select
+            allowClear
+            options={zones
+              .filter((z) => !editing || z.id !== editing.id)
+              .map((z) => ({ value: z.id, label: z.name }))}
+          />
+        </Form.Item>
         <Form.Item name="description" label="Açıklama">
           <Input.TextArea rows={2} />
         </Form.Item>
@@ -357,112 +107,308 @@ function AddressModal({ open, subnetId, address, onClose }: { open: boolean; sub
   )
 }
 
-// ── Addresses Drawer ──────────────────────────────────────────────────────────
-function AddressDrawer({ subnet, onClose }: { subnet: IpamSubnet | null; onClose: () => void }) {
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string | undefined>(undefined)
-  const [addrModal, setAddrModal] = useState(false)
-  const [editAddr, setEditAddr] = useState<IpamAddress | null>(null)
-  const [viewMode, setViewMode] = useState<'table' | 'heatmap'>('table')
+// ─── Subnet form ───────────────────────────────────────────────────────────
+
+function SubnetFormModal({
+  open, onClose, zoneId, editing,
+}: {
+  open: boolean; onClose: () => void
+  zoneId: number | null; editing: IpamSubnet | null
+}) {
   const qc = useQueryClient()
-
-  const { data, isFetching } = useQuery({
-    queryKey: ['ipam-addresses', subnet?.id, statusFilter, search],
-    queryFn: () => ipamApi.listAddresses(subnet!.id, { status: statusFilter, search: search || undefined }),
-    enabled: !!subnet,
-    staleTime: 10000,
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
+  const [cidrValue, setCidrValue] = useState<string>('')
+  const { data: zones = [] } = useQuery({
+    queryKey: ['ipam-zones'], queryFn: ipamApi.listZones,
   })
 
-  // Unfiltered addresses for heatmap
-  const { data: allAddressesData } = useQuery({
-    queryKey: ['ipam-addresses-all', subnet?.id],
-    queryFn: () => ipamApi.listAddresses(subnet!.id, { limit: 1100 }),
-    enabled: !!subnet && viewMode === 'heatmap',
-    staleTime: 30_000,
+  useEffect(() => {
+    if (open) {
+      if (editing) {
+        form.setFieldsValue(editing)
+        setCidrValue(editing.cidr || '')
+      } else {
+        form.resetFields()
+        form.setFieldsValue({ zone_id: zoneId ?? undefined, utilization_warn_pct: 80, dhcp_enabled: false })
+        setCidrValue('')
+      }
+    }
+  }, [open, editing, zoneId, form])
+
+  // Live overlap check (debounced via React's natural batching — cheap call).
+  const overlapQuery = useQuery({
+    queryKey: ['ipam-overlap', editing?.id, cidrValue],
+    queryFn: () => ipamApi.checkOverlap(editing?.id ?? 0, cidrValue),
+    enabled: open && cidrValue.length >= 7 && /\/\d+$/.test(cidrValue),
+    staleTime: 5_000,
   })
 
-  const scanMut = useMutation({
-    mutationFn: (pingSweep: boolean) => ipamApi.scanFromArp(subnet!.id, pingSweep),
-    onSuccess: (r) => {
-      const extra = r.ping_discovered > 0 ? ` (${r.ping_discovered} ping ile)` : ''
-      message.success(`${r.imported} yeni, ${r.updated} güncellendi${extra}`)
-      qc.invalidateQueries({ queryKey: ['ipam-addresses', subnet?.id] })
-      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
-    },
-    onError: (e: any) => message.error(e.response?.data?.detail || 'Tarama hatası'),
-  })
-
-  const delMut = useMutation({
-    mutationFn: ipamApi.deleteAddress,
+  const save = useMutation({
+    mutationFn: (vals: any) => editing
+      ? ipamApi.updateSubnet(editing.id, vals)
+      : ipamApi.createSubnet(vals),
     onSuccess: () => {
-      message.success('Silindi')
-      qc.invalidateQueries({ queryKey: ['ipam-addresses', subnet?.id] })
       qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+      qc.invalidateQueries({ queryKey: ['ipam-summary'] })
+      message.success(editing ? 'Subnet güncellendi' : 'Subnet oluşturuldu')
+      onClose()
     },
-    onError: () => message.error('Silinemedi'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata', 6),
   })
 
-  const columns = [
-    {
-      title: 'IP Adresi',
-      dataIndex: 'ip_address',
-      render: (v: string) => (
-        <code style={{ fontSize: 12, background: isDark ? '#0f172a' : '#f0fdfa', color: isDark ? '#4ec9b0' : '#0d9488', padding: '1px 6px', borderRadius: 3, border: `1px solid ${isDark ? '#134e4a' : '#99f6e4'}` }}>
-          {v}
-        </code>
-      ),
-      sorter: (a: IpamAddress, b: IpamAddress) => a.ip_address.localeCompare(b.ip_address),
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      title={editing ? `Subnet Düzenle: ${editing.cidr}` : 'Yeni Subnet'}
+      onOk={() => form.submit()}
+      confirmLoading={save.isPending}
+      width={620}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)}>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="zone_id" label="Zone" rules={[{ required: true }]}>
+              <Select
+                placeholder="Zone seçin"
+                options={zones.map((z) => ({ value: z.id, label: z.name }))}
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="cidr" label="CIDR" rules={[{ required: true }]}>
+              <Input
+                placeholder="örn. 10.10.20.0/24"
+                disabled={!!editing}
+                onChange={(e) => setCidrValue(e.target.value)}
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        {overlapQuery.data && overlapQuery.data.overlaps.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            message={`Bu CIDR ile çakışan ${overlapQuery.data.overlaps.length} subnet var:`}
+            description={overlapQuery.data.overlaps.map((o) => o.cidr).join(', ')}
+            style={{ marginBottom: 12 }}
+          />
+        )}
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="name" label="Ad">
+              <Input placeholder="örn. MGMT-DC1" />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name="vlan_id" label="VLAN ID">
+              <InputNumber min={1} max={4094} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={6}>
+            <Form.Item name="utilization_warn_pct" label="Uyarı %">
+              <InputNumber min={1} max={100} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Form.Item name="gateway" label="Gateway IP">
+          <Input placeholder="10.10.20.1" />
+        </Form.Item>
+        <Form.Item name="dhcp_enabled" valuePropName="checked" label="DHCP">
+          <Switch checkedChildren="Aktif" unCheckedChildren="Pasif" />
+        </Form.Item>
+        <Form.Item
+          noStyle
+          shouldUpdate={(p, c) => p.dhcp_enabled !== c.dhcp_enabled}
+        >
+          {({ getFieldValue }) => getFieldValue('dhcp_enabled') && (
+            <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item name="dhcp_server" label="DHCP Server">
+                  <Input placeholder="10.10.20.10" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="dhcp_range_start" label="Pool Start">
+                  <Input placeholder="10.10.20.100" />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item name="dhcp_range_end" label="Pool End">
+                  <Input placeholder="10.10.20.200" />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+        </Form.Item>
+        <Form.Item name="description" label="Açıklama">
+          <Input.TextArea rows={2} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+// ─── Assignment form ───────────────────────────────────────────────────────
+
+function AssignmentFormModal({
+  open, onClose, subnet, editing,
+}: {
+  open: boolean; onClose: () => void
+  subnet: IpamSubnet | null; editing: IpamAssignment | null
+}) {
+  const qc = useQueryClient()
+  const { message } = App.useApp()
+  const [form] = Form.useForm()
+  const { data: freeIps } = useQuery({
+    queryKey: ['ipam-free-ips', subnet?.id],
+    queryFn: () => ipamApi.freeIps(subnet!.id, 5),
+    enabled: open && !editing && subnet !== null,
+    staleTime: 0,
+  })
+
+  useEffect(() => {
+    if (open) {
+      if (editing) form.setFieldsValue(editing)
+      else { form.resetFields(); form.setFieldsValue({ type: 'static' }) }
+    }
+  }, [open, editing, form])
+
+  const save = useMutation({
+    mutationFn: (vals: any) => editing
+      ? ipamApi.updateAssignment(editing.id, vals)
+      : ipamApi.createAssignment(subnet!.id, vals),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ipam-assignments', subnet?.id] })
+      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+      message.success(editing ? 'Atama güncellendi' : 'Atama oluşturuldu')
+      onClose()
     },
-    {
-      title: 'Durum',
-      dataIndex: 'status',
-      width: 90,
-      render: (v: string) => {
-        const hex = STATUS_HEX[v] ?? '#64748b'
-        return <Tag style={{ color: hex, borderColor: hex + '50', background: hex + '18', fontSize: 11 }}>{STATUS_LABEL[v] || v}</Tag>
-      },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata', 6),
+  })
+
+  return (
+    <Modal
+      open={open}
+      onCancel={onClose}
+      title={editing
+        ? `Atamayı Düzenle: ${editing.ip_address}`
+        : `Yeni Atama — ${subnet?.cidr || ''}`
+      }
+      onOk={() => form.submit()}
+      confirmLoading={save.isPending}
+      destroyOnClose
+    >
+      {!editing && freeIps && freeIps.free_ips.length > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          message="Önerilen boş IP'ler"
+          description={
+            <Space wrap>
+              {freeIps.free_ips.map((ip) => (
+                <Button
+                  key={ip}
+                  size="small"
+                  onClick={() => form.setFieldValue('ip_address', ip)}
+                >
+                  {ip}
+                </Button>
+              ))}
+            </Space>
+          }
+          style={{ marginBottom: 12 }}
+        />
+      )}
+      <Form form={form} layout="vertical" onFinish={(v) => save.mutate(v)}>
+        <Form.Item name="ip_address" label="IP" rules={[{ required: true }]}>
+          <Input disabled={!!editing} placeholder="10.10.20.50" />
+        </Form.Item>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="hostname" label="Hostname">
+              <Input placeholder="srv-dns-01" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="mac_address" label="MAC">
+              <Input placeholder="aa:bb:cc:dd:ee:ff" />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Form.Item name="type" label="Atama Türü">
+          <Select
+            options={[
+              { value: 'static', label: 'Static' },
+              { value: 'dhcp', label: 'DHCP' },
+              { value: 'reserved', label: 'Reserved' },
+              { value: 'gateway', label: 'Gateway' },
+              { value: 'broadcast', label: 'Broadcast' },
+              { value: 'network', label: 'Network' },
+            ]}
+          />
+        </Form.Item>
+        <Form.Item name="description" label="Açıklama">
+          <Input.TextArea rows={2} placeholder="Notlar" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+// ─── Subnet detail drawer ──────────────────────────────────────────────────
+
+function SubnetDetailDrawer({
+  subnetId, open, onClose, isDark,
+}: { subnetId: number | null; open: boolean; onClose: () => void; isDark: boolean }) {
+  const C = mkC(isDark)
+  const qc = useQueryClient()
+  const { message } = App.useApp()
+  const canEdit = useAuthStore((s) => s.can('ipam', 'edit'))
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [editingAssign, setEditingAssign] = useState<IpamAssignment | null>(null)
+
+  const { data: subnet } = useQuery({
+    queryKey: ['ipam-subnet-detail', subnetId],
+    queryFn: () => ipamApi.getSubnet(subnetId!),
+    enabled: open && subnetId !== null,
+  })
+  const { data: assignments = [] } = useQuery({
+    queryKey: ['ipam-assignments', subnetId],
+    queryFn: () => ipamApi.listAssignments(subnetId!),
+    enabled: open && subnetId !== null,
+  })
+
+  const delAssign = useMutation({
+    mutationFn: (id: number) => ipamApi.deleteAssignment(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ipam-assignments', subnetId] })
+      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+      message.success('Atama silindi')
     },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Silinemedi'),
+  })
+
+  const cols = [
+    { title: 'IP', dataIndex: 'ip_address', width: 130,
+      render: (v: string) => <Text style={{ fontFamily: 'monospace' }}>{v}</Text> },
+    { title: 'Hostname', dataIndex: 'hostname', render: (v: string | null) => v || <Text style={{ color: C.dim }}>—</Text> },
+    { title: 'MAC', dataIndex: 'mac_address', width: 150, render: (v: string | null) =>
+        v ? <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text> : <Text style={{ color: C.dim }}>—</Text> },
+    { title: 'Tür', dataIndex: 'type', width: 90,
+      render: (v: string) => <Tag color={TYPE_COLOR[v] || 'default'}>{v}</Tag> },
+    { title: 'Kaynak', dataIndex: 'source', width: 90,
+      render: (v: string) => <Tag style={{ fontSize: 10 }}>{v}</Tag> },
     {
-      title: 'MAC',
-      dataIndex: 'mac_address',
-      render: (v?: string) => v
-        ? <code style={{ fontSize: 11, color: '#06b6d4' }}>{v}</code>
-        : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'Hostname',
-      dataIndex: 'hostname',
-      render: (v?: string) => v ? <Text style={{ fontSize: 12, color: C.text }}>{v}</Text> : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'Açıklama',
-      dataIndex: 'description',
-      ellipsis: true,
-      render: (v?: string) => v ? <Text style={{ fontSize: 12, color: C.text }}>{v}</Text> : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'Son Görülme',
-      dataIndex: 'last_seen',
-      width: 140,
-      render: (v?: string) => v
-        ? <Text style={{ fontSize: 11, color: C.muted }}>{new Date(v).toLocaleString('tr')}</Text>
-        : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: '',
-      width: 80,
-      render: (_: any, row: IpamAddress) => (
+      title: '', width: 80,
+      render: (_: unknown, r: IpamAssignment) => canEdit && (
         <Space size={4}>
-          <Tooltip title="Düzenle">
-            <Button size="small" type="text" icon={<EditOutlined />}
-              onClick={() => { setEditAddr(row); setAddrModal(true) }} />
-          </Tooltip>
-          <Popconfirm title="Silinsin mi?" onConfirm={() => delMut.mutate(row.id)} okText="Evet" cancelText="Hayır">
-            <Tooltip title="Sil">
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-            </Tooltip>
+          <Button size="small" icon={<EditOutlined />}
+            onClick={() => { setEditingAssign(r); setAssignOpen(true) }} />
+          <Popconfirm title="Atama silinsin mi?" onConfirm={() => delAssign.mutate(r.id)}>
+            <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
       ),
@@ -471,460 +417,411 @@ function AddressDrawer({ subnet, onClose }: { subnet: IpamSubnet | null; onClose
 
   return (
     <Drawer
-      open={!!subnet}
+      open={open}
       onClose={onClose}
+      width={920}
       title={subnet ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ClusterOutlined style={{ color: '#3b82f6' }} />
-          <span style={{ color: C.text }}>{subnet.network}</span>
-          {subnet.name && <Text style={{ fontSize: 13, color: C.muted }}>— {subnet.name}</Text>}
-        </div>
-      ) : ''}
-      width={900}
-      styles={{
-        body: { background: C.bg, padding: 16 },
-        header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
-      }}
-      extra={
         <Space>
-          <Button.Group size="small">
-            <Tooltip title="Tablo görünümü">
-              <Button
-                type={viewMode === 'table' ? 'primary' : 'default'}
-                icon={<TableOutlined />}
-                onClick={() => setViewMode('table')}
-              />
-            </Tooltip>
-            <Tooltip title="IP ızgara haritası">
-              <Button
-                type={viewMode === 'heatmap' ? 'primary' : 'default'}
-                icon={<AppstoreOutlined />}
-                onClick={() => setViewMode('heatmap')}
-              />
-            </Tooltip>
-          </Button.Group>
-          <Button icon={<RadarChartOutlined />} size="small" loading={scanMut.isPending} onClick={() => scanMut.mutate(false)}>ARP Tara</Button>
-          <Button icon={<RadarChartOutlined />} size="small" loading={scanMut.isPending} onClick={() => scanMut.mutate(true)}>Ping Tara</Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => { setEditAddr(null); setAddrModal(true) }}>IP Ekle</Button>
+          <ApartmentOutlined style={{ color: '#3b82f6' }} />
+          <Text strong>{subnet.cidr}</Text>
+          {subnet.name && <Text style={{ color: C.muted }}>· {subnet.name}</Text>}
+          {subnet.vlan_id && <Tag color="purple">VLAN {subnet.vlan_id}</Tag>}
         </Space>
-      }
+      ) : 'Subnet'}
     >
       {subnet && (
         <>
-          {/* subnet summary */}
-          <div style={{ display: 'flex', gap: 16, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-            {[
-              { label: 'Toplam Host', value: subnet.total_hosts, color: C.text },
-              { label: 'Kullanılan', value: subnet.used, color: '#3b82f6' },
-              { label: 'Rezerve', value: subnet.reserved, color: '#f59e0b' },
-              { label: 'Boş', value: subnet.free, color: '#22c55e' },
-            ].map((s) => (
-              <div key={s.label} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{s.value}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>{s.label}</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 12 }}>
+            <Card size="small" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
+              <Text style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>KULLANIM</Text>
+              <div style={{ fontSize: 20, fontWeight: 700, color: (subnet.utilization?.is_high ? '#ef4444' : '#22c55e') }}>
+                {subnet.utilization?.pct ?? 0}<small>%</small>
               </div>
-            ))}
-            <div style={{ flex: 1, minWidth: 180 }}>
               <Progress
-                percent={subnet.utilization_pct}
-                strokeColor={subnet.utilization_pct >= 90 ? '#ef4444' : subnet.utilization_pct >= 70 ? '#f59e0b' : '#3b82f6'}
-                trailColor={isDark ? '#334155' : '#e2e8f0'}
-                style={{ width: '100%' }}
+                percent={subnet.utilization?.pct ?? 0}
+                showInfo={false}
+                strokeColor={subnet.utilization?.is_high ? '#ef4444' : '#22c55e'}
+                size="small"
               />
-            </div>
+              <Text style={{ fontSize: 11, color: C.muted }}>
+                {subnet.utilization?.used ?? 0} / {subnet.utilization?.total ?? 0}
+              </Text>
+            </Card>
+            <Card size="small" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
+              <Text style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>BOŞ IP</Text>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#3b82f6' }}>
+                {subnet.utilization?.free ?? 0}
+              </div>
+              <Text style={{ fontSize: 11, color: C.muted }}>henüz atanmamış</Text>
+            </Card>
+            <Card size="small" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
+              <Text style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>GATEWAY</Text>
+              <div style={{ fontSize: 14, color: C.text, fontFamily: 'monospace' }}>
+                {subnet.gateway || '—'}
+              </div>
+            </Card>
+            <Card size="small" style={{ background: C.bg2, border: `1px solid ${C.border}` }}>
+              <Text style={{ fontSize: 10, color: C.muted, fontWeight: 600 }}>DHCP</Text>
+              <div style={{ fontSize: 14, color: subnet.dhcp_enabled ? '#22c55e' : C.muted }}>
+                {subnet.dhcp_enabled
+                  ? (subnet.dhcp_range_start
+                      ? `${subnet.dhcp_range_start} – ${subnet.dhcp_range_end}`
+                      : 'aktif')
+                  : 'kapalı'}
+              </div>
+            </Card>
           </div>
 
-          {viewMode === 'table' ? (
-            <>
-              {/* filters */}
-              <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-                <Input
-                  placeholder="IP, MAC, hostname ara…"
-                  prefix={<SearchOutlined style={{ color: C.muted }} />}
-                  allowClear
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  style={{ width: 280 }}
-                />
-                <Select
-                  allowClear
-                  placeholder="Durum filtrele"
-                  value={statusFilter}
-                  onChange={setStatusFilter}
-                  style={{ width: 160 }}
-                  options={[
-                    { value: 'dynamic', label: 'Dinamik' },
-                    { value: 'static', label: 'Statik' },
-                    { value: 'reserved', label: 'Rezerve' },
-                  ]}
-                />
-                <Text style={{ lineHeight: '32px', fontSize: 12, color: C.muted }}>
-                  {data?.total ?? 0} kayıt
-                </Text>
-              </div>
-              <Table
-                dataSource={data?.items ?? []}
-                columns={columns}
-                rowKey="id"
-                loading={isFetching}
-                size="small"
-                pagination={{ pageSize: 50, showSizeChanger: false }}
-              />
-            </>
-          ) : (
-            <SubnetHeatmap
-              subnet={subnet}
-              allAddresses={allAddressesData?.items ?? []}
-              onClickIp={(ip, addr) => {
-                if (addr) {
-                  setEditAddr(addr)
-                  setAddrModal(true)
-                } else {
-                  setEditAddr({ ip_address: ip } as IpamAddress)
-                  setAddrModal(true)
-                }
-              }}
-            />
+          {canEdit && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => { setEditingAssign(null); setAssignOpen(true) }}
+              style={{ marginBottom: 10 }}
+            >
+              Yeni IP Atama
+            </Button>
           )}
+
+          <Table
+            dataSource={assignments}
+            rowKey="id"
+            columns={cols}
+            size="small"
+            pagination={{ pageSize: 20, showSizeChanger: false }}
+            locale={{ emptyText: 'Bu subnet için atama yok' }}
+          />
         </>
       )}
 
-      {subnet && (
-        <AddressModal
-          open={addrModal}
-          subnetId={subnet.id}
-          address={editAddr}
-          onClose={() => { setAddrModal(false); setEditAddr(null) }}
-        />
-      )}
+      <AssignmentFormModal
+        open={assignOpen}
+        onClose={() => { setAssignOpen(false); setEditingAssign(null) }}
+        subnet={subnet ?? null}
+        editing={editingAssign}
+      />
     </Drawer>
   )
 }
 
-// ── Subnet Utilization Grid ───────────────────────────────────────────────────
-function SubnetUtilizationGrid({ subnets }: { subnets: IpamSubnet[] }) {
-  const { isDark } = useTheme()
-  const C = mkC(isDark)
-  const sorted = [...subnets].sort((a, b) => b.utilization_pct - a.utilization_pct)
-  const criticalCount = sorted.filter((s) => s.utilization_pct >= 90).length
-  const warningCount = sorted.filter((s) => s.utilization_pct >= 70 && s.utilization_pct < 90).length
+// ─── Main page ─────────────────────────────────────────────────────────────
 
-  if (subnets.length === 0) return null
-
-  return (
-    <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
-      <div className="nm-card-hd">
-        <h3><BarChartOutlined /> Subnet Doluluk Haritası</h3>
-        {criticalCount > 0 && (
-          <span className="nm-pill" style={{ color: 'var(--crit)', borderColor: 'var(--crit)' }}>
-            <WarningOutlined style={{ marginRight: 4 }} />{criticalCount} kritik
-          </span>
-        )}
-        {warningCount > 0 && (
-          <span className="nm-pill" style={{ color: 'var(--warn)', borderColor: 'var(--warn)' }}>
-            {warningCount} uyarı
-          </span>
-        )}
-        <Space style={{ marginLeft: 'auto', fontSize: 11 }}>
-          {[
-            { color: '#3b82f6', label: 'Kullanılan' },
-            { color: '#f59e0b', label: 'Rezerve' },
-            { color: isDark ? '#334155' : '#e2e8f0', label: 'Boş' },
-          ].map((l) => (
-            <span key={l.label} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: l.color, display: 'inline-block' }} />
-              <Text style={{ fontSize: 11, color: 'var(--fg-3)' }}>{l.label}</Text>
-            </span>
-          ))}
-        </Space>
-      </div>
-      <div style={{ padding: '10px 16px', maxHeight: 300, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {sorted.map((s) => {
-          const usedPct = s.total_hosts ? (s.used / s.total_hosts) * 100 : 0
-          const resPct = s.total_hosts ? (s.reserved / s.total_hosts) * 100 : 0
-          const isCritical = s.utilization_pct >= 90
-          const isWarning = s.utilization_pct >= 70
-          const barColor = isCritical ? '#ef4444' : isWarning ? '#f59e0b' : '#3b82f6'
-
-          return (
-            <Tooltip
-              key={s.id}
-              title={
-                <div>
-                  <div style={{ fontWeight: 600 }}>{s.network}{s.name ? ` — ${s.name}` : ''}</div>
-                  <div>Kullanılan: {s.used} · Rezerve: {s.reserved} · Boş: {s.free} / {s.total_hosts}</div>
-                  {s.site && <div>Site: {s.site}</div>}
-                </div>
-              }
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'default' }}>
-                <div style={{ minWidth: 190, flex: '0 0 190px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                  {(isCritical || isWarning) && (
-                    <WarningOutlined style={{ fontSize: 11, color: barColor, flexShrink: 0 }} />
-                  )}
-                  <code style={{ fontSize: 11, color: isDark ? '#4ec9b0' : '#0d9488', whiteSpace: 'nowrap' }}>{s.network}</code>
-                  {s.name && (
-                    <Text style={{ fontSize: 10, color: C.muted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {s.name}
-                    </Text>
-                  )}
-                </div>
-                <div style={{ flex: 1, height: 16, background: isDark ? '#334155' : '#e2e8f0', borderRadius: 3, overflow: 'hidden', display: 'flex' }}>
-                  <div style={{ width: `${usedPct}%`, background: barColor, transition: 'width 0.4s' }} />
-                  <div style={{ width: `${resPct}%`, background: '#f59e0b', opacity: 0.75, transition: 'width 0.4s' }} />
-                </div>
-                <div style={{ minWidth: 42, textAlign: 'right' }}>
-                  <Text style={{ fontSize: 12, fontWeight: 700, color: barColor }}>{s.utilization_pct}%</Text>
-                </div>
-                <div style={{ minWidth: 80, textAlign: 'right' }}>
-                  <Text style={{ fontSize: 11, color: C.muted }}>{s.used + s.reserved}/{s.total_hosts}</Text>
-                </div>
-              </div>
-            </Tooltip>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-// ── Main IPAM Page ────────────────────────────────────────────────────────────
 export default function IpamPage() {
   const { isDark } = useTheme()
-  const { activeSite } = useSite()
   const C = mkC(isDark)
-  const [search, setSearch] = useState('')
-  const [selectedSubnet, setSelectedSubnet] = useState<IpamSubnet | null>(null)
-  const [subnetModal, setSubnetModal] = useState(false)
-  const [editSubnet, setEditSubnet] = useState<IpamSubnet | null>(null)
+  const { message } = App.useApp()
   const qc = useQueryClient()
+  const canEdit = useAuthStore((s) => s.can('ipam', 'edit'))
 
-  const { data: stats } = useQuery({
-    queryKey: ['ipam-stats'],
-    queryFn: ipamApi.getStats,
-    staleTime: 15000,
+  const [selectedZoneId, setSelectedZoneId] = useState<number | null>(null)
+  const [zoneFormOpen, setZoneFormOpen] = useState(false)
+  const [editingZone, setEditingZone] = useState<IpamZone | null>(null)
+  const [subnetFormOpen, setSubnetFormOpen] = useState(false)
+  const [editingSubnet, setEditingSubnet] = useState<IpamSubnet | null>(null)
+  const [drilldownId, setDrilldownId] = useState<number | null>(null)
+  const [lookupIp, setLookupIp] = useState('')
+  const [lookupResult, setLookupResult] = useState<Awaited<ReturnType<typeof ipamApi.lookup>> | null>(null)
+
+  const { data: zones = [], isLoading: zonesLoading } = useQuery({
+    queryKey: ['ipam-zones'], queryFn: ipamApi.listZones,
+  })
+  const { data: subnets = [], isLoading: subnetsLoading, refetch: refetchSubnets } = useQuery({
+    queryKey: ['ipam-subnets', selectedZoneId],
+    queryFn: () => ipamApi.listSubnets(selectedZoneId ? { zone_id: selectedZoneId } : undefined),
+  })
+  const { data: summary } = useQuery({
+    queryKey: ['ipam-summary'], queryFn: ipamApi.summary,
+    refetchInterval: 60_000,
   })
 
-  const { data: subnetsData, isFetching } = useQuery({
-    queryKey: ['ipam-subnets', search, activeSite],
-    queryFn: () => ipamApi.listSubnets({ search: search || undefined, site: activeSite || undefined }),
-    staleTime: 15000,
+  const delZone = useMutation({
+    mutationFn: ipamApi.deleteZone,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ipam-zones'] })
+      qc.invalidateQueries({ queryKey: ['ipam-summary'] })
+      message.success('Zone silindi')
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Silinemedi', 6),
   })
 
-  const deleteMut = useMutation({
+  const delSubnet = useMutation({
     mutationFn: ipamApi.deleteSubnet,
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+      qc.invalidateQueries({ queryKey: ['ipam-summary'] })
       message.success('Subnet silindi')
-      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
-      qc.invalidateQueries({ queryKey: ['ipam-stats'] })
     },
-    onError: () => message.error('Silinemedi'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Silinemedi'),
   })
 
-  const scanMut = useMutation({
-    mutationFn: ({ id, pingSweep = false }: { id: number; pingSweep?: boolean }) =>
-      ipamApi.scanFromArp(id, pingSweep),
-    onSuccess: (r) => {
-      const extra = r.ping_discovered > 0 ? ` (${r.ping_discovered} ping ile)` : ''
-      message.success(`${r.subnet}: ${r.imported} yeni, ${r.updated} güncellendi${extra}`)
-      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
-    },
-    onError: (e: any) => message.error(e.response?.data?.detail || 'Tarama hatası'),
-  })
-
-  const columns = [
+  const subnetCols = useMemo(() => [
     {
-      title: 'Ağ',
-      dataIndex: 'network',
-      render: (v: string) => (
-        <code style={{ fontSize: 13, background: isDark ? '#0f172a' : '#f0fdfa', color: isDark ? '#4ec9b0' : '#0d9488', padding: '1px 6px', borderRadius: 3 }}>
-          {v}
-        </code>
-      ),
-      sorter: (a: IpamSubnet, b: IpamSubnet) => a.network.localeCompare(b.network),
-    },
-    {
-      title: 'Ad',
-      dataIndex: 'name',
-      render: (v?: string) => v
-        ? <Text strong style={{ color: C.text }}>{v}</Text>
-        : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'Site',
-      dataIndex: 'site',
-      render: (v?: string) => v
-        ? <Tag style={{ color: '#06b6d4', borderColor: '#06b6d450', background: '#06b6d418', fontSize: 11 }}>{v}</Tag>
-        : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'VLAN',
-      dataIndex: 'vlan_id',
-      width: 70,
-      render: (v?: number) => v
-        ? <Tag style={{ color: '#6366f1', borderColor: '#6366f150', background: '#6366f118', fontSize: 11 }}>{v}</Tag>
-        : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'Gateway',
-      dataIndex: 'gateway',
-      render: (v?: string) => v
-        ? <code style={{ fontSize: 12, color: C.muted }}>{v}</code>
-        : <Text style={{ color: C.dim }}>—</Text>,
-    },
-    {
-      title: 'Kullanım',
-      width: 150,
-      render: (_: any, row: IpamSubnet) => <UtilBar subnet={row} />,
-    },
-    {
-      title: 'Adresler',
-      width: 180,
-      render: (_: any, row: IpamSubnet) => (
+      title: 'CIDR', dataIndex: 'cidr', width: 150,
+      render: (v: string, r: IpamSubnet) => (
         <Space size={4}>
-          <Tag style={{ color: '#3b82f6', borderColor: '#3b82f650', background: '#3b82f618', fontSize: 10 }}>{row.used} kul.</Tag>
-          <Tag style={{ color: '#f59e0b', borderColor: '#f59e0b50', background: '#f59e0b18', fontSize: 10 }}>{row.reserved} rez.</Tag>
-          <Tag style={{ color: '#22c55e', borderColor: '#22c55e50', background: '#22c55e18', fontSize: 10 }}>{row.free} boş</Tag>
-        </Space>
-      ),
-    },
-    {
-      title: '',
-      width: 140,
-      render: (_: any, row: IpamSubnet) => (
-        <Space size={4}>
-          <Tooltip title="Adresleri Gör">
-            <Button size="small" type="link" icon={<SearchOutlined />} onClick={() => setSelectedSubnet(row)}>Detay</Button>
-          </Tooltip>
-          <Tooltip title="ARP Tarama">
-            <Button size="small" type="text" icon={<RadarChartOutlined />} loading={scanMut.isPending} onClick={() => scanMut.mutate({ id: row.id })} />
-          </Tooltip>
-          <Tooltip title="Düzenle">
-            <Button size="small" type="text" icon={<EditOutlined />} onClick={() => { setEditSubnet(row); setSubnetModal(true) }} />
-          </Tooltip>
-          <Popconfirm title="Subnet ve tüm adresleri silinecek. Devam edilsin mi?" onConfirm={() => deleteMut.mutate(row.id)} okText="Evet" cancelText="Hayır">
-            <Tooltip title="Sil">
-              <Button size="small" type="text" danger icon={<DeleteOutlined />} />
+          <Text style={{ fontFamily: 'monospace', fontWeight: 600 }}>{v}</Text>
+          {r.utilization?.is_high && (
+            <Tooltip title={`%${r.utilization.pct} dolu — eşik %${r.utilization.warn_pct}`}>
+              <WarningOutlined style={{ color: '#ef4444' }} />
             </Tooltip>
-          </Popconfirm>
+          )}
         </Space>
       ),
     },
-  ]
+    {
+      title: 'Ad', dataIndex: 'name',
+      render: (v: string | null, r: IpamSubnet) => (
+        <div>
+          <Text style={{ color: C.text }}>{v || <Text style={{ color: C.dim }}>—</Text>}</Text>
+          {r.vlan_id && <Tag color="purple" style={{ fontSize: 10, marginLeft: 6 }}>VLAN {r.vlan_id}</Tag>}
+        </div>
+      ),
+    },
+    {
+      title: 'Kullanım', width: 200,
+      sorter: (a: IpamSubnet, b: IpamSubnet) =>
+        (a.utilization?.pct ?? 0) - (b.utilization?.pct ?? 0),
+      render: (_: unknown, r: IpamSubnet) => {
+        const u = r.utilization
+        if (!u) return <Text style={{ color: C.dim }}>—</Text>
+        return (
+          <div>
+            <Progress
+              percent={u.pct}
+              size="small"
+              status={u.is_high ? 'exception' : 'active'}
+              format={(p) => `${p}% (${u.used}/${u.total})`}
+            />
+          </div>
+        )
+      },
+    },
+    {
+      title: 'Gateway', dataIndex: 'gateway', width: 130,
+      render: (v: string | null) => v
+        ? <Text style={{ fontFamily: 'monospace', fontSize: 11 }}>{v}</Text>
+        : <Text style={{ color: C.dim }}>—</Text>,
+    },
+    {
+      title: 'DHCP', dataIndex: 'dhcp_enabled', width: 80,
+      render: (v: boolean) => v
+        ? <Tag color="green">DHCP</Tag>
+        : <Text style={{ color: C.dim, fontSize: 11 }}>—</Text>,
+    },
+    {
+      title: '', width: 110,
+      render: (_: unknown, r: IpamSubnet) => (
+        <Space size={4}>
+          <Tooltip title="Detay & Atamalar">
+            <Button size="small" icon={<ApiOutlined />} onClick={() => setDrilldownId(r.id)} />
+          </Tooltip>
+          {canEdit && (
+            <>
+              <Button size="small" icon={<EditOutlined />}
+                onClick={() => { setEditingSubnet(r); setSubnetFormOpen(true) }} />
+              <Popconfirm title="Subnet silinsin mi?" onConfirm={() => delSubnet.mutate(r.id)}>
+                <Button size="small" danger icon={<DeleteOutlined />} />
+              </Popconfirm>
+            </>
+          )}
+        </Space>
+      ),
+    },
+  ], [C, canEdit])
 
-  // Derived per-subnet utilization stats — concrete capacity-planning signal.
-  const subnets = subnetsData?.items ?? []
-  const utilStats = useMemo(() => {
-    const critical = subnets.filter((s) => s.utilization_pct >= 90).length
-    const warning = subnets.filter((s) => s.utilization_pct >= 70 && s.utilization_pct < 90).length
-    const avgUtil = subnets.length === 0 ? 0
-      : Math.round(subnets.reduce((sum, s) => sum + s.utilization_pct, 0) / subnets.length)
-    return { critical, warning, avgUtil }
-  }, [subnets])
+  const handleLookup = async () => {
+    if (!lookupIp.trim()) return
+    try {
+      const r = await ipamApi.lookup(lookupIp.trim())
+      setLookupResult(r)
+    } catch (e: any) {
+      message.error(e?.response?.data?.detail || 'Sorgu başarısız')
+    }
+  }
 
   return (
     <div className="nm-page" style={{ padding: '4px 2px' }}>
-      <style>{IPAM_CSS}</style>
-
-      {/* NOC header */}
       <div className="nm-page-hd">
         <div className="title-block">
           <div className="nm-crumbs"><span>Ağ Operasyonları</span><span>IPAM</span></div>
           <h1 className="nm-page-title">
-            IP Adres Yönetimi
-            <span className="nm-pill mono">{stats?.subnets ?? 0} subnet</span>
+            IPAM (IP Address Management)
+            <span className="nm-pill mono">{summary?.subnet_count ?? 0} subnet</span>
+            <span className="nm-pill mono">{summary?.assignment_count ?? 0} atama</span>
+            <Tag color="purple" style={{ fontSize: 10, fontWeight: 600 }}>T9 Tur 7</Tag>
           </h1>
           <div className="nm-page-sub">
-            Subnet kataloğu · IP doluluk takibi · ARP/Ping keşif · adres → cihaz eşlemesi.
+            Zone → Subnet → IP atama hiyerarşisi · CIDR overlap koruması · ARP keşfi · doluluk uyarıları.
           </div>
         </div>
-        <Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { setEditSubnet(null); setSubnetModal(true) }}>
-          Subnet Ekle
-        </Button>
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => refetchSubnets()}>Yenile</Button>
+          {canEdit && (
+            <Button type="primary" icon={<PlusOutlined />}
+              onClick={() => { setEditingSubnet(null); setSubnetFormOpen(true) }}>
+              Yeni Subnet
+            </Button>
+          )}
+        </Space>
       </div>
 
-      {/* NOC stat bar — 6 real KPIs */}
-      <div className="nm-statbar">
-        <div className="nm-stat">
-          <div className="nm-stat-label">SUBNET</div>
-          <div className="nm-stat-val">{stats?.subnets ?? 0}</div>
-          <div className="nm-stat-delta">{subnets.length} listede</div>
-        </div>
-        <div className="nm-stat">
-          <div className="nm-stat-label">TOPLAM ADRES</div>
-          <div className="nm-stat-val">{stats?.addresses_total ?? 0}</div>
-          <div className="nm-stat-delta">dyn + sta + rez</div>
-        </div>
-        <div className={`nm-stat ${utilStats.avgUtil >= 70 ? 'warn' : utilStats.avgUtil >= 50 ? '' : 'ok'}`}>
-          <div className="nm-stat-label">ORT. DOLULUK</div>
-          <div className="nm-stat-val">{utilStats.avgUtil}<small>%</small></div>
-          <div className="nm-stat-delta">{subnets.length} subnet üzerinden</div>
-        </div>
-        <div className={`nm-stat ${utilStats.critical > 0 ? 'crit' : ''}`}>
-          <div className="nm-stat-label">KRİTİK (≥90%)</div>
-          <div className="nm-stat-val">{utilStats.critical}</div>
-          <div className="nm-stat-delta">kapasite tükeniyor</div>
-        </div>
-        <div className={`nm-stat ${utilStats.warning > 0 ? 'warn' : ''}`}>
-          <div className="nm-stat-label">UYARI (70-89%)</div>
-          <div className="nm-stat-val">{utilStats.warning}</div>
-          <div className="nm-stat-delta">izlemeye alın</div>
-        </div>
-        <div className="nm-stat">
-          <div className="nm-stat-label">DİNAMİK / STATİK</div>
-          <div className="nm-stat-val mono" style={{ fontSize: 18 }}>
-            {stats?.addresses_dynamic ?? 0}<span style={{ color: 'var(--fg-3)' }}> / </span>{stats?.addresses_static ?? 0}
-          </div>
-          <div className="nm-stat-delta">{stats?.addresses_reserved ?? 0} rezerve</div>
-        </div>
-      </div>
-
-      <SubnetUtilizationGrid subnets={subnets} />
-
-      {/* Subnets table */}
-      <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div className="nm-card-hd">
-          <h3><ClusterOutlined /> Subnetler</h3>
-          <span className="nm-pill mono">{subnetsData?.total ?? 0}</span>
-          {/* Inline search + reload */}
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-            <Input
-              placeholder="Ağ, ad, açıklama ara…"
-              prefix={<SearchOutlined />}
-              allowClear
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ width: 260 }}
-              size="small"
-            />
-            <Button icon={<ReloadOutlined />} size="small"
-              onClick={() => qc.invalidateQueries({ queryKey: ['ipam-subnets'] })} />
-          </div>
-        </div>
-        <Table
-          dataSource={subnets}
-          columns={columns}
-          rowKey="id"
-          loading={isFetching}
-          size="small"
-          pagination={{ pageSize: 20 }}
-          onRow={(row) => ({
-            onDoubleClick: () => setSelectedSubnet(row),
-            style: { animation: 'ipamRowIn 0.2s ease-out' },
-          })}
+      {/* High-utilization warning */}
+      {summary && summary.high_utilization.length > 0 && (
+        <Alert
+          type="warning"
+          showIcon
+          icon={<WarningOutlined />}
+          style={{ marginBottom: 12 }}
+          message={`${summary.high_utilization.length} subnet eşik üzerinde`}
+          description={
+            <Space wrap>
+              {summary.high_utilization.slice(0, 5).map((h) => (
+                <Tag key={h.id} color="red" onClick={() => setDrilldownId(h.id)} style={{ cursor: 'pointer' }}>
+                  {h.cidr} · %{h.pct}
+                </Tag>
+              ))}
+              {summary.high_utilization.length > 5 && (
+                <Text style={{ color: C.muted, fontSize: 12 }}>
+                  +{summary.high_utilization.length - 5} daha
+                </Text>
+              )}
+            </Space>
+          }
         />
-      </div>
+      )}
 
-      <SubnetModal
-        open={subnetModal}
-        subnet={editSubnet}
-        onClose={() => { setSubnetModal(false); setEditSubnet(null) }}
+      {/* IP Lookup */}
+      <Card size="small" style={{ marginBottom: 12, background: C.bg, border: `1px solid ${C.border}` }}>
+        <Space.Compact style={{ width: '100%' }}>
+          <Input
+            prefix={<SearchOutlined />}
+            placeholder="IP sorgula — örn. 10.10.20.50"
+            value={lookupIp}
+            onChange={(e) => setLookupIp(e.target.value)}
+            onPressEnter={handleLookup}
+          />
+          <Button type="primary" onClick={handleLookup} icon={<GlobalOutlined />}>
+            Sorgula
+          </Button>
+        </Space.Compact>
+        {lookupResult && (
+          <div style={{ marginTop: 8, fontSize: 12 }}>
+            <Text style={{ color: C.muted }}>{lookupResult.ip}: </Text>
+            {lookupResult.subnet ? (
+              <>
+                <Tag color="blue" onClick={() => setDrilldownId(lookupResult.subnet!.id)} style={{ cursor: 'pointer' }}>
+                  {lookupResult.subnet.cidr}
+                </Tag>
+                {lookupResult.assignment ? (
+                  <Tag color={TYPE_COLOR[lookupResult.assignment.type] || 'default'}>
+                    {lookupResult.assignment.hostname || lookupResult.assignment.type}
+                  </Tag>
+                ) : <Text style={{ color: C.muted }}>atanmamış</Text>}
+              </>
+            ) : <Text style={{ color: '#ef4444' }}>Hiçbir subnet'e ait değil</Text>}
+          </div>
+        )}
+      </Card>
+
+      <Row gutter={12}>
+        {/* Zones (left) */}
+        <Col span={6}>
+          <Card
+            size="small"
+            title={
+              <Space>
+                <ApartmentOutlined />
+                <Text strong>Zone'lar</Text>
+                <Tag>{zones.length}</Tag>
+              </Space>
+            }
+            extra={canEdit && (
+              <Button size="small" icon={<PlusOutlined />}
+                onClick={() => { setEditingZone(null); setZoneFormOpen(true) }} />
+            )}
+            style={{ background: C.bg, border: `1px solid ${C.border}` }}
+            styles={{ body: { padding: 8 } }}
+          >
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button
+                onClick={() => setSelectedZoneId(null)}
+                style={{
+                  textAlign: 'left', cursor: 'pointer', padding: '6px 10px',
+                  background: selectedZoneId === null ? (isDark ? '#1e40af40' : '#dbeafe') : 'transparent',
+                  border: `1px solid ${selectedZoneId === null ? '#3b82f6' : C.border}`,
+                  borderRadius: 6,
+                }}
+              >
+                <Text style={{ color: C.text, fontSize: 13, fontWeight: 600 }}>Tümü</Text>
+              </button>
+              {zones.map((z) => (
+                <button
+                  key={z.id}
+                  onClick={() => setSelectedZoneId(z.id)}
+                  style={{
+                    textAlign: 'left', cursor: 'pointer', padding: '6px 10px',
+                    background: selectedZoneId === z.id ? (isDark ? '#1e40af40' : '#dbeafe') : 'transparent',
+                    border: `1px solid ${selectedZoneId === z.id ? '#3b82f6' : C.border}`,
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <Text style={{ color: C.text, fontSize: 13 }}>{z.name}</Text>
+                    <Tag style={{ fontSize: 10, margin: 0 }}>{z.zone_type}</Tag>
+                  </div>
+                  {canEdit && (
+                    <Space size={4} style={{ marginTop: 4 }}>
+                      <Button
+                        size="small" type="text" icon={<EditOutlined />}
+                        onClick={(e) => { e.stopPropagation(); setEditingZone(z); setZoneFormOpen(true) }}
+                      />
+                      <Popconfirm title="Zone silinsin mi?" onConfirm={() => delZone.mutate(z.id)}>
+                        <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                          onClick={(e) => e.stopPropagation()} />
+                      </Popconfirm>
+                    </Space>
+                  )}
+                </button>
+              ))}
+              {!zonesLoading && zones.length === 0 && (
+                <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="Zone yok" />
+              )}
+            </div>
+          </Card>
+        </Col>
+
+        {/* Subnets (right, wide) */}
+        <Col span={18}>
+          <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
+            <Table
+              dataSource={subnets}
+              rowKey="id"
+              columns={subnetCols}
+              loading={subnetsLoading}
+              size="small"
+              pagination={{ pageSize: 50, showTotal: (n) => <span style={{ color: C.muted }}>{n} subnet</span> }}
+              locale={{ emptyText: zones.length === 0 ? 'Önce bir zone oluşturun.' : 'Bu zone için subnet yok.' }}
+            />
+          </div>
+        </Col>
+      </Row>
+
+      <ZoneFormModal
+        open={zoneFormOpen}
+        onClose={() => { setZoneFormOpen(false); setEditingZone(null) }}
+        editing={editingZone}
       />
-
-      <AddressDrawer
-        subnet={selectedSubnet}
-        onClose={() => setSelectedSubnet(null)}
+      <SubnetFormModal
+        open={subnetFormOpen}
+        onClose={() => { setSubnetFormOpen(false); setEditingSubnet(null) }}
+        zoneId={selectedZoneId}
+        editing={editingSubnet}
+      />
+      <SubnetDetailDrawer
+        subnetId={drilldownId}
+        open={drilldownId !== null}
+        onClose={() => setDrilldownId(null)}
+        isDark={isDark}
       />
     </div>
   )
