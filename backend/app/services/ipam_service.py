@@ -8,7 +8,7 @@ the GIST index `ix_ipam_subnets_cidr_gist`.
 from __future__ import annotations
 
 import ipaddress
-from typing import Optional
+from typing import Any, Optional
 
 from sqlalchemy import and_, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,19 +171,22 @@ async def find_overlapping_subnets(
     db: AsyncSession, cidr: str, organization_id: int,
     *, exclude_id: Optional[int] = None,
 ) -> list[IpamSubnet]:
-    """Subnets in the same org whose CIDR overlaps with `cidr`."""
-    q = text("""
+    """Subnets in the same org whose CIDR overlaps with `cidr`.
+
+    NB: asyncpg '::int' cast operatörü ':param' placeholder ile çakışıyor —
+    bu yüzden exclude_id'i Python tarafında koşullu WHERE clause ile ekliyoruz.
+    """
+    base_sql = """
         SELECT id FROM ipam_subnets
         WHERE organization_id = :org_id
           AND deleted_at IS NULL
           AND cidr && cast(:cidr as cidr)
-          AND (:exclude_id::int IS NULL OR id <> :exclude_id::int)
-    """)
-    rows = (await db.execute(q, {
-        "org_id": organization_id,
-        "cidr": cidr,
-        "exclude_id": exclude_id,
-    })).all()
+    """
+    params: dict[str, Any] = {"org_id": organization_id, "cidr": cidr}
+    if exclude_id is not None:
+        base_sql += " AND id <> :exclude_id"
+        params["exclude_id"] = exclude_id
+    rows = (await db.execute(text(base_sql), params)).all()
     if not rows:
         return []
     ids = [r[0] for r in rows]

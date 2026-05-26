@@ -56,7 +56,12 @@ function DevicePoeDrawer({
       },
     },
     {
-      title: 'Güç (W)', dataIndex: 'power_watts', width: 120,
+      title: (
+        <Tooltip title="Tahmini çekiş — cihaz vendor'ı gerçek mW raporlamıyorsa PD class'tan IEEE 802.3 max bütçesi kullanılır.">
+          <span>Güç (W) <span style={{ color: '#94a3b8', fontSize: 11 }}>ⓘ</span></span>
+        </Tooltip>
+      ),
+      dataIndex: 'power_watts', width: 130,
       sorter: (a: PoePort, b: PoePort) => (a.power_mw || 0) - (b.power_mw || 0),
       render: (v: number, r: PoePort) =>
         r.oper_status === 'on'
@@ -64,7 +69,21 @@ function DevicePoeDrawer({
           : <Text style={{ color: C.muted }}>—</Text>,
     },
     {
-      title: 'Sınıf', dataIndex: 'device_class', width: 90,
+      title: (
+        <Tooltip title={
+          <div style={{ fontSize: 11, lineHeight: 1.5 }}>
+            <b>IEEE 802.3 PD Power Class</b> — bağlı cihazın talep ettiği güç sınıfı:<br/>
+            • Class 1 — ~4 W (VoIP telefon)<br/>
+            • Class 2 — ~6 W (basic IP kamera)<br/>
+            • Class 3 — ~13 W (WiFi AP, gelişmiş kamera)<br/>
+            • Class 4 — ~25 W (PoE+ — PTZ kamera, AP-AX)<br/>
+            • Class 5-8 — 45-90 W (PoE++ / UPOE)
+          </div>
+        }>
+          <span>Sınıf <span style={{ color: '#94a3b8', fontSize: 11 }}>ⓘ</span></span>
+        </Tooltip>
+      ),
+      dataIndex: 'device_class', width: 100,
       render: (v: string | null) => v ? <Tag>{v}</Tag> : <Text style={{ color: C.dim }}>—</Text>,
     },
     {
