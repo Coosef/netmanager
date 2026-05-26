@@ -413,6 +413,38 @@ async def ssh_terminal_ws(
     from app.services.agent_manager import agent_manager as _ag
     use_agent = bool(device.agent_id) and _ag.is_online(device.agent_id)
 
+    # T9 Tur 3A — Session audit logger. Hem agent-relay hem direct paramiko
+    # path'lerinde aynı logger örneği; close() finally bloğunda.
+    from app.services.terminal_session_logger import TerminalSessionLogger
+    from app.core.database import AsyncSessionLocal as _AsyncSessionLocal
+    _term_client_ip = websocket.client.host if websocket.client else None
+    _term_user_agent = websocket.headers.get("user-agent") if hasattr(websocket, "headers") else None
+    if _term_user_agent and len(_term_user_agent) > 512:
+        _term_user_agent = _term_user_agent[:512]
+
+    async with _AsyncSessionLocal() as _audit_db_init:
+        from sqlalchemy import text as _sql_text_init
+        await _audit_db_init.execute(_sql_text_init(
+            "SELECT set_config('app.is_super_admin', :sa, true),"
+            "       set_config('app.current_org_id', :o, true),"
+            "       set_config('app.current_location_id', :l, true)"
+        ), {
+            "sa": "on" if scope.is_super_admin else "off",
+            "o": str(scope.organization_id) if scope.organization_id is not None else "",
+            "l": str(scope.active_location_id) if scope.active_location_id is not None else "",
+        })
+        _term_logger = await TerminalSessionLogger.create(
+            _audit_db_init,
+            user_id=scope.user_id,
+            device_id=device.id,
+            agent_id=device.agent_id,
+            organization_id=device.organization_id,
+            location_id=device.location_id,
+            client_ip=_term_client_ip,
+            user_agent=_term_user_agent,
+            connection_path="agent_relay" if use_agent else "direct_paramiko",
+        )
+
     if use_agent:
         await websocket.send_text(
             f"\r\nConnecting to {username}@{host}:{port} via agent…\r\n"
@@ -422,6 +454,8 @@ async def ssh_terminal_ws(
         async def _on_output(data: bytes):
             if closed_evt.is_set():
                 return
+            # T9 Tur 3A — audit (sync, buffer)
+            _term_logger.log_output(data)
             try:
                 await websocket.send_bytes(data)
             except Exception:
@@ -472,15 +506,20 @@ async def ssh_terminal_ws(
                     except Exception:
                         pass
                 # Keystrokes → agent → device
-                await _ag.send_shell_input(
-                    session_id, text.encode("utf-8", errors="replace"),
-                )
+                _input_bytes = text.encode("utf-8", errors="replace")
+                _term_logger.log_input(_input_bytes)  # T9 Tur 3A audit
+                await _ag.send_shell_input(session_id, _input_bytes)
         finally:
             revalidator.cancel()
             if session_id:
                 await _ag.close_shell_session(session_id)
             try: await websocket.close()
             except Exception: pass
+            # T9 Tur 3A — session log final flush
+            try:
+                await _term_logger.close(_AsyncSessionLocal, exit_reason="user_closed")
+            except Exception:
+                pass
         return
 
     # ── Fallback: direct paramiko (agent yok / offline / eski sürüm) ──────
@@ -516,6 +555,7 @@ async def ssh_terminal_ws(
                 data = await loop.run_in_executor(None, channel.recv, 4096)
                 if not data:
                     break
+                _term_logger.log_output(data)  # T9 Tur 3A audit
                 await websocket.send_bytes(data)
             except Exception:
                 await asyncio.sleep(0.05)
@@ -541,7 +581,9 @@ async def ssh_terminal_ws(
                         continue
                     except Exception:
                         pass
-                await loop.run_in_executor(None, channel.sendall, text.encode("utf-8", errors="replace"))
+                _input_bytes = text.encode("utf-8", errors="replace")
+                _term_logger.log_input(_input_bytes)  # T9 Tur 3A audit
+                await loop.run_in_executor(None, channel.sendall, _input_bytes)
             except (asyncio.TimeoutError, WebSocketDisconnect):
                 break
             except Exception:
@@ -558,5 +600,10 @@ async def ssh_terminal_ws(
         ssh_client.close()
         try:
             await websocket.close()
+        except Exception:
+            pass
+        # T9 Tur 3A — session log final flush
+        try:
+            await _term_logger.close(_AsyncSessionLocal, exit_reason="user_closed")
         except Exception:
             pass

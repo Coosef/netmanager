@@ -24,6 +24,7 @@ import DevicesPage from '@/pages/Devices'
 import TasksPage from '@/pages/Tasks'
 import UsersPage from '@/pages/Users'
 import AuditLogPage from '@/pages/AuditLog'
+import TerminalSessionsPage from '@/pages/TerminalSessions'
 import MonitorPage from '@/pages/Monitor'
 import LiveMonitorPage from '@/pages/LiveMonitor'
 import TopologyPage from '@/pages/Topology'
@@ -260,6 +261,7 @@ function ThemedApp() {
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
               <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
               <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
+              <Route path="terminal-sessions" element={<PermRoute module="audit_logs" action="view"><TerminalSessionsPage /></PermRoute>} />
               <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
               <Route path="settings" element={<PermRoute module="settings" action="view"><SettingsPage /></PermRoute>} />
               {/* Profil — her authenticated kullanıcı kendi sayfası. Permission
