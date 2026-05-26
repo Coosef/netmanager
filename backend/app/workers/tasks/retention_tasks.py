@@ -16,13 +16,17 @@ HYPERTABLE_MANAGED = {
     "synthetic_probe_results",
 }
 
-# Retention windows (days) for plain-table time-series data.
+# Retention windows (days, ts_column) for plain-table time-series data.
 # Hypertable-managed tables are intentionally excluded from this dict.
+# T8.5 — agent_command_logs eklendi: tablo executed_at kolonu kullanıyor
+# (created_at yok). VPS prod'da 135K satır / 87MB seviyesine çıktığı için
+# kapsama alındı.
 _RETENTION = {
-    "notification_logs":  30,   # dedup/audit, low priority
-    "command_executions": 90,   # useful audit trail
-    "network_events":     90,   # event history
-    "audit_logs":         180,  # compliance / security audit
+    "notification_logs":  (30,  "sent_at"),       # dedup/audit, low priority
+    "command_executions": (90,  "created_at"),    # useful audit trail
+    "network_events":     (90,  "created_at"),    # event history
+    "audit_logs":         (180, "created_at"),    # compliance / security audit
+    "agent_command_logs": (90,  "executed_at"),   # agent ssh/snmp komut audit'i
 }
 
 # How many days of inactive MAC/ARP entries to keep
@@ -46,9 +50,8 @@ async def _run():
 
     async with make_worker_session()() as db:
         # ── Standard time-series tables ───────────────────────────────────────
-        for table, days in _RETENTION.items():
+        for table, (days, ts_col) in _RETENTION.items():
             cutoff = now - timedelta(days=days)
-            ts_col = "sent_at" if table == "notification_logs" else "created_at"
             result = await db.execute(
                 text(f"DELETE FROM {table} WHERE {ts_col} < :cutoff"),
                 {"cutoff": cutoff},

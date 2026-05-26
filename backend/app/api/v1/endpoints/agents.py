@@ -1377,20 +1377,45 @@ async def agent_websocket(
                     "has_snmp": msg.get("has_snmp", False),
                     "has_crypto": msg.get("has_crypto", False),
                 })
-                agent.platform = msg.get("platform")
-                agent.machine_hostname = msg.get("hostname")
-                agent.version = msg.get("version")
+                # T8.5 — Hello persist explicit UPDATE.
+                # Eskiden ORM attribute set + db.commit() yapıyorduk; sessizce
+                # fail oluyordu (DB'de agent.version 1.3.16'da kalıyordu,
+                # canlı agentlar v1.4.0 hello attığı halde). Muhtemel sebep:
+                # bu WS task'ının uzun ömürlü transaction'ında SQLAlchemy
+                # change-tracking heartbeat update'lerden sonra dirty flag'i
+                # düşürüyor. Explicit UPDATE SQL + log ile değişiklikleri
+                # garanti ediyoruz.
+                from sqlalchemy import update as _sa_update
+                _hello_vals = {
+                    "platform": msg.get("platform"),
+                    "machine_hostname": msg.get("hostname"),
+                    "version": msg.get("version"),
+                }
                 if msg.get("local_ip"):
-                    agent.local_ip = msg.get("local_ip")
+                    _hello_vals["local_ip"] = msg.get("local_ip")
+                _agent_logger = logging.getLogger("agent_manager")
                 try:
+                    await db.execute(
+                        _sa_update(Agent).where(Agent.id == agent_id).values(**_hello_vals)
+                    )
                     await db.commit()
-                except Exception:
+                    # ORM in-memory state'i de sync et (sonraki agent.* okumalar tutar)
+                    for _k, _v in _hello_vals.items():
+                        setattr(agent, _k, _v)
+                    _agent_logger.info(
+                        "hello persist OK: agent=%s ver=%s platform=%s",
+                        agent_id, _hello_vals.get("version"), _hello_vals.get("platform"),
+                    )
+                except Exception as _exc:
                     await db.rollback()
+                    _agent_logger.warning(
+                        "hello persist FAIL: agent=%s err=%r vals=%s",
+                        agent_id, _exc, _hello_vals,
+                    )
 
                 # Auto-update: notify agent if its version is outdated
                 agent_ver = msg.get("version") or ""
                 def _ver(v): return tuple(int(x) for x in v.split(".") if x.isdigit())
-                _agent_logger = logging.getLogger("agent_manager")
                 _agent_logger.info(
                     "agent hello: id=%s ver=%s platform=%s",
                     agent_id, agent_ver, msg.get("platform"),
