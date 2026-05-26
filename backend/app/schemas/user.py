@@ -22,6 +22,8 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     notes: Optional[str] = None
     organization_id: Optional[int] = None
+    # T9 Tur 2 #4 — IP allowlist. Comma-separated CIDR (boş/None → kısıt yok)
+    allowed_ips: Optional[str] = None
 
 
 class UserPasswordChange(BaseModel):
@@ -60,5 +62,7 @@ class UserResponse(BaseModel):
     # admin page needs `mfa_enabled` for the "MFA AÇIK" KPI; the rest of
     # the MFA state (totp_secret, recovery codes) stays per-user-only.
     mfa_enabled: bool = False
+    # T9 Tur 2 #4 — IP allowlist (NULL/"" → kısıt yok)
+    allowed_ips: Optional[str] = None
 
     model_config = {"from_attributes": True}

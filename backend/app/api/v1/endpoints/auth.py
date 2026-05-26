@@ -34,6 +34,7 @@ from app.schemas.auth import (
 )
 from app.schemas.user import UserResponse
 from app.services.audit_service import log_action
+from app.services import ip_allowlist as _ip_allowlist
 
 router = APIRouter()
 limiter = Limiter(key_func=get_remote_address)
@@ -118,6 +119,22 @@ async def login(
         )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
+    # ── T9 Tur 2 #4 — Per-user IP allowlist ────────────────────────────
+    # Şifre doğru ama kullanıcının allowed_ips listesi varsa client IP'sini
+    # eşleştirmek gerek. Allowlist NULL/boş ise check'ten geçer (kısıt yok).
+    client_ip = request.client.host if request and request.client else None
+    if not _ip_allowlist.is_allowed(client_ip, user.allowed_ips):
+        await log_action(
+            db, user, "login_blocked_ip",
+            details={"client_ip": client_ip,
+                     "allowed_ips": user.allowed_ips},
+            status="failure", request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu IP adresinden giriş yapma yetkiniz yok",
+        )
+
     # ── MFA branch ──────────────────────────────────────────────────────
     # The password is now confirmed. If the user opted into MFA, do NOT
     # issue an access token — hand back a short-lived challenge token
@@ -179,6 +196,22 @@ async def mfa_verify(
         # user but the account could have been disabled / MFA removed in
         # the 5-minute window.
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+
+    # T9 Tur 2 #4 — IP allowlist check yine. MFA challenge geçerli olsa
+    # bile farklı IP'den verify deneniyorsa engelle (challenge'i alıp
+    # başka IP'den verify etmeye çalışmayı önler).
+    mfa_client_ip = request.client.host if request and request.client else None
+    if not _ip_allowlist.is_allowed(mfa_client_ip, user.allowed_ips):
+        await log_action(
+            db, user, "mfa_verify_blocked_ip",
+            details={"client_ip": mfa_client_ip,
+                     "allowed_ips": user.allowed_ips},
+            status="failure", request=request,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Bu IP adresinden giriş yapma yetkiniz yok",
+        )
 
     method = (payload.method or "totp").lower()
     ok = False
