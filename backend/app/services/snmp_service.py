@@ -261,11 +261,6 @@ async def get_poe_status(
         except Exception:
             pass
 
-    # IEEE 802.3af/at PD power classes — Watts max (PSE budget).
-    # Class 4 = PoE+ (25.5W), 5-8 = PoE++ (UPOE) 45-90W.
-    class_max_mw = {1: 3840, 2: 6490, 3: 12950, 4: 25500,
-                    5: 45000, 6: 60000, 7: 75000, 8: 90000}
-
     out: list[dict] = []
     detection_label = {
         1: "off", 2: "searching", 3: "on", 4: "faulty", 5: "test", 6: "faulty",
@@ -277,11 +272,10 @@ async def get_poe_status(
         admin = "enabled" if admin_int == 1 else "disabled" if admin_int == 2 else None
         class_int = _int(full_index_class.get(idx))
         device_class = f"Class {class_int}" if class_int and 1 <= class_int <= 8 else None
+        # GERÇEK ÇEKİŞ: yalnız vendor proprietary MIB raporladıysa kullan
+        # (Cisco cpeExtPsePortPwrConsumption). Aksi halde 0 → UI "—" + tooltip
+        # ile 'sınıf bütçesi' gösterir; sahte 25.5W gösterilmez.
         power_mw = _int(pwr_t.get(idx)) or 0
-        # Vendor power_mw vermiyorsa (Ruijie / standart MIB), class'tan
-        # tahmini max çekiş kullan — sayfa "0 W" görüntülemesin.
-        if power_mw == 0 and oper == "on" and class_int:
-            power_mw = class_max_mw.get(class_int, 0)
 
         # Port name: PSE composite '<group>.<portIndex>' → portIndex çoğu
         # vendor'da ifIndex'e eşit. Sondaki nokta sonrası int'i ifName

@@ -123,4 +123,16 @@ export const ipamApi = {
       ip: string; subnet: IpamSubnet | null; assignment: IpamAssignment | null
     }>('/ipam/lookup', { params: { ip } }).then((r) => r.data),
   summary: () => client.get<IpamSummary>('/ipam/summary').then((r) => r.data),
+
+  // T9 follow-up — ARP'tan IPAM doldur (saatlik task'ı manuel tetikle)
+  syncArp: () =>
+    client.post<{ queued: boolean; message: string }>('/ipam/sync-arp')
+      .then((r) => r.data),
+
+  // T9 follow-up — Subnet IP scanner (paralel ping, dolu IP'leri keşfet)
+  scanSubnet: (subnetId: number) =>
+    client.post<{
+      subnet_id: number; cidr: string; scanned: number; responded: number
+      created: number; refreshed: number; deleted: number
+    }>(`/ipam/subnets/${subnetId}/scan`).then((r) => r.data),
 }

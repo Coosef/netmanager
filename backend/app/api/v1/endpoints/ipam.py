@@ -13,6 +13,8 @@ Surfaces:
 """
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -486,6 +488,154 @@ async def ip_lookup(
         "ip": ip,
         "subnet": _subnet(subnet) if subnet else None,
         "assignment": assignment,
+    }
+
+
+# ─── ARP-discovery sync (manual trigger) ────────────────────────────────────
+
+@router.post("/sync-arp", status_code=202)
+async def trigger_arp_sync(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 Tur 7 follow-up — operatörden tetiklenen ARP→IPAM sync.
+
+    sync_arp_to_ipam zaten saatlik beat task; bu endpoint kullanıcıya
+    'Şimdi cihazlardan ARP'ı çek' butonu sağlar.
+    """
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    from app.workers.tasks.ipam_tasks import sync_arp_to_ipam
+    sync_arp_to_ipam.delay()
+    await log_action(
+        db, current_user, "ipam_arp_sync_triggered",
+        "ipam", None, None, request=request,
+    )
+    return {"queued": True, "message": "ARP→IPAM sync kuyruğa alındı."}
+
+
+# ─── IP Scanner (per-subnet ping sweep) ─────────────────────────────────────
+
+class ScanResult(BaseModel):
+    ip_address: str
+    responded: bool
+    rtt_ms: Optional[float] = None
+
+
+@router.post("/subnets/{subnet_id}/scan", status_code=200)
+async def scan_subnet(
+    subnet_id: int, request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 follow-up — subnet'teki tüm host IP'leri ICMP ping ile tara.
+
+    - Yanıt veren IP'ler: source='discovery' assignment olarak upsert edilir
+    - Yanıt vermeyen 'discovery' kayıtları subnet'ten silinir (sadece
+      discovery kaynaklı — manual/arp/dhcp asla dokunulmaz)
+    - /24 max ölçek için optimize (256 IP paralel ping, ~1sn)
+    """
+    if not current_user.has_permission("ipam:edit"):
+        raise HTTPException(status_code=403, detail="ipam:edit yetkisi gerekli")
+    s = await _get_subnet_or_404(db, subnet_id)
+
+    try:
+        net = ipaddress.ip_network(str(s.cidr), strict=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Subnet CIDR geçersiz: {exc}")
+    # Pratik üst sınır — /23'ten büyük tek seferde taranmaz (operatöre
+    # 'subnet'i böl ya da bekle' rehberi). /24 max 254 host.
+    if net.num_addresses > 1024:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Subnet çok geniş ({net.num_addresses} IP). /22 ve altı önerilir.",
+        )
+
+    hosts = list(net.hosts()) if net.num_addresses > 2 else list(net)
+    ip_strs = [str(h) for h in hosts]
+
+    # Paralel ping
+    sem = asyncio.Semaphore(128)  # max 128 eş zamanlı ping
+    async def _ping(ip: str) -> ScanResult:
+        async with sem:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ping", "-c", "1", "-W", "1", ip,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+                )
+                out, _ = await asyncio.wait_for(proc.communicate(), timeout=2.0)
+                if proc.returncode == 0:
+                    rtt = None
+                    import re
+                    m = re.search(rb"time=([\d.]+)", out)
+                    if m:
+                        try: rtt = float(m.group(1))
+                        except ValueError: pass
+                    return ScanResult(ip_address=ip, responded=True, rtt_ms=rtt)
+            except (asyncio.TimeoutError, Exception):
+                pass
+            return ScanResult(ip_address=ip, responded=False)
+
+    results = await asyncio.gather(*[_ping(ip) for ip in ip_strs])
+    responsive = {r.ip_address: r for r in results if r.responded}
+
+    # Yanıt verenleri assignment olarak upsert (sadece 'discovery' source).
+    existing_rows = (await db.execute(
+        select(IpamAssignment).where(IpamAssignment.subnet_id == subnet_id)
+    )).scalars().all()
+    existing_by_ip = {str(a.ip_address).split("/")[0]: a for a in existing_rows}
+
+    created = 0
+    refreshed = 0
+    deleted = 0
+    now = datetime.now(timezone.utc)
+
+    for ip, res in responsive.items():
+        a = existing_by_ip.get(ip)
+        if a is None:
+            db.add(IpamAssignment(
+                subnet_id=subnet_id, ip_address=ip,
+                description=f"IP scanner discovery (rtt={res.rtt_ms}ms)" if res.rtt_ms else "IP scanner discovery",
+                type="dynamic", source="discovery",
+                location_id=s.location_id, created_by=current_user.id,
+                last_seen_at=now,
+            ))
+            created += 1
+        elif a.source == "discovery":
+            a.last_seen_at = now
+            a.description = f"IP scanner discovery (rtt={res.rtt_ms}ms)" if res.rtt_ms else "IP scanner discovery"
+            refreshed += 1
+        # source != discovery — dokunma (manuel / ARP / DHCP korunur)
+
+    # Yanıt vermeyen 'discovery' kayıtlarını sil
+    for ip, a in existing_by_ip.items():
+        if a.source != "discovery":
+            continue
+        if ip not in responsive:
+            await db.delete(a)
+            deleted += 1
+
+    await db.commit()
+    await log_action(
+        db, current_user, "ipam_subnet_scanned",
+        "ipam_subnet", subnet_id, str(s.cidr), request=request,
+        details={
+            "scanned": len(ip_strs),
+            "responded": len(responsive),
+            "created": created,
+            "refreshed": refreshed,
+            "deleted": deleted,
+        },
+    )
+
+    return {
+        "subnet_id": subnet_id, "cidr": str(s.cidr),
+        "scanned": len(ip_strs),
+        "responded": len(responsive),
+        "created": created,
+        "refreshed": refreshed,
+        "deleted": deleted,
     }
 
 

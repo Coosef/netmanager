@@ -9,7 +9,7 @@ import {
 import {
   ApartmentOutlined, ApiOutlined, DeleteOutlined, EditOutlined,
   GlobalOutlined, PlusOutlined, ReloadOutlined, SearchOutlined,
-  WarningOutlined,
+  SyncOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -601,6 +601,36 @@ export default function IpamPage() {
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Silinemedi'),
   })
 
+  // T9 follow-up — ARP'tan IPAM doldur
+  const arpSync = useMutation({
+    mutationFn: () => ipamApi.syncArp(),
+    onSuccess: () => {
+      message.success('ARP→IPAM senkronizasyonu başlatıldı — birkaç dakika içinde subnet\'lerde IP atamaları görünür', 6)
+      // 30s sonra otomatik yenile
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+        qc.invalidateQueries({ queryKey: ['ipam-summary'] })
+      }, 30_000)
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Tetiklenemedi', 6),
+  })
+
+  // T9 follow-up — Subnet IP scanner
+  const scanSubnet = useMutation({
+    mutationFn: (subnetId: number) => ipamApi.scanSubnet(subnetId),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+      qc.invalidateQueries({ queryKey: ['ipam-subnet-detail'] })
+      qc.invalidateQueries({ queryKey: ['ipam-assignments'] })
+      qc.invalidateQueries({ queryKey: ['ipam-summary'] })
+      message.success(
+        `${r.cidr}: ${r.responded}/${r.scanned} yanıt verdi · +${r.created} yeni · ↻${r.refreshed} güncel · -${r.deleted} silindi`,
+        8,
+      )
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Tarama başarısız', 6),
+  })
+
   const subnetCols = useMemo(() => [
     {
       title: 'CIDR', dataIndex: 'cidr', width: 150,
@@ -656,12 +686,22 @@ export default function IpamPage() {
         : <Text style={{ color: C.dim, fontSize: 11 }}>—</Text>,
     },
     {
-      title: '', width: 110,
+      title: '', width: 160,
       render: (_: unknown, r: IpamSubnet) => (
         <Space size={4}>
           <Tooltip title="Detay & Atamalar">
             <Button size="small" icon={<ApiOutlined />} onClick={() => setDrilldownId(r.id)} />
           </Tooltip>
+          {canEdit && (
+            <Tooltip title="ICMP ping ile tüm IP'leri tara — yanıt vereni 'discovery' olarak ekle, yanıt vermeyen eski discovery kayıtlarını sil">
+              <Button
+                size="small"
+                icon={<SearchOutlined />}
+                loading={scanSubnet.isPending && scanSubnet.variables === r.id}
+                onClick={() => scanSubnet.mutate(r.id)}
+              />
+            </Tooltip>
+          )}
           {canEdit && (
             <>
               <Button size="small" icon={<EditOutlined />}
@@ -702,6 +742,16 @@ export default function IpamPage() {
           </div>
         </div>
         <Space>
+          <Tooltip title="Cihazlardan ARP cache'ini çek, IP atamalarını otomatik doldur (manual entries dokunulmaz)">
+            <Button
+              icon={<SyncOutlined />}
+              loading={arpSync.isPending}
+              onClick={() => arpSync.mutate()}
+              disabled={!canEdit}
+            >
+              ARP'tan Doldur
+            </Button>
+          </Tooltip>
           <Button icon={<ReloadOutlined />} onClick={() => refetchSubnets()}>Yenile</Button>
           {canEdit && (
             <Button type="primary" icon={<PlusOutlined />}
