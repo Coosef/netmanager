@@ -131,6 +131,7 @@ export function useNavGroups(): NavGroup[] {
         { key: '/change-management', icon: <CalendarOutlined />, label: t('nav.change_management'), minRole: 'location_admin' },
         { key: '/approvals', icon: <SafetyOutlined />, label: t('nav.approvals'), badge: 'approval', badgeCount: approvalCount?.count ?? 0, minRole: 'location_admin' },
         { key: '/sla', icon: <RiseOutlined />, label: t('nav.sla'), minRole: 'viewer' },
+        { key: '/poe', icon: <ThunderboltOutlined />, label: 'PoE / Enerji', minRole: 'viewer' },
         { key: '/synthetic-probes', icon: <RadarChartOutlined />, label: 'Synthetic Probes', minRole: 'viewer' },
         { key: '/incidents', icon: <BugOutlined />, label: 'Incident RCA', minRole: 'viewer' },
         { key: '/escalation-rules', icon: <BellOutlined />, label: 'Escalation Kuralları', minRole: 'org_admin' },

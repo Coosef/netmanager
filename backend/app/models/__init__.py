@@ -55,6 +55,7 @@ from app.models.system_setting import SystemSetting
 from app.models.password_policy import PasswordPolicy
 from app.models.terminal_session_log import TerminalSessionLog
 from app.models.port_change_rollback import PortChangeRollback
+from app.models.poe_port_snapshot import PoEPortSnapshot
 
 __all__ = [
     "User", "SystemRole",
@@ -106,4 +107,5 @@ __all__ = [
     "SyntheticProbe", "SyntheticProbeResult",
     "AgentPeerLatency",
     "EscalationRule", "EscalationNotificationLog",
+    "PoEPortSnapshot",
 ]
