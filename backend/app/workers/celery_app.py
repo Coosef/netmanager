@@ -31,6 +31,7 @@ celery_app = Celery(
         "app.workers.tasks.metrics_tasks",
         "app.workers.tasks.cache_warmer_tasks",
         "app.workers.tasks.maintenance_tasks",
+        "app.workers.tasks.poe_tasks",
     ],
 )
 
@@ -184,6 +185,11 @@ celery_app.conf.update(
         "spawn-cyclic-maintenance-windows-hourly": {
             "task": "app.workers.tasks.maintenance_tasks.spawn_cyclic_maintenance_windows",
             "schedule": 3600.0,
+        },
+        # T9 Tur 6B — per-port PoE state snapshot
+        "snapshot-poe-status-every-15min": {
+            "task": "app.workers.tasks.poe_tasks.snapshot_poe_status",
+            "schedule": 900.0,
         },
     },
 )
