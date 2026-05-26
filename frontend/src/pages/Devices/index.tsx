@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link as RouterLink, useSearchParams } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
   App, Button, Card, Col, Form, Input, Modal, Popconfirm, Progress, Row, Select, Space,
   Tag, Tooltip, Drawer, Alert, Radio,
 } from 'antd'
 import {
-  PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined, InboxOutlined,
+  PlusOutlined, ThunderboltOutlined, DeleteOutlined, EditOutlined, InboxOutlined, ApiOutlined,
   EyeOutlined, ReloadOutlined, KeyOutlined, CheckCircleFilled,
   CloseCircleFilled, QuestionCircleFilled, ExclamationCircleFilled,
   SaveOutlined, RobotOutlined, SyncOutlined, TagOutlined, InfoCircleOutlined,
@@ -251,6 +251,12 @@ function DeviceCard({ device, isDark, onDetail, onEdit, onTest, onDelete, onArch
         <Tooltip title="Detay"><Button size="small" type="text" icon={<EyeOutlined />} onClick={onDetail} /></Tooltip>
         <Tooltip title="Bağlantı Test"><Button size="small" type="text" icon={<ThunderboltOutlined style={{ color: '#faad14' }} />} onClick={onTest} /></Tooltip>
         <Tooltip title="Düzenle"><Button size="small" type="text" icon={<EditOutlined style={{ color: '#1677ff' }} />} onClick={onEdit} /></Tooltip>
+        {/* T9 Tur 4 #8 — Port Yönetimi sayfası */}
+        <Tooltip title="Port Yönetimi">
+          <RouterLink to={`/devices/${device.id}/ports`} onClick={(e) => e.stopPropagation()}>
+            <Button size="small" type="text" icon={<ApiOutlined style={{ color: '#06b6d4' }} />} />
+          </RouterLink>
+        </Tooltip>
         {/* T9 Tur 4 — Arşive Al (archived state'ine geçirir; super_admin geri açar) */}
         {device.lifecycle_status !== 'archived' && (
           <Popconfirm
