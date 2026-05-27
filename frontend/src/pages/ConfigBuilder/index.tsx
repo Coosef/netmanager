@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import {
   ApiOutlined, CheckCircleOutlined, ClockCircleOutlined,
-  CloseCircleOutlined, DeleteOutlined, EditOutlined, FileTextOutlined,
+  CloseCircleOutlined, DeleteOutlined, DownloadOutlined, EditOutlined, FileTextOutlined,
   GlobalOutlined, LockOutlined, PlusCircleOutlined, RocketOutlined,
   SafetyOutlined, TagOutlined, ThunderboltOutlined, ToolOutlined,
 } from '@ant-design/icons'
@@ -383,6 +383,35 @@ export default function ConfigBuilderPage() {
     setPushModalOpen(true)
   }
 
+  // T9 follow-up — Önizlenen CLI'ı text dosyası olarak indir
+  const downloadCli = (
+    title: string,
+    items: Array<{ hostname: string; os_type: string; commands: string[]; error?: string | null }>,
+  ) => {
+    const lines: string[] = []
+    lines.push(`# ${title}`)
+    lines.push(`# ${new Date().toISOString()}`)
+    lines.push(`# ${items.length} cihaz`)
+    lines.push('')
+    for (const it of items) {
+      lines.push(`# ─── ${it.hostname} (${it.os_type}) ───`)
+      if (it.error) {
+        lines.push(`# HATA: ${it.error}`)
+      } else {
+        for (const c of it.commands) lines.push(c)
+      }
+      lines.push('')
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `cli-${title.replace(/\s+/g, '-').toLowerCase()}-${Date.now()}.txt`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    message.success('CLI dosyası indirildi', 3)
+  }
+
   // T9 follow-up — sepet işlemleri
   const addToCart = () => {
     const err = (() => {
@@ -594,15 +623,31 @@ export default function ConfigBuilderPage() {
             )}
 
             <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {cart.length > 0 && (
+                <Alert
+                  type="info"
+                  showIcon
+                  message="Sepet dolu — alttaki 'Sepeti Önizle / Uygula' kullanın"
+                  description="Tekli butonlar yalnız üstteki formdaki işlemi gönderir; sepete eklediklerinizi DAHİL ETMEZ."
+                  style={{ marginBottom: 4, padding: '6px 10px' }}
+                />
+              )}
               <Button
                 type="default"
                 icon={<FileTextOutlined />}
-                onClick={handlePreview}
+                onClick={() => {
+                  // Form'da geçerli op var mı kontrol et; sepete bağımsız preview.
+                  if (cart.length > 0 && !selectedOp) {
+                    message.info('Sepetteki işlemleri görmek için "Sepeti Önizle" kullanın.', 4)
+                    return
+                  }
+                  handlePreview()
+                }}
                 loading={previewMut.isPending}
                 block
                 disabled={!selectedOp}
               >
-                CLI Önizleme (dry-run)
+                Tekli CLI Önizleme {cart.length > 0 ? '(yalnız bu form)' : '(dry-run)'}
               </Button>
               <Button
                 type="primary"
@@ -612,7 +657,7 @@ export default function ConfigBuilderPage() {
                 disabled={!canPush || !previewMut.data || previewMut.data.supported_count === 0}
                 block
               >
-                Cihazlara Uygula
+                Tekli Uygula
               </Button>
               {!canPush && (
                 <Text style={{ fontSize: 11, color: C.muted, textAlign: 'center' }}>
@@ -718,6 +763,23 @@ export default function ConfigBuilderPage() {
         footer={[
           <Button key="cancel" onClick={() => setPreviewOpen(false)}>Kapat</Button>,
           <Button
+            key="download"
+            icon={<DownloadOutlined />}
+            disabled={!previewMut.data}
+            onClick={() => {
+              if (!previewMut.data) return
+              downloadCli(
+                `${selectedOp?.label || 'config'}`,
+                previewMut.data.items.map(it => ({
+                  hostname: it.hostname, os_type: it.os_type,
+                  commands: it.commands, error: it.error,
+                })),
+              )
+            }}
+          >
+            CLI'yı İndir (.txt)
+          </Button>,
+          <Button
             key="push"
             type="primary"
             danger
@@ -801,6 +863,23 @@ export default function ConfigBuilderPage() {
         width={860}
         footer={[
           <Button key="c" onClick={() => setBatchPreviewOpen(false)}>Kapat</Button>,
+          <Button
+            key="download"
+            icon={<DownloadOutlined />}
+            disabled={!batchPreviewMut.data}
+            onClick={() => {
+              if (!batchPreviewMut.data) return
+              downloadCli(
+                `sepet-${cart.length}-islem`,
+                batchPreviewMut.data.items.map(it => ({
+                  hostname: it.hostname, os_type: it.os_type,
+                  commands: it.commands, error: it.error,
+                })),
+              )
+            }}
+          >
+            CLI'yı İndir (.txt)
+          </Button>,
           <Button key="x" type="primary" danger icon={<ThunderboltOutlined />}
             disabled={!canPush || !batchPreviewMut.data || batchPreviewMut.data.supported_count === 0}
             onClick={() => { setBatchPreviewOpen(false); batchPushMut.mutate() }}

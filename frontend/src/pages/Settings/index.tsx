@@ -36,12 +36,16 @@ import { aiAssistantApi, type AIProviderSettings } from '@/api/aiAssistant'
 
 const { Text } = Typography
 
-const LANGUAGES = [
-  { code: 'tr', label: 'Türkçe', flag: '🇹🇷', region: 'Türkiye' },
-  { code: 'en', label: 'English', flag: '🇬🇧', region: 'United Kingdom' },
-  { code: 'ru', label: 'Русский', flag: '🇷🇺', region: 'Россия' },
-  { code: 'de', label: 'Deutsch', flag: '🇩🇪', region: 'Deutschland' },
-]
+// T9 follow-up — i18n auto-discovery. LANGUAGES artık locales/*.json
+// dosyalarından üretilir; yeni dil eklemek için sadece JSON kopyalanıp
+// çevrilir, kod değişikliği yok.
+import { availableLanguages } from '@/i18n'
+const LANGUAGES = availableLanguages.map((l) => ({
+  code: l.code,
+  label: l.name,
+  flag: l.flag || '🌐',
+  region: l.region || '',
+}))
 
 function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
   return (
