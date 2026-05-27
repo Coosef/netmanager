@@ -8,6 +8,10 @@ import {
   AimOutlined, BarChartOutlined, RadarChartOutlined, QuestionCircleOutlined,
   SearchOutlined, CheckCircleOutlined, UserOutlined, QuestionOutlined,
   TagOutlined, CodeOutlined,
+  // T9 yeni özellik ikonları
+  SettingOutlined, LockOutlined, MailOutlined, GlobalOutlined,
+  AuditOutlined, FileSyncOutlined, ApiOutlined, RollbackOutlined,
+  DatabaseOutlined, BulbOutlined, FireOutlined,
 } from '@ant-design/icons'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
@@ -79,6 +83,21 @@ const FEATURES = [
   { icon: <SafetyOutlined />,     color: '#10b981', titleKey: 'feat_maintenance_title', descKey: 'feat_maintenance_desc' },
   { icon: <CodeOutlined />,       color: '#0ea5e9', titleKey: 'feat_terminal_title',  descKey: 'feat_terminal_desc' },
   { icon: <CloudOutlined />,      color: '#64748b', titleKey: 'feat_syslog_title',    descKey: 'feat_syslog_desc' },
+  // ── T9 turunda eklenen yeni özellikler ──────────────────────────────────
+  { icon: <BulbOutlined />,        color: '#facc15', titleKey: 'feat_poe_title',           descKey: 'feat_poe_desc' },
+  { icon: <FireOutlined />,        color: '#ef4444', titleKey: 'feat_firmware_title',      descKey: 'feat_firmware_desc' },
+  { icon: <BuildOutlined />,       color: '#22c55e', titleKey: 'feat_configbuilder_title', descKey: 'feat_configbuilder_desc' },
+  { icon: <RollbackOutlined />,    color: '#3b82f6', titleKey: 'feat_configrollback_title',descKey: 'feat_configrollback_desc' },
+  { icon: <DatabaseOutlined />,    color: '#8b5cf6', titleKey: 'feat_bulkops_title',       descKey: 'feat_bulkops_desc' },
+  { icon: <AuditOutlined />,       color: '#06b6d4', titleKey: 'feat_sshaudit_title',      descKey: 'feat_sshaudit_desc' },
+  { icon: <RobotOutlined />,       color: '#a855f7', titleKey: 'feat_aisummary_title',     descKey: 'feat_aisummary_desc' },
+  { icon: <ApiOutlined />,         color: '#06b6d4', titleKey: 'feat_porttoggle_title',    descKey: 'feat_porttoggle_desc' },
+  { icon: <FileSyncOutlined />,    color: '#f59e0b', titleKey: 'feat_cyclicmw_title',      descKey: 'feat_cyclicmw_desc' },
+  { icon: <SettingOutlined />,     color: '#64748b', titleKey: 'feat_systemset_title',     descKey: 'feat_systemset_desc' },
+  { icon: <LockOutlined />,        color: '#ef4444', titleKey: 'feat_pwdpolicy_title',     descKey: 'feat_pwdpolicy_desc' },
+  { icon: <MailOutlined />,        color: '#3b82f6', titleKey: 'feat_mfaemail_title',      descKey: 'feat_mfaemail_desc' },
+  { icon: <GlobalOutlined />,      color: '#10b981', titleKey: 'feat_ipallowlist_title',   descKey: 'feat_ipallowlist_desc' },
+  { icon: <SearchOutlined />,      color: '#0ea5e9', titleKey: 'feat_ipamtools_title',     descKey: 'feat_ipamtools_desc' },
 ]
 
 const QS_STEPS = [
