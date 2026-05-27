@@ -311,6 +311,10 @@ export default function ConfigBuilderPage() {
   const [deviceIds, setDeviceIds] = useState<number[]>([])
   const [previewOpen, setPreviewOpen] = useState(false)
   const [pushModalOpen, setPushModalOpen] = useState(false)
+  // T9 follow-up — sepet (çoklu operasyon)
+  const [cart, setCart] = useState<Array<{ key: string; params: Record<string, unknown>; label: string }>>([])
+  const [batchPreviewOpen, setBatchPreviewOpen] = useState(false)
+  const [batchPushResult, setBatchPushResult] = useState<Awaited<ReturnType<typeof configBuilderApi.pushBatch>> | null>(null)
 
   const { data: operations = [], error: opsError, isLoading: opsLoading } = useQuery({
     queryKey: ['config-builder-operations'],
@@ -378,6 +382,50 @@ export default function ConfigBuilderPage() {
     }
     setPushModalOpen(true)
   }
+
+  // T9 follow-up — sepet işlemleri
+  const addToCart = () => {
+    const err = (() => {
+      if (!selectedOp) return 'Önce bir işlem seçin.'
+      for (const f of selectedOp.fields) {
+        const v = params[f.name]
+        if (f.required && (v === undefined || v === '' || v === null)) {
+          return `'${f.label}' zorunlu.`
+        }
+      }
+      return null
+    })()
+    if (err) { message.warning(err); return }
+    setCart((prev) => [...prev, { key: selectedOp!.key, params: { ...params }, label: selectedOp!.label }])
+    message.success(`Sepete eklendi: ${selectedOp!.label}`, 2)
+    // Form temizle — yeni op için
+    setParams({})
+  }
+  const removeFromCart = (idx: number) => setCart((prev) => prev.filter((_, i) => i !== idx))
+  const clearCart = () => setCart([])
+
+  const batchPreviewMut = useMutation({
+    mutationFn: () => configBuilderApi.previewBatch(
+      cart.map((c) => ({ operation: c.key, params: c.params })),
+      deviceIds, true,
+    ),
+    onSuccess: () => setBatchPreviewOpen(true),
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Önizleme alınamadı', 5),
+  })
+  const batchPushMut = useMutation({
+    mutationFn: () => configBuilderApi.pushBatch(
+      cart.map((c) => ({ operation: c.key, params: c.params })),
+      deviceIds,
+    ),
+    onSuccess: (r) => {
+      setBatchPushResult(r)
+      setBatchPreviewOpen(false)
+      if (r.success_count === r.total) message.success(`Tüm ${r.total} cihazda ${cart.length} işlem başarılı.`)
+      else if (r.success_count > 0) message.warning(`${r.success_count}/${r.total} cihazda başarılı.`)
+      else message.error('Hiçbir cihazda uygulanamadı.', 6)
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'İşlem başlatılamadı', 6),
+  })
 
   const devicesById = useMemo(
     () => Object.fromEntries((devicesData?.items || []).map((d: Device) => [d.id, d])),
@@ -475,6 +523,16 @@ export default function ConfigBuilderPage() {
                   onChange={setParams}
                   isDark={isDark}
                 />
+                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px dashed ${C.border}` }}>
+                  <Button
+                    type="dashed"
+                    icon={<PlusCircleOutlined />}
+                    onClick={addToCart}
+                    block
+                  >
+                    Sepete Ekle (çoklu işlem)
+                  </Button>
+                </div>
               </>
             ) : (
               <Text style={{ color: C.muted }}>Soldaki listeden bir işlem seçin.</Text>
@@ -562,6 +620,78 @@ export default function ConfigBuilderPage() {
                 </Text>
               )}
             </div>
+          </Card>
+
+          {/* T9 follow-up — İşlem Sepeti (çoklu operasyon) */}
+          <Card
+            size="small"
+            style={{ background: C.bg, border: `1px solid ${C.border}`, marginTop: 12 }}
+            title={
+              <Space>
+                <PlusCircleOutlined style={{ color: '#22c55e' }} />
+                <Text strong>İşlem Sepeti</Text>
+                <Tag color={cart.length > 0 ? 'green' : 'default'}>{cart.length} işlem</Tag>
+              </Space>
+            }
+            extra={cart.length > 0 && (
+              <Button size="small" danger type="text" onClick={clearCart}>Temizle</Button>
+            )}
+          >
+            {cart.length === 0 ? (
+              <Text style={{ color: C.muted, fontSize: 12 }}>
+                Tek seferde birden çok işlem uygulamak için, form'u doldurup
+                <b> "Sepete Ekle" </b>tıkla. Birkaç ekleyebilirsin, sonra
+                <b> "Sepeti Uygula"</b> ile cihazlara sırayla gönderilir.
+              </Text>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {cart.map((item, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    padding: '6px 10px', background: C.bg2,
+                    border: `1px solid ${C.border}`, borderRadius: 6,
+                  }}>
+                    <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>#{i + 1}</Tag>
+                    <Text style={{ flex: 1, fontSize: 12, color: C.text }}>{item.label}</Text>
+                    <Text style={{ fontSize: 10, color: C.muted, fontFamily: 'monospace' }}>
+                      {Object.entries(item.params).slice(0, 2).map(([k, v]) => `${k}=${v}`).join(' ')}
+                    </Text>
+                    <Button size="small" type="text" danger icon={<DeleteOutlined />}
+                      onClick={() => removeFromCart(i)} />
+                  </div>
+                ))}
+                <Space style={{ marginTop: 8 }}>
+                  <Button
+                    icon={<FileTextOutlined />}
+                    loading={batchPreviewMut.isPending}
+                    onClick={() => {
+                      if (!deviceIds.length) { message.warning('Cihaz seçin.'); return }
+                      batchPreviewMut.mutate()
+                    }}
+                  >
+                    Sepeti Önizle
+                  </Button>
+                  <Button
+                    type="primary"
+                    danger
+                    icon={<ThunderboltOutlined />}
+                    loading={batchPushMut.isPending}
+                    disabled={!canPush || !deviceIds.length}
+                    onClick={() => {
+                      if (!deviceIds.length) { message.warning('Cihaz seçin.'); return }
+                      Modal.confirm({
+                        title: `${cart.length} işlemi ${deviceIds.length} cihaza uygula?`,
+                        content: 'İşlemler verdiğin sırada cihaza gönderilir. Önce "Sepeti Önizle" ile kontrol etmen önerilir.',
+                        okText: 'Uygula', cancelText: 'İptal', okButtonProps: { danger: true },
+                        onOk: () => batchPushMut.mutate(),
+                      })
+                    }}
+                  >
+                    Sepeti Uygula ({cart.length})
+                  </Button>
+                </Space>
+              </div>
+            )}
           </Card>
         </Col>
       </Row>
@@ -654,6 +784,101 @@ export default function ConfigBuilderPage() {
           isDark={isDark}
         />
       )}
+
+      {/* Batch preview modal — sepetteki tüm işlemlerin birleşik CLI'si */}
+      <Modal
+        open={batchPreviewOpen}
+        onCancel={() => setBatchPreviewOpen(false)}
+        title={
+          <Space>
+            <FileTextOutlined style={{ color: '#3b82f6' }} />
+            <Text strong>Sepet Önizleme — {cart.length} işlem</Text>
+            {batchPreviewMut.data && (
+              <Badge status="success" text={`${batchPreviewMut.data.supported_count} hazır`} />
+            )}
+          </Space>
+        }
+        width={860}
+        footer={[
+          <Button key="c" onClick={() => setBatchPreviewOpen(false)}>Kapat</Button>,
+          <Button key="x" type="primary" danger icon={<ThunderboltOutlined />}
+            disabled={!canPush || !batchPreviewMut.data || batchPreviewMut.data.supported_count === 0}
+            onClick={() => { setBatchPreviewOpen(false); batchPushMut.mutate() }}
+            loading={batchPushMut.isPending}>
+            Sepeti Uygula
+          </Button>,
+        ]}
+        styles={{
+          content: { background: C.bg, border: `1px solid ${C.border}` },
+          header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
+        }}
+      >
+        {batchPreviewMut.data && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {batchPreviewMut.data.items.map((it) => (
+              <Card key={it.device_id} size="small"
+                style={{
+                  background: it.error ? (isDark ? '#7f1d1d18' : '#fef2f2') : C.bg2,
+                  border: `1px solid ${it.error ? '#ef444460' : C.border}`,
+                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  {it.error
+                    ? <CloseCircleOutlined style={{ color: '#ef4444' }} />
+                    : <CheckCircleOutlined style={{ color: '#22c55e' }} />}
+                  <Text strong style={{ color: C.text }}>{it.hostname}</Text>
+                  <Tag color="default" style={{ fontSize: 10 }}>{it.os_type || '?'}</Tag>
+                  {it.error && <Tag color="red" style={{ fontSize: 11, marginLeft: 'auto' }}>{it.error}</Tag>}
+                </div>
+                {it.commands.length > 0 && (
+                  <pre style={{
+                    background: isDark ? '#0d1117' : '#f8fafc',
+                    border: `1px solid ${C.border}`, borderRadius: 4,
+                    padding: '6px 10px', margin: 0, fontSize: 11,
+                    fontFamily: 'monospace', color: C.text, lineHeight: 1.5, whiteSpace: 'pre',
+                  }}>
+                    {it.commands.join('\n')}
+                  </pre>
+                )}
+              </Card>
+            ))}
+          </div>
+        )}
+      </Modal>
+
+      {/* Batch result modal */}
+      <Modal
+        open={batchPushResult !== null}
+        onCancel={() => setBatchPushResult(null)}
+        title={<Space><ThunderboltOutlined />Sepet Sonucu</Space>}
+        width={720}
+        footer={[
+          <Button key="c" type="primary" onClick={() => setBatchPushResult(null)}>Kapat</Button>,
+        ]}
+      >
+        {batchPushResult && (
+          <Table
+            dataSource={batchPushResult.results}
+            rowKey="device_id"
+            size="small"
+            pagination={false}
+            columns={[
+              { title: 'Cihaz', dataIndex: 'hostname',
+                render: (v: string) => <Text style={{ color: C.text }}>{v}</Text> },
+              { title: 'Sonuç', width: 110,
+                render: (_: unknown, r: { success: boolean; skipped?: boolean }) =>
+                  r.skipped ? <Tag icon={<CloseCircleOutlined />}>Atlandı</Tag>
+                  : r.success ? <Tag icon={<CheckCircleOutlined />} color="green">Başarılı</Tag>
+                  : <Tag icon={<CloseCircleOutlined />} color="red">Hata</Tag>
+              },
+              { title: 'Hata', dataIndex: 'error',
+                render: (e: string | null | undefined) => e
+                  ? <Text style={{ color: '#ef4444', fontSize: 12 }}>{e}</Text>
+                  : <Text style={{ color: C.dim }}>—</Text>
+              },
+            ]}
+          />
+        )}
+      </Modal>
     </div>
   )
 }

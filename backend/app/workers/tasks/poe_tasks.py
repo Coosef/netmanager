@@ -62,16 +62,56 @@ async def _run():
             return_exceptions=True,
         )
 
-        # SSH fallback DEFAULT KAPALI — 63 cihaza paralel SSH oturumu
-        # açmak çok ağır, 15+ dakika sürebiliyor ve worker time_limit'e
-        # yaklaşıyor. SNMP yeterli (POWER-ETHERNET-MIB her vendor'da
-        # destekli). Bir cihaz SNMP yanıt vermiyorsa, snapshot tablosunda
-        # eksik kalır — operatör cihazın SNMP credential'ını kontrol
-        # eder. SSH yolu için ayrı bir on-demand endpoint düşünülebilir.
+        # SSH fallback — SNMP boş VEYA SNMP doldurduğu satırlar power_mw=0
+        # ise (Ruijie: POWER-ETHERNET-MIB sadece on/off + class verir, mW
+        # her zaman 0). Vendor'a göre 'show poe interfaces status' parse
+        # edilir; paralel gather + ssh_manager pool ile makul süre.
+        from app.services.ssh_manager import ssh_manager
+        from app.services.topology_service import EXTENDED_COMMANDS, _parse_power_inline
+
+        def _needs_ssh(i: int, d) -> bool:
+            if d.os_type not in EXTENDED_COMMANDS or "power" not in EXTENDED_COMMANDS[d.os_type]:
+                return False
+            res = snmp_results[i]
+            if not isinstance(res, list) or not res:
+                return True  # SNMP başarısız → SSH dene
+            # SNMP başarılı ama vendor mW raporlamadı (Ruijie pattern)
+            return all((row.get("power_mw") or 0) == 0 for row in res)
+
+        ssh_candidates = [(i, d) for i, d in enumerate(devices) if _needs_ssh(i, d)]
+        ssh_results_map: dict[int, list[dict]] = {}
+        if ssh_candidates:
+            log.info("poe: SSH fallback for %d devices (SNMP no-mW)", len(ssh_candidates))
+            ssh_results = await asyncio.gather(
+                *[_read_via_ssh(d, ssh_manager, EXTENDED_COMMANDS, _parse_power_inline)
+                  for _, d in ssh_candidates],
+                return_exceptions=True,
+            )
+            for (idx, _), res in zip(ssh_candidates, ssh_results):
+                ssh_results_map[idx] = res if isinstance(res, list) else []
+
         for i, device in enumerate(devices):
             snmp_res = snmp_results[i]
             poe_rows = snmp_res if isinstance(snmp_res, list) else []
             source = "snmp"
+
+            # SSH ile gerçek mW geldiyse, snmp satırlarındaki port_name'i
+            # koruyup mW değerini SSH'ten al (port adı SNMP'te genelde
+            # daha doğru: ifName mapping yapılmış).
+            ssh_rows = ssh_results_map.get(i, [])
+            if ssh_rows:
+                ssh_by_port = {r["port"]: r for r in ssh_rows}
+                if poe_rows:
+                    for row in poe_rows:
+                        sr = ssh_by_port.get(row["port"])
+                        if sr:
+                            row["power_mw"] = sr.get("power_mw") or row.get("power_mw") or 0
+                            if sr.get("device_class"):
+                                row["device_class"] = sr["device_class"]
+                            source = "snmp+ssh"
+                else:
+                    poe_rows = ssh_rows
+                    source = "ssh"
 
             if not poe_rows:
                 failed += 1
@@ -181,7 +221,7 @@ async def _read_via_ssh(device, ssh_manager, EXTENDED_COMMANDS, _parse_power_inl
             "oper_status": "on" if info["enabled"] else "off",
             "admin_status": None,
             "power_mw": int(info.get("mw") or 0),
-            "device_class": None,
+            "device_class": info.get("device_class"),
         }
         for port, info in parsed.items()
     ]

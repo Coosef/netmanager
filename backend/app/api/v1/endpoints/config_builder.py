@@ -183,3 +183,150 @@ async def push(
         "success_count": success_count,
         "total": len(results),
     }
+
+
+# ─── Batch (multi-operation) ────────────────────────────────────────────────
+
+class BatchItem(BaseModel):
+    """T9 follow-up — sepete eklenen tek bir operasyon."""
+    operation: str
+    params: dict[str, Any]
+
+
+class BatchPushRequest(BaseModel):
+    items: list[BatchItem]
+    device_ids: list[int]
+    with_save: bool = True
+    reason: Optional[str] = None
+    confirm: bool = False
+
+
+@router.post("/preview-batch")
+async def preview_batch(
+    body: BatchPushRequest,
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    """Dry-run — sepetteki TÜM operasyonların komutlarını cihaz başına
+    birleştirip döner. Operatör tek bir 'CLI Önizleme' ekranında tüm
+    işlemleri sırayla görür."""
+    if not body.items:
+        raise HTTPException(status_code=400, detail="items boş olamaz")
+    if not body.device_ids:
+        raise HTTPException(status_code=400, detail="device_ids boş olamaz")
+
+    devices = (await db.execute(
+        select(Device).where(Device.id.in_(body.device_ids))
+    )).scalars().all()
+
+    items_out = []
+    for dev in devices:
+        os_type = dev.os_type or ""
+        entry: dict[str, Any] = {
+            "device_id": dev.id, "hostname": dev.hostname,
+            "os_type": os_type, "supported": os_type in ALL_SUPPORTED,
+            "per_op_commands": [],
+            "commands": [],
+            "error": None,
+        }
+        if not entry["supported"]:
+            entry["error"] = f"Vendor desteklenmiyor: {os_type or '?'}"
+            items_out.append(entry)
+            continue
+        try:
+            for op_item in body.items:
+                cmds = build_commands(
+                    op_item.operation, os_type, op_item.params,
+                    with_save=False,  # save'i en sona tek seferde ekle
+                )
+                entry["per_op_commands"].append({
+                    "operation": op_item.operation, "commands": cmds,
+                })
+                entry["commands"].extend(cmds)
+            # Save komutu en sona — _save_cmd helper'ı kullanacak
+            if body.with_save:
+                from app.services.config_builder_service import _save_cmd
+                entry["commands"].append(_save_cmd(os_type))
+        except ValueError as exc:
+            entry["error"] = str(exc)
+        items_out.append(entry)
+
+    return {
+        "items": items_out,
+        "operation_count": len(body.items),
+        "supported_count": sum(1 for it in items_out if it["supported"] and not it["error"]),
+        "error_count": sum(1 for it in items_out if it["error"]),
+    }
+
+
+@router.post("/push-batch")
+async def push_batch(
+    body: BatchPushRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T9 follow-up — birden fazla operasyonu tek seferde uygula.
+
+    Tüm operasyonların komutları birleştirilip tek bir `send_config`
+    çağrısı ile gönderilir; cihaza tek bir konfigürasyon mod oturumu açılır.
+    """
+    if not current_user.has_permission("config:push"):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if not body.confirm:
+        raise HTTPException(status_code=400, detail="confirm: true gerekli")
+    if not body.items:
+        raise HTTPException(status_code=400, detail="items boş olamaz")
+    if not body.device_ids:
+        raise HTTPException(status_code=400, detail="device_ids boş olamaz")
+
+    devices = (await db.execute(
+        select(Device).where(Device.id.in_(body.device_ids))
+    )).scalars().all()
+    device_map = {d.id: d for d in devices}
+
+    # Preview ile aynı plan üretimi
+    preview = await preview_batch(body, db, current_user)  # type: ignore[arg-type]
+
+    async def _run_one(item: dict):
+        if item["error"] or not item["commands"]:
+            return {**item, "success": False, "output": "", "skipped": True}
+        device = device_map.get(item["device_id"])
+        if not device:
+            return {**item, "success": False, "error": "Device gone", "output": ""}
+        if device.status == "offline":
+            return {**item, "success": False, "error": "Cihaz çevrimdışı", "output": ""}
+        try:
+            result = await ssh_manager.send_config(device, item["commands"])
+            return {
+                **item,
+                "success": result.success,
+                "output": (result.output or "")[:3000],
+                "error": result.error if not result.success else None,
+            }
+        except Exception as exc:  # noqa: BLE001
+            return {**item, "success": False, "error": str(exc), "output": ""}
+
+    results = await asyncio.gather(*[_run_one(it) for it in preview["items"]])
+    success_count = sum(1 for r in results if r.get("success"))
+
+    await log_action(
+        db, current_user, "config_builder_push_batch",
+        "device", body.device_ids[0] if body.device_ids else None,
+        f"{len(body.items)} op(s) on {len(body.device_ids)} device(s)",
+        request=request,
+        details={
+            "operations": [{"operation": i.operation, "params": i.params} for i in body.items],
+            "device_ids": body.device_ids,
+            "success_count": success_count,
+            "total": len(results),
+            "reason": body.reason,
+        },
+    )
+
+    return {
+        "items": [{"operation": i.operation, "params": i.params} for i in body.items],
+        "results": results,
+        "success_count": success_count,
+        "total": len(results),
+    }

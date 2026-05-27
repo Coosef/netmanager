@@ -139,10 +139,41 @@ def _parse_switchport_ruijie(output: str) -> dict[str, dict]:
 
 
 def _parse_power_inline(output: str) -> dict[str, dict]:
-    """Return {norm_port: {enabled, mw}} from 'show power inline' (Cisco + Ruijie)."""
+    """Return {norm_port: {enabled, mw, device_class}} from PoE status output.
+
+    Iki format desteklenir:
+
+    (a) Cisco IOS `show power inline`:
+        Gi0/1   auto   on   4.0  ...
+        ↑ port  admin  oper power(W)
+
+    (b) Ruijie `show poe interfaces status`:
+        Gi0/1   enable  on   4.2W  4.2W  7.2W  78mA  Normal  3   54.4V
+        ↑ port  ctrl    oper curr  avg   peak  curr  trouble class voltage
+
+    Number > 100 → mW (Ruijie eski versiyon); aksi → watt'tan mW'a çevir.
+    """
     result: dict[str, dict] = {}
     for line in output.splitlines():
-        # Format: "Gi0/1  auto  on  4.0  ..." or "GigabitEthernet0/1  auto  on  3840  ..."
+        # (b) Ruijie format — 'enable/disable' + W suffix on numbers
+        m = re.match(
+            r"^\s*(\S+)\s+(enable|disable)\s+(on|off|faulty|denied|searching)\s+"
+            r"([\d.]+)W\s+[\d.]+W\s+[\d.]+W\s+\d+mA\s+\S+\s+(\S+)",
+            line, re.IGNORECASE,
+        )
+        if m:
+            port = _normalize_port(m.group(1))
+            oper = m.group(3).lower()
+            curr_w = float(m.group(4))
+            pd_class = m.group(5)
+            device_class = f"Class {pd_class}" if pd_class and pd_class.isdigit() else None
+            result[port] = {
+                "enabled": oper == "on",
+                "mw": int(curr_w * 1000),
+                "device_class": device_class,
+            }
+            continue
+        # (a) Cisco format — 'auto/static/never/off' + bare number
         m = re.match(
             r"^\s*(\S+)\s+(?:auto|static|never|off)\s+(on|off|faulty|denied|searching)\s+([\d.]+)",
             line, re.IGNORECASE,
@@ -151,9 +182,8 @@ def _parse_power_inline(output: str) -> dict[str, dict]:
             port = _normalize_port(m.group(1))
             oper = m.group(2).lower()
             raw = float(m.group(3))
-            # Values >100 are already mW (Ruijie), otherwise watts (Cisco)
             mw = int(raw) if raw > 100 else int(raw * 1000)
-            result[port] = {"enabled": oper == "on", "mw": mw}
+            result[port] = {"enabled": oper == "on", "mw": mw, "device_class": None}
     return result
 
 
@@ -175,7 +205,8 @@ EXTENDED_COMMANDS: dict[str, dict[str, str]] = {
     "ruijie_os": {
         "interfaces": "show interfaces",
         "switchport": "show interfaces switchport",
-        "power":      "show power inline",
+        # Ruijie 'show power inline' DESTEKLEMİYOR — doğru komut bu:
+        "power":      "show poe interfaces status",
     },
 }
 

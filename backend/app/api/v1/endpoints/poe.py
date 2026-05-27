@@ -207,21 +207,25 @@ async def get_device_poe_realtime(
         )).scalar_one_or_none()
         oper = "on" if info["enabled"] else "off"
         power_mw = int(info.get("mw") or 0)
+        device_class = info.get("device_class")
         if existing is None:
             db.add(PoEPortSnapshot(
                 device_id=device_id, port=port,
                 oper_status=oper, power_mw=power_mw,
-                source="ssh",
+                device_class=device_class, source="ssh",
             ))
         else:
             existing.oper_status = oper
             existing.power_mw = power_mw
+            if device_class:
+                existing.device_class = device_class
             existing.source = "ssh"
             existing.updated_at = now
         items.append({
             "port": port, "oper_status": oper,
             "power_mw": power_mw,
             "power_watts": round(power_mw / 1000.0, 1),
+            "device_class": device_class,
         })
     await db.commit()
 
