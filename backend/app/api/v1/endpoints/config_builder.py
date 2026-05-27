@@ -76,6 +76,100 @@ async def get_operations(_: CurrentUser = None):
     return {"operations": list_operations()}
 
 
+class PreviewByOsRequest(BaseModel):
+    """T9 follow-up — Cihaz seçmeden, sadece os_type ile preview üret.
+    Operatör henüz cihaz seçmeden CLI'yı görmek/indirmek istediğinde."""
+    operation: str
+    params: dict[str, Any]
+    os_types: list[str]
+    with_save: bool = True
+
+
+@router.post("/preview-by-os")
+async def preview_by_os(
+    body: PreviewByOsRequest,
+    _: CurrentUser = None,
+):
+    """OS-type listesi için CLI üret — cihaz seçmeye gerek yok."""
+    if not body.os_types:
+        raise HTTPException(status_code=400, detail="os_types boş olamaz")
+    items = []
+    for os_type in body.os_types:
+        entry: dict[str, Any] = {
+            "os_type": os_type,
+            "supported": os_type in ALL_SUPPORTED,
+            "commands": [],
+            "error": None,
+        }
+        if not entry["supported"]:
+            entry["error"] = f"Vendor desteklenmiyor: {os_type}"
+        else:
+            try:
+                entry["commands"] = build_commands(
+                    body.operation, os_type, body.params, with_save=body.with_save,
+                )
+            except ValueError as exc:
+                entry["error"] = str(exc)
+        items.append(entry)
+    return {
+        "operation": body.operation, "params": body.params,
+        "items": items,
+        "supported_count": sum(1 for it in items if it["supported"] and not it["error"]),
+        "error_count": sum(1 for it in items if it["error"]),
+    }
+
+
+class PreviewBatchByOsRequest(BaseModel):
+    items: list[BatchItem]
+    os_types: list[str]
+    with_save: bool = True
+
+
+@router.post("/preview-batch-by-os")
+async def preview_batch_by_os(
+    body: PreviewBatchByOsRequest,
+    _: CurrentUser = None,
+):
+    """Sepet (çoklu op) — cihaz seçmeden OS-type için CLI."""
+    if not body.items:
+        raise HTTPException(status_code=400, detail="items boş olamaz")
+    if not body.os_types:
+        raise HTTPException(status_code=400, detail="os_types boş olamaz")
+    from app.services.config_builder_service import _save_cmd
+    items_out = []
+    for os_type in body.os_types:
+        entry: dict[str, Any] = {
+            "os_type": os_type,
+            "supported": os_type in ALL_SUPPORTED,
+            "per_op_commands": [],
+            "commands": [],
+            "error": None,
+        }
+        if not entry["supported"]:
+            entry["error"] = f"Vendor desteklenmiyor: {os_type}"
+            items_out.append(entry)
+            continue
+        try:
+            for op_item in body.items:
+                cmds = build_commands(op_item.operation, os_type, op_item.params,
+                                      with_save=False)
+                entry["per_op_commands"].append({
+                    "operation": op_item.operation, "commands": cmds,
+                })
+                entry["commands"].extend(cmds)
+            if body.with_save:
+                entry["commands"].append(_save_cmd(os_type))
+        except ValueError as exc:
+            entry["error"] = str(exc)
+        items_out.append(entry)
+    return {
+        "items": items_out,
+        "operation_count": len(body.items),
+        "supported_count": sum(1 for it in items_out if it["supported"] and not it["error"]),
+        "error_count": sum(1 for it in items_out if it["error"]),
+    }
+
+
 @router.post("/preview")
 async def preview(
     body: PreviewRequest,
