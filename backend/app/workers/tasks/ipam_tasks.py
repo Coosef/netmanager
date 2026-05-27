@@ -18,7 +18,8 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import and_, select, text
+from sqlalchemy import and_, cast, select, text
+from sqlalchemy.dialects.postgresql import INET
 
 from app.workers.celery_app import celery_app
 
@@ -53,16 +54,17 @@ async def _run_arp_sync():
 
         total_upserted = 0
         total_skipped = 0
+        import ipaddress
         for org_id, entries in by_org.items():
             with org_context(org_id):
-                # Pull this org's subnets once; in-memory IP-in-CIDR is
-                # cheaper than a per-row roundtrip for hundreds of subnets.
+                # Pull this org's subnets + ALL existing assignments once.
+                # 3431 ARP × per-row SELECT = ~5dk; bulk preload + in-memory
+                # dedupe = ~2sn.
                 subnets = (await db.execute(
                     select(IpamSubnet).where(IpamSubnet.deleted_at.is_(None))
                 )).scalars().all()
                 if not subnets:
                     continue
-                import ipaddress
                 parsed_subnets = []
                 for s in subnets:
                     try:
@@ -71,6 +73,18 @@ async def _run_arp_sync():
                         continue
                 # Sort by prefix length DESC → longest match wins.
                 parsed_subnets.sort(key=lambda x: x[1].prefixlen, reverse=True)
+
+                subnet_ids = [s.id for s, _ in parsed_subnets]
+                existing_rows = (await db.execute(
+                    select(IpamAssignment).where(
+                        IpamAssignment.subnet_id.in_(subnet_ids)
+                    )
+                )).scalars().all()
+                # Build (subnet_id, ip_str_no_mask) → row lookup
+                existing_by_key: dict[tuple[int, str], IpamAssignment] = {}
+                for a in existing_rows:
+                    ip_only = str(a.ip_address).split("/")[0]
+                    existing_by_key[(a.subnet_id, ip_only)] = a
 
                 for e in entries:
                     try:
@@ -84,12 +98,8 @@ async def _run_arp_sync():
                     if target is None:
                         total_skipped += 1
                         continue
-                    existing = (await db.execute(
-                        select(IpamAssignment).where(
-                            IpamAssignment.subnet_id == target.id,
-                            IpamAssignment.ip_address == e.ip_address,
-                        )
-                    )).scalar_one_or_none()
+                    key = (target.id, e.ip_address)
+                    existing = existing_by_key.get(key)
                     if existing is None:
                         a = IpamAssignment(
                             subnet_id=target.id, ip_address=e.ip_address,
@@ -101,6 +111,8 @@ async def _run_arp_sync():
                             last_seen_at=e.last_seen,
                         )
                         db.add(a)
+                        # cache that we just added — avoid double insert
+                        existing_by_key[key] = a
                         total_upserted += 1
                     else:
                         # Only refresh ARP-sourced rows — manual entries

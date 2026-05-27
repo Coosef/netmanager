@@ -86,4 +86,32 @@ export const configBuilderApi = {
       reason: opts?.reason || null,
       confirm: true,
     }).then((r) => r.data),
+
+  // T9 follow-up — sepet (multi-operation) batch
+  previewBatch: (items: Array<{ operation: string; params: Record<string, unknown> }>,
+                 device_ids: number[], with_save = true) =>
+    client.post<{
+      items: Array<{
+        device_id: number; hostname: string; os_type: string;
+        supported: boolean; commands: string[]; error: string | null;
+        per_op_commands: Array<{ operation: string; commands: string[] }>;
+      }>;
+      operation_count: number; supported_count: number; error_count: number;
+    }>('/config-builder/preview-batch', { items, device_ids, with_save }).then((r) => r.data),
+
+  pushBatch: (items: Array<{ operation: string; params: Record<string, unknown> }>,
+              device_ids: number[], opts?: { with_save?: boolean; reason?: string }) =>
+    client.post<{
+      items: Array<{ operation: string; params: Record<string, unknown> }>;
+      results: Array<{
+        device_id: number; hostname: string; success: boolean;
+        error?: string | null; skipped?: boolean; output?: string;
+      }>;
+      success_count: number; total: number;
+    }>('/config-builder/push-batch', {
+      items, device_ids,
+      with_save: opts?.with_save ?? true,
+      reason: opts?.reason || null,
+      confirm: true,
+    }).then((r) => r.data),
 }

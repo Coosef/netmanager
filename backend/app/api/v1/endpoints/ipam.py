@@ -20,7 +20,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import cast, func, select
+from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -393,7 +394,7 @@ async def create_assignment(
     existing = (await db.execute(
         select(IpamAssignment).where(
             IpamAssignment.subnet_id == subnet_id,
-            IpamAssignment.ip_address == body.ip_address,
+            IpamAssignment.ip_address == cast(body.ip_address, INET),
         )
     )).scalar_one_or_none()
     if existing is not None:
@@ -479,7 +480,7 @@ async def ip_lookup(
         a = (await db.execute(
             select(IpamAssignment).where(
                 IpamAssignment.subnet_id == subnet.id,
-                IpamAssignment.ip_address == ip,
+                IpamAssignment.ip_address == cast(ip, INET),
             )
         )).scalar_one_or_none()
         if a is not None:
