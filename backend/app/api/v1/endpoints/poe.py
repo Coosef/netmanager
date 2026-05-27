@@ -141,6 +141,108 @@ async def get_poe_summary(
     }
 
 
+@router.get("/devices/{device_id}/realtime")
+async def get_device_poe_realtime(
+    device_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: CurrentUser = None,
+):
+    """T9 follow-up — anlık SSH `show power inline` ile GERÇEK mW.
+
+    Cihaz vendor'ı standart MIB'in ötesinde mW raporlamıyorsa (Ruijie, Aruba)
+    SNMP snapshot 0 W gösterir. Bu endpoint operatör bir cihaza drilldown
+    yaptığında tetiklenir: SSH'le canlı çıktı çekilir, vendor parser ile
+    gerçek port-level mW + port adı döndürülür. Snapshot tablosu da update
+    edilir (kalıcı kayıt).
+    """
+    device = (await db.execute(
+        select(Device).where(Device.id == device_id)
+    )).scalar_one_or_none()
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    from app.services.ssh_manager import ssh_manager
+    from app.services.topology_service import EXTENDED_COMMANDS, _parse_power_inline
+    from app.models.poe_port_snapshot import PoEPortSnapshot
+    from sqlalchemy import delete as _del
+
+    os_cmds = EXTENDED_COMMANDS.get(device.os_type) or {}
+    cmd = os_cmds.get("power")
+    if not cmd:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{device.os_type} için 'show power inline' parser tanımlı değil.",
+        )
+
+    try:
+        result = await ssh_manager.execute_command(device, cmd, read_timeout=20)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"SSH hatası: {exc}")
+    if not result.success or not result.output:
+        raise HTTPException(
+            status_code=502,
+            detail=f"SSH komutu başarısız: {result.error or 'çıktı yok'}",
+        )
+
+    poe_rows = _parse_power_inline(result.output)
+    if not poe_rows:
+        raise HTTPException(
+            status_code=502,
+            detail="Komut çalıştı ama PoE satırı parse edilemedi (cihaz PoE-destekli değil olabilir).",
+        )
+
+    # Snapshot tablosunu da güncelle — kalıcı kayıt; bir sonraki SNMP
+    # sweepi gerçek mW kullanmadığı için kullanıcı bu butonla manuel
+    # senkronize tutar.
+    now = datetime.now(timezone.utc)
+    seen_ports: set[str] = set()
+    items = []
+    for port, info in poe_rows.items():
+        seen_ports.add(port)
+        existing = (await db.execute(
+            select(PoEPortSnapshot).where(
+                PoEPortSnapshot.device_id == device_id,
+                PoEPortSnapshot.port == port,
+            )
+        )).scalar_one_or_none()
+        oper = "on" if info["enabled"] else "off"
+        power_mw = int(info.get("mw") or 0)
+        if existing is None:
+            db.add(PoEPortSnapshot(
+                device_id=device_id, port=port,
+                oper_status=oper, power_mw=power_mw,
+                source="ssh",
+            ))
+        else:
+            existing.oper_status = oper
+            existing.power_mw = power_mw
+            existing.source = "ssh"
+            existing.updated_at = now
+        items.append({
+            "port": port, "oper_status": oper,
+            "power_mw": power_mw,
+            "power_watts": round(power_mw / 1000.0, 1),
+        })
+    await db.commit()
+
+    active = [it for it in items if it["oper_status"] == "on"]
+    return {
+        "device": {
+            "id": device.id, "hostname": device.hostname,
+            "ip_address": device.ip_address, "vendor": device.vendor,
+            "os_type": device.os_type,
+        },
+        "ports": items,
+        "summary": {
+            "total_ports": len(items),
+            "active_ports": len(active),
+            "total_power_mw": sum(it["power_mw"] for it in active),
+            "total_power_watts": round(sum(it["power_mw"] for it in active) / 1000.0, 1),
+        },
+        "source": "ssh",
+    }
+
+
 @router.get("/devices/{device_id}")
 async def get_device_poe(
     device_id: int,

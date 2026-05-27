@@ -6,7 +6,7 @@ import {
   ApiOutlined, BulbOutlined, ClockCircleOutlined, PoweroffOutlined,
   ReloadOutlined, SyncOutlined, ThunderboltOutlined, WarningOutlined,
 } from '@ant-design/icons'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { poeApi, type PoeDeviceRow, type PoePort } from '@/api/poe'
 import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
@@ -33,10 +33,26 @@ function DevicePoeDrawer({
   deviceId, open, onClose, isDark,
 }: { deviceId: number | null; open: boolean; onClose: () => void; isDark: boolean }) {
   const C = mkC(isDark)
+  const qc = useQueryClient()
+  const { message } = App.useApp()
   const { data, isLoading } = useQuery({
     queryKey: ['poe-device', deviceId],
     queryFn: () => poeApi.device(deviceId!),
     enabled: open && deviceId !== null,
+  })
+
+  // Anlık SSH — gerçek mW için (SNMP'in raporlamadığı vendor'lar)
+  const realtimeMut = useMutation({
+    mutationFn: () => poeApi.deviceRealtime(deviceId!),
+    onSuccess: (r) => {
+      message.success(
+        `SSH ile gerçek mW alındı: ${r.summary.total_power_watts} W (${r.summary.active_ports} aktif port)`,
+        5,
+      )
+      qc.invalidateQueries({ queryKey: ['poe-device', deviceId] })
+      qc.invalidateQueries({ queryKey: ['poe-summary'] })
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'SSH başarısız', 8),
   })
 
   const portCols = [
@@ -110,6 +126,18 @@ function DevicePoeDrawer({
             <Tag color="default" style={{ fontSize: 11 }}>{data.device.ip_address}</Tag>
           )}
         </Space>
+      }
+      extra={
+        <Tooltip title="SSH ile 'show power inline' çıktısını anlık çek — Cisco-dışı vendor'larda gerçek mW için tek yol.">
+          <Button
+            type="primary"
+            icon={<ThunderboltOutlined />}
+            loading={realtimeMut.isPending}
+            onClick={() => realtimeMut.mutate()}
+          >
+            Anlık SSH (Gerçek W)
+          </Button>
+        </Tooltip>
       }
       styles={{ body: { background: isDark ? '#0f172a' : '#f8fafc' } }}
     >

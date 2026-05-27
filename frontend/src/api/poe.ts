@@ -72,4 +72,8 @@ export const poeApi = {
   // T9 Tur 6B follow-up — operatör tarafından tetiklenen anlık snapshot.
   snapshotNow: () =>
     client.post<{ queued: boolean; message: string }>('/poe/snapshot-now').then((r) => r.data),
+  // T9 follow-up — Anlık SSH (gerçek mW). Vendor SNMP'i raporlamayanlar
+  // için 'show power inline' parse edilir.
+  deviceRealtime: (deviceId: number) =>
+    client.get<DevicePoe & { source: string }>(`/poe/devices/${deviceId}/realtime`).then((r) => r.data),
 }
