@@ -438,6 +438,33 @@ function SubnetDetailDrawer({
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Silinemedi'),
   })
 
+  // T9 follow-up — Subnet drawer'da ARP-sync + scanner (header'a ek olarak
+  // drawer'dan da erişim, kullanıcı subnet detayına bakarken doldurabilsin)
+  const arpSync = useMutation({
+    mutationFn: () => ipamApi.syncArp(),
+    onSuccess: () => {
+      message.success('ARP→IPAM sync başlatıldı — birkaç dakika içinde IP atamaları görünür', 6)
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ['ipam-assignments', subnetId] })
+        qc.invalidateQueries({ queryKey: ['ipam-subnet-detail', subnetId] })
+      }, 30_000)
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Tetiklenemedi', 6),
+  })
+  const scanSubnet = useMutation({
+    mutationFn: () => ipamApi.scanSubnet(subnetId!),
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['ipam-assignments', subnetId] })
+      qc.invalidateQueries({ queryKey: ['ipam-subnet-detail', subnetId] })
+      qc.invalidateQueries({ queryKey: ['ipam-subnets'] })
+      message.success(
+        `${r.cidr}: ${r.responded}/${r.scanned} yanıt verdi · +${r.created} yeni · ↻${r.refreshed} güncel · -${r.deleted} silindi`,
+        8,
+      )
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Tarama başarısız', 6),
+  })
+
   const cols = [
     { title: 'IP', dataIndex: 'ip_address', width: 130,
       render: (v: string) => <Text style={{ fontFamily: 'monospace' }}>{v}</Text> },
@@ -475,6 +502,29 @@ function SubnetDetailDrawer({
           {subnet.vlan_id && <Tag color="purple">VLAN {subnet.vlan_id}</Tag>}
         </Space>
       ) : 'Subnet'}
+      extra={canEdit && (
+        <Space>
+          <Tooltip title="Cihazlardan ARP cache'ini çek, IP atamalarını otomatik doldur">
+            <Button
+              icon={<SyncOutlined />}
+              loading={arpSync.isPending}
+              onClick={() => arpSync.mutate()}
+            >
+              ARP'tan Doldur
+            </Button>
+          </Tooltip>
+          <Tooltip title="Bu subnet'teki tüm IP'leri ping at — yanıt verenleri 'discovery' olarak ekle">
+            <Button
+              type="primary"
+              icon={<SearchOutlined />}
+              loading={scanSubnet.isPending}
+              onClick={() => scanSubnet.mutate()}
+            >
+              IP Tara (Ping)
+            </Button>
+          </Tooltip>
+        </Space>
+      )}
     >
       {subnet && (
         <>
