@@ -581,6 +581,26 @@ async def scan_subnet(
     results = await asyncio.gather(*[_ping(ip) for ip in ip_strs])
     responsive = {r.ip_address: r for r in results if r.responded}
 
+    # T9 follow-up — hostname autofill: DB'deki cihaz IP'lerini lookup'a al,
+    # taranan IP cihaza karşılık geliyorsa Device.hostname'i otomatik yaz.
+    from app.models.device import Device as _Dev
+    _dev_rows = (await db.execute(select(_Dev.ip_address, _Dev.hostname))).all()
+    ip_to_hostname: dict[str, str] = {
+        ip_addr: hn for ip_addr, hn in _dev_rows if ip_addr and hn
+    }
+
+    # MAC tabanlı lookup için ARP cache — IP yanıt veriyor ama Device değilse
+    # bile ARP'tan MAC alıp atayabiliriz.
+    from app.models.mac_arp import ArpEntry as _Arp
+    _arp_rows = (await db.execute(
+        select(_Arp.ip_address, _Arp.mac_address)
+        .where(_Arp.is_active.is_(True),
+               _Arp.ip_address.in_(list(responsive.keys())))
+    )).all()
+    ip_to_mac: dict[str, str] = {
+        ip_addr: mac for ip_addr, mac in _arp_rows if ip_addr and mac
+    }
+
     # Yanıt verenleri assignment olarak upsert (sadece 'discovery' source).
     existing_rows = (await db.execute(
         select(IpamAssignment).where(IpamAssignment.subnet_id == subnet_id)
@@ -594,9 +614,13 @@ async def scan_subnet(
 
     for ip, res in responsive.items():
         a = existing_by_ip.get(ip)
+        # T9 follow-up — hostname + MAC autofill
+        auto_hostname = ip_to_hostname.get(ip)
+        auto_mac = ip_to_mac.get(ip)
         if a is None:
             db.add(IpamAssignment(
                 subnet_id=subnet_id, ip_address=ip,
+                hostname=auto_hostname, mac_address=auto_mac,
                 description=f"IP scanner discovery (rtt={res.rtt_ms}ms)" if res.rtt_ms else "IP scanner discovery",
                 type="dynamic", source="discovery",
                 location_id=s.location_id, created_by=current_user.id,
@@ -606,6 +630,11 @@ async def scan_subnet(
         elif a.source == "discovery":
             a.last_seen_at = now
             a.description = f"IP scanner discovery (rtt={res.rtt_ms}ms)" if res.rtt_ms else "IP scanner discovery"
+            # Hostname / MAC tahmini varsa ve şu an yoksa doldur
+            if auto_hostname and not a.hostname:
+                a.hostname = auto_hostname
+            if auto_mac and not a.mac_address:
+                a.mac_address = auto_mac
             refreshed += 1
         # source != discovery — dokunma (manuel / ARP / DHCP korunur)
 

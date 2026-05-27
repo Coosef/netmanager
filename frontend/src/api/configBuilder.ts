@@ -114,4 +114,29 @@ export const configBuilderApi = {
       reason: opts?.reason || null,
       confirm: true,
     }).then((r) => r.data),
+
+  // T9 follow-up — Cihaz seçmeden OS-type ile preview (canlı/dry-run)
+  previewByOs: (operation: string, params: Record<string, unknown>,
+                os_types: string[], with_save = true) =>
+    client.post<{
+      operation: string; params: Record<string, unknown>;
+      items: Array<{
+        os_type: string; supported: boolean;
+        commands: string[]; error: string | null;
+      }>;
+      supported_count: number; error_count: number;
+    }>('/config-builder/preview-by-os', { operation, params, os_types, with_save })
+      .then((r) => r.data),
+
+  previewBatchByOs: (items: Array<{ operation: string; params: Record<string, unknown> }>,
+                     os_types: string[], with_save = true) =>
+    client.post<{
+      items: Array<{
+        os_type: string; supported: boolean;
+        commands: string[]; error: string | null;
+        per_op_commands: Array<{ operation: string; commands: string[] }>;
+      }>;
+      operation_count: number; supported_count: number; error_count: number;
+    }>('/config-builder/preview-batch-by-os', { items, os_types, with_save })
+      .then((r) => r.data),
 }

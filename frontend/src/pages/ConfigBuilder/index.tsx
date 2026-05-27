@@ -315,6 +315,9 @@ export default function ConfigBuilderPage() {
   const [cart, setCart] = useState<Array<{ key: string; params: Record<string, unknown>; label: string }>>([])
   const [batchPreviewOpen, setBatchPreviewOpen] = useState(false)
   const [batchPushResult, setBatchPushResult] = useState<Awaited<ReturnType<typeof configBuilderApi.pushBatch>> | null>(null)
+  // T9 follow-up — Cihaz seçmeden OS-type tabanlı canlı preview
+  const [previewOsTypes, setPreviewOsTypes] = useState<string[]>([])
+  const [livePreview, setLivePreview] = useState<{ os_type: string; commands: string[]; error: string | null }[]>([])
 
   const { data: operations = [], error: opsError, isLoading: opsLoading } = useQuery({
     queryKey: ['config-builder-operations'],
@@ -337,6 +340,49 @@ export default function ConfigBuilderPage() {
   }, [operations, selectedOpKey])
 
   const selectedOp = operations.find((o) => o.key === selectedOpKey)
+
+  // T9 follow-up — seçili cihazlardan benzersiz os_types'ı türet
+  const devicesById = useMemo(
+    () => Object.fromEntries((devicesData?.items || []).map((d: Device) => [d.id, d])),
+    [devicesData],
+  )
+  const derivedOsTypes = useMemo(() => {
+    const set = new Set<string>()
+    for (const id of deviceIds) {
+      const d = devicesById[id]
+      if (d?.os_type) set.add(d.os_type)
+    }
+    return Array.from(set)
+  }, [deviceIds, devicesById])
+
+  // Efektif os_type listesi: kullanıcı manuel seçti ise onu kullan,
+  // yoksa cihazlardan türet, ikisi de boşsa boş.
+  const effectiveOsTypes = previewOsTypes.length > 0
+    ? previewOsTypes
+    : derivedOsTypes
+  // Cihazlardan toplanan os_types değiştiğinde manuel seçimi temizle.
+  useEffect(() => { setPreviewOsTypes([]) }, [deviceIds])
+
+  // Debounced canlı CLI preview: form değiştikçe 400ms sonra arka planda
+  // OS-bazlı dry-run çağrılır, sonuç orta panelin altında 'pre' bloğunda
+  // görüntülenir. Backend yok ise sessizce ignore.
+  useEffect(() => {
+    if (!selectedOp) { setLivePreview([]); return }
+    if (effectiveOsTypes.length === 0) { setLivePreview([]); return }
+    // Zorunlu alanlar dolmamışsa preview etme
+    for (const f of selectedOp.fields) {
+      const v = params[f.name]
+      if (f.required && (v === undefined || v === '' || v === null)) {
+        setLivePreview([]); return
+      }
+    }
+    const t = setTimeout(() => {
+      configBuilderApi.previewByOs(selectedOp.key, params, effectiveOsTypes, true)
+        .then((r) => setLivePreview(r.items))
+        .catch(() => setLivePreview([]))
+    }, 400)
+    return () => clearTimeout(t)
+  }, [selectedOp, params, effectiveOsTypes])
 
   // Reset params when operation changes — load defaults.
   useEffect(() => {
@@ -456,11 +502,6 @@ export default function ConfigBuilderPage() {
     onError: (e: any) => message.error(e?.response?.data?.detail || 'İşlem başlatılamadı', 6),
   })
 
-  const devicesById = useMemo(
-    () => Object.fromEntries((devicesData?.items || []).map((d: Device) => [d.id, d])),
-    [devicesData],
-  )
-
   return (
     <div className="nm-page" style={{ padding: '4px 2px' }}>
       <div className="nm-page-hd">
@@ -567,6 +608,67 @@ export default function ConfigBuilderPage() {
               <Text style={{ color: C.muted }}>Soldaki listeden bir işlem seçin.</Text>
             )}
           </Card>
+
+          {/* T9 follow-up — Canlı CLI önizleme (form değiştikçe debounced) */}
+          {selectedOp && livePreview.length > 0 && (
+            <Card
+              size="small"
+              style={{ background: C.bg, border: `1px solid ${C.border}`, marginTop: 12 }}
+              title={
+                <Space>
+                  <FileTextOutlined style={{ color: '#22c55e' }} />
+                  <Text strong>Canlı CLI</Text>
+                  <Tag color="green" style={{ fontSize: 10 }}>{livePreview.length} OS</Tag>
+                </Space>
+              }
+              extra={
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={() => {
+                    downloadCli(
+                      selectedOp.label,
+                      livePreview.map(it => ({
+                        hostname: it.os_type, os_type: it.os_type,
+                        commands: it.commands, error: it.error,
+                      })),
+                    )
+                  }}
+                >
+                  İndir (.txt)
+                </Button>
+              }
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 380, overflowY: 'auto' }}>
+                {livePreview.map((it) => (
+                  <div key={it.os_type} style={{
+                    background: it.error ? (isDark ? '#7f1d1d18' : '#fef2f2') : C.bg2,
+                    border: `1px solid ${it.error ? '#ef444460' : C.border}`,
+                    borderRadius: 6, padding: 8,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                      {it.error
+                        ? <CloseCircleOutlined style={{ color: '#ef4444' }} />
+                        : <CheckCircleOutlined style={{ color: '#22c55e' }} />}
+                      <Tag style={{ fontSize: 10, margin: 0 }}>{it.os_type}</Tag>
+                      {it.error && <Text style={{ color: '#ef4444', fontSize: 11 }}>{it.error}</Text>}
+                    </div>
+                    {it.commands.length > 0 && (
+                      <pre style={{
+                        margin: 0, fontSize: 11, fontFamily: 'monospace',
+                        color: C.text, lineHeight: 1.5, whiteSpace: 'pre',
+                        background: isDark ? '#0d1117' : '#f8fafc',
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 4, padding: '6px 10px',
+                      }}>
+                        {it.commands.join('\n')}
+                      </pre>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
         </Col>
 
         {/* Right: device picker + actions */}
@@ -596,6 +698,32 @@ export default function ConfigBuilderPage() {
                 label: `${d.hostname} — ${d.ip_address} (${d.os_type || '?'})`,
               }))}
             />
+            {/* T9 follow-up — cihaz seçmeden de canlı CLI: doğrudan OS-type
+                seç. Cihaz seçince otomatik dolduğu için gizli kalır. */}
+            <div style={{ marginTop: 8 }}>
+              <Text style={{ color: C.muted, fontSize: 11 }}>
+                veya doğrudan vendor/OS seç (cihaz seçmeden CLI önizle/indir):
+              </Text>
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="örn. cisco_ios, ruijie_os, aruba_osswitch"
+                style={{ width: '100%', marginTop: 4 }}
+                value={previewOsTypes}
+                onChange={setPreviewOsTypes}
+                options={(selectedOp?.supported_vendors ?? [
+                  'cisco_ios','cisco_xe','cisco_nxos','cisco_sg300',
+                  'aruba_osswitch','aruba_aoscx','hp_procurve',
+                  'ruijie_os','comware',
+                ]).map((v) => ({ value: v, label: v }))}
+                disabled={deviceIds.length > 0}
+              />
+              {deviceIds.length > 0 && (
+                <Text style={{ color: C.dim, fontSize: 10 }}>
+                  Cihaz seçili — OS otomatik türetildi: {derivedOsTypes.join(', ') || '—'}
+                </Text>
+              )}
+            </div>
             {deviceIds.length > 0 && selectedOp && (
               <div style={{ marginTop: 10 }}>
                 <Text style={{ color: C.muted, fontSize: 11 }}>

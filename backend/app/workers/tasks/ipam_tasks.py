@@ -86,6 +86,18 @@ async def _run_arp_sync():
                     ip_only = str(a.ip_address).split("/")[0]
                     existing_by_key[(a.subnet_id, ip_only)] = a
 
+                # T9 follow-up — hostname autofill: bu org'taki TÜM cihazları
+                # tek query'de bulk al, ip→hostname dict'i kur. ARP entry
+                # bir cihaza karşılık geliyorsa Device.hostname kullan.
+                from app.models.device import Device
+                device_rows = (await db.execute(
+                    select(Device.ip_address, Device.hostname)
+                )).all()
+                ip_to_hostname: dict[str, str] = {}
+                for ip_addr, hn in device_rows:
+                    if ip_addr and hn:
+                        ip_to_hostname[ip_addr] = hn
+
                 for e in entries:
                     try:
                         ip_obj = ipaddress.ip_address(e.ip_address)
@@ -100,11 +112,15 @@ async def _run_arp_sync():
                         continue
                     key = (target.id, e.ip_address)
                     existing = existing_by_key.get(key)
+                    # Hostname tahmini — cihaz IP'siyse Device.hostname
+                    auto_hostname = ip_to_hostname.get(e.ip_address)
+
                     if existing is None:
                         a = IpamAssignment(
                             subnet_id=target.id, ip_address=e.ip_address,
                             mac_address=e.mac_address,
-                            hostname=None, description="ARP discovery",
+                            hostname=auto_hostname,
+                            description="ARP discovery" + (f" ({auto_hostname})" if auto_hostname else ""),
                             type="dynamic", source="arp",
                             device_id=e.device_id, interface=e.interface,
                             location_id=target.location_id,
@@ -122,6 +138,9 @@ async def _run_arp_sync():
                             existing.device_id = e.device_id
                             existing.interface = e.interface
                             existing.last_seen_at = e.last_seen
+                            # Hostname yoksa veya farklıysa güncelle
+                            if auto_hostname and existing.hostname != auto_hostname:
+                                existing.hostname = auto_hostname
                             total_upserted += 1
                 await db.commit()
 
