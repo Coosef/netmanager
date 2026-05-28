@@ -94,3 +94,54 @@ def test_clamp_floor_wins_over_low_ceiling():
 
 def test_clamp_custom_floor():
     assert effective_retention_days(5, 90, floor=14) == 14
+
+
+# ── A3.2 — _purge_or_count: dry-run COUNT vs gerçek DELETE + org-scope ───────
+
+import pytest
+from unittest.mock import MagicMock
+
+
+class _CapSession:
+    """execute()'a giden SQL'i yakalar; scalar/rowcount döndürür."""
+    def __init__(self, scalar=0, rowcount=0):
+        self.calls: list[str] = []
+        self._scalar = scalar
+        self._rowcount = rowcount
+
+    async def execute(self, stmt, params=None):
+        self.calls.append(str(stmt))
+        r = MagicMock()
+        r.scalar.return_value = self._scalar
+        r.rowcount = self._rowcount
+        return r
+
+
+@pytest.mark.asyncio
+async def test_purge_or_count_dry_run_uses_count_no_delete():
+    from app.workers.tasks.retention_tasks import _purge_or_count
+    db = _CapSession(scalar=5)
+    n = await _purge_or_count(
+        db, True,
+        "FROM network_events WHERE created_at < :cutoff AND organization_id = :org",
+        {"cutoff": "x", "org": 1},
+    )
+    assert n == 5
+    # dry-run → COUNT, asla DELETE değil; org-scope filtresi mevcut.
+    assert db.calls[0].startswith("SELECT COUNT(*) FROM network_events")
+    assert "DELETE" not in db.calls[0]
+    assert "organization_id = :org" in db.calls[0]
+
+
+@pytest.mark.asyncio
+async def test_purge_or_count_delete_returns_rowcount():
+    from app.workers.tasks.retention_tasks import _purge_or_count
+    db = _CapSession(rowcount=3)
+    n = await _purge_or_count(
+        db, False,
+        "FROM network_events WHERE created_at < :cutoff AND organization_id = :org",
+        {"cutoff": "x", "org": 1},
+    )
+    assert n == 3
+    assert db.calls[0].startswith("DELETE FROM network_events")
+    assert "organization_id = :org" in db.calls[0]
