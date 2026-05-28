@@ -145,3 +145,33 @@ async def test_purge_or_count_delete_returns_rowcount():
     assert n == 3
     assert db.calls[0].startswith("DELETE FROM network_events")
     assert "organization_id = :org" in db.calls[0]
+
+
+# ── A3.3 — retention-preview endpoint yetki dalları (DB'ye dokunmadan) ───────
+
+def _fake_user(*, is_super=False, is_org=False, org_id=1):
+    return type("U", (), {
+        "is_super_admin": is_super, "is_org_admin": is_org,
+        "organization_id": org_id,
+    })()
+
+
+@pytest.mark.asyncio
+async def test_retention_preview_rejects_viewer():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.system_settings import retention_preview
+    with pytest.raises(HTTPException) as exc:
+        await retention_preview(organization_id=None, db=None, current_user=_fake_user())
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_retention_preview_org_admin_requires_org():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.system_settings import retention_preview
+    with pytest.raises(HTTPException) as exc:
+        await retention_preview(
+            organization_id=None, db=None,
+            current_user=_fake_user(is_org=True, org_id=None),
+        )
+    assert exc.value.status_code == 400

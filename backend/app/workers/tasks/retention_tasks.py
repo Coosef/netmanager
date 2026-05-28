@@ -71,7 +71,9 @@ async def _purge_or_count(db, dry_run: bool, from_where: str, params: dict) -> i
     return res.rowcount or 0
 
 
-async def _run(dry_run: bool = False) -> dict:
+async def _run(dry_run: bool = False, only_org_id: int | None = None) -> dict:
+    """only_org_id verilirse yalnız o org işlenir (org-admin dry-run önizleme);
+    None ise tüm org'lar (beat sweep / super-admin)."""
     from datetime import datetime, timedelta, timezone
     from sqlalchemy import select
     from app.core.database import make_worker_session
@@ -90,10 +92,13 @@ async def _run(dry_run: bool = False) -> dict:
         with superadmin_context():
             await apply_rls_context(db)
 
-            orgs = (await db.execute(
+            org_q = (
                 select(Organization.id, Organization.max_retention_days)
                 .where(Organization.deleted_at.is_(None))
-            )).all()
+            )
+            if only_org_id is not None:
+                org_q = org_q.where(Organization.id == only_org_id)
+            orgs = (await db.execute(org_q)).all()
 
             for org_id, max_ret in orgs:
                 max_ret = int(max_ret or 90)
