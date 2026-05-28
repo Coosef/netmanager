@@ -33,6 +33,32 @@ _DEFAULTS: dict[str, Any] = {
     "scan.synthetic_probe_sec":        60,
     # Maintenance window aktifken polling factor (1B'de etkin)
     "scan.relaxed_factor_in_maintenance": 0.5,
+
+    # T10 A2 — Alarm / event dedup pencereleri (saniye). Bir cihaz için aynı
+    # tip event'in tekrar üretilme aralığını sınırlar (monitor_tasks).
+    "dedup.offline_event_sec":         1800,   # offline event ≤ 2/saat
+    "dedup.online_event_sec":          1800,   # online event ≤ 2/saat
+    "dedup.flap_alert_sec":            3600,   # flapping uyarısı ≤ 1/saat
+    "dedup.correlation_incident_sec":  3600,   # korelasyon incident ≤ 1/saat
+    "dedup.agent_event_sec":           600,    # agent online/offline ≤ 1/10dk
+
+    # T10 A2 — Flap tespit eşikleri (adet)
+    "flap.device_threshold_per_hour":  10,     # saatte N durum değişimi → flapping
+    "flap.incident_threshold":         8,      # pencerede N event → flapping say
+
+    # T10 A2 — Korelasyon motoru zamanlama pencereleri (saniye)
+    "correlation.group_wait_sec":      30,     # incident açmadan önce tampon
+    "correlation.bounce_guard_sec":    60,     # RECOVERING'e geçmeden min açık süre
+    "correlation.recovery_confirm_sec": 120,   # RECOVERING→CLOSED onay penceresi
+    "correlation.upstream_settle_sec": 35,     # downstream bastırmadan upstream bekleme
+    "correlation.flap_window_sec":     300,    # flap tespiti kayan pencere
+
+    # T10 A2 — Bakım pencereleri
+    "maintenance.spawn_horizon_days":  14,     # cyclic MW kaç gün önceden materialize
+
+    # T10 A2 — Oturum / stale eşikleri (dakika)
+    "session.terminal_stale_min":      30,     # stale terminal oturumu kapat
+    "session.poe_snapshot_stale_min":  45,     # PoE snapshot stale işaretle
 }
 
 # Per-key guardrail'ler — UI uyarı verir, backend de kabul etmez.
@@ -46,7 +72,66 @@ _GUARDRAILS: dict[str, tuple[Optional[int], Optional[int]]] = {
     "scan.topology_discovery_sec":     (3600, 86400),  # 1 saat - 1 gün
     "scan.synthetic_probe_sec":        (30, 600),      # 30s - 10dk
     "scan.relaxed_factor_in_maintenance": (None, None),  # 0.0 - 1.0 (UI'da sayısal)
+
+    # T10 A2 — dedup pencereleri
+    "dedup.offline_event_sec":         (60, 86400),    # 1dk - 1 gün
+    "dedup.online_event_sec":          (60, 86400),
+    "dedup.flap_alert_sec":            (300, 86400),   # 5dk - 1 gün
+    "dedup.correlation_incident_sec":  (300, 86400),
+    "dedup.agent_event_sec":           (60, 86400),
+
+    # T10 A2 — flap eşikleri
+    "flap.device_threshold_per_hour":  (3, 100),
+    "flap.incident_threshold":         (3, 100),
+
+    # T10 A2 — korelasyon pencereleri
+    "correlation.group_wait_sec":      (5, 600),
+    "correlation.bounce_guard_sec":    (5, 600),
+    "correlation.recovery_confirm_sec": (10, 1200),
+    "correlation.upstream_settle_sec": (5, 600),
+    "correlation.flap_window_sec":     (30, 3600),
+
+    # T10 A2 — bakım
+    "maintenance.spawn_horizon_days":  (1, 90),
+
+    # T10 A2 — oturum / stale
+    "session.terminal_stale_min":      (5, 1440),      # 5dk - 1 gün
+    "session.poe_snapshot_stale_min":  (5, 1440),
 }
+
+# T10 A2 — UI kategori grupları (key prefix → insan-okur etiket). Settings
+# sayfası sekmelerini bundan üretir; _meta her key'e category döndürür.
+_CATEGORIES: dict[str, str] = {
+    "scan":         "Tarama Frekansları",
+    "dedup":        "Alarm / Dedup",
+    "flap":         "Flap Tespiti",
+    "correlation":  "Korelasyon Motoru",
+    "maintenance":  "Bakım Pencereleri",
+    "session":      "Oturum / Stale",
+    "retention":    "Veri Saklama (Retention)",
+}
+
+# T10 A2 — yazma kapsamı. "global" = yalnız super-admin, organization_id=None
+# satırına yazılır (fleet-wide worker'lar bunu okur — org override anlamsız).
+# "org"    = org_admin kendi org'una override yazabilir. Tanımsız key "org".
+# Operasyonel/altyapı tuning'i global; tarama + retention org-override'lı.
+_SCOPE: dict[str, str] = {
+    **{k: "org" for k in _DEFAULTS if k.startswith("scan.")},
+    **{k: "global" for k in _DEFAULTS if k.split(".", 1)[0] in (
+        "dedup", "flap", "correlation", "maintenance", "session",
+    )},
+}
+
+
+def category(key: str) -> str:
+    """Bir key'in UI kategorisi — prefix'ten türetilir."""
+    prefix = key.split(".", 1)[0]
+    return _CATEGORIES.get(prefix, prefix)
+
+
+def scope(key: str) -> str:
+    """Bir key'in yazma kapsamı: 'global' | 'org'. Varsayılan 'org'."""
+    return _SCOPE.get(key, "org")
 
 
 def defaults() -> dict[str, Any]:

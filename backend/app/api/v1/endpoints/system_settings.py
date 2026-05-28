@@ -54,6 +54,8 @@ class SettingMeta(BaseModel):
     default: Any
     min_value: Optional[int] = None
     max_value: Optional[int] = None
+    category: str = ""
+    scope: str = "org"        # T10 A2 — "global" (super-admin) | "org" (org_admin)
 
 
 # ── Endpoint'ler ────────────────────────────────────────────────────────────
@@ -117,6 +119,7 @@ async def settings_meta(current_user: CurrentUser = None):
         items.append(SettingMeta(
             key=key, default=default_val,
             min_value=lo, max_value=hi,
+            category=svc.category(key), scope=svc.scope(key),
         ))
     return {"items": items}
 
