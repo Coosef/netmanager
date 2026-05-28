@@ -81,12 +81,22 @@ async def get_current_context(current_user: CurrentUser, ctx: RequestContext, db
     locs = await _accessible_locations(ctx, db)
     counts = await _device_counts(db, [loc.id for loc in locs])
 
+    # T10 Faz A1 — org'un planındaki feature durumları. Super-admin tüm
+    # modülleri görür (plana bakılmaz); FE nav filtresi bunu kullanır.
+    from app.core.deps import org_feature_states
+    if ctx.is_super_admin:
+        from app.core.features import FEATURES
+        features = {key: True for key in FEATURES}
+    else:
+        features = await org_feature_states(db, ctx.organization_id)
+
     return {
         "user_id": current_user.id,
         "username": current_user.username,
         "system_role": current_user.system_role,
         "is_super_admin": ctx.is_super_admin,
         "is_org_wide": ctx.is_org_wide,
+        "features": features,
         "organization": (
             {"id": org.id, "name": org.name, "slug": org.slug} if org else None
         ),

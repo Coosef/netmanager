@@ -13,6 +13,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
+import { useSite } from '@/contexts/SiteContext'
 import { monitorApi } from '@/api/monitor'
 import { approvalsApi } from '@/api/approvals'
 import { featureFlags } from '@/config/featureFlags'
@@ -36,6 +37,21 @@ export interface NavGroup {
   items: NavItem[]
 }
 
+// T10 Faz A1 — nav route → lisans feature anahtarı. Org planında modül
+// EXPLICIT kapalıysa (features[key] === false) nav öğesi gizlenir. Backend
+// router'ında da aynı anahtar require_feature ile gate'li — FE gizlese de
+// API 403 döner. Buradaki anahtarlar backend FEATURES registry ile birebir.
+const FEATURE_MAP: Record<string, string> = {
+  '/topology': 'topology', '/topology-next': 'topology',
+  '/topology-twin': 'topology_twin',
+  '/ipam': 'ipam', '/firmware': 'firmware', '/poe': 'poe',
+  '/config-builder': 'config_builder', '/config-drift': 'config_drift',
+  '/sla': 'sla', '/synthetic-probes': 'synthetic_probes',
+  '/incidents': 'incidents', '/escalation-rules': 'escalation',
+  '/ai-assistant': 'ai_assistant', '/agents': 'agents',
+  '/change-management': 'change_management', '/racks': 'racks',
+}
+
 const MODULE_MAP: Record<string, [string, string]> = {
   '/devices': ['devices', 'view'], '/topology': ['topology', 'view'],
   '/ipam': ['ipam', 'view'], '/backups': ['config_backups', 'view'],
@@ -56,9 +72,20 @@ const MODULE_MAP: Record<string, [string, string]> = {
 export function useNavGroups(): NavGroup[] {
   const { t } = useTranslation()
   const { user, isSuperAdmin, isOrgAdmin, can } = useAuthStore()
+  const { features } = useSite()
   const isSA = isSuperAdmin()
   const isOA = isOrgAdmin()
   const userRoleIdx = roleIndex(user?.role ?? 'viewer')
+
+  // T10 Faz A1 — feature (lisans) kapısı. Opt-out: anahtar yok / true →
+  // göster; yalnız EXPLICIT false gizler. Super-admin'e context tüm
+  // feature'ları true verir, dolayısıyla burada ekstra bypass gerekmez.
+  const featureOk = (key?: string) => {
+    if (!key) return true
+    const feat = FEATURE_MAP[key]
+    if (!feat) return true
+    return features[feat] !== false
+  }
 
   const canSee = (minRole?: SystemRole, key?: string) => {
     if (!minRole && !key) return true
@@ -160,7 +187,7 @@ export function useNavGroups(): NavGroup[] {
     },
   ]
 
-  // Role/permission filter — boş gruplar atılır.
-  return GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => canSee(it.minRole, it.key)) }))
+  // Role/permission + feature (lisans) filtresi — boş gruplar atılır.
+  return GROUPS.map((g) => ({ ...g, items: g.items.filter((it) => canSee(it.minRole, it.key) && featureOk(it.key)) }))
     .filter((g) => g.items.length > 0)
 }

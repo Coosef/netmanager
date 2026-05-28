@@ -66,6 +66,9 @@ interface SiteCtx {
   hasLocationAccess: boolean
   /** super-admin / org-admin — operates across the whole organization. */
   isOrgWide: boolean
+  /** T10 — org plan'ındaki feature durumları {key: bool}. Eksik anahtar
+   * = açık (opt-out). Nav filtresi bunu okur. */
+  features: Record<string, boolean>
   sitesLoading: boolean
   /** Backward-compat: the active location's NAME, and the name list. */
   activeSite: string | null
@@ -80,6 +83,7 @@ const SiteContext = createContext<SiteCtx>({
   allowedLocationIds: [],
   hasLocationAccess: true,
   isOrgWide: false,
+  features: {},
   sitesLoading: false,
   activeSite: null,
   setSite: () => {},
@@ -108,6 +112,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const allowedLocationIds: number[] = ctx?.allowed_location_ids ?? []
   const hasLocationAccess: boolean = ctx?.has_location_access ?? true
   const isOrgWide: boolean = ctx?.is_org_wide ?? false
+  const features: Record<string, boolean> = ctx?.features ?? {}
   const sites: string[] = locations.map((l) => l.name)
 
   const setLocation = useCallback(
@@ -184,6 +189,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         allowedLocationIds,
         hasLocationAccess,
         isOrgWide,
+        features,
         sitesLoading,
         activeSite,
         setSite,
