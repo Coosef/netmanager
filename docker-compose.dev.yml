@@ -1,0 +1,40 @@
+# T10 B1a — Local development overlay (COMMITTED, opt-in).
+#
+# Kullanım (local geliştirme + host'tan DB/redis debug):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# NOT: Açık `-f` verince Compose `docker-compose.override.yml`'i OTOMATİK
+# yüklemez — bu yüzden bu overlay frontend-dev mount'larını da içerir
+# (tek komutla tam local dev). VPS/prod bu overlay'i KULLANMAZ → postgres/
+# redis host'a açılmaz (base'de yalnız `expose:`).
+#
+# Sadece çalıştırmak (host'tan DB erişimi gerekmiyorsa) için base + auto
+# override.yml yeterli: `docker compose up -d` (DB/redis internal kalır).
+services:
+  # Host'tan psql / DBeaver / redis-cli ile debug için portları geri publish et.
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  # B1b — backend API + flower UI'ya host'tan direct erişim (debug). Prod'da
+  # nginx tek kapı; bunlar yalnız bu overlay ile (local) açılır.
+  backend:
+    ports:
+      - "8000:8000"
+
+  flower:
+    ports:
+      - "5555:5555"
+
+  # Frontend dev server + canlı src mount (auto override.yml ile aynı içerik;
+  # açık -f kullanımında auto override yüklenmediği için burada tekrar edilir).
+  frontend:
+    build:
+      target: development
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public

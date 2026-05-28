@@ -22,8 +22,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-network_manager}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # T10 B1a — host'a publish YOK; yalnız konteynerler arası (expose). Host'tan
+    # debug için docker-compose.dev.yml overlay'i 5432'yi geri publish eder.
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netmgr} -d ${POSTGRES_DB:-network_manager}"]
       interval: 10s
@@ -36,8 +38,9 @@ services:
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
+    # T10 B1a — host'a publish YOK (expose). Host debug için docker-compose.dev.yml.
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -57,8 +60,10 @@ services:
       - ./backend:/app
       - config_backups:/app/backups
       - prom_multiproc:/tmp/prom_multiproc
-    ports:
-      - "8000:8000"
+    # T10 B1b — host'a publish YOK; nginx (tek dış kapı) `backend:8000`'e
+    # proxy'liyor. Host'tan direct API/debug için docker-compose.dev.yml 8000'i açar.
+    expose:
+      - "8000"
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
@@ -276,8 +281,10 @@ services:
   flower:
     build: ./backend
     command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
-    ports:
-      - "5555:5555"
+    # T10 B1b — host'a publish YOK (yalnız expose). Flower UI'ya local debug
+    # için docker-compose.dev.yml 5555'i geri açar; prod'da dışarı kapalı.
+    expose:
+      - "5555"
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
