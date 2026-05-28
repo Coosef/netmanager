@@ -34,9 +34,28 @@ export interface UpsertResponse {
   note?: string
 }
 
+// T10 A3 — retention dry-run önizleme
+export interface RetentionPreviewOrg {
+  organization_id: number
+  organization_name: string
+  tables: Record<string, number>
+  total: number
+}
+export interface RetentionPreview {
+  dry_run: boolean
+  total: number
+  organizations: RetentionPreviewOrg[]
+}
+
 export const systemSettingsApi = {
   list: () =>
     client.get<SettingsBundle>('/system-settings').then((r) => r.data),
+
+  // T10 A3 — dry-run: ne silinecek (hiçbir şey silinmez)
+  retentionPreview: (organizationId?: number) =>
+    client.get<RetentionPreview>('/system-settings/retention-preview', {
+      params: organizationId != null ? { organization_id: organizationId } : undefined,
+    }).then((r) => r.data),
 
   meta: () =>
     client.get<{ items: SettingMeta[] }>('/system-settings/_meta').then((r) => r.data),

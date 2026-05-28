@@ -13,14 +13,79 @@
 import { useMemo, useState } from 'react'
 import {
   Alert, Badge, Button, Card, Empty, InputNumber, Popconfirm,
-  Space, Tabs, Tag, Tooltip, Typography, message,
+  Space, Table, Tabs, Tag, Tooltip, Typography, message,
 } from 'antd'
 import {
-  InfoCircleOutlined, ReloadOutlined, SaveOutlined, UndoOutlined,
+  ExperimentOutlined, InfoCircleOutlined, ReloadOutlined,
+  SaveOutlined, UndoOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { systemSettingsApi, SettingValue, SettingMeta } from '@/api/systemSettings'
 import { useAuthStore } from '@/store/auth'
+
+const RETENTION_CATEGORY = 'Veri Saklama (Retention)'
+
+// T10 A3 — dry-run önizleme paneli: "şu an çalışsa ne silinirdi?" (hiçbir
+// şey silinmez). Retention sekmesinin altında gösterilir.
+function RetentionPreviewPanel() {
+  const previewMut = useMutation({
+    mutationFn: () => systemSettingsApi.retentionPreview(),
+    onError: (err: any) =>
+      message.error(err?.response?.data?.detail || 'Önizleme alınamadı'),
+  })
+  const data = previewMut.data
+
+  return (
+    <Card
+      size="small"
+      style={{ marginTop: 12 }}
+      title={<Space><ExperimentOutlined /><span>Retention Önizleme (Dry-Run)</span></Space>}
+      extra={
+        <Button
+          size="small" type="primary" ghost
+          loading={previewMut.isPending}
+          onClick={() => previewMut.mutate()}
+        >Önizle</Button>
+      }
+    >
+      <Paragraph style={{ color: 'var(--fg-3)', fontSize: 12, marginBottom: 8 }}>
+        Temizlik <strong>şimdi çalışsaydı</strong> hangi tablodan kaç satır silinirdi?
+        Bu işlem <strong>hiçbir şeyi silmez</strong> — yalnız sayar. Gerçek temizlik
+        günlük beat task'ında, org bazlı etkili saklama (plan tavanı + 7 gün taban) ile çalışır.
+      </Paragraph>
+
+      {!data ? (
+        <Text style={{ color: 'var(--fg-3)', fontSize: 12 }}>
+          Önizleme için "Önizle"ye basın.
+        </Text>
+      ) : data.total === 0 ? (
+        <Alert type="success" showIcon message="Silinecek eski veri yok — her şey saklama penceresi içinde." />
+      ) : (
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          <Text>Toplam <strong>{data.total}</strong> satır silinmeye aday.</Text>
+          {data.organizations.map((org) => {
+            const rows = Object.entries(org.tables).map(([table, count]) => ({
+              key: table, table, count,
+            }))
+            return (
+              <Card key={org.organization_id} size="small" type="inner"
+                title={<span>{org.organization_name} <Tag color="orange">{org.total}</Tag></span>}>
+                <Table
+                  size="small" pagination={false}
+                  dataSource={rows}
+                  columns={[
+                    { title: 'Tablo', dataIndex: 'table', key: 'table' },
+                    { title: 'Silinecek satır', dataIndex: 'count', key: 'count', align: 'right' as const },
+                  ]}
+                />
+              </Card>
+            )
+          })}
+        </Space>
+      )}
+    </Card>
+  )
+}
 
 const { Text, Paragraph } = Typography
 
@@ -281,24 +346,27 @@ export default function SystemSettingsTab() {
     key: cat,
     label: <span>{cat} <Badge count={grouped[cat].length} style={{ backgroundColor: 'var(--accent)' }} /></span>,
     children: (
-      <Card bodyStyle={{ padding: 0 }}>
-        {grouped[cat].map((s) => {
-          const meta = metaByKey[s.key] || { key: s.key, default: s.value }
-          const isGlobal = meta.scope === 'global'
-          const canEditThis = isGlobal ? isSuperAdmin : canView
-          return (
-            <SettingRow
-              key={s.key}
-              setting={s}
-              meta={meta}
-              canEdit={canEditThis}
-              onSave={(v) => upsertMut.mutateAsync({ key: s.key, value: v })}
-              onReset={() => resetMut.mutateAsync(s.key)}
-              saving={upsertMut.isPending && upsertMut.variables?.key === s.key}
-            />
-          )
-        })}
-      </Card>
+      <>
+        <Card bodyStyle={{ padding: 0 }}>
+          {grouped[cat].map((s) => {
+            const meta = metaByKey[s.key] || { key: s.key, default: s.value }
+            const isGlobal = meta.scope === 'global'
+            const canEditThis = isGlobal ? isSuperAdmin : canView
+            return (
+              <SettingRow
+                key={s.key}
+                setting={s}
+                meta={meta}
+                canEdit={canEditThis}
+                onSave={(v) => upsertMut.mutateAsync({ key: s.key, value: v })}
+                onReset={() => resetMut.mutateAsync(s.key)}
+                saving={upsertMut.isPending && upsertMut.variables?.key === s.key}
+              />
+            )
+          })}
+        </Card>
+        {cat === RETENTION_CATEGORY && <RetentionPreviewPanel />}
+      </>
     ),
   }))
 

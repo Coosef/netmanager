@@ -5,7 +5,7 @@ After Faz 4B, device_availability_snapshots is a TimescaleDB hypertable.
 Retention is managed by add_retention_policy (90 days), not a manual DELETE.
 """
 
-from app.workers.tasks.retention_tasks import HYPERTABLE_MANAGED, _RETENTION
+from app.workers.tasks.retention_tasks import HYPERTABLE_MANAGED, _RETENTION_KEYS
 
 
 def test_snapshot_managed_by_timescaledb():
@@ -15,4 +15,4 @@ def test_snapshot_managed_by_timescaledb():
 
 def test_snapshot_not_in_manual_retention():
     """No manual DELETE should target device_availability_snapshots."""
-    assert "device_availability_snapshots" not in _RETENTION
+    assert "device_availability_snapshots" not in _RETENTION_KEYS

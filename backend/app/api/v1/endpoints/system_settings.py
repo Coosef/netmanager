@@ -124,6 +124,58 @@ async def settings_meta(current_user: CurrentUser = None):
     return {"items": items}
 
 
+@router.get("/retention-preview")
+async def retention_preview(
+    organization_id: Optional[int] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+):
+    """T10 A3 — dry-run retention önizlemesi: hangi org'da hangi tablodan kaç
+    satır SİLİNECEK (hiçbir şey silinmez). Veri kaybı riskine karşı önizleme.
+
+    org_admin yalnız kendi org'unu görür; super_admin tümünü ya da
+    ?organization_id ile tek bir org'u. Sayım, org bazlı etkili retention
+    (system_settings + plan tavanı + güvenlik tabanı) ile hesaplanır."""
+    if not (current_user.is_super_admin or current_user.is_org_admin):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Yetersiz yetki — org_admin / super_admin")
+
+    if current_user.is_super_admin:
+        only_org_id = organization_id          # None → tüm org'lar
+    else:
+        only_org_id = current_user.organization_id
+        if only_org_id is None:
+            raise HTTPException(status_code=400, detail="Kullanıcının organization_id'si yok")
+
+    from app.workers.tasks.retention_tasks import _run
+    report = await _run(dry_run=True, only_org_id=only_org_id)
+
+    # Org adlarını çöz (rapor {org_id: {tablo: count}}).
+    summary: dict = report.get("summary", {})
+    names: dict[int, str] = {}
+    if summary:
+        from app.models.shared.organization import Organization
+        rows = (await db.execute(
+            select(Organization.id, Organization.name)
+            .where(Organization.id.in_(list(summary.keys())))
+        )).all()
+        names = {oid: nm for oid, nm in rows}
+
+    return {
+        "dry_run": True,
+        "total": report.get("total", 0),
+        "organizations": [
+            {
+                "organization_id": oid,
+                "organization_name": names.get(oid, str(oid)),
+                "tables": tables,
+                "total": sum(tables.values()),
+            }
+            for oid, tables in summary.items()
+        ],
+    }
+
+
 @router.put("/{key}")
 async def upsert_setting(
     key: str,
