@@ -76,16 +76,25 @@ async def process_event(
     fp = make_fingerprint(device_id, event_type, component)
     confidence = SOURCE_CONFIDENCE.get(source, 0.5)
 
+    # T10 A2 — korelasyon zamanlama pencereleri system_settings'ten (global
+    # scope). Kod sabitleri son fallback (get defaults'a düşer).
+    from app.services import system_settings_service as _svc
+    flap_window      = int(await _svc.get(db, "correlation.flap_window_sec"))
+    flap_threshold   = int(await _svc.get(db, "flap.incident_threshold"))
+    group_wait       = int(await _svc.get(db, "correlation.group_wait_sec"))
+    bounce_guard     = int(await _svc.get(db, "correlation.bounce_guard_sec"))
+    recovery_confirm = int(await _svc.get(db, "correlation.recovery_confirm_sec"))
+
     # ── 1. Flap guard (Redis counter) ─────────────────────────────────────
     flap_key = f"corr:flap:{fp}"
     try:
         flap_count = sync_redis.incr(flap_key)
         if flap_count == 1:
-            sync_redis.expire(flap_key, FLAP_WINDOW_SEC)
+            sync_redis.expire(flap_key, flap_window)
     except Exception:
         flap_count = 0  # Redis unavailable — don't drop the event
 
-    if flap_count > FLAP_THRESHOLD:
+    if flap_count > flap_threshold:
         log.debug("corr: flap-suppressed %s (count=%d)", fp, flap_count)
         return None
 
@@ -104,10 +113,12 @@ async def process_event(
     if is_problem:
         result = await _handle_problem(
             fp, device_id, event_type, component, source,
-            severity, confidence, incident, db, sync_redis,
+            severity, confidence, incident, db, sync_redis, group_wait,
         )
     else:
-        result = await _handle_recovery(incident, source, db)
+        result = await _handle_recovery(
+            incident, source, db, bounce_guard, recovery_confirm,
+        )
 
     # Faz 6B G4: invalidate aggregation cache for this event.
     # Non-fatal; cache_invalidation itself swallows Redis errors, but we
@@ -126,6 +137,7 @@ async def process_event(
 async def _handle_problem(
     fp, device_id, event_type, component, source,
     severity, confidence, incident, db, sync_redis,
+    group_wait: int = GROUP_WAIT_SEC,
 ):
     now = datetime.now(timezone.utc)
 
@@ -141,13 +153,13 @@ async def _handle_problem(
             return None  # group_wait is still running — absorb duplicate
 
         try:
-            # TTL is GROUP_WAIT_SEC + 15 so the key outlives the task's countdown
+            # TTL is group_wait + 15 so the key outlives the task's countdown
             # and is still present when open_incident_after_wait checks it.
-            sync_redis.setex(gw_key, GROUP_WAIT_SEC + 15, "1")
+            sync_redis.setex(gw_key, group_wait + 15, "1")
         except Exception:
             pass
 
-        # Delegate actual creation to a Celery task after GROUP_WAIT_SEC
+        # Delegate actual creation to a Celery task after group_wait
         try:
             from app.workers.tasks.correlation_tasks import open_incident_after_wait
             open_incident_after_wait.apply_async(
@@ -159,7 +171,7 @@ async def _handle_problem(
                     severity=severity,
                     confidence=confidence,
                 ),
-                countdown=GROUP_WAIT_SEC,
+                countdown=group_wait,
             )
             log.debug("corr: group_wait started for %s (device=%d)", fp, device_id)
         except Exception as task_err:
@@ -194,14 +206,17 @@ async def _handle_problem(
 
 # ── Recovery path ─────────────────────────────────────────────────────────────
 
-async def _handle_recovery(incident: Incident | None, source: str, db: AsyncSession):
+async def _handle_recovery(
+    incident: Incident | None, source: str, db: AsyncSession,
+    bounce_guard: int = BOUNCE_GUARD_SEC, recovery_confirm: int = RECOVERY_CONFIRM_SEC,
+):
     if incident is None:
         return None
 
     now = datetime.now(timezone.utc)
     open_duration = (now - incident.opened_at).total_seconds()
 
-    if open_duration < BOUNCE_GUARD_SEC:
+    if open_duration < bounce_guard:
         log.debug("corr: bounce-guard absorbed recovery for incident #%d", incident.id)
         return None
 
@@ -218,10 +233,10 @@ async def _handle_recovery(incident: Incident | None, source: str, db: AsyncSess
             from app.workers.tasks.correlation_tasks import confirm_recovery
             confirm_recovery.apply_async(
                 kwargs={"incident_id": incident.id},
-                countdown=RECOVERY_CONFIRM_SEC,
+                countdown=recovery_confirm,
             )
             log.info("corr: incident #%d RECOVERING (will confirm in %ds)",
-                     incident.id, RECOVERY_CONFIRM_SEC)
+                     incident.id, recovery_confirm)
         except Exception as task_err:
             # Broker unreachable — incident stays RECOVERING; the periodic
             # recovery sweeper (Faz 2) will close it. Log for observability.

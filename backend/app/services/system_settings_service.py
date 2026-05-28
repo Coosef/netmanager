@@ -190,27 +190,33 @@ async def get(
     if cached and cached[1] > now:
         return cached[0]
 
+    # DB okuması bir SAVEPOINT içinde — tablo yoksa / DB hatasında dış
+    # transaction'ı kirletmeden koda (default) düşeriz. Settings okuması
+    # asla tüketen task'ı kırmamalı.
     value: Any = None
+    try:
+        async with db.begin_nested():
+            if organization_id is not None:
+                row = (await db.execute(
+                    select(SystemSetting).where(
+                        SystemSetting.organization_id == organization_id,
+                        SystemSetting.key == key,
+                    )
+                )).scalar_one_or_none()
+                if row is not None:
+                    value = row.value
 
-    if organization_id is not None:
-        row = (await db.execute(
-            select(SystemSetting).where(
-                SystemSetting.organization_id == organization_id,
-                SystemSetting.key == key,
-            )
-        )).scalar_one_or_none()
-        if row is not None:
-            value = row.value
-
-    if value is None:
-        row = (await db.execute(
-            select(SystemSetting).where(
-                SystemSetting.organization_id.is_(None),
-                SystemSetting.key == key,
-            )
-        )).scalar_one_or_none()
-        if row is not None:
-            value = row.value
+            if value is None:
+                row = (await db.execute(
+                    select(SystemSetting).where(
+                        SystemSetting.organization_id.is_(None),
+                        SystemSetting.key == key,
+                    )
+                )).scalar_one_or_none()
+                if row is not None:
+                    value = row.value
+    except Exception:
+        value = None  # system_settings okunamadı → kod default'u
 
     if value is None:
         value = _DEFAULTS.get(key)
@@ -230,26 +236,29 @@ def get_sync(db, key: str, organization_id: Optional[int] = None) -> Any:
         return cached[0]
 
     value: Any = None
+    try:
+        with db.begin_nested():
+            if organization_id is not None:
+                row = db.execute(
+                    select(SystemSetting).where(
+                        SystemSetting.organization_id == organization_id,
+                        SystemSetting.key == key,
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    value = row.value
 
-    if organization_id is not None:
-        row = db.execute(
-            select(SystemSetting).where(
-                SystemSetting.organization_id == organization_id,
-                SystemSetting.key == key,
-            )
-        ).scalar_one_or_none()
-        if row is not None:
-            value = row.value
-
-    if value is None:
-        row = db.execute(
-            select(SystemSetting).where(
-                SystemSetting.organization_id.is_(None),
-                SystemSetting.key == key,
-            )
-        ).scalar_one_or_none()
-        if row is not None:
-            value = row.value
+            if value is None:
+                row = db.execute(
+                    select(SystemSetting).where(
+                        SystemSetting.organization_id.is_(None),
+                        SystemSetting.key == key,
+                    )
+                ).scalar_one_or_none()
+                if row is not None:
+                    value = row.value
+    except Exception:
+        value = None
 
     if value is None:
         value = _DEFAULTS.get(key)

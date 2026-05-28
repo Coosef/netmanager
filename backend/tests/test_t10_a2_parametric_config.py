@@ -128,9 +128,14 @@ class _FakeRow:
 
 class _FakeSyncSession:
     """execute() çağrı sırasına göre kuyruktan sonuç döndürür.
-    get_sync: org_id=None → 1 execute (global); org_id=X → 2 execute (org, global)."""
+    get_sync: org_id=None → 1 execute (global); org_id=X → 2 execute (org, global).
+    begin_nested() no-op savepoint (get_sync onu sarmalıyor)."""
     def __init__(self, *rows):
         self._rows = list(rows)
+
+    def begin_nested(self):
+        import contextlib
+        return contextlib.nullcontext()
 
     def execute(self, _stmt):
         return _FakeResult(self._rows.pop(0) if self._rows else None)
