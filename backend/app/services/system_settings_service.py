@@ -219,6 +219,45 @@ async def get(
     return value
 
 
+def get_sync(db, key: str, organization_id: Optional[int] = None) -> Any:
+    """`get`'in senkron eşi — Celery sync worker'ları (SyncSessionLocal)
+    için. Aynı çözünürlük (org → global → _DEFAULTS) ve aynı process-local
+    cache. `db` bir senkron sqlalchemy Session'dır."""
+    now = time.time()
+    cache_key = (organization_id, key)
+    cached = _cache.get(cache_key)
+    if cached and cached[1] > now:
+        return cached[0]
+
+    value: Any = None
+
+    if organization_id is not None:
+        row = db.execute(
+            select(SystemSetting).where(
+                SystemSetting.organization_id == organization_id,
+                SystemSetting.key == key,
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            value = row.value
+
+    if value is None:
+        row = db.execute(
+            select(SystemSetting).where(
+                SystemSetting.organization_id.is_(None),
+                SystemSetting.key == key,
+            )
+        ).scalar_one_or_none()
+        if row is not None:
+            value = row.value
+
+    if value is None:
+        value = _DEFAULTS.get(key)
+
+    _cache[cache_key] = (value, now + _CACHE_TTL_SEC)
+    return value
+
+
 async def get_all(
     db: AsyncSession, organization_id: Optional[int] = None,
 ) -> dict[str, Any]:

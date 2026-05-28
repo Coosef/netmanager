@@ -107,3 +107,63 @@ def test_scope_scan_keys_are_org_overridable():
 
 def test_scope_unknown_defaults_to_org():
     assert svc.scope("totally.unknown_key") == "org"
+
+
+# ── A2.2 — get_sync resolution (org → global → _DEFAULTS) ────────────────────
+# SystemSetting JSONB kolonu SQLite'ta create edilemediği için gerçek tablo
+# yerine sahte senkron session ile çözünürlük mantığını sabitliyoruz.
+
+class _FakeResult:
+    def __init__(self, row):
+        self._row = row
+
+    def scalar_one_or_none(self):
+        return self._row
+
+
+class _FakeRow:
+    def __init__(self, value):
+        self.value = value
+
+
+class _FakeSyncSession:
+    """execute() çağrı sırasına göre kuyruktan sonuç döndürür.
+    get_sync: org_id=None → 1 execute (global); org_id=X → 2 execute (org, global)."""
+    def __init__(self, *rows):
+        self._rows = list(rows)
+
+    def execute(self, _stmt):
+        return _FakeResult(self._rows.pop(0) if self._rows else None)
+
+
+def test_get_sync_falls_back_to_default():
+    svc.invalidate_cache()
+    # Global lookup boş → kod default'u (3600).
+    val = svc.get_sync(_FakeSyncSession(None), "dedup.flap_alert_sec")
+    assert val == 3600
+
+
+def test_get_sync_returns_global_row():
+    svc.invalidate_cache()
+    val = svc.get_sync(_FakeSyncSession(_FakeRow(7200)), "dedup.flap_alert_sec")
+    assert val == 7200
+
+
+def test_get_sync_org_override_wins_over_global():
+    svc.invalidate_cache()
+    # org_id verildi: ilk execute org satırı (9000) → global'e bakmadan döner.
+    val = svc.get_sync(
+        _FakeSyncSession(_FakeRow(9000), _FakeRow(7200)),
+        "dedup.flap_alert_sec", organization_id=5,
+    )
+    assert val == 9000
+
+
+def test_get_sync_uses_cache_on_second_call():
+    svc.invalidate_cache()
+    # İlk çağrı global satırı cache'ler; ikinci çağrı boş session'a rağmen
+    # cache'ten 7200 döndürmeli (30s TTL).
+    svc.get_sync(_FakeSyncSession(_FakeRow(7200)), "dedup.online_event_sec")
+    val = svc.get_sync(_FakeSyncSession(None), "dedup.online_event_sec")
+    assert val == 7200
+    svc.invalidate_cache()
