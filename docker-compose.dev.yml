@@ -22,9 +22,13 @@ services:
 
   # B1b — backend API + flower UI'ya host'tan direct erişim (debug). Prod'da
   # nginx tek kapı; bunlar yalnız bu overlay ile (local) açılır.
+  # B2b — fresh local DB'de şema kurulumu için BOOTSTRAP_SCHEMA=1 (prod base'de
+  # yok = OFF → runtime DDL çalışmaz). Mevcut DB'de zararsız (create_all no-op).
   backend:
     ports:
       - "8000:8000"
+    environment:
+      - BOOTSTRAP_SCHEMA=1
 
   flower:
     ports:

@@ -219,6 +219,25 @@ local image'ın `pyotp`'siz bayat olması tam bu drift'ti.)
 - [ ] §4a pg_dump + SHA alındı.
 - [ ] Restart değil, image gerekiyorsa rebuild ile deploy.
 
+### 7.2 Fresh DB bootstrap sırası (B2b sonrası) ⚠️
+**T10 B2b:** runtime startup'ta DDL **varsayılan KAPALI** (`BOOTSTRAP_SCHEMA` yok = OFF).
+Mevcut DB'de etkisiz (create_all zaten no-op). **Boş/yeni DB'de** doğru sıra:
+1. **`BOOTSTRAP_SCHEMA=1`** ile ilk start (veya eşdeğer `create_all`) → tüm tablolar + hypertable.
+2. **`alembic upgrade head`** → netmgr_app grant'ları (`f7a5`) + RLS policy'leri (`f7a4`) + retention.
+> **`alembic upgrade head` TEK BAŞINA boş DB'yi KURAMAZ** — zincirde var olmayan tabloya `ALTER`
+> var (örn. `agent_credential_bundles` DROP CONSTRAINT). Önce create_all, sonra alembic.
+- Fresh + OFF + bootstrap yapılmadan: tablo yok → seeding `users` bulamaz → **startup fail**
+  (beklenen; "önce bootstrap et" sinyali). B2b doğrulamasında bu davranış gözlendi.
+- `docker-compose.dev.yml` local fresh dev için `BOOTSTRAP_SCHEMA=1` taşır; prod base'de YOK.
+
+### 7.3 nginx tek-dosya bind-mount inode footgun
+`nginx.conf` konteynere **tek dosya** olarak mount'lu (`./nginx/nginx.conf:...default.conf`).
+Host'ta dosyayı bir editör **yeniden yazarsa inode değişir** → konteynerdeki mount eski inode'a
+bakar; çalışan nginx eski config'le devam eder ama `nginx -t` "no such file" verir → healthcheck
+**unhealthy** (işlevsel değil, kozmetik ama yanıltıcı). **Çözüm:** config değişince `docker compose
+restart nginx` YETMEYEBİLİR; **`docker compose up -d --force-recreate nginx`** ile mount'u tazele.
+Deploy'da nginx.conf değiştiyse nginx'i **recreate et** (sadece restart değil).
+
 ---
 
 ## 8. Retention (A3) ↔ Backup İlişkisi
