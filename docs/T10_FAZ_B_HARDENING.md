@@ -151,19 +151,16 @@ smoke'una da eklenebilir — exit kodu PASS/FAIL.)
 
 ---
 
-## B3 — DR / Key Recovery Runbook (#13)
+## B3 — DR / Key Recovery Runbook (#13) — DONE (draft committed)
 
-**Büyük ölçüde dokümantasyon** (düşük kod riski). `docs/DR_RUNBOOK.md` (yeni):
-
-- **Fernet key kaybı matrisi:** key kaybında ne kurtulur / ne kaybolur:
-  - **Kaybolur (decrypt edilemez):** device SSH şifreleri (`ssh_password_enc`, `enable_secret_enc`),
-    credential_profile sırları, AI API anahtarları, agent AES bundle, org pg_pass.
-  - **Kurtulur (şifresiz):** config backup'lar, topoloji, metrikler, event/incident, audit.
-- **Key escrow prosedürü:** CREDENTIAL_ENCRYPTION_KEY (+`_OLD`) offline/secret-manager yedeği;
-  rotation MultiFernet ile (eski key `_OLD`'da kalır → eski veri okunur). Rotation adımları.
-- **Backup + restore:** postgres volume / `pg_dump` restore adımları + key restore sırası
-  (önce key, sonra DB; aksi halde decrypt patlar).
-- **Restore testi:** manuel checklist (DEPLOY_CHECKLIST'e veya runbook'a).
+**Çıktı:** `docs/DR_RUNBOOK.md` (taslak, commit edildi). Dokümantasyon — kod yok.
+11 bölüm: temel gerçekler · severity (S0–S4, öneri RTO/RPO) · Fernet key kaybı matrisi ·
+key escrow (araç-bağımsız, dual-control/offline/rotation-history/audit) · backup (pg_dump —
+**otomatik DEĞİL, manuel**) · restore + doğrulama · rollback anchor (kod SHA + alembic + image) ·
+**VPS deploy hazard** + **§7.1 schema/image drift** (yaşanan crash-loop incident'i) ·
+retention↔backup · volume kurtarma (`down -v` high-severity uyarısı) · **§11 break-glass admin**.
+Açık/sonraki: otomatik backup kurulumu, RTO/RPO SLA'laştırma, **restore-doğrulama smoke scripti
+(opsiyonel mini-task)**.
 
 ---
 
