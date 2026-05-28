@@ -121,12 +121,24 @@ FORCE biter. Bu kısım büyük ölçüde **zaten doğru** — audit + iki sertl
   kontrolleri yapar; CANLI DDL denemelerini (CREATE TABLE/SCHEMA) transaction içinde dener ve
   KOŞULSUZ rollback eder (destructive değil). Human + `--json` çıktı; tüm PASS → exit 0.
   Çalıştırma: `docker compose exec -T backend python scripts/audit_db_permissions.py [--json]`.
-- **B2b — Startup DDL'i runtime'dan ayır:** `main.py` lifespan'deki `create_all`+`ALTER`
-  bloğu superuser ile her başlangıçta koşuyor. Hedef: şema yönetimi yalnız Alembic'te (deploy),
-  runtime startup'ta DDL yok. → `MIGRATION_DATABASE_URL`'i uzun-ömürlü backend env'inden
-  çıkar/gate'le; fresh-install dev için ayrı bir opt-in yol bırak (örn. `BOOTSTRAP_SCHEMA=1`).
-  **Risk:** fresh dev env create_all'a bağımlı; geçişi dikkatli + dev'de test. Bu yüzden B2b
-  ayrı commit, varsayılan davranış korunur, opt-out flag ile.
+- **B2b — Startup DDL'i runtime'dan ayır (DONE):** `main.py` lifespan'deki create_all+ALTER
+  bloğu artık `BOOTSTRAP_SCHEMA` flag'i arkasında (**varsayılan OFF**). Kapalıyken `_NoopDDLConn`
+  597 satırlık bloğu no-op'a çevirir (gövdeye dokunulmadı). `_ddl_engine` yalnız ON iken
+  oluşur/dispose edilir. `docker-compose.dev.yml` backend'e `BOOTSTRAP_SCHEMA=1` (local fresh dev);
+  prod base'de YOK = OFF. `MIGRATION_DATABASE_URL` backend env'inde kaldı (deploy alembic için).
+  Canlı doğrulama (5 senaryo):
+  | Senaryo | Sonuç |
+  |---|---|
+  | Mevcut DB + OFF | ✅ startup clean, "DDL atlandı" logu, /health/ready 200, regresyon yok |
+  | Fresh DB + OFF | ✅ tablo yok (0) → seeding `users` bulamaz → startup fail (beklenen, dokümante) |
+  | Fresh DB + create_all (BOOTSTRAP_SCHEMA=1) | ✅ 68 tablo kuruldu |
+  | Mevcut DB + dev overlay (ON) | ✅ DDL koştu (skip logu yok), startup complete, host:8000 200 |
+  | Test suite + health | ✅ 41 test, /health/ready 200 |
+
+  **Bulgu:** `alembic upgrade head` TEK BAŞINA boş DB'yi kuramaz (var olmayan tabloya ALTER) →
+  fresh sıra: create_all → alembic (grant/RLS). DR_RUNBOOK §7.2'ye işlendi. Ayrıca B1b'den gelen
+  nginx tek-dosya bind-mount inode footgun'u keşfedildi (config değişince `--force-recreate nginx`)
+  → DR_RUNBOOK §7.3.
 - RLS/FORCE etkilenmez (netmgr_app zaten NOBYPASSRLS).
 
 ### B2a — Audit Sonucu (2026-05-28, local canlı, daemon)

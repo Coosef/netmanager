@@ -62,6 +62,39 @@ def _asyncio_timeout(seconds: float):
     return _compat()
 
 
+# ── T10 B2b — runtime startup DDL gate ────────────────────────────────────────
+# Şema yönetimi Alembic'in (deploy). Varsayılan: runtime startup'ta DDL YOK
+# (BOOTSTRAP_SCHEMA kapalı). Açıkça açılırsa (fresh dev) eski create_all+ALTER
+# bloğu superuser engine ile koşar. Kapalıyken `_NoopDDLConn` bloğu no-op'a
+# çevirir → 597 satırlık DDL gövdesine dokunmadan tamamı atlanır.
+class _NoopResult:
+    def scalar(self): return None
+    def scalars(self): return self
+    def fetchall(self): return []
+    def fetchone(self): return None
+    def first(self): return None
+    def all(self): return []
+
+
+class _NoopDDLConn:
+    async def run_sync(self, *a, **k): return None
+    async def execute(self, *a, **k): return _NoopResult()
+
+
+def _bootstrap_schema_enabled() -> bool:
+    return os.environ.get("BOOTSTRAP_SCHEMA", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+@asynccontextmanager
+async def _ddl_conn(engine, enabled: bool):
+    """enabled → gerçek superuser DDL bağlantısı; değilse no-op (DDL atlanır)."""
+    if enabled:
+        async with engine.begin() as conn:
+            yield conn
+    else:
+        yield _NoopDDLConn()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Faz 7 — the whole startup bootstrap (schema, seeding, default org)
@@ -89,9 +122,19 @@ async def lifespan(app: FastAPI):
         _mig_url.replace("+psycopg2", "+asyncpg")
         if _mig_url else str(async_engine.url)
     )
-    _ddl_engine = _create_async_engine(_ddl_url, poolclass=_NullPool)
+    # T10 B2b — varsayılan OFF: runtime startup DDL çalıştırmaz (şema Alembic'te).
+    # Fresh kurulum için BOOTSTRAP_SCHEMA=1 (veya `alembic upgrade head`).
+    _bootstrap = _bootstrap_schema_enabled()
+    if not _bootstrap:
+        import logging as _logging
+        _logging.getLogger("netmanager.startup").info(
+            "BOOTSTRAP_SCHEMA kapalı — runtime startup DDL atlandı; şema Alembic ile "
+            "yönetilir (fresh kurulum: BOOTSTRAP_SCHEMA=1=create_all İLE tablolar, sonra "
+            "`alembic upgrade head` İLE grant/RLS — alembic tek başına boş DB'yi kuramaz)"
+        )
+    _ddl_engine = _create_async_engine(_ddl_url, poolclass=_NullPool) if _bootstrap else None
 
-    async with _ddl_engine.begin() as conn:
+    async with _ddl_conn(_ddl_engine, _bootstrap) as conn:
         # ── DEPRECATED: create_all + ALTER TABLE pattern ──────────────────────
         # Faz 5A (2026-05-13): Alembic is now the authoritative schema manager.
         # DO NOT add new ALTER TABLE, CREATE TABLE, or CREATE INDEX statements
@@ -687,7 +730,8 @@ async def lifespan(app: FastAPI):
 
     # Schema bootstrap done — drop the superuser engine; the rest of the
     # lifespan (seeding) runs on the normal netmgr_app engine.
-    await _ddl_engine.dispose()
+    if _ddl_engine is not None:
+        await _ddl_engine.dispose()
 
     # M6 final drop — _create_default_tenant() removed; _ensure_default_org()
     # is the only seed path now.
