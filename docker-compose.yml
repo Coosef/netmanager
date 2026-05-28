@@ -60,8 +60,10 @@ services:
       - ./backend:/app
       - config_backups:/app/backups
       - prom_multiproc:/tmp/prom_multiproc
-    ports:
-      - "8000:8000"
+    # T10 B1b — host'a publish YOK; nginx (tek dış kapı) `backend:8000`'e
+    # proxy'liyor. Host'tan direct API/debug için docker-compose.dev.yml 8000'i açar.
+    expose:
+      - "8000"
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}
@@ -279,8 +281,10 @@ services:
   flower:
     build: ./backend
     command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
-    ports:
-      - "5555:5555"
+    # T10 B1b — host'a publish YOK (yalnız expose). Flower UI'ya local debug
+    # için docker-compose.dev.yml 5555'i geri açar; prod'da dışarı kapalı.
+    expose:
+      - "5555"
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://${APP_DB_USER:-netmgr_app}:${APP_DB_PASSWORD:-netmgr_app_dev_pw}@postgres:5432/${POSTGRES_DB:-network_manager}

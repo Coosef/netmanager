@@ -20,6 +20,16 @@ services:
     ports:
       - "6379:6379"
 
+  # B1b — backend API + flower UI'ya host'tan direct erişim (debug). Prod'da
+  # nginx tek kapı; bunlar yalnız bu overlay ile (local) açılır.
+  backend:
+    ports:
+      - "8000:8000"
+
+  flower:
+    ports:
+      - "5555:5555"
+
   # Frontend dev server + canlı src mount (auto override.yml ile aynı içerik;
   # açık -f kullanımında auto override yüklenmediği için burada tekrar edilir).
   frontend:
