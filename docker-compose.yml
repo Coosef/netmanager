@@ -22,8 +22,10 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-network_manager}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+    # T10 B1a — host'a publish YOK; yalnız konteynerler arası (expose). Host'tan
+    # debug için docker-compose.dev.yml overlay'i 5432'yi geri publish eder.
+    expose:
+      - "5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-netmgr} -d ${POSTGRES_DB:-network_manager}"]
       interval: 10s
@@ -36,8 +38,9 @@ services:
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
+    # T10 B1a — host'a publish YOK (expose). Host debug için docker-compose.dev.yml.
+    expose:
+      - "6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
