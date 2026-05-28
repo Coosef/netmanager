@@ -34,6 +34,39 @@ _MAC_ARP_INACTIVE_DAYS = 30
 # Keep non-golden config backups for this many days; golden backups are never deleted
 _CONFIG_BACKUP_DAYS = 90
 
+# ── T10 A3 — Customer-based retention ─────────────────────────────────────────
+# Hard floor: bir ayar / plan ne olursa olsun bu kadar günden taze veri ASLA
+# silinmez. Yanlış girilmiş çok küçük bir retention değerinin son veriyi
+# silip süpürmesine karşı güvenlik tabanı.
+RETENTION_FLOOR_DAYS = 7
+
+# Regular (hypertable olmayan) tablo → (system_settings retention key, ts_col).
+# Org bazlı retention bu tablolara uygulanır; her satır organization_id taşır.
+_RETENTION_KEYS: dict[str, tuple[str, str]] = {
+    "notification_logs":  ("retention.notification_logs_days",  "sent_at"),
+    "command_executions": ("retention.command_executions_days", "created_at"),
+    "network_events":     ("retention.network_events_days",     "created_at"),
+    "audit_logs":         ("retention.audit_logs_days",         "created_at"),
+    "agent_command_logs": ("retention.agent_command_logs_days", "executed_at"),
+}
+
+
+def effective_retention_days(raw: int, max_retention_days: int,
+                             floor: int = RETENTION_FLOOR_DAYS) -> int:
+    """Bir org için etkili saklama günü.
+
+    raw                = system_settings değeri (org override → global → default)
+    max_retention_days = org plan tavanı (lisanslı en uzun saklama)
+    floor              = güvenlik tabanı (bundan taze veri silinmez)
+
+    Clamp: önce lisans tavanına indir (müşteri lisanstan fazla saklayamaz),
+    sonra güvenlik tabanına yükselt. Çakışmada (tavan < taban) TABAN kazanır
+    — fazla saklamak güvenli, az saklamak veri kaybı riskidir.
+    """
+    eff = min(int(raw), int(max_retention_days))
+    eff = max(eff, int(floor))
+    return eff
+
 
 @celery_app.task(name="app.workers.tasks.retention_tasks.cleanup_old_data")
 def cleanup_old_data():

@@ -59,6 +59,17 @@ _DEFAULTS: dict[str, Any] = {
     # T10 A2 — Oturum / stale eşikleri (dakika)
     "session.terminal_stale_min":      30,     # stale terminal oturumu kapat
     "session.poe_snapshot_stale_min":  45,     # PoE snapshot stale işaretle
+
+    # T10 A3 — Veri saklama (gün). Org-override edilebilir; retention task
+    # org bazlı okur. Etkili değer org.max_retention_days (tavan) ve
+    # RETENTION_FLOOR_DAYS (taban) ile clamp'lenir (bkz. retention_tasks).
+    "retention.network_events_days":      90,
+    "retention.audit_logs_days":          180,
+    "retention.notification_logs_days":   30,
+    "retention.command_executions_days":  90,
+    "retention.agent_command_logs_days":  90,
+    "retention.mac_arp_inactive_days":    30,
+    "retention.config_backup_days":       90,
 }
 
 # Per-key guardrail'ler — UI uyarı verir, backend de kabul etmez.
@@ -97,6 +108,16 @@ _GUARDRAILS: dict[str, tuple[Optional[int], Optional[int]]] = {
     # T10 A2 — oturum / stale
     "session.terminal_stale_min":      (5, 1440),      # 5dk - 1 gün
     "session.poe_snapshot_stale_min":  (5, 1440),
+
+    # T10 A3 — retention (gün): 1 hafta - 10 yıl. Gerçek tavan org plan'ı
+    # (max_retention_days); buradaki üst sınır UI/validate koruması.
+    "retention.network_events_days":      (7, 3650),
+    "retention.audit_logs_days":          (7, 3650),
+    "retention.notification_logs_days":   (7, 3650),
+    "retention.command_executions_days":  (7, 3650),
+    "retention.agent_command_logs_days":  (7, 3650),
+    "retention.mac_arp_inactive_days":    (7, 3650),
+    "retention.config_backup_days":       (7, 3650),
 }
 
 # T10 A2 — UI kategori grupları (key prefix → insan-okur etiket). Settings
