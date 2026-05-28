@@ -172,3 +172,53 @@ def test_get_sync_uses_cache_on_second_call():
     val = svc.get_sync(_FakeSyncSession(None), "dedup.online_event_sec")
     assert val == 7200
     svc.invalidate_cache()
+
+
+# ── A2.5 — scope-aware write yetkilendirme (DB'ye dokunmadan 403/400) ─────────
+
+import pytest
+
+
+def _fake_user(*, is_super=False, is_org=False, org_id=1, uid=1):
+    return type("U", (), {
+        "is_super_admin": is_super, "is_org_admin": is_org,
+        "organization_id": org_id, "id": uid,
+    })()
+
+
+@pytest.mark.asyncio
+async def test_put_global_key_rejects_non_super_admin():
+    """Global-scope key (operasyonel tuning) yalnız super-admin yazabilir —
+    403 svc.upsert'e gitmeden, DB'ye dokunmadan döner."""
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.system_settings import upsert_setting, SettingUpsertPayload
+    with pytest.raises(HTTPException) as exc:
+        await upsert_setting(
+            "dedup.flap_alert_sec", SettingUpsertPayload(value=7200),
+            db=None, current_user=_fake_user(is_org=True),
+        )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_put_org_key_rejects_viewer():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.system_settings import upsert_setting, SettingUpsertPayload
+    with pytest.raises(HTTPException) as exc:
+        await upsert_setting(
+            "scan.poll_snmp_sec", SettingUpsertPayload(value=300),
+            db=None, current_user=_fake_user(),  # ne super ne org admin
+        )
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_put_org_key_requires_org_id():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.system_settings import upsert_setting, SettingUpsertPayload
+    with pytest.raises(HTTPException) as exc:
+        await upsert_setting(
+            "scan.poll_snmp_sec", SettingUpsertPayload(value=300),
+            db=None, current_user=_fake_user(is_org=True, org_id=None),
+        )
+    assert exc.value.status_code == 400

@@ -279,12 +279,12 @@ async def get_all(
 
 
 async def upsert(
-    db: AsyncSession, key: str, value: Any, organization_id: int,
+    db: AsyncSession, key: str, value: Any, organization_id: Optional[int],
     user_id: Optional[int] = None,
 ) -> SystemSetting:
-    """Bir ayar değerini upsert et (org bazlı). organization_id=None ile
-    global default güncelleme yalnız super-admin tarafından yapılır;
-    endpoint katmanı bunu enforce eder.
+    """Bir ayar değerini upsert et. organization_id=None → global default
+    satırı (yalnız super-admin; endpoint katmanı scope'a göre enforce eder).
+    organization_id=X → org override.
 
     NOT: Bu çağrı `db.commit()` YAPMAZ — endpoint commit eder.
     Cache invalidation çağıran tarafa bırakılır.

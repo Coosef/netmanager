@@ -131,27 +131,43 @@ async def upsert_setting(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    """Bir ayarı org bazında upsert et. Yetki: org_admin / super_admin."""
-    if not (current_user.is_super_admin or current_user.is_org_admin):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Yetersiz yetki — sadece org_admin / super_admin",
-        )
+    """Bir ayarı upsert et.
 
-    if current_user.organization_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Kullanıcının organization_id'si yok",
-        )
+    T10 A2 — scope'a göre hedef ve yetki:
+      * scope=global → yalnız super_admin, organization_id=None (global)
+        satırına yazar. Operasyonel/fleet-wide tuning böyle güncellenir.
+      * scope=org    → org_admin / super_admin kendi org'una override yazar.
+    """
+    key_scope = svc.scope(key)
+
+    if key_scope == "global":
+        if not current_user.is_super_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Bu ayar global kapsamlı — yalnız super_admin değiştirebilir.",
+            )
+        target_org_id: Optional[int] = None
+    else:
+        if not (current_user.is_super_admin or current_user.is_org_admin):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Yetersiz yetki — sadece org_admin / super_admin",
+            )
+        if current_user.organization_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Kullanıcının organization_id'si yok",
+            )
+        target_org_id = current_user.organization_id
 
     try:
         row = await svc.upsert(
             db, key=key, value=payload.value,
-            organization_id=current_user.organization_id,
+            organization_id=target_org_id,
             user_id=current_user.id,
         )
         await db.commit()
-        svc.invalidate_cache(current_user.organization_id, key)
+        svc.invalidate_cache(target_org_id, key)
     except ValueError as e:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -162,6 +178,7 @@ async def upsert_setting(
     return {
         "key": row.key, "value": row.value,
         "organization_id": row.organization_id,
+        "scope": key_scope,
         "updated_at": row.updated_at.isoformat(),
         # 1A — beat schedule dinamik değil; restart gerek
         "applied_immediately": False,
@@ -176,25 +193,38 @@ async def delete_org_override(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    """Org override'ını sil — global default'a dön."""
-    if not (current_user.is_super_admin or current_user.is_org_admin):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
-                            detail="Yetersiz yetki")
-    if current_user.organization_id is None:
-        raise HTTPException(status_code=400,
-                            detail="Kullanıcının organization_id'si yok")
+    """Override'ı sil — koda/global default'a dön.
+
+    T10 A2 — scope=global ise super_admin global satırı (org_id=None) siler
+    (koda düşer). scope=org ise org_admin org override'ını siler (global'e döner).
+    """
+    key_scope = svc.scope(key)
+
+    if key_scope == "global":
+        if not current_user.is_super_admin:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Bu ayar global kapsamlı — yalnız super_admin.")
+        target_org_id: Optional[int] = None
+    else:
+        if not (current_user.is_super_admin or current_user.is_org_admin):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,
+                                detail="Yetersiz yetki")
+        if current_user.organization_id is None:
+            raise HTTPException(status_code=400,
+                                detail="Kullanıcının organization_id'si yok")
+        target_org_id = current_user.organization_id
 
     row = (await db.execute(
         select(SystemSetting).where(
-            SystemSetting.organization_id == current_user.organization_id,
+            SystemSetting.organization_id == target_org_id,
             SystemSetting.key == key,
         )
     )).scalar_one_or_none()
 
     if row is None:
-        return {"removed": False, "note": "Org-specific override yoktu."}
+        return {"removed": False, "note": "Kayıtlı override yoktu."}
 
     await db.delete(row)
     await db.commit()
-    svc.invalidate_cache(current_user.organization_id, key)
+    svc.invalidate_cache(target_org_id, key)
     return {"removed": True, "key": key}
