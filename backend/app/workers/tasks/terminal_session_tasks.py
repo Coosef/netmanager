@@ -39,9 +39,15 @@ async def _run():
     from app.core.org_context import superadmin_context
     from app.models.terminal_session_log import TerminalSessionLog
 
-    threshold = datetime.now(timezone.utc) - STALE_AFTER
     factory = make_worker_session()
     async with factory() as db:
+        # T10 A2 — stale eşiği system_settings'ten (global scope, dakika);
+        # kod sabiti (STALE_AFTER) fallback.
+        from app.services import system_settings_service as _svc
+        stale_min = int(await _svc.get(
+            db, "session.terminal_stale_min", None,
+        ))
+        threshold = datetime.now(timezone.utc) - timedelta(minutes=stale_min)
         # Sweep tüm org'ları — kullanıcı yerine biz kapatıyoruz.
         with superadmin_context():
             result = await db.execute(
@@ -60,5 +66,5 @@ async def _run():
             if count:
                 log.info(
                     "terminal: cleanup_stale_sessions kapattı %d eski oturum "
-                    "(> %d dk)", count, int(STALE_AFTER.total_seconds() // 60),
+                    "(> %d dk)", count, stale_min,
                 )

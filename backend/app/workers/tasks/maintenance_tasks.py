@@ -36,10 +36,13 @@ def spawn_cyclic_maintenance_windows():
     )
 
     now = datetime.now(timezone.utc)
-    horizon = now + timedelta(days=SPAWN_HORIZON_DAYS)
 
     db = SyncSessionLocal()
     try:
+        # T10 A2 — horizon system_settings'ten (global scope); kod sabiti fallback.
+        from app.services import system_settings_service as _svc
+        horizon_days = int(_svc.get_sync(db, "maintenance.spawn_horizon_days"))
+        horizon = now + timedelta(days=horizon_days)
         # Bypass RLS for the scan; we re-stamp organization_id per child
         # from the template, so the child still belongs to the right org.
         from app.core.org_context import superadmin_context

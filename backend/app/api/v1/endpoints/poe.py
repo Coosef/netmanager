@@ -88,6 +88,13 @@ async def get_poe_summary(
         )).scalars().all()
         devices_map = {d.id: d for d in device_rows}
 
+    # T10 A2 — stale eşiği system_settings'ten (global scope, dakika);
+    # kod sabiti (STALE_AFTER) fallback.
+    from app.services import system_settings_service as _svc
+    stale_after = timedelta(minutes=int(
+        await _svc.get(db, "session.poe_snapshot_stale_min", None)
+    ))
+
     now = datetime.now(timezone.utc)
     items = []
     total_power_mw = 0
@@ -103,7 +110,7 @@ async def get_poe_summary(
         last = r.last_updated_at
         if last is not None and last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
-        is_stale = last is None or (now - last) > STALE_AFTER
+        is_stale = last is None or (now - last) > stale_after
         if is_stale:
             stale_devices += 1
         items.append({
@@ -137,7 +144,7 @@ async def get_poe_summary(
             "total_power_watts": round(total_power_mw / 1000.0, 1),
             "stale_devices": stale_devices,
         },
-        "stale_threshold_minutes": int(STALE_AFTER.total_seconds() // 60),
+        "stale_threshold_minutes": int(stale_after.total_seconds() // 60),
     }
 
 
