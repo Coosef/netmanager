@@ -116,9 +116,11 @@ redis/backend/flower host'tan erişilemez olsun. Konteynerler arası erişim kor
 **Mevcut durum (sağlam):** `netmgr_app` NOSUPERUSER/NOBYPASSRLS, yalnız DML; DDL yok; RLS
 FORCE biter. Bu kısım büyük ölçüde **zaten doğru** — audit + iki sertleştirme:
 
-- **B2a — Grant doğrulama (kod yok, doğrulama scripti):** çalışan DB'de `\du netmgr_app` +
-  `information_schema.role_table_grants` ile netmgr_app'in CREATE/ALTER/DROP yapamadığını,
-  yalnız CRUD olduğunu doğrula. Bir test/script olarak DEPLOY_CHECKLIST'e ekle.
+- **B2a — Grant doğrulama scripti (TAMAMLANDI):** `backend/scripts/audit_db_permissions.py`
+  — netmgr_app olarak bağlanır, rol attribute + has_*_privilege + ownership + RLS katalog
+  kontrolleri yapar; CANLI DDL denemelerini (CREATE TABLE/SCHEMA) transaction içinde dener ve
+  KOŞULSUZ rollback eder (destructive değil). Human + `--json` çıktı; tüm PASS → exit 0.
+  Çalıştırma: `docker compose exec -T backend python scripts/audit_db_permissions.py [--json]`.
 - **B2b — Startup DDL'i runtime'dan ayır:** `main.py` lifespan'deki `create_all`+`ALTER`
   bloğu superuser ile her başlangıçta koşuyor. Hedef: şema yönetimi yalnız Alembic'te (deploy),
   runtime startup'ta DDL yok. → `MIGRATION_DATABASE_URL`'i uzun-ömürlü backend env'inden
@@ -126,6 +128,26 @@ FORCE biter. Bu kısım büyük ölçüde **zaten doğru** — audit + iki sertl
   **Risk:** fresh dev env create_all'a bağımlı; geçişi dikkatli + dev'de test. Bu yüzden B2b
   ayrı commit, varsayılan davranış korunur, opt-out flag ile.
 - RLS/FORCE etkilenmez (netmgr_app zaten NOBYPASSRLS).
+
+### B2a — Audit Sonucu (2026-05-28, local canlı, daemon)
+`audit_db_permissions.py` → **25/25 PASS → GO**. Doğrulananlar:
+- **Rol attribute (pg_roles):** netmgr_app = NOSUPERUSER, NOBYPASSRLS, NOCREATEDB,
+  NOCREATEROLE, LOGIN. Kontrast: netmgr = SUPERUSER (migration/DDL bu rolle).
+- **Şema/DB yetkisi:** public USAGE ✓; public CREATE **kapalı**; DB CREATE **kapalı**
+  (şema yaratamaz).
+- **CRUD:** devices/alert_rules/network_events/incidents/topology_links/config_backups →
+  SELECT/INSERT/UPDATE/DELETE hepsi True (has_table_privilege).
+- **Ownership:** netmgr_app public'te **0 tablo** sahibi (69 tablodan) → ALTER/DROP yapamaz.
+- **Canlı DDL denemesi (rollback'li):** `CREATE TABLE public.*` ve `CREATE SCHEMA *` →
+  **permission denied** (DENIED). Kalıcı nesne oluşmadı.
+- **Canlı okuma:** `SELECT 1` + `SELECT count(*) FROM devices` → çalışıyor.
+- **RLS:** 58 tablo RLS-enabled, **hepsi FORCE** (FORCE olmayan = 0), 60 policy. Örnek
+  scoped tabloların hepsi enabled+force.
+
+**Sonuç:** runtime/migration user ayrımı **gerçek ortamda doğrulandı** — netmgr_app DDL
+yapamıyor, yalnız RLS-scoped CRUD; extension/schema/role yaratamıyor. Hardening main'e
+alınmadan önce istenen DB-permission güvencesi sağlanmış durumda. (Bu script CI/deploy
+smoke'una da eklenebilir — exit kodu PASS/FAIL.)
 
 ---
 
