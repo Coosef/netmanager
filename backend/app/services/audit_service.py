@@ -2,12 +2,19 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 
+import structlog
 from fastapi import Request
 from sqlalchemy import JSON, String, bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
+
+# T10 B4.3 — audit dual-emit logger. DB audit_logs kayıt-of-truth; bu logger
+# (logging_config'te log_category=audit) aynı olayı SIEM/aggregator için
+# structured log akışına yansıtır. Tam details/before/after DB'de kalır;
+# log satırı SIEM-dostu kimlik alanlarını taşır.
+_audit_log = structlog.get_logger("netmanager.audit")
 
 
 async def log_action(
@@ -104,3 +111,23 @@ async def log_action(
         },
     )
     await db.commit()
+
+    # T10 B4.3 — DB yazımı (kayıt-of-truth) başarılı; aynı olayı log akışına
+    # da yansıt (category=audit). Fire-and-forget: log hatası audit'i bozmaz.
+    try:
+        emit = _audit_log.info if status == "success" else _audit_log.warning
+        emit(
+            action,
+            audit_action=action,
+            status=status,
+            username=user.username if user else "system",
+            user_id=user.id if user else None,
+            organization_id=organization_id,
+            resource_type=resource_type,
+            resource_id=str(resource_id) if resource_id else None,
+            resource_name=resource_name,
+            client_ip=client_ip,
+            duration_ms=computed_duration_ms,
+        )
+    except Exception:  # noqa: BLE001 — audit logging asla çağıranı kırmaz
+        pass
