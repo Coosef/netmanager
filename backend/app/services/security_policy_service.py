@@ -171,6 +171,65 @@ def evaluate_switch_health(hostname: str, policy, metrics: dict) -> list[dict]:
     return out
 
 
+def resolve_port_policy_sync(db, device, port_name: Optional[str] = None) -> PortSecurityPolicy:
+    """resolve_port_policy'nin senkron eşi. v1: per-port override yok (port_name imzada);
+    device.port_security_policy_id → org default → fallback."""
+    pid = getattr(device, "port_security_policy_id", None)
+    if pid:
+        p = db.get(PortSecurityPolicy, pid)
+        if p is not None:
+            return p
+    org_id = getattr(device, "organization_id", None)
+    if org_id is not None:
+        p = db.execute(
+            select(PortSecurityPolicy).where(
+                PortSecurityPolicy.organization_id == org_id,
+                PortSecurityPolicy.is_default.is_(True),
+            )
+        ).scalar_one_or_none()
+        if p is not None:
+            return p
+    return _fallback_port()
+
+
+import re as _re
+
+# C4a — uplink/trunk port heuristic: docx'teki uplink preset (mac_flood=NULL) niyetini
+# v1 device-level granülaritede taklit eder. Bu portlar binlerce MAC taşır → flood false-positive.
+# İleride system_settings ile override edilebilir (şimdilik kod sabiti).
+_UPLINK_CONTAINS = ("tengigabit", "fortygig", "hundredgig", "port-channel",
+                    "trunk", "uplink", "aggregation", "portchannel")
+_UPLINK_PREFIX = _re.compile(r"^(te|fo|hu|po|lag|ae|bond)\d")
+
+
+def is_uplink_port(port_name) -> bool:
+    """Port adı uplink/trunk/aggregation paternine uyuyor mu (flood skip için)."""
+    if not port_name:
+        return False
+    n = str(port_name).strip().lower()
+    if any(p in n for p in _UPLINK_CONTAINS):
+        return True
+    return bool(_UPLINK_PREFIX.match(n.replace(" ", "")))
+
+
+def evaluate_port_flood(hostname: str, port, mac_count: int, policy) -> Optional[dict]:
+    """C4a — port başına MAC sayısı eşik değerlendirmesi (saf). NULL eşik → None (skip).
+    critical > warning. `[policy=<name>]` etiketli alarm spec döner ya da None."""
+    label = f" [policy={policy_label(policy)}]"
+    pname = policy_label(policy)
+    crit = getattr(policy, "mac_flood_critical", None)
+    warn = getattr(policy, "mac_flood_warning", None)
+    if crit is not None and mac_count >= crit:
+        return dict(event_type="mac_flood", severity="critical",
+                    message=f"{hostname} port {port}: {mac_count} MAC (kritik eşik {crit}){label}",
+                    details={"port": port, "mac_count": mac_count, "threshold": crit, "policy": pname})
+    if warn is not None and mac_count >= warn:
+        return dict(event_type="mac_flood", severity="warning",
+                    message=f"{hostname} port {port}: {mac_count} MAC (uyarı eşik {warn}){label}",
+                    details={"port": port, "mac_count": mac_count, "threshold": warn, "policy": pname})
+    return None
+
+
 def security_policy_enabled_sync(db, organization_id) -> bool:
     """org'un planında security_policy feature açık mı (sync). Opt-out: org/plan/feature
     yoksa açık. Task'lar org feature kapalıysa policy check'i atlar (super-admin bypass YOK —

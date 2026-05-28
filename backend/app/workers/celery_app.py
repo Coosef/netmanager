@@ -200,6 +200,11 @@ celery_app.conf.update(
             "task": "app.workers.tasks.security_policy_tasks.poll_device_health",
             "schedule": 300.0,
         },
+        # T10 Faz C C4a — MAC flood (port başına MAC sayısı; mac_arp collection cadence)
+        "poll-mac-anomalies-every-15min": {
+            "task": "app.workers.tasks.security_policy_tasks.poll_mac_anomalies",
+            "schedule": 900.0,
+        },
         # T9 Tur 7 — IPAM: ARP→IPAM linkage + subnet utilization alerts
         "sync-arp-to-ipam-every-15min": {
             "task": "app.workers.tasks.ipam_tasks.sync_arp_to_ipam",
