@@ -19,12 +19,16 @@ export interface SettingMeta {
   default: number | string | boolean
   min_value?: number | null
   max_value?: number | null
+  // T10 A2 — UI kategori grubu + yazma kapsamı ("global" | "org")
+  category?: string
+  scope?: 'global' | 'org'
 }
 
 export interface UpsertResponse {
   key: string
   value: number | string | boolean
   organization_id: number | null
+  scope?: 'global' | 'org'
   updated_at: string
   applied_immediately: boolean
   note?: string
