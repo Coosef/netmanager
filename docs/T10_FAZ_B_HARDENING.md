@@ -1,6 +1,14 @@
 # T10 Faz B — Güvenlik Sertleştirme: Plan + Risk Review
 
-> Durum: **PLAN** (kod yazılmadı, önce gözden geçirilecek)
+> Durum: **TAMAMLANDI — checkpoint closed (2026-05-29).** Tüm adımlar main'e merge +
+> origin/main'e push edildi. **Production/VPS deploy YAPILMADI** (VPS deploy hazard geçerli).
+> Tamamlananlar: **B1a** (postgres/redis ports→expose) · **B1b** (backend/flower→expose, nginx tek kapı) ·
+> **B1c** (edge/internal network segmentation) · **B2a** (netmgr_app DB perm audit 25/25) ·
+> **B2b** (startup DDL gate, BOOTSTRAP_SCHEMA default OFF) · **B3** (DR/Key Recovery Runbook taslağı) ·
+> **B4** (log separation + redaction: log_category + security stream + audit dual-emit).
+> Backlog: B4.5 trace_id (OTel kurulumu sonrası), agent-auth/API-token security event'leri,
+> otomatik DB backup, B2b migration-service ayrımı. Sıradaki büyük aşama: **Faz C — Security Policy Engine**.
+>
 > Kaynak: T10_ROADMAP.md Faz B (#12 network, #15 log, #2 DB perm, #13 DR/key)
 > Kısıtlar: **production deploy YOK** · dev ortamı bozulmayacak · postgres/redis
 > dış portları kapatılırsa local debug için override opsiyonu olacak · her adımda
@@ -82,12 +90,13 @@ redis/backend/flower host'tan erişilemez olsun. Konteynerler arası erişim kor
 - Risk: backend'e direct `:8000` ile bağlanan harici bir araç/script varsa kırılır
   (envanterde yok; nginx tüm API trafiğini taşıyor).
 
-**B1c — explicit `edge` / `internal` ağları (defense-in-depth, en invaziv → en son)**
-- `edge`: nginx (host:80) + frontend.
-- `internal`: backend, celery×3, beat, event_consumer, flower, postgres, redis.
-- nginx her iki ağda (dış + backend/frontend'e ulaşmak için). postgres/redis yalnız `internal`.
-- Risk: yanlış ağ ataması → servis birbirini bulamaz. Bu yüzden B1a/B1b'den sonra,
-  ayrı commit + tam health turu ile.
+**B1c — explicit `edge` / `internal` ağları (defense-in-depth) — DONE (2026-05-29)**
+- `edge`: nginx (host:80) + frontend. `internal`: backend, celery×3, beat, event_consumer,
+  flower, postgres, redis. nginx her iki ağda. postgres/redis yalnız `internal`.
+- `internal: true` KULLANILMADI (backend egress: OUI/AI/agent); izolasyon ağ üyeliğiyle.
+- Canlı doğrulama: nginx→backend/frontend 200; backend→pg/redis OK (pozitif); frontend→pg/redis
+  DNS çözülemedi (negatif/izole); dev overlay debug portları çalışıyor; base'de tek kapı nginx 80.
+- monitoring overlay kullanılırsa Prometheus `networks:[internal]`'a eklenmeli (compose yorumu).
 
 ### Local debug opsiyonu (kritik — dev bozulmasın)
 İki seçenek; **öneri = (2) committed dev overlay** (izlenebilir, tekrarlanabilir):
