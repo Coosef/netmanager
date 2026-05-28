@@ -132,6 +132,15 @@ class Device(Base):
     building: Mapped[Optional[str]] = mapped_column(String(64))
     floor: Mapped[Optional[str]] = mapped_column(String(32))
 
+    # T10 Faz C — security policy ataması. switch-level + cihaz-geneli port default
+    # (per-port override v2). NULL → resolver org default'a, o da yoksa hardcoded fallback'e düşer.
+    security_policy_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("switch_security_policies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    port_security_policy_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("port_security_policies.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # SSH Credentials (encrypted)
     ssh_username: Mapped[str] = mapped_column(String(128), nullable=False)
     ssh_password_enc: Mapped[str] = mapped_column(Text, nullable=False)
