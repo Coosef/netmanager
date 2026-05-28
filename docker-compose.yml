@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   postgres:
+    networks: [internal]            # T10 B1c — yalnız internal (edge'den erişilemez)
     image: timescale/timescaledb:latest-pg16
     # max_connections bumped from default 50 (TimescaleDB image override) to
     # 200 — Faz 6A introduced 3 separate Celery worker pools, total demand
@@ -34,6 +35,7 @@ services:
     restart: unless-stopped
 
   redis:
+    networks: [internal]            # T10 B1c — yalnız internal
     image: redis:8-alpine
     command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
     volumes:
@@ -49,6 +51,7 @@ services:
     restart: unless-stopped
 
   backend:
+    networks: [internal]            # T10 B1c
     build: ./backend
     # Faz 6B G7: clear this service's own multiproc subdir on start (stale .db
     # files from dead pids would otherwise accumulate); exec keeps SIGTERM.
@@ -97,6 +100,7 @@ services:
   # Faz 6A — 3 isolated worker pools (was single worker --concurrency=30)
   # monitor: high-concurrency I/O-bound polling (SNMP, topology, playbooks, analytics)
   celery_worker:
+    networks: [internal]            # T10 B1c
     build: ./backend
     command:
       - /bin/sh
@@ -135,6 +139,7 @@ services:
 
   # agent_cmd: bridge-dispatched commands to agents (RTT-bound, moderate concurrency)
   celery_agent_worker:
+    networks: [internal]            # T10 B1c
     build: ./backend
     command:
       - /bin/sh
@@ -170,6 +175,7 @@ services:
 
   # default + bulk: correlation tasks, driver, backup, bulk SSH/config ops
   celery_default_worker:
+    networks: [internal]            # T10 B1c
     build: ./backend
     command:
       - /bin/sh
@@ -205,6 +211,7 @@ services:
         max-file: "5"
 
   celery_beat:
+    networks: [internal]            # T10 B1c
     build: ./backend
     command:
       - /bin/sh
@@ -244,6 +251,7 @@ services:
   # persists batches. Decoupled from the backend (control plane) so a syslog
   # burst can never exhaust the DB pool (KI-4).
   event_consumer:
+    networks: [internal]            # T10 B1c
     build: ./backend
     command:
       - /bin/sh
@@ -279,6 +287,7 @@ services:
         max-file: "5"
 
   flower:
+    networks: [internal]            # T10 B1c — internal; debug için dev overlay 5555
     build: ./backend
     command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
     # T10 B1b — host'a publish YOK (yalnız expose). Flower UI'ya local debug
@@ -300,6 +309,7 @@ services:
         max-file: "5"
 
   frontend:
+    networks: [edge]                # T10 B1c — public tier; DB/redis'e erişmez
     build:
       context: ./frontend
       # T8.4 security/F1 — production stage default (nginx + dist build).
@@ -318,6 +328,7 @@ services:
     restart: unless-stopped
 
   nginx:
+    networks: [edge, internal]      # T10 B1c — tek dış kapı (edge) + backend proxy (internal)
     image: nginx:1.27-alpine
     ports:
       - "80:80"
@@ -332,6 +343,20 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+# T10 B1c — network segmentation. edge = public tier (nginx + frontend);
+# internal = app/data tier (backend, celery×3, beat, event_consumer, flower,
+# postgres, redis). nginx her ikisinde. postgres/redis edge'de DEĞİL → edge-tier
+# (frontend) kompromizasyonu DB/redis'e doğrudan pivot edemez.
+# internal: true KULLANILMAZ — backend dış erişim gerektirir (OUI/AI/agent egress);
+# izolasyon ağ üyeliğiyle (reachability), egress kesilerek değil.
+# NOT: monitoring overlay (docker-compose.monitoring.yml) kullanılırsa Prometheus
+# backend:8000/metrics'i scrape etmek için `networks: [internal]` ile internal'a eklenmeli.
+networks:
+  edge:
+    driver: bridge
+  internal:
+    driver: bridge
 
 volumes:
   postgres_data:
