@@ -57,6 +57,7 @@ from app.models.terminal_session_log import TerminalSessionLog
 from app.models.port_change_rollback import PortChangeRollback
 from app.models.poe_port_snapshot import PoEPortSnapshot
 from app.models.ipam import IpamZone, IpamSubnet, IpamAssignment
+from app.models.security_policy import SwitchSecurityPolicy, PortSecurityPolicy
 from app.models.firmware import FirmwareArtifact, FirmwareInstallJob
 
 __all__ = [

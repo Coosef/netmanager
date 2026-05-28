@@ -15,7 +15,19 @@
 | `network_switch_security_policies` (~30 alan) | `switch_security_policies` — **+`organization_id` (RLS FORCE)** |
 | `network_port_security_policies` (~18 alan) | `port_security_policies` — **+`organization_id` (RLS FORCE)** |
 | `network_switches.security_policy_id FK` | `devices.security_policy_id FK` (nullable) |
-| `network_ports.security_policy_id FK` | `interfaces.security_policy_id FK` (nullable) |
+| `network_ports.security_policy_id FK` | **`devices.port_security_policy_id FK`** (cihaz-geneli varsayılan port policy) — bkz. aşağı |
+
+> ⚠️ **PLAN DÜZELTMESİ (2026-05-29, C1):** `interfaces.security_policy_id` varsayımı **GEÇERSİZ** —
+> bu kod tabanında **kalıcı interfaces/ports tablosu YOK** (arayüzler canlı SSH/SNMP ile çekilir,
+> satır olarak saklanmaz). Bu yüzden:
+> - **v1 port policy granularity = device-level default:** `devices.port_security_policy_id` →
+>   switch'in TÜM portları için varsayılan port policy. docx port presetleri (default/uplink/pc/…)
+>   ilk aşamada cihaz-geneli default olarak kullanılır.
+> - **v2 per-port override = ayrı tablo** (`port_policy_assignment(device_id, port_name, policy_id)`)
+>   veya canonical interface modeli (C7/v2). C1'de YENİ tablo açılmaz (scope büyütmez).
+> - Resolver `resolve_port_policy(device, port_name)` zinciri ileride per-port override eklemeye açık:
+>   (1) gelecekte per-port override → (2) `device.port_security_policy_id` → (3) org default port
+>   policy → (4) hardcoded fallback. NULL semantic bozulmaz.
 | `is_default=true` UNIQUE | **org bazlı** partial unique: `UNIQUE(organization_id) WHERE is_default` |
 | `network_alerts` + `anomaly.service.ts` | mevcut `NetworkEvent`/`_save_event` + `correlation_engine` + `snmp/monitor/poe/mac_arp` task'ları |
 | Cron vs event tetikleyici | mevcut Celery beat (cron) + agent push / poll (event) |
@@ -37,7 +49,8 @@
   Severity alanları `VARCHAR(16)` (`info|warning|critical`), eşikler `INTEGER/FLOAT`, `allowed_vlans`/
   `allowed_management_source_ips` `TEXT` (CSV), `config_change_policy` `VARCHAR(16)`.
 - **`f9ac` — FK + grant:** `devices.security_policy_id` (nullable FK→switch_security_policies SET NULL) +
-  `interfaces.security_policy_id` (nullable FK→port_security_policies SET NULL). `ix_*` indexleri.
+  `devices.port_security_policy_id` (nullable FK→port_security_policies SET NULL — cihaz-geneli
+  varsayılan port policy; per-port override v2). `ix_*` indexleri. (interfaces FK YOK — tablo yok.)
   netmgr_app grant: f7a5 `ALTER DEFAULT PRIVILEGES` yeni tabloları kapsamalı — **doğrulanacak**;
   kapsamıyorsa explicit `GRANT SELECT,INSERT,UPDATE,DELETE ON switch/port_security_policies TO netmgr_app`.
 - **`f9ad` — RLS + seed:** her iki tabloya `ENABLE` + `FORCE ROW LEVEL SECURITY` + `org_isolation`
@@ -82,7 +95,9 @@ docx'teki presetler **org bazlı** seed'lenir (multi-tenant):
 - `resolve_switch_policy(db, device) -> SwitchPolicy`:
   `device.security_policy_id` → yoksa org'un `is_default=true` switch policy → yoksa **hardcoded fallback**
   (kod sabiti, en güvenli baseline). 30s process-cache (system_settings_service deseni) opsiyonel.
-- `resolve_port_policy(db, interface) -> PortPolicy`: aynı zincir (interface FK → org default → fallback).
+- `resolve_port_policy(db, device, port_name=None) -> PortPolicy`: zincir (gelecekte per-port override →
+  `device.port_security_policy_id` → org `is_default` port policy → hardcoded fallback). v1'de port_name
+  henüz kullanılmaz (device-level default); imzada bırakılır ki v2 per-port override eklenebilsin.
 - Org scope: resolver RLS-scoped session'da çalışır (org dışı policy görünmez). Fleet-wide task'larda
   `superadmin_context` + explicit org filtre (context.py `_device_counts` deseni).
 - Çıktı: alarm üretiminde her mesaj **`[policy=<name>]`** ile etiketlenir (docx birebir).
