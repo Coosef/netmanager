@@ -176,17 +176,44 @@ Açık/sonraki: otomatik backup kurulumu, RTO/RPO SLA'laştırma, **restore-doğ
 
 ---
 
-## B4 — Log Separation (#15)
+## B4 — Log Separation (#15) — Yaklaşım A (tag + route), büyük ölçüde DONE
 
-**Amaç:** access ↔ audit ↔ DB/query log ayrı stream + retention + sensitive redaction.
+**Karar:** tek stdout + structured JSON korunur (12-factor); ayrım `log_category` etiketiyle,
+ayrıştırma/retention **downstream aggregator**'da (Loki/ELK). File/volume split YOK.
+Kategoriler: `access · audit · security · db · task · app · health · ws`.
 
-- **B4a — Logger ayrımı:** mevcut `netmanager.http` + structured logging üzerine; API access,
-  audit (audit_service zaten DB'de) ve uygulama log'larını ayrı logger/handler'a böl.
-- **B4b — Sensitive redaction:** log'larda şifre/token/Fernet/Authorization header sızıntısı
-  için redaction filtresi (parola, `*_enc`, Bearer token).
-- **B4c — Retention:** docker json-file zaten 50m×5; gerekiyorsa log tipine göre ayrı volume/
-  retention. (A3'teki veri retention'dan ayrı — bu log dosyası retention'ı.)
-- Risk: düşük; logging config + filter. Gürültü/perf'e dikkat.
+- **B4.1 (DONE):** `_add_log_category` processor (logger→log_category) + redaction sertleştirme
+  (`authorization`/`cookie`/`bearer` key + değer-içi `Bearer`/JWT maskesi). IP maskelenmez.
+- **B4.2 (DONE):** `app/core/security_log.py` `log_security_event` → `netmanager.security`
+  (category=security, SIEM). login success/failure, login_blocked_ip, mfa verify success/failure,
+  logout, 403 permission_denied. DB audit'ten bağımsız/paralel. Canlı doğrulandı (token sızıntısı yok).
+- **B4.3 (DONE):** `audit_service.log_action` → `netmanager.audit` dual-emit (category=audit). DB
+  `audit_logs` kayıt-of-truth; log satırı SIEM için (action/status/user/org/resource/ip/duration).
+
+### B4.4 — Retention / log driver stratejisi (dokümantasyon)
+- **Mevcut:** her servis stdout → docker `json-file` (50m×5). Structured JSON + log_category.
+- **Strateji (tag+route):** prod'da stdout bir aggregator'a (Loki+Promtail / Docker log driver /
+  Vector) gönderilir; **retention kategori bazlı orada** uygulanır:
+  - `audit`, `security` → **uzun** retention (uyumluluk/forensics).
+  - `access`, `db`, `task`, `app` → **kısa-orta** retention (operasyonel).
+- **File/volume split YAPILMADI** (12-factor; konteyner içine dosya yazımı modeli bozardı).
+  Gerekirse SIEM dosya-ingest istiyorsa yalnız `audit`/`security` için seçici stream eklenebilir
+  (ayrı görev). docker json-file kategoriden bağımsız döner; ayrıştırma label/parse ile aggregator'da.
+- **request_id** her satırda (middleware contextvars) → access/security/audit korelasyonu hazır.
+
+### B4.5 — trace_id (BACKLOG)
+OTel SDK image'da kurulu DEĞİL ve kodda span/trace_id propagation yok (`TRACING_ENABLED` env
+var ama no-op). Hazır olmadığı için **backlog**. Tracing aktifleşince log context'ine `trace_id`
+eklenir (request_id'ye ek korelasyon).
+
+### B4 Backlog (sonraki tur)
+- **agent-auth failure** + **API-token invalid** security event'leri: tek-nokta net değil
+  (agent_stream/internal akışı) → düşük-risk tek noktaya indirgenince eklenecek.
+- B4.5 trace_id (OTel kurulumu sonrası).
+- Opsiyonel: SIEM dosya-ingest için seçici audit/security stream.
+
+- **Risk:** düşük (additive processor/log + auth log-only). Gürültü/perf: redaction yalnız
+  bearer/eyj içeren string'lerde regex; security/audit hacmi seviye (info/warning) ile yönetilir.
 
 ---
 
