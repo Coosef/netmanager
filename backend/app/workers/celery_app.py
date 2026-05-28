@@ -35,6 +35,7 @@ celery_app = Celery(
         "app.workers.tasks.ipam_tasks",
         "app.workers.tasks.firmware_tasks",
         "app.workers.tasks.terminal_session_tasks",
+        "app.workers.tasks.security_policy_tasks",
     ],
 )
 
@@ -193,6 +194,11 @@ celery_app.conf.update(
         "snapshot-poe-status-every-15min": {
             "task": "app.workers.tasks.poe_tasks.snapshot_poe_status",
             "schedule": 900.0,
+        },
+        # T10 Faz C C3 — policy-driven device health (CPU/Memory threshold)
+        "poll-device-health-every-5min": {
+            "task": "app.workers.tasks.security_policy_tasks.poll_device_health",
+            "schedule": 300.0,
         },
         # T9 Tur 7 — IPAM: ARP→IPAM linkage + subnet utilization alerts
         "sync-arp-to-ipam-every-15min": {

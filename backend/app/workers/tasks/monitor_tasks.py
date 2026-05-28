@@ -203,6 +203,21 @@ def _is_flapping(device_id: int, threshold: int = FLAP_THRESHOLD) -> bool:
     return int(count or 0) >= threshold
 
 
+def _policy_suffix(db, device) -> str:
+    """T10 C3 — offline event'ine ` [policy=<name>]` etiketi. Org'da security_policy
+    feature kapalıysa boş (davranış değişmez). Asla monitor'ı kırmaz."""
+    try:
+        from app.services.security_policy_service import (
+            resolve_switch_policy_sync, security_policy_enabled_sync,
+        )
+        if not security_policy_enabled_sync(db, getattr(device, "organization_id", None)):
+            return ""
+        pol = resolve_switch_policy_sync(db, device)
+        return f" [policy={pol.name}]"
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def _correlate_offline_events(
     db, newly_offline: list,
     flap_threshold: int = FLAP_THRESHOLD, corr_ttl: int = CORR_DEDUP_TTL,
@@ -434,7 +449,7 @@ def poll_device_status():
                     if flap_counts[dev.id] < flap_threshold:
                         _save_event(
                             db, dev, "device_offline", "critical",
-                            f"{dev.hostname} çevrimdışı",
+                            f"{dev.hostname} çevrimdışı{_policy_suffix(db, dev)}",
                             f"SSH bağlantısı başarısız: {err}",
                             dedup_key=f"offline:{dev.id}",
                             dedup_ttl=offline_ttl,
@@ -455,7 +470,7 @@ def poll_device_status():
             if fc < flap_threshold:
                 _save_event(
                     db, dev, "device_offline", "critical",
-                    f"{dev.hostname} çevrimdışı",
+                    f"{dev.hostname} çevrimdışı{_policy_suffix(db, dev)}",
                     f"SSH bağlantısı başarısız: {err}",
                     dedup_key=f"offline:{dev.id}",
                     dedup_ttl=offline_ttl,
