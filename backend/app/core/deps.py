@@ -257,6 +257,57 @@ def require_permission(module: str, action: str):
     return _checker
 
 
+async def org_feature_states(db: AsyncSession, organization_id: Optional[int]) -> dict[str, bool]:
+    """T10 Faz A1 — bir org'un plan'ından tüm feature durumlarını çöz.
+    Plan yoksa hepsi açık (opt-out semantic)."""
+    from app.core.features import all_feature_states
+    from app.models.shared.organization import Organization
+    from app.models.shared.plan import Plan
+
+    if organization_id is None:
+        return all_feature_states(None)
+    org = await db.get(Organization, organization_id)
+    if org is None or org.plan_id is None:
+        return all_feature_states(None)
+    plan = await db.get(Plan, org.plan_id)
+    return all_feature_states(plan.features if plan else None)
+
+
+def require_feature(feature: str):
+    """T10 Faz A1 — org'un planı `feature` modülünü içermiyorsa 403.
+
+    RBAC'tan bağımsız: kullanıcının verb yetkisi olsa bile org planında
+    modül kapalıysa erişim reddedilir. Super-admin bypass (platform sahibi
+    tüm modülleri görür). Plan yoksa / explicit kapatılmamışsa açık
+    (opt-out — bkz. core/features.py)."""
+    async def _checker(
+        ctx: RequestContext,
+        user: Annotated[User, Depends(get_current_active_user)],
+        db: Annotated[AsyncSession, Depends(get_db)],
+    ) -> User:
+        if _is_super_admin(user):
+            return user
+        from app.core.features import feature_enabled, FEATURES
+        from app.models.shared.organization import Organization
+        from app.models.shared.plan import Plan
+
+        org_id = ctx.organization_id
+        plan_features = None
+        if org_id is not None:
+            org = await db.get(Organization, org_id)
+            if org and org.plan_id is not None:
+                plan = await db.get(Plan, org.plan_id)
+                plan_features = plan.features if plan else None
+        if not feature_enabled(plan_features, feature):
+            label = FEATURES.get(feature, feature)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"'{label}' modülü planınızda bulunmuyor. Yöneticinizle iletişime geçin.",
+            )
+        return user
+    return _checker
+
+
 def require_system_role(*roles: SystemRole):
     """
     Require one of the given system roles — Faz 7 4-role model

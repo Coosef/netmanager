@@ -29,6 +29,7 @@ function ctx(overrides: Partial<CurrentContext>): CurrentContext {
     is_super_admin: true,
     is_org_wide: true,
     organization: { id: 1, name: 'Default', slug: 'default' },
+    features: {},
     locations: [],
     allowed_location_ids: [],
     active_location_id: null,

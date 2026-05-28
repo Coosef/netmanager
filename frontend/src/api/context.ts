@@ -26,6 +26,9 @@ export interface CurrentContext {
   /** super-admin or org-admin — operates across the whole organization. */
   is_org_wide: boolean
   organization: { id: number; name: string; slug: string } | null
+  /** T10 — org plan'ındaki feature durumları {key: bool}. Super-admin
+   * için hepsi true. Nav filtresi kapalı modülleri gizler. */
+  features: Record<string, boolean>
   /** Locations the user may access — the user_locations source of truth. */
   locations: AccessibleLocation[]
   allowed_location_ids: number[]
