@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_builder, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, firmware, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, poe, port_control, racks, reports, security_audit, services, sla, snmp, super_admin, synthetic, system_settings, tasks, terminal_sessions, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_builder, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, firmware, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, poe, port_control, racks, reports, security_audit, security_policies, services, sla, snmp, super_admin, synthetic, system_settings, tasks, terminal_sessions, topology, topology_twin, users, ws
 from app.core.deps import require_feature
 
 
@@ -67,3 +67,4 @@ api_router.include_router(super_admin.router, prefix="", tags=["Super Admin"])
 api_router.include_router(org_admin.router, prefix="", tags=["Org Admin"])
 api_router.include_router(internal.router, prefix="/internal", tags=["Internal"])
 api_router.include_router(escalation.router, prefix="/escalation-rules", tags=["Escalation"], dependencies=_feat("escalation"))
+api_router.include_router(security_policies.router, prefix="/security-policies", tags=["Security Policies"], dependencies=_feat("security_policy"))
