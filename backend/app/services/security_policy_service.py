@@ -110,3 +110,78 @@ async def set_default(db: AsyncSession, model_cls, organization_id: int, policy_
 def policy_label(policy) -> str:
     """Alarm mesajı etiketi için policy adı: `[policy=<name>]` (C3'te kullanılır)."""
     return getattr(policy, "name", None) or FALLBACK_NAME
+
+
+# ── C3 — senkron worker (Celery sync task'ları) için varyantlar ──────────────
+
+def resolve_switch_policy_sync(db, device) -> SwitchSecurityPolicy:
+    """resolve_switch_policy'nin senkron eşi (SyncSessionLocal). Fleet task'larda
+    superadmin context → RLS bypass; org default lookup org_id ile filtrelenir."""
+    pid = getattr(device, "security_policy_id", None)
+    if pid:
+        p = db.get(SwitchSecurityPolicy, pid)
+        if p is not None:
+            return p
+    org_id = getattr(device, "organization_id", None)
+    if org_id is not None:
+        p = db.execute(
+            select(SwitchSecurityPolicy).where(
+                SwitchSecurityPolicy.organization_id == org_id,
+                SwitchSecurityPolicy.is_default.is_(True),
+            )
+        ).scalar_one_or_none()
+        if p is not None:
+            return p
+    return _fallback_switch()
+
+
+def evaluate_switch_health(hostname: str, policy, metrics: dict) -> list[dict]:
+    """CPU/Memory eşik değerlendirmesi — saf (DB/SNMP yok). NULL eşik → skip,
+    NULL metrik → skip. critical > warning önceliği. Mesaj `[policy=<name>]` etiketli.
+    Dönüş: [{metric, event_type, severity, message, details}] (alarm specs)."""
+    label = f" [policy={policy_label(policy)}]"
+    pname = policy_label(policy)
+    out: list[dict] = []
+
+    cpu = metrics.get("cpu_pct")
+    if cpu is not None:
+        crit = getattr(policy, "cpu_critical", None)
+        warn = getattr(policy, "cpu_warning", None)
+        if crit is not None and cpu >= crit:
+            out.append(dict(metric="cpu", event_type="high_cpu", severity="critical",
+                            message=f"{hostname} CPU %{cpu:.0f} (kritik eşik %{crit}){label}",
+                            details={"value": cpu, "threshold": crit, "policy": pname}))
+        elif warn is not None and cpu >= warn:
+            out.append(dict(metric="cpu", event_type="high_cpu", severity="warning",
+                            message=f"{hostname} CPU %{cpu:.0f} (uyarı eşik %{warn}){label}",
+                            details={"value": cpu, "threshold": warn, "policy": pname}))
+
+    ram = metrics.get("ram_pct")
+    if ram is not None:
+        crit = getattr(policy, "memory_critical", None)
+        warn = getattr(policy, "memory_warning", None)
+        if crit is not None and ram >= crit:
+            out.append(dict(metric="mem", event_type="high_memory", severity="critical",
+                            message=f"{hostname} RAM %{ram:.0f} (kritik eşik %{crit}){label}",
+                            details={"value": ram, "threshold": crit, "policy": pname}))
+        elif warn is not None and ram >= warn:
+            out.append(dict(metric="mem", event_type="high_memory", severity="warning",
+                            message=f"{hostname} RAM %{ram:.0f} (uyarı eşik %{warn}){label}",
+                            details={"value": ram, "threshold": warn, "policy": pname}))
+    return out
+
+
+def security_policy_enabled_sync(db, organization_id) -> bool:
+    """org'un planında security_policy feature açık mı (sync). Opt-out: org/plan/feature
+    yoksa açık. Task'lar org feature kapalıysa policy check'i atlar (super-admin bypass YOK —
+    arka plan task'ı org'un planına uyar)."""
+    if organization_id is None:
+        return True
+    from app.core.features import feature_enabled
+    from app.models.shared.organization import Organization
+    from app.models.shared.plan import Plan
+    org = db.get(Organization, organization_id)
+    if org is None or org.plan_id is None:
+        return True
+    plan = db.get(Plan, org.plan_id)
+    return feature_enabled(plan.features if plan else None, "security_policy")

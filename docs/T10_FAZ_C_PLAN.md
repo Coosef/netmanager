@@ -116,17 +116,20 @@ docx'teki presetler **org bazlı** seed'lenir (multi-tenant):
 
 ## 6. Anomaly / alarm integration (mevcut motora bağla)
 
+> **C3 VERİ-KAYNAĞI DENETİMİ (2026-05-29) — kapsam revize edildi.** Olmayan metrikler C3'e
+> zorlanmadı. **C3 MVP = CPU + Memory threshold + Offline policy-label.** Gerekçe ve erteleme aşağıda.
+
 Yeni motor YAZMIYORUZ — mevcut tetik noktalarına policy-okuma ekliyoruz:
-- **CPU/mem/temp** (event): `snmp_tasks` SNMP poll sonrası `resolve_switch_policy` → eşik aşımı → `_save_event`
-  (critical/warning). NULL eşik → skip.
-- **Offline / config-age / NTP drift** (cron): mevcut `monitor_tasks`/beat → policy `offline_timeout_min`,
-  `config_backup_max_age_days`, `ntp_drift_*` oku.
-- **MAC flood / flap** (event): `mac_arp` verisinden port başına MAC sayısı → port policy eşiği;
-  flap penceresi (`mac_flap_*`). Flap → auto-quarantine adayı (§8).
-- **PoE budget** (event/cron): `poe_port_snapshots` topla → switch toplam % → `poe_budget_*_pct`.
-- **L2 trap severity'leri** (event): **SNMP trap receiver gerekli** — agent UDP→backend trap parse
-  (bpdu/loop/dhcp/arp/port_sec/dot1x/storm) → policy severity. **Bu altyapı genişletme** (agent değişikliği)
-  → Faz C'nin en riskli/uzun parçası; ayrı alt-adım, gerekirse v2.
+- ✅ **CPU + Memory** (C3): `snmp_service.get_cpu_ram()` VAR ama yalnız on-demand. C3 yeni periyodik
+  `poll_device_health` task'ı (+ beat) → `resolve_switch_policy` → `cpu_warning/critical` +
+  `memory_warning/critical` eşik → `_save_event` (`[policy=<name>]`). NULL eşik → skip. Feature kapalı → çalışmaz.
+- ✅ **Offline** (C3): mevcut `monitor_tasks` `device_offline` event'ine **yalnız `[policy=<name>]` etiketi**
+  (davranış DEĞİŞMEZ). `offline_timeout_min` tuning'i → **later** (ayrı küçük adım; mevcut offline detection stabil kalır).
+- ⏸️ **Temperature → v2:** veri kaynağı YOK (vendor-specific entity-sensor OID). Trap/optic ile birlikte.
+- ⏸️ **PoE budget % → v2:** switch toplam PoE bütçesi (payda) kayıtlı değil; per-port `max_mw` switch
+  budget'ı değil. Ayrı migration + cihaz envanter alanı (`devices.poe_total_budget_mw`) gerektirir.
+- **MAC flood / flap** → C4 (mevcut `mac_arp` verisi).
+- **L2 trap / optic DOM** → v2 (agent UDP trap receiver + vendor OID heterojenliği).
 - **Optic DOM** (event): vendor-specific SFP OID keşfi (Cisco/Ruijie) → `optic_rx/temp` eşiği. Keşif gerektirir.
 - Cron-based vs event-based ayrımı docx'teki gibi korunur.
 
