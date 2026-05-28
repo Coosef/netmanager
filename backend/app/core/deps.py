@@ -249,6 +249,10 @@ def require_permission(module: str, action: str):
             db, user, module, action, location_id=active_loc,
         )
         if not allowed:
+            from app.core.security_log import log_security_event
+            log_security_event("permission_denied", result="denied",
+                               username=user.username, user_id=user.id,
+                               reason=f"{module}.{action}")
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permission denied: {module}.{action}",
@@ -322,6 +326,11 @@ def require_system_role(*roles: SystemRole):
             sr = SystemRole.VIEWER
         if sr in roles:
             return user
+        from app.core.security_log import log_security_event
+        log_security_event("permission_denied", result="denied",
+                           username=getattr(user, "username", None),
+                           user_id=getattr(user, "id", None),
+                           reason=f"requires_system_role={[r.value if hasattr(r, 'value') else r for r in roles]}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Insufficient system role",

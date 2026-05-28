@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.deps import CurrentUser
+from app.core.security_log import log_security_event
 from app.core.mfa import (
     verify_and_consume_recovery_code,
     verify_stored_totp,
@@ -124,6 +125,8 @@ async def login(
             status="failure",
             request=request,
         )
+        log_security_event("login", result="failure", request=request,
+                           username=payload.username, reason="invalid_credentials")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
 
     # ── T9 Tur 2 #4 — Per-user IP allowlist ────────────────────────────
@@ -137,6 +140,8 @@ async def login(
                      "allowed_ips": user.allowed_ips},
             status="failure", request=request,
         )
+        log_security_event("login_blocked_ip", result="blocked", request=request,
+                           username=user.username, user_id=user.id)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Bu IP adresinden giriş yapma yetkiniz yok",
@@ -171,6 +176,8 @@ async def login(
 
     token_resp = await _build_token_response(db, user, request=request)
     await log_action(db, user, "login", request=request)
+    log_security_event("login", result="success", request=request,
+                       username=user.username, user_id=user.id)
     return token_resp
 
 
@@ -246,6 +253,8 @@ async def mfa_verify(
             details={"method": method},
             status="failure", request=request,
         )
+        log_security_event("mfa_verify", result="failure", request=request,
+                           username=user.username, user_id=user.id, reason=f"method={method}")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Geçersiz kod")
 
     # ── Success — promote to a real session ─────────────────────────────
@@ -258,6 +267,8 @@ async def mfa_verify(
     if consumed_recovery:
         audit_details["recovery_codes_remaining"] = len(user.mfa_recovery_codes or [])
     await log_action(db, user, "login_mfa_success", details=audit_details, request=request)
+    log_security_event("mfa_verify", result="success", request=request,
+                       username=user.username, user_id=user.id)
     return token_resp
 
 
@@ -335,6 +346,8 @@ async def logout(
             )
             await db.commit()
     await log_action(db, current_user, "logout", request=request)
+    log_security_event("logout", result="success", request=request,
+                       username=current_user.username, user_id=current_user.id)
     return None
 
 
