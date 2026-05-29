@@ -19,9 +19,9 @@ describe('DETAIL_TABS catalog', () => {
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('placeholder bayraklar — C7.B aktif: overview + security; gerisi placeholder', () => {
+  it('placeholder bayraklar — C7.C sonrası live: overview + ports + security; gerisi placeholder (C7.D)', () => {
     const live = DETAIL_TABS.filter((t) => !t.placeholder).map((t) => t.key).sort()
-    expect(live).toEqual(['overview', 'security'])
+    expect(live).toEqual(['overview', 'ports', 'security'])
   })
 })
 
