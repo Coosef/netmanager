@@ -20,6 +20,7 @@ import { macArpApi } from '@/api/macarp'
 import { portPolicyAssignmentsApi } from '@/api/portPolicyAssignments'
 import { securityPoliciesApi } from '@/api/securityPolicies'
 import { useAuthStore } from '@/store/auth'
+import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import {
   effectivePortPolicy, macCountByPort, MAC_COUNT_CAP, type EffectiveSource,
 } from './_portsHelper'
@@ -52,6 +53,7 @@ interface Row {
   macCount: number
   macCapped: boolean
   effective: ReturnType<typeof effectivePortPolicy>
+  flapEvents: NetworkEvent[]
 }
 
 export default function PortsTab({ device }: { device: Device }) {
@@ -84,11 +86,41 @@ export default function PortsTab({ device }: { device: Device }) {
     queryFn: () => securityPoliciesApi.list('port'),
     staleTime: 30_000,
   })
+  // C7.C dry-run pill: bu cihazın son 24 saatlik mac_flap policy olayları.
+  const flapQ = useQuery({
+    queryKey: ['flap-events', device.id],
+    queryFn: () => monitorApi.getEvents({
+      device_id: device.id, event_type: 'mac_flap', hours: 24, limit: 50,
+    }),
+    staleTime: 60_000,
+  })
 
   const macMap = useMemo(
     () => macCountByPort((macQ.data?.items ?? []) as { port?: string }[]),
     [macQ.data?.items],
   )
+
+  // dry-run flap olaylarını port_name başına grupla (details.current_port).
+  const flapByPort = useMemo(() => {
+    const map = new Map<string, NetworkEvent[]>()
+    for (const ev of flapQ.data?.items ?? []) {
+      const det = (ev.details ?? {}) as Record<string, any>
+      if (det.dry_run !== true) continue
+      const port = typeof det.current_port === 'string' ? det.current_port : null
+      if (!port) continue
+      const arr = map.get(port) ?? []
+      arr.push(ev)
+      map.set(port, arr)
+    }
+    return map
+  }, [flapQ.data?.items])
+
+  // Hangi seçili port'larda override VAR (Override kaldır butonunun aktiflik kararı için).
+  const overrideSet = useMemo(
+    () => new Set((overridesQ.data ?? []).map((o) => o.port_name)),
+    [overridesQ.data],
+  )
+  const selectedWithOverride = selected.filter((p) => overrideSet.has(p))
 
   const rows: Row[] = useMemo(() => {
     const ifaces: NetworkInterface[] = ifaceQ.data?.interfaces ?? []
@@ -107,9 +139,10 @@ export default function PortsTab({ device }: { device: Device }) {
         macCount: mac.count,
         macCapped: mac.isCapped,
         effective: effectivePortPolicy(i.name, overrides, dev.port_security_policy_id, portPolicies),
+        flapEvents: flapByPort.get(i.name) ?? [],
       }
     })
-  }, [ifaceQ.data?.interfaces, macMap, overridesQ.data, portPoliciesQ.data, dev.port_security_policy_id])
+  }, [ifaceQ.data?.interfaces, macMap, overridesQ.data, portPoliciesQ.data, dev.port_security_policy_id, flapByPort])
 
   const isLoading = ifaceQ.isLoading || overridesQ.isLoading || portPoliciesQ.isLoading
   const fetchSuccess = ifaceQ.data?.success !== false  // backend success flag
@@ -134,6 +167,27 @@ export default function PortsTab({ device }: { device: Device }) {
       qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'Kaydedilemedi'),
+  })
+
+  const removeOverrideMut = useMutation({
+    mutationFn: async () => {
+      // Yalnız override'ı OLAN portları DELETE; atanmamışları atla. Paralel; 404'leri yut.
+      const results = await Promise.allSettled(
+        selectedWithOverride.map((p) =>
+          portPolicyAssignmentsApi.remove(device.id, p),
+        ),
+      )
+      const ok = results.filter((r) => r.status === 'fulfilled').length
+      const fail = results.length - ok
+      return { ok, fail }
+    },
+    onSuccess: ({ ok, fail }) => {
+      if (fail > 0) message.warning(`${ok} override kaldırıldı, ${fail} başarısız`)
+      else message.success(`${ok} override kaldırıldı`)
+      setSelected([])
+      qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
+    },
+    onError: () => message.error('Override kaldırma başarısız'),
   })
 
   const columns = [
@@ -174,6 +228,23 @@ export default function PortsTab({ device }: { device: Device }) {
           </Tag>
         </span>
       ),
+    },
+    {
+      title: '⚠', key: 'flap', width: 110,
+      render: (_: any, r: Row) => {
+        if (r.flapEvents.length === 0) return null
+        const top = r.flapEvents[0]
+        const det = (top.details ?? {}) as Record<string, any>
+        const policy = typeof det.policy === 'string' ? det.policy : '?'
+        const trans = typeof det.transitions === 'number' ? det.transitions : '?'
+        return (
+          <Tooltip title={`DRY-RUN öneri [policy=${policy}] · ${r.flapEvents.length} flap olayı (24sa), son: ${trans} port değişimi. Gerçek aksiyon UYGULANMADI (shutdown C5 ile gelecek).`}>
+            <Tag color="orange" style={{ fontSize: 10 }}>
+              DRY-RUN ({r.flapEvents.length})
+            </Tag>
+          </Tooltip>
+        )
+      },
     },
   ]
 
@@ -230,7 +301,21 @@ export default function PortsTab({ device }: { device: Device }) {
         }}>
           <Text strong>Seçili {selected.length} port</Text>
           <Button type="primary" onClick={() => setBulkOpen(true)}>Policy ata ▾</Button>
-          {/* Override kaldır + dry-run pill C7.C commit 4'te. */}
+          <Tooltip title={
+            selectedWithOverride.length === 0
+              ? 'Seçili portların hiçbirinde override yok'
+              : `${selectedWithOverride.length} portta override kaldırılacak (atanmamışlar atlanır)`
+          }>
+            <Button
+              danger
+              disabled={selectedWithOverride.length === 0}
+              loading={removeOverrideMut.isPending}
+              onClick={() => removeOverrideMut.mutate()}
+            >
+              Override kaldır
+              {selectedWithOverride.length > 0 && ` (${selectedWithOverride.length})`}
+            </Button>
+          </Tooltip>
           <Tooltip title="Gerçek port kapatma C5 (approval + kill-switch) ile gelecek">
             <Button icon={<PoweroffOutlined />} disabled>Shutdown</Button>
           </Tooltip>
