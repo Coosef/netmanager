@@ -14,17 +14,34 @@
 
 ---
 
-## 0. Temel gerçekler (yerel repo'dan doğrulandı, 2026-05-29)
+## 0. Temel gerçekler
 
-| | Değer |
+> ✅ **CANLI INVENTORY İLE DÜZELTİLDİ (2026-05-29).** Bu dokümanın ilk taslağı, eski/bayat
+> hafıza notuna ("VPS d5e6f7a8b9c0'da, 2 ay geride, 32 migration, 2 destructive") dayanıyordu.
+> **Gerçek durum çok daha iyi** — aşağıdaki tablo VPS'te çalıştırılan read-only inventory'nin sonucudur.
+
+| | Değer (DOĞRULANDI) |
 |---|---|
-| origin/main HEAD | `5a1f3c8` (T10 A+B+C MVP + TD-2) |
+| origin/main HEAD | `2a80464` (T10 A+B+C MVP + TD-2 + bu doc) |
 | Alembic **head** (hedef) | **`f9adsecrls`** |
-| VPS beklenen revision | **`d5e6f7a8b9c0`** (Faz 5D — Faz 7 ÖNCESİ son revision) — **inventory ile doğrula** |
-| Uygulanacak migration sayısı | **32** (Faz7×9 + Faz8×10 + Faz9×10 + T10-C×3) |
-| Migration kullanıcısı | **`netmgr`** (superuser) — `MIGRATION_DATABASE_URL` |
-| Runtime kullanıcısı (deploy SONRASI) | **`netmgr_app`** (NOSUPERUSER/NOBYPASSRLS) — `DATABASE_URL` |
-| Forward-destructive migration'lar | **`f8a5_drop_legacy_tenant`** (M6), **`f9a9_ipam_rebuild`** (IPAM tabloları DROP+rebuild, **veri korunmaz**) |
+| **VPS git HEAD** | **`0dface5`** (branch main) — origin/main'in **temiz atası** (fast-forward; diverjans yok) |
+| **VPS alembic current** | **`f9aafirmware`** ✓ (DB `alembic_version` + `alembic current` aynı) |
+| **Bekleyen migration** | **yalnız 3 ADDITIVE** — `f9ab` (policy tabloları), `f9ac` (device FK kolon), `f9ad` (RLS+seed). `upgrade()`'lerde drop YOK |
+| Eksik kod | **49 commit** (tüm T10 Faz A1/A2/A3 + Faz B + Faz C + TD-2 + docs) |
+| ✅ Destructive migration'lar | **`f8a5` (M6 tenant drop) + `f9a9` (IPAM rebuild) ZATEN UYGULANMIŞ** — tenants ABSENT, 0 tenant_id, IPAM rebuilt+boş. **Pending'de destructive YOK.** |
+| Migration kullanıcısı | **`netmgr`** (super+bypassrls) — `MIGRATION_DATABASE_URL` compose'ta tanımlı, runtime env'de doğrulandı ✓ |
+| Runtime kullanıcısı | **`netmgr_app`** (NOSUPER/NOBYPASSRLS) — `DATABASE_URL`/`SYNC_DATABASE_URL` compose'ta, runtime env'de doğrulandı ✓ |
+| Prod veri | 4 org · 3 user · 8 location · 71 device · 27 agent · DB **383 MB** · disk **%80 (9.3G boş)** |
+
+**Düzeltilmiş migration deltası (VPS → hedef):**
+```
+f9aafirmware (VPS current)
+  └─ f9absecpol  (CREATE switch/port policy tabloları)        [additive]
+  └─ f9acdevsecfk(devices: security_policy_id + port_security_policy_id FK kolon) [additive]
+  └─ f9adsecrls  (RLS enable/force + org-bazlı seed)          [additive]   ← HEAD f9adsecrls
+```
+> Faz 7/8/M6/9 zincirinin tamamı (f7a1…f9aa) VPS'te **zaten uygulanmış**. Eski "32 migration / 2 destructive"
+> çerçevesi GEÇERSİZ. Kalan DB işi: 3 additive migration. **DB-yıkım riski yok.**
 
 **Migration zinciri (özet, sıra önemli):**
 ```
@@ -165,40 +182,58 @@ done
 
 ## 2. Risk haritası
 
-### 2.1 Migration zinciri riskleri (sıralı)
-| Migration | Risk | Azaltma |
+### 2.1 Migration zinciri riskleri — DÜZELTİLDİ (düşük)
+Bekleyen yalnız **3 additive** migration; f8a5/f9a9 destructive'leri zaten geçmişte. DB riski düşük.
+
+| Migration | İşlem | Risk |
 |---|---|---|
-| **f7a2backfill** | tenant→org/location backfill; veri tutarsızsa sonraki NOT NULL patlar | staging'de tam prova; "Unassigned" location raporunu incele |
-| **f7a3notnull** | `organization_id NOT NULL` — backfill eksikse migration ortada DURUR (yarım şema) | f7a2 sonrası NULL org taraması; CONCURRENTLY index → tek tx değil |
-| **f7a4rls** | `ENABLE + FORCE ROW LEVEL SECURITY` — anlık + global. Sonraki tüm runtime sorguları RLS context ister | Migration `netmgr` **superuser** ile koşar → RLS'i atlar (sorun yok). **Runtime netmgr_app'e geçmeli** (§2.3) |
-| **f7a5approle** | `netmgr_app` rolünü `APP_DB_PASSWORD`'dan kurar; parola env'den okunur | Deploy öncesi `APP_DB_PASSWORD` set + runtime `DATABASE_URL` aynı parolayı kullanmalı |
-| **f7a6roles** | UserRole→SystemRole remap; eşleşmeyen rol → viewer'a düşebilir | staging'de kullanıcı rol dağılımını doğrula |
-| **⚠️ f8a5droplegacytenant (M6)** | `DROP COLUMN tenant_id` (tüm tablolar) + `DROP COLUMN users.role` + `DROP TABLE tenants CASCADE` — **GERİ ALINAMAZ** | Veri f7a2'de org'a taşındı; **yine de pre-deploy pg_dump şart** (downgrade veriyi geri getirmez) |
-| **⚠️ f9a9ipamrebld** | `DROP TABLE ipam_subnets/ipam_addresses CASCADE` → yeni şema (zones/subnets/assignments). **Mevcut IPAM verisi KORUNMAZ** | Inventory §1.4'te IPAM boş değilse: deploy öncesi export, sonrası manuel re-import. Boşsa risk yok |
-| f9aa / f9ad | yeni tablolar + RLS + seed (org bazlı) | düşük risk; staging'de seed sayısını doğrula |
+| **f9absecpol** | `switch_security_policies` + `port_security_policies` tabloları CREATE | düşük — yeni tablo |
+| **f9acdevsecfk** | `devices`'a `security_policy_id` + `port_security_policy_id` FK kolon ADD (nullable) | düşük — nullable kolon, mevcut satırlar NULL |
+| **f9adsecrls** | RLS enable/force + org-bazlı preset seed (3 switch/7 port × org) | düşük — RLS pattern f7a4 ile aynı; seed idempotent değilse org başına tekrar kontrol et |
 
-> **Not:** `f7a1`, `f8a7`, `f9a2`, `f9a3`, `f9a5`, `f9a7` vb. migration'lardaki `drop_column`/`drop_table`
-> çağrılarının çoğu **downgrade()** içindedir (forward'da tablo/kolon EKLER). Forward-destructive
-> olanlar yalnız **f8a5** ve **f9a9**'dur.
+- Migration kullanıcısı **`netmgr` superuser** (runtime env'de doğrulandı: `MIGRATION_DATABASE_URL=...netmgr...`) → RLS'i atlar. **Kanıt:** VPS'te f7a4 sonrası tüm migration'lar (f9aa'ya kadar) bu yolla zaten başarıyla koştu.
+- **ARTIK GEÇERSİZ:** f7a2 backfill / f7a3 NOT NULL / f7a4 RLS-enable / f8a5 M6 / f9a9 IPAM riskleri — hepsi VPS'te **çoktan uygulanmış**; bu deploy'da tekrar koşmaz.
 
-### 2.2 Migration RLS davranışı (kritik kabul)
-- Migration'lar **`netmgr` superuser** ile koşmalı (`MIGRATION_DATABASE_URL`). PostgreSQL superuser'ı
-  RLS'i (FORCE dahil) **atlar** → f7a4 sonrası DDL/data migration'ları satır-filtreye takılmaz.
-- **TEHLİKE:** `MIGRATION_DATABASE_URL` set DEĞİLSE, `env.py` `SYNC_DATABASE_URL`'e düşer; bu `netmgr_app`
-  (NOBYPASSRLS) ise f7a4 sonrası migration'lar 0-satır görüp **bozuk geçiş** üretir. **Deploy öncesi
-  `MIGRATION_DATABASE_URL=...netmgr...` doğrula** (inventory §1.6).
+> **Yine de pre-deploy pg_dump ŞART** (additive olsa da geri-dönüş güvencesi + DR_RUNBOOK §4).
 
-### 2.3 Runtime kullanıcı geçişi (kod+DB birlikte taşınmalı)
-- Deploy ÖNCESİ VPS runtime'ı muhtemelen tek superuser (`netmgr`) ile bağlanıyor (netmgr_app yoktu).
-- Deploy SONRASI runtime **`netmgr_app`** (NOBYPASSRLS) + RLS context ile çalışmalı. Bu yüzden:
-  - `.env` `DATABASE_URL`/`SYNC_DATABASE_URL` → `netmgr_app` kullanıcısına çevrilecek (parola = `APP_DB_PASSWORD`, f7a5 ile aynı).
-  - Deploy edilen **kod** Faz7+ olmalı (RLS context'i deps/worker'larda kuruyor). Eski kod + yeni RLS şeması = 0 satır. **Kod ve DB aynı anda cut-over.**
+### 2.2 Migration RLS davranışı — DOĞRULANDI ✓
+- VPS runtime env'inde **`MIGRATION_DATABASE_URL=postgresql+psycopg2://netmgr:****@postgres:5432/network_manager`**
+  → migration'lar **`netmgr` superuser** ile koşar; superuser RLS'i (FORCE dahil) atlar. compose.yml satır 68 + comment
+  "the app URLs above use the non-superuser netmgr_app role so RLS bites". Kanıt: f7a4 sonrası tüm migration'lar
+  (→f9aa) zaten bu yolla başarılı. 3 yeni migration aynı kanıtlı yoldan gider. **Ek aksiyon gerekmez.**
 
-### 2.4 Compose / network / bootstrap (B1b/B1c/B2b) etkisi
-- **B1c network segmentation:** `edge` (nginx, frontend) / `internal` (backend, celery×3, beat,
-  event_consumer, flower, postgres, redis); dış kapı yalnız nginx. VPS'te daha önce backend:8000 /
-  flower:5555 / postgres:5432 host'a publish ediliyorsa **artık edilmeyecek** — VPS reverse-proxy /
-  firewall / monitoring beklentileri buna göre güncellenmeli.
+### 2.3 Runtime kullanıcı — ZATEN netmgr_app ✓ (geçiş gerekmez)
+- VPS runtime env: **`DATABASE_URL=...netmgr_app:****@...`**, `SYNC_DATABASE_URL=...netmgr_app:****@...`
+  → runtime **zaten** non-superuser `netmgr_app` (NOBYPASSRLS) ile bağlı; RLS aktif (58 tablo FORCE).
+  Faz7'de yapılmış olan netmgr→netmgr_app geçişi **tamamlanmış durumda** — bu deploy'da yapılacak bir cut-over YOK.
+- DB URL'leri `.env`'de değil **`docker-compose.yml`**'de (`${APP_DB_USER:-netmgr_app}` / `${POSTGRES_USER:-netmgr}`
+  default'ları ile). `.env`'de `APP_DB_PASSWORD` görünmese de netmgr_app bağlantısı çalışıyor → parola compose
+  default'undan geliyor ve f7a5'in kurduğu parola ile **eşleşiyor** (kanıt: app healthy). 3 yeni migration rol
+  parolasına dokunmaz.
+
+### 2.4 Compose / network / bootstrap (B1b/B1c/B2b) etkisi — DOĞRULANDI
+**Mevcut (B1c ÖNCESİ) yayınlanan portlar (VPS canlı):** nginx `0.0.0.0:80`, **backend `0.0.0.0:8000`**,
+**flower `0.0.0.0:5555`**, **redis `0.0.0.0:6379`**, **postgres `0.0.0.0:5432`** — yani DB/redis/backend
+şu an internete açık (yalnız bulut firewall'u koruyorsa). Tek network: `netmanager_default`.
+
+**Aktif dış erişim zinciri (doğrulandı):**
+`Cloudflare → cloudflared (token tunnel) / host-nginx :443 (ws-systrack.conf) → 127.0.0.1:80
+(netmanager-nginx-1 container) → backend/frontend`. Host nginx `ws-systrack.conf` (sites-**enabled**)
+`proxy_pass http://127.0.0.1:80`'e gidiyor. `:8000`'e giden `netmanager.conf` sites-**available**
+(ENABLED DEĞİL). `https://localhost/api/v1/auth/login → 405` ile zincir backend'e ulaşıyor (doğrulandı).
+
+**B1c etkisi → DÜŞÜK risk:** B1c backend:8000/postgres/redis/flower host-publish'ini kaldırır, yalnız
+nginx:80 kalır. Aktif yol zaten **:80 üzerinden** → kırılmaz. Yan fayda: DB/redis/backend internete
+kapanır (hardening). edge={nginx,frontend} / internal={backend,celery×3,beat,event_consumer,flower,
+postgres,redis}, nginx ikisinde.
+
+> ⚠️ **DEPLOY ÖNCESİ TEYİT (tek açık nokta):** cloudflared **token tunnel** (ingress Cloudflare Zero
+> Trust panelinde, VPS'te yerel config yok). Tunnel'in public hostname'i **`localhost:80`'e mi yoksa
+> `:8000`/`:3000`'e mi** işaret ettiği panelden doğrulanmalı. `:80` ise B1c güvenli; `:8000`/`:3000` ise
+> B1c öncesi `:80`'e (container nginx) çevrilmeli. (Host nginx `:8000` config'i zaten devre dışı → yol
+> büyük olasılıkla :80.)
+> ⚠️ **Güvenlik:** cloudflared tunnel **token'ı** inventory çıktısında maskelenmeden göründü → sızmış
+> kabul et; paylaşılan bir ortamsa Cloudflare'de **rotate** et.
 - **B2b `BOOTSTRAP_SCHEMA` default OFF:** `main.py` artık startup'ta `create_all` YAPMAZ. Mevcut DB
   için doğru (şema tek otorite = alembic). **VPS .env'de `BOOTSTRAP_SCHEMA` set edilmemeli** (fresh
   bootstrap değil; bu bir UPGRADE). Fresh DB sırası için DR_RUNBOOK §7.2.
