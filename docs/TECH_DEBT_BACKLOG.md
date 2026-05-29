@@ -34,40 +34,47 @@ build, and the broken `tsc` gate masks real type regressions. Does not
 block the topology workstream (verified around it with `@xterm`
 externalised).
 
-## TD-2 — WS auth dependency bug: `OAuth2PasswordBearer` (HTTP-only) resolved on a WebSocket scope → 5xx
+## TD-2 — WS auth dependency bug: `OAuth2PasswordBearer` (HTTP-only) resolved on a WebSocket scope → 5xx — ✅ RESOLVED (branch `t10/td2-ws-auth-fix`)
 
-A WebSocket connection raises, server-side:
+A WebSocket connection raised, server-side:
 
 ```
 TypeError: OAuth2PasswordBearer.__call__() missing 1 required positional argument: 'request'
 ```
 
-Traceback runs through `uvicorn/.../websockets_impl.py` → `fastapi/routing.py`
-→ `solve_dependencies`, i.e. FastAPI is resolving a dependency that includes
-`oauth2_scheme` (`OAuth2PasswordBearer`, defined in `backend/app/core/deps.py:18`,
-used by `get_current_user` at `deps.py:38`/`:219`). `OAuth2PasswordBearer.__call__`
-expects an HTTP `Request`; on a WebSocket scope there is none → `TypeError` → 5xx.
+**Confirmed root cause (≠ original lead):** it was **not** a frontend path/prefix
+mismatch. `backend/app/api/v1/router.py` included the **agents** router with a
+router-level user-auth feature gate:
 
-**Lead (found during T10 C6 smoke):** the WS routes in
-`backend/app/api/v1/endpoints/ws.py` do **not** themselves declare this
-dependency — they authenticate via a `token: Optional[str] = Query(...)`
-param + `decode_access_token()` / `_authenticate_ws()` / `_resolve_ws_scope()`,
-and the ws router is included **without** `dependencies=` (`router.py:25`). So the
-`oauth2_scheme` is being pulled in because a WebSocket connection is reaching an
-**HTTP route's** dependency chain — most likely a path/prefix mismatch between the
-frontend WS URL and the mounted `/ws/...` routes (the upgrade falls through to an
-HTTP handler that depends on `get_current_user`), rather than from any WS route
-declaring it.
+```python
+api_router.include_router(agents.router, prefix="/agents", dependencies=_feat("agents"))
+```
 
-**Fix direction:** confirm the exact frontend WS URL vs the mounted WS paths
-(prefix `/ws`); ensure WS connects hit a real `@router.websocket` route. If any
-WS-reachable path resolves `get_current_user`/`oauth2_scheme`, swap it for the
-WS-safe `token` Query + `decode_access_token` pattern already used in `ws.py`.
+`_feat("agents")` = `[Depends(require_feature("agents"))]`, and `require_feature`'s
+checker depends on `get_current_active_user` → `get_current_user` → `oauth2_scheme`
+(`OAuth2PasswordBearer`, `deps.py:18`). A **router-level dependency applies to every
+route in that router — including the WebSocket route** `@router.websocket("/ws/{agent_id}")`
+(agents.py). So an agent connecting to `/api/v1/agents/ws/{agent_id}` made FastAPI
+resolve `oauth2_scheme` on a **WebSocket** scope, where `__call__(request=...)` has no
+`Request` → `TypeError` → 5xx, handshake dropped. The agent WS authenticates by
+`key` (agent_key) Query param, not a user session, so the user-auth gate was both
+broken AND semantically wrong there. The `ws.py` routes (included at `/ws` **without**
+`dependencies=`) were never affected.
 
-**Provenance:** pre-existing, NOT a T10 C6 regression — the C6 branch diff touches
-no WS/auth files, and `ws.py` was last changed by a T9 commit (`6aa99d8`). The same
-error reproduces on `main`.
+**Fix:** the agent WebSocket route now lives on a separate `agent_ws_router`
+(agents.py) included **without** `_feat(...)` (router.py), preserving the path
+`/api/v1/agents/ws/{agent_id}` and its existing `key` Query-token auth. No HTTP
+user-auth dependency reaches any WS endpoint. The HTTP agents routes keep the
+feature gate + auth.
 
-**Priority:** medium — realtime streams (live events/anomalies/task-progress)
-fail to connect; the app degrades to polling. No data-exposure risk (the socket
-errors closed). Tackle as a small standalone fix after C6 merge.
+**Verification:**
+- Reproduced pre-fix: agent WS handshake → HTTP **500** + `OAuth2PasswordBearer`
+  traceback; post-fix → controlled handshake rejection (no 5xx, **0 tracebacks**).
+- Valid-token `/ws/events` connect → **101 accept** (realtime stream intact).
+- Regression tests: `backend/tests/test_td2_ws_auth.py` (6 tests) — agent WS &
+  ws.py routes carry **no** user-auth dependency; HTTP agents route **does**;
+  no/invalid-token `/ws/events` → controlled 4001 close; `GET /agents/` → 401.
+- Full backend suite green (709 passed).
+
+**Provenance:** pre-existing, NOT a T10 C6 regression — the gate was added in T10
+Faz A1; reproduced on `main`.
