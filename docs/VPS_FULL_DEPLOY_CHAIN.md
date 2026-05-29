@@ -287,9 +287,11 @@ Amaç: 32-migration zincirini **VPS'in gerçek verisi** üzerinde, izole bir ort
 5. **Env hazırla:** `MIGRATION_DATABASE_URL` (netmgr), `APP_DB_PASSWORD`, `DATABASE_URL`/`SYNC_DATABASE_URL`
    (netmgr_app), `BOOTSTRAP_SCHEMA` unset, `FRONTEND_TARGET=production`. (IPAM doluysa export alındı.)
 6. **Image build:** `docker compose build` (gerekirse `--no-cache`). Frontend production stage (dist).
-7. **Migration step-by-step:** `docker compose run --rm backend alembic upgrade head`
-   (yalnız migration; uygulama henüz yeni şemaya yazmıyor). Çıktıyı izle; faz sınırlarında doğrula.
-   - Alternatif güvenli mod: faz faz (`alembic upgrade f7b1toposnaploc`, sonra `f8a10sessions`, ...).
+7. **Migration step-by-step:** ⚠️ B1c nedeniyle `docker compose run` DEĞİL — `up` öncesi network topolojisi
+   değiştiğinden one-off container çalışan postgres'e ulaşamaz. Mevcut `netmanager_default` ağında, yeni
+   image + çalışan backend env'iyle koş (bkz. §8 P6):
+   `docker run --rm --network netmanager_default --env-file <(docker inspect netmanager-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}') netmanager-backend:latest alembic upgrade head`
+   (yalnız migration; uygulama henüz yeni şemaya yazmıyor). Çıktıyı izle.
 8. **Servisleri kaldır:** `docker compose up -d` (down DEĞİL; rolling recreate). nginx.conf değiştiyse
    `--force-recreate nginx`.
 9. **Smoke gates (§6):** sırayla; ilk kırmızıda dur.
@@ -385,12 +387,21 @@ docker compose build           # FRONTEND_TARGET default=production (dist+nginx)
 - [ ] Build hatasız bitti (tsc+vite build geçer — staging'de kanıtlandı).
 
 ### P6 — Migration (3 additive — yeni image, up'tan ÖNCE)
+> ⚠️ **B1c DÜZELTMESİ:** `docker compose run … alembic` KULLANMA. B1c yeni compose'u postgres/backend'i
+> `internal` ağına koyar; ama `up` ÖNCESİ çalışan postgres hâlâ `netmanager_default`'ta. `compose run`
+> one-off backend'i boş `internal`'a bağlar → `postgres` DNS çözülmez (migration bağlantı hatası) ya da
+> dep'leri recreate etmeye kalkar (restart). Bunun yerine migration'ı **mevcut `netmanager_default`**
+> ağında, yeni image + çalışan backend'in env'iyle koş (ağ topolojisi anahtarı zaten P7'de olur):
 ```bash
-docker compose run --rm backend alembic upgrade head
+docker run --rm --network netmanager_default \
+  --env-file <(docker inspect netmanager-backend-1 --format '{{range .Config.Env}}{{println .}}{{end}}') \
+  netmanager-backend:latest \
+  alembic upgrade head
 # Beklenen TAM OLARAK: f9aafirmware→f9absecpol→f9acdevsecfk→f9adsecrls
-docker exec -i netmanager-postgres-1 psql -U netmgr -d network_manager -tAc "SELECT version_num FROM alembic_version;"  # f9adsecrls
+docker exec netmanager-postgres-1 psql -U netmgr -d network_manager -tAc "SELECT version_num FROM alembic_version;"  # f9adsecrls
 ```
-- [ ] 3 migration koştu, `alembic current = f9adsecrls`, hata yok. *(migration `netmgr` superuser ile — compose MIGRATION_DATABASE_URL)*
+Ön-doğrula: `MIGRATION_DATABASE_URL` env'de **netmgr** (superuser) + `netmanager-backend:latest` = P5 yeni image.
+- [ ] 3 migration koştu, `alembic current = f9adsecrls`, hata yok. *(migration `netmgr` superuser; up/restart/yeni-network YOK)*
 
 ### P7 — Servisleri kaldır (rolling recreate; down DEĞİL)
 ```bash
