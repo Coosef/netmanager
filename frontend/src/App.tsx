@@ -59,6 +59,7 @@ import RacksPage from '@/pages/Racks'
 import LocationsPage from '@/pages/Locations'
 import FloorPlanPage from '@/pages/FloorPlan'
 import AlertRulesPage from '@/pages/AlertRules'
+import SecurityPoliciesPage from '@/pages/SecurityPolicies'
 import DriverTemplatesPage from '@/pages/DriverTemplates'
 import HelpPage from '@/pages/Help'
 import ServicesPage from '@/pages/Services'
@@ -296,6 +297,7 @@ function ThemedApp() {
               <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
               <Route path="floor-plan" element={<RoleRoute minRole="admin"><FloorPlanPage /></RoleRoute>} />
               <Route path="alert-rules" element={<RoleRoute minRole="admin"><AlertRulesPage /></RoleRoute>} />
+              <Route path="security-policies" element={<RoleRoute minRole="viewer"><SecurityPoliciesPage /></RoleRoute>} />
               <Route path="driver-templates" element={<PermRoute module="driver_templates" action="view"><DriverTemplatesPage /></PermRoute>} />
               <Route path="help" element={<HelpPage />} />
               <Route path="services" element={<RoleRoute minRole="org_viewer"><ServicesPage /></RoleRoute>} />

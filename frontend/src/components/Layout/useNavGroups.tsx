@@ -50,6 +50,7 @@ const FEATURE_MAP: Record<string, string> = {
   '/incidents': 'incidents', '/escalation-rules': 'escalation',
   '/ai-assistant': 'ai_assistant', '/agents': 'agents',
   '/change-management': 'change_management', '/racks': 'racks',
+  '/security-policies': 'security_policy',
 }
 
 const MODULE_MAP: Record<string, [string, string]> = {
@@ -149,6 +150,7 @@ export function useNavGroups(): NavGroup[] {
         { key: '/bandwidth', icon: <LineChartOutlined />, label: t('nav.bandwidth'), minRole: 'viewer' },
         { key: '/mac-arp', icon: <TableOutlined />, label: t('nav.port_intelligence'), minRole: 'viewer' },
         { key: '/security-audit', icon: <SafetyOutlined />, label: t('nav.security_audit'), minRole: 'viewer' },
+        { key: '/security-policies', icon: <SafetyOutlined />, label: 'Güvenlik Politikaları', minRole: 'viewer' },
         { key: '/asset-lifecycle', icon: <CalendarOutlined />, label: t('nav.asset_lifecycle'), minRole: 'viewer' },
         { key: '/diagnostics', icon: <AimOutlined />, label: t('nav.diagnostics'), minRole: 'viewer' },
         { key: '/tasks', icon: <PlayCircleOutlined />, label: t('nav.tasks'), minRole: 'viewer' },
