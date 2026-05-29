@@ -10,18 +10,20 @@
  *
  * Bu commit: tablo + read-only kolonlar. Toplu seçim/atama/override-kaldır (commit 3-4).
  */
-import { useMemo } from 'react'
-import { Table, Tag, Badge, Button, Tooltip, Alert, Spin, Typography } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo, useState } from 'react'
+import { Table, Tag, Badge, Button, Tooltip, Alert, Spin, Typography, message } from 'antd'
+import { ReloadOutlined, PoweroffOutlined } from '@ant-design/icons'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Device, NetworkInterface } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { macArpApi } from '@/api/macarp'
 import { portPolicyAssignmentsApi } from '@/api/portPolicyAssignments'
 import { securityPoliciesApi } from '@/api/securityPolicies'
+import { useAuthStore } from '@/store/auth'
 import {
   effectivePortPolicy, macCountByPort, MAC_COUNT_CAP, type EffectiveSource,
 } from './_portsHelper'
+import BulkPolicyAssignDrawer from './BulkPolicyAssignDrawer'
 
 const { Text } = Typography
 
@@ -55,6 +57,10 @@ interface Row {
 export default function PortsTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const dev = device as any
+  const { isOrgAdmin } = useAuthStore()
+  const canWrite = isOrgAdmin()
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkOpen, setBulkOpen] = useState(false)
 
   const ifaceQ = useQuery({
     queryKey: ['device-interfaces', device.id],
@@ -114,6 +120,21 @@ export default function PortsTab({ device }: { device: Device }) {
     qc.invalidateQueries({ queryKey: ['mac-table-device', device.id] })
     qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
   }
+
+  const bulkSetMut = useMutation({
+    mutationFn: (policyId: number) =>
+      portPolicyAssignmentsApi.bulkSet(
+        device.id,
+        selected.map((p) => ({ port_name: p, port_security_policy_id: policyId })),
+      ),
+    onSuccess: () => {
+      message.success(`${selected.length} port güncellendi`)
+      setBulkOpen(false)
+      setSelected([])
+      qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Kaydedilemedi'),
+  })
 
   const columns = [
     {
@@ -190,12 +211,47 @@ export default function PortsTab({ device }: { device: Device }) {
           dataSource={rows}
           pagination={{ pageSize: 50, showSizeChanger: false, hideOnSinglePage: true }}
           locale={{ emptyText: fetchSuccess ? 'Port bulunamadı' : '—' }}
+          rowSelection={canWrite ? {
+            selectedRowKeys: selected,
+            onChange: (keys) => setSelected(keys as string[]),
+            preserveSelectedRowKeys: false,
+          } : undefined}
         />
       </Spin>
 
-      <Alert
-        type="info" showIcon style={{ marginTop: 12, fontSize: 12 }}
-        message="Toplu seçim + atama, override kaldırma ve dry-run quarantine pill C7.C sıradaki commit'lerinde gelecek (shutdown C5)."
+      {/* Sticky toolbar — yalnız org_admin+ ve seçim varsa görünür. */}
+      {canWrite && selected.length > 0 && (
+        <div style={{
+          position: 'sticky', bottom: 8, marginTop: 12,
+          padding: '8px 12px', background: 'var(--bg-2, #ffffff)',
+          border: '1px solid var(--line-soft, #cbd5e1)', borderRadius: 8,
+          display: 'flex', alignItems: 'center', gap: 12,
+          boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+        }}>
+          <Text strong>Seçili {selected.length} port</Text>
+          <Button type="primary" onClick={() => setBulkOpen(true)}>Policy ata ▾</Button>
+          {/* Override kaldır + dry-run pill C7.C commit 4'te. */}
+          <Tooltip title="Gerçek port kapatma C5 (approval + kill-switch) ile gelecek">
+            <Button icon={<PoweroffOutlined />} disabled>Shutdown</Button>
+          </Tooltip>
+          <Button type="text" onClick={() => setSelected([])} style={{ marginLeft: 'auto' }}>Seçimi temizle</Button>
+        </div>
+      )}
+
+      {!canWrite && (
+        <Alert
+          type="info" showIcon style={{ marginTop: 12, fontSize: 12 }}
+          message="Salt-okunur görünüm. Toplu atama ve override kaldırma için org_admin+ rolü gerekir."
+        />
+      )}
+
+      <BulkPolicyAssignDrawer
+        open={bulkOpen}
+        onClose={() => setBulkOpen(false)}
+        selectedPorts={selected}
+        portPolicies={(portPoliciesQ.data ?? []) as any}
+        saving={bulkSetMut.isPending}
+        onSubmit={(policyId) => bulkSetMut.mutate(policyId)}
       />
     </div>
   )
