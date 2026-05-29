@@ -10,8 +10,10 @@ import { Button, Spin, Result, Tabs, Tag, Badge } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
+import { useSite } from '@/contexts/SiteContext'
 import { DETAIL_TABS, normalizeTab, type TabKey } from './detail/_tabs'
 import OverviewTab from './detail/OverviewTab'
+import SecurityPoliciesTab from './detail/SecurityPoliciesTab'
 
 const STATUS_BADGE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
   online: 'success', offline: 'error', unreachable: 'warning', unknown: 'default',
@@ -42,7 +44,19 @@ export default function DeviceDetailPage() {
     enabled: Number.isFinite(id) && id > 0,
   })
 
-  const activeTab: TabKey = useMemo(() => normalizeTab(search.get('tab')), [search])
+  // Feature gate: security_policy explicit false ise Güvenlik Politikası sekmesi gizlenir.
+  const { features } = useSite()
+  const secPolEnabled = features['security_policy'] !== false
+  const visibleTabs = useMemo(
+    () => DETAIL_TABS.filter((t) => t.key !== 'security' || secPolEnabled),
+    [secPolEnabled],
+  )
+
+  const activeTab: TabKey = useMemo(() => {
+    const t = normalizeTab(search.get('tab'))
+    // İstenen tab gizliyse (örn. security gate kapalı) overview'a düş.
+    return visibleTabs.some((v) => v.key === t) ? t : 'overview'
+  }, [search, visibleTabs])
   const setTab = (key: string) => {
     const next = new URLSearchParams(search)
     next.set('tab', key)
@@ -69,15 +83,12 @@ export default function DeviceDetailPage() {
     )
   }
 
-  const tabItems = DETAIL_TABS.map((t) => ({
+  const tabItems = visibleTabs.map((t) => ({
     key: t.key,
     label: t.label + (t.placeholder ? ' ·' : ''),
     children: (() => {
       if (t.key === 'overview') return <OverviewTab device={device} />
-      if (t.key === 'security') {
-        // C7.B Commit 3'te SecurityPoliciesTab eklenecek.
-        return <PlaceholderTab name="Güvenlik Politikası" eta="C7.B (sıradaki commit)" />
-      }
+      if (t.key === 'security') return <SecurityPoliciesTab device={device} />
       if (t.key === 'ports') return <PlaceholderTab name="Portlar / Arayüzler" eta="C7.C" />
       return <PlaceholderTab name={t.label} eta="C7.D" />
     })(),
