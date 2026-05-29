@@ -24,6 +24,7 @@ from typing import Optional
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.port_policy_assignment import PortPolicyAssignment
 from app.models.security_policy import PortSecurityPolicy, SwitchSecurityPolicy
 
 FALLBACK_NAME = "(hardcoded-fallback)"
@@ -78,12 +79,33 @@ async def resolve_switch_policy(db: AsyncSession, device) -> SwitchSecurityPolic
 async def resolve_port_policy(
     db: AsyncSession, device, port_name: Optional[str] = None,
 ) -> PortSecurityPolicy:
-    # 1. v2: per-port override (port_name) — şimdilik yok, imzada bırakıldı.
+    """Port policy resolver — zincir:
+      1) PortPolicyAssignment (device_id+port_name)  ← C7.A per-port override
+      2) device.port_security_policy_id              (C6b cihaz default)
+      3) org is_default=true PortSecurityPolicy       (C2 org default)
+      4) hardcoded fallback                           (C2)
+    port_name=None ya da assignment yoksa 1. adım atlanır."""
+    # 1) Per-port override (C7.A) — port_name + device.id varsa.
+    dev_id = getattr(device, "id", None)
+    if port_name and dev_id is not None:
+        ppa = (await db.execute(
+            select(PortPolicyAssignment).where(
+                PortPolicyAssignment.device_id == dev_id,
+                PortPolicyAssignment.port_name == port_name,
+                PortPolicyAssignment.deleted_at.is_(None),
+            )
+        )).scalar_one_or_none()
+        if ppa is not None:
+            p = await db.get(PortSecurityPolicy, ppa.port_security_policy_id)
+            if p is not None:
+                return p
+    # 2) Cihaz-default (C6b).
     pid = getattr(device, "port_security_policy_id", None)
     if pid:
         p = await db.get(PortSecurityPolicy, pid)
         if p is not None:
             return p
+    # 3) Org default.
     org_id = getattr(device, "organization_id", None)
     if org_id is not None:
         p = (await db.execute(
@@ -94,6 +116,7 @@ async def resolve_port_policy(
         )).scalar_one_or_none()
         if p is not None:
             return p
+    # 4) Fallback.
     return _fallback_port()
 
 
@@ -177,8 +200,21 @@ def evaluate_switch_health(hostname: str, policy, metrics: dict) -> list[dict]:
 
 
 def resolve_port_policy_sync(db, device, port_name: Optional[str] = None) -> PortSecurityPolicy:
-    """resolve_port_policy'nin senkron eşi. v1: per-port override yok (port_name imzada);
-    device.port_security_policy_id → org default → fallback."""
+    """resolve_port_policy'nin senkron eşi. Zincir async ile aynı:
+    per-port override → cihaz default → org default → fallback."""
+    dev_id = getattr(device, "id", None)
+    if port_name and dev_id is not None:
+        ppa = db.execute(
+            select(PortPolicyAssignment).where(
+                PortPolicyAssignment.device_id == dev_id,
+                PortPolicyAssignment.port_name == port_name,
+                PortPolicyAssignment.deleted_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if ppa is not None:
+            p = db.get(PortSecurityPolicy, ppa.port_security_policy_id)
+            if p is not None:
+                return p
     pid = getattr(device, "port_security_policy_id", None)
     if pid:
         p = db.get(PortSecurityPolicy, pid)

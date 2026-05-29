@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends
 
-from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_builder, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, firmware, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, poe, port_control, racks, reports, security_audit, security_policies, services, sla, snmp, super_admin, synthetic, system_settings, tasks, terminal_sessions, topology, topology_twin, users, ws
+from app.api.v1.endpoints import agents, agent_stream, ai_assistant, alert_rules, api_tokens, approvals, asset_lifecycle, auth, backup_schedules, change_rollouts, config_builder, config_templates, context, credential_profiles, dashboard, devices, diagnostics, driver_templates, escalation, firmware, incidents, intelligence, interfaces, internal, invites, ipam, locations, mac_arp, maintenance_windows, mfa, monitor, notifications, org_admin, password_policy, playbooks, poe, port_control, port_policy_assignments, racks, reports, security_audit, security_policies, services, sla, snmp, super_admin, synthetic, system_settings, tasks, terminal_sessions, topology, topology_twin, users, ws
 from app.core.deps import require_feature
 
 
@@ -19,6 +19,8 @@ api_router.include_router(context.router, prefix="/context", tags=["Context"])
 api_router.include_router(users.router, prefix="/users", tags=["Users"])
 api_router.include_router(mfa.router, prefix="/users", tags=["MFA"])
 api_router.include_router(devices.router, prefix="/devices", tags=["Devices"])
+# T10 C7.A — per-port policy override (security_policy feature gate; org_admin+ yazma).
+api_router.include_router(port_policy_assignments.router, prefix="/devices", tags=["Port Policy"], dependencies=_feat("security_policy"))
 api_router.include_router(interfaces.router, prefix="/devices", tags=["Interfaces"])
 api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 api_router.include_router(topology.router, prefix="/topology", tags=["Topology"], dependencies=_feat("topology"))
