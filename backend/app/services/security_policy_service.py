@@ -230,6 +230,61 @@ def evaluate_port_flood(hostname: str, port, mac_count: int, policy) -> Optional
     return None
 
 
+def evaluate_mac_flap(redis, policy, org_id, device_id, mac, hostname, port) -> Optional[dict]:
+    """C4b — port-transition flap. _collect_device bir MAC'in portu DEĞİŞTİĞİNDE çağırır.
+    Redis sayaç (key org/device/mac, TTL=mac_flap_window_min); transition ≥
+    mac_flap_min_transitions → flap alarm spec (DRY-RUN öneri; **gerçek shutdown YOK**).
+    NULL pencere/eşik → None (kontrol kapalı). Alarm breach'te bir kez (dedup key)."""
+    window = getattr(policy, "mac_flap_window_min", None)
+    min_tr = getattr(policy, "mac_flap_min_transitions", None)
+    if window is None or min_tr is None:
+        return None
+    key = f"secpol:flap:{org_id}:{device_id}:{mac}"
+    try:
+        cnt = redis.incr(key)
+        if cnt == 1:
+            redis.expire(key, int(window) * 60)
+    except Exception:  # noqa: BLE001 — Redis yoksa flap takibi sessizce atlanır
+        return None
+    if cnt < int(min_tr):
+        return None
+    # Breach'te tek alarm (pencere boyunca dedup).
+    alarm_key = f"secpol:flapalarm:{org_id}:{device_id}:{mac}"
+    try:
+        if redis.exists(alarm_key):
+            return None
+        redis.setex(alarm_key, int(window) * 60, "1")
+    except Exception:  # noqa: BLE001
+        pass
+    pname = policy_label(policy)
+    nth = getattr(policy, "auto_quarantine_on_nth_flap", None)
+    return dict(
+        event_type="mac_flap", severity="warning",
+        message=f"MAC {mac} flapping: {cnt} port değişimi (eşik {min_tr}) [policy={pname}]",
+        details={
+            "mac": mac, "transitions": cnt, "threshold": int(min_tr), "policy": pname,
+            "current_port": port,
+            # C4b — DRY-RUN öneri; gerçek shutdown YOK (C5 kill-switch+approval ile gelir).
+            "dry_run": True, "suggested_action": "quarantine_port",
+            "auto_quarantine_on_nth_flap": nth,
+        },
+    )
+
+
+async def security_policy_enabled(db, organization_id) -> bool:
+    """security_policy_enabled_sync'in async eşi (async session)."""
+    if organization_id is None:
+        return True
+    from app.core.features import feature_enabled
+    from app.models.shared.organization import Organization
+    from app.models.shared.plan import Plan
+    org = await db.get(Organization, organization_id)
+    if org is None or org.plan_id is None:
+        return True
+    plan = await db.get(Plan, org.plan_id)
+    return feature_enabled(plan.features if plan else None, "security_policy")
+
+
 def security_policy_enabled_sync(db, organization_id) -> bool:
     """org'un planında security_policy feature açık mı (sync). Opt-out: org/plan/feature
     yoksa açık. Task'lar org feature kapalıysa policy check'i atlar (super-admin bypass YOK —
