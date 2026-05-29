@@ -14,6 +14,7 @@ import { useSite } from '@/contexts/SiteContext'
 import { DETAIL_TABS, normalizeTab, type TabKey } from './detail/_tabs'
 import OverviewTab from './detail/OverviewTab'
 import SecurityPoliciesTab from './detail/SecurityPoliciesTab'
+import PortsTab from './detail/PortsTab'
 
 const STATUS_BADGE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
   online: 'success', offline: 'error', unreachable: 'warning', unknown: 'default',
@@ -89,7 +90,7 @@ export default function DeviceDetailPage() {
     children: (() => {
       if (t.key === 'overview') return <OverviewTab device={device} />
       if (t.key === 'security') return <SecurityPoliciesTab device={device} />
-      if (t.key === 'ports') return <PlaceholderTab name="Portlar / Arayüzler" eta="C7.C" />
+      if (t.key === 'ports') return <PortsTab device={device} />
       return <PlaceholderTab name={t.label} eta="C7.D" />
     })(),
   }))
