@@ -35,6 +35,7 @@ export const monitorApi = {
   getEvents: (params?: {
     skip?: number; limit?: number; severity?: string
     event_type?: string; device_id?: number; hours?: number; unacked_only?: boolean; site?: string
+    policy_only?: boolean
   }) =>
     client.get<{ total: number; items: NetworkEvent[] }>('/monitor/events', { params }).then((r) => r.data),
 
@@ -59,7 +60,7 @@ export const monitorApi = {
 
   exportEvents: async (params?: {
     severity?: string; event_type?: string; device_id?: number
-    hours?: number; unacked_only?: boolean; site?: string
+    hours?: number; unacked_only?: boolean; site?: string; policy_only?: boolean
   }) => {
     const res = await client.get('/monitor/events/export.csv', {
       params,

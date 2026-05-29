@@ -28,6 +28,11 @@ from app.models.security_policy import PortSecurityPolicy, SwitchSecurityPolicy
 
 FALLBACK_NAME = "(hardcoded-fallback)"
 
+# C6c — bu motorun ürettiği NetworkEvent.event_type'ları. UI'da "Politika olayları"
+# filtresi (monitor /events?policy_only=true) bu küme üzerinden çalışır. Yeni bir
+# event_type eklenirse buraya da eklenmeli (tek kaynak).
+POLICY_EVENT_TYPES = ("high_cpu", "high_memory", "mac_flood", "mac_flap")
+
 
 def _fallback_switch() -> SwitchSecurityPolicy:
     """En güvenli baseline (docx Default'a yakın). Transient — persist edilmez."""
