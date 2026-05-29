@@ -36,6 +36,7 @@ export default function NocMonitor() {
   // ── filters / state ─────────────────────────────────────────────────────
   const [severityFilter, setSeverityFilter] = useState<'all' | SevKey>('all')
   const [unackedOnly, setUnackedOnly] = useState(false)
+  const [policyOnly, setPolicyOnly] = useState(false)  // C6c — sadece güvenlik politikası olayları
   const [hours, setHours] = useState(24)
   const [page, setPage] = useState(1)
   const [selectedEvent, setSelectedEvent] = useState<NetworkEvent | null>(null)
@@ -47,13 +48,14 @@ export default function NocMonitor() {
     refetchInterval: 60000,
   })
   const { data: eventsData, isFetching, refetch } = useQuery({
-    queryKey: ['monitor-events-cards', severityFilter, hours, unackedOnly, page, activeSite],
+    queryKey: ['monitor-events-cards', severityFilter, hours, unackedOnly, policyOnly, page, activeSite],
     queryFn: () => monitorApi.getEvents({
       skip: (page - 1) * PAGE_SIZE,
       limit: PAGE_SIZE,
       severity: severityFilter === 'all' ? undefined : severityFilter,
       hours,
       unacked_only: unackedOnly || undefined,
+      policy_only: policyOnly || undefined,
       site: activeSite || undefined,
     }),
     refetchInterval: 30000,
@@ -98,7 +100,7 @@ export default function NocMonitor() {
     catch { message.error('Temizleme başarısız') }
   }
   const downloadCsv = async () => {
-    try { await monitorApi.exportEvents({ severity: severityFilter === 'all' ? undefined : severityFilter, hours, unacked_only: unackedOnly || undefined, site: activeSite || undefined }); message.success('CSV indirildi') }
+    try { await monitorApi.exportEvents({ severity: severityFilter === 'all' ? undefined : severityFilter, hours, unacked_only: unackedOnly || undefined, policy_only: policyOnly || undefined, site: activeSite || undefined }); message.success('CSV indirildi') }
     catch { message.error('CSV indirilemedi') }
   }
 
@@ -189,6 +191,16 @@ export default function NocMonitor() {
           }}>
           <span>{unackedOnly ? '✓ Sadece açık' : 'Sadece açık'}</span>
         </span>
+        <span className="nm-filterchip" onClick={() => { setPolicyOnly(!policyOnly); setPage(1) }}
+          title="CPU/bellek/MAC flood/flap — güvenlik politikası motorunun ürettiği olaylar"
+          style={{
+            cursor: 'pointer',
+            background: policyOnly ? 'var(--accent-soft)' : undefined,
+            color: policyOnly ? 'var(--accent)' : undefined,
+            borderColor: policyOnly ? 'var(--accent)' : undefined,
+          }}>
+          <span>{policyOnly ? '✓ Politika olayları' : 'Politika olayları'}</span>
+        </span>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <span style={{ fontSize: 11, color: 'var(--fg-3)', fontFamily: 'var(--font-mono)' }}>SÜRE</span>
           <Select<number> size="small" value={hours} onChange={(v) => { setHours(v); setPage(1) }} style={{ width: 110 }}
@@ -239,6 +251,10 @@ function EventCard({ ev, onDetail, onAck }: { ev: NetworkEvent; onDetail: () => 
   const sevKey = (ev.severity in SEV_CLS ? ev.severity : 'info') as SevKey
   const sevCls = SEV_CLS[sevKey]
   const isOpen = !ev.acknowledged
+  // C6c — güvenlik politikası meta'sı (details.policy / dry_run / suggested_action).
+  const det = (ev.details ?? {}) as Record<string, any>
+  const policyName = typeof det.policy === 'string' ? det.policy : null
+  const isDryRun = det.dry_run === true
   return (
     <div className="nm-card" onClick={onDetail} style={{ cursor: 'pointer', padding: 0 }}>
       <div style={{ padding: '14px 18px', display: 'grid', gridTemplateColumns: 'auto 1fr auto', gap: 14, alignItems: 'flex-start' }}>
@@ -269,6 +285,14 @@ function EventCard({ ev, onDetail, onAck }: { ev: NetworkEvent; onDetail: () => 
               <span className="nm-pill ok">ONAYLI</span>
             )}
             <span className="nm-pill mono" style={{ fontSize: 9.5 }}>{ev.event_type}</span>
+            {policyName && (
+              <span className="nm-pill info mono" style={{ fontSize: 9.5 }}
+                title={`Güvenlik politikası: ${policyName}`}>policy: {policyName}</span>
+            )}
+            {isDryRun && (
+              <span className="nm-pill warn mono" style={{ fontSize: 9.5 }}
+                title="Öneri — otomatik aksiyon UYGULANMADI (dry-run). Port kapatma yok.">DRY-RUN ÖNERİ</span>
+            )}
             <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }} className="mono">
               {dayjs(ev.created_at).fromNow(true)} önce
             </span>
@@ -310,6 +334,12 @@ function EventDetailModal({ ev, onClose, onAck }:
   const isOpen = !ev.acknowledged
   const detail = buildEventDetail(ev)
   const typeLabel = TYPE_LABELS[ev.event_type] || ev.event_type
+  // C6c — dry-run güvenlik politikası önerisi (gerçek aksiyon YOK).
+  const det = (ev.details ?? {}) as Record<string, any>
+  const isDryRun = det.dry_run === true
+  const suggested = typeof det.suggested_action === 'string' ? det.suggested_action : null
+  const suggestedLabel = suggested === 'quarantine_port'
+    ? 'Port karantinası (quarantine_port)' : (suggested || '—')
   return (
     <Modal open onCancel={onClose} title={
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -334,6 +364,23 @@ function EventDetailModal({ ev, onClose, onAck }:
       }}>
         {detail.what}
       </div>
+
+      {/* C6c — dry-run öneri uyarısı: bu yalnız bir öneridir, otomatik port
+          kapatma/karantina UYGULANMAZ (gerçek auto-quarantine C5 kill-switch +
+          onay akışı ile gelecek). Operatör manuel karar verir. */}
+      {isDryRun && (
+        <div style={{
+          padding: '10px 14px',
+          background: 'var(--warn-soft, rgba(245,158,11,0.12))',
+          border: '1px solid var(--warn)',
+          borderRadius: 8, marginBottom: 14,
+          fontSize: 12.5, lineHeight: 1.55, color: 'var(--fg-0)',
+        }}>
+          <strong>Dry-run öneri:</strong> {suggestedLabel} — bu yalnızca bir <em>öneridir</em>,
+          otomatik aksiyon <strong>uygulanmadı</strong>. Port kapatma/karantina manuel olarak
+          yapılmalıdır (gerçek otomatik karantina ileride onay akışıyla gelecek).
+        </div>
+      )}
 
       {/* Genel meta */}
       <Descriptions column={2} bordered size="small" style={{ marginBottom: 14 }}>

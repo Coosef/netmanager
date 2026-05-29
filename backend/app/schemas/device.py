@@ -89,6 +89,10 @@ class DeviceUpdate(BaseModel):
     snmp_v3_priv_protocol: Optional[str] = None
     snmp_v3_priv_passphrase: Optional[str] = None
     credential_profile_id: Optional[int] = None
+    # T10 Faz C — güvenlik politikası ataması (switch + cihaz-geneli default port).
+    # null = atamayı kaldır (resolver org default'a düşer). Per-port override v2.
+    security_policy_id: Optional[int] = None
+    port_security_policy_id: Optional[int] = None
 
 
 class DeviceMoveRequest(BaseModel):
@@ -142,6 +146,9 @@ class DeviceResponse(BaseModel):
     snmp_v3_priv_protocol: Optional[str]
     group_id: Optional[int]
     credential_profile_id: Optional[int]
+    # T10 Faz C — atanan güvenlik politikaları (null = atanmamış → org default).
+    security_policy_id: Optional[int] = None
+    port_security_policy_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     availability_24h:  Optional[float] = None
@@ -176,7 +183,9 @@ class DeviceResponse(BaseModel):
             "status", "last_seen", "last_backup", "is_active", "is_readonly",
             "approval_required", "snmp_enabled", "snmp_version", "snmp_port",
             "snmp_v3_username", "snmp_v3_auth_protocol", "snmp_v3_priv_protocol",
-            "group_id", "credential_profile_id", "created_at", "updated_at",
+            "group_id", "credential_profile_id",
+            "security_policy_id", "port_security_policy_id",
+            "created_at", "updated_at",
             "availability_24h", "availability_7d", "mtbf_hours", "experience_score",
             # F11 — surface only if the endpoint joined and stashed them
             # on the ORM object as transient attributes.

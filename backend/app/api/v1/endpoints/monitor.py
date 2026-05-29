@@ -34,6 +34,7 @@ async def list_events(
     hours: int = Query(24, description="Events from last N hours"),
     unacked_only: bool = Query(False),
     site: Optional[str] = Query(None),
+    policy_only: bool = Query(False, description="Only security-policy engine events"),
 ):
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
     q = select(NetworkEvent).where(NetworkEvent.created_at >= since)
@@ -49,6 +50,9 @@ async def list_events(
         q = q.where(NetworkEvent.severity == severity)
     if event_type:
         q = q.where(NetworkEvent.event_type == event_type)
+    if policy_only:
+        from app.services.security_policy_service import POLICY_EVENT_TYPES
+        q = q.where(NetworkEvent.event_type.in_(POLICY_EVENT_TYPES))
     if device_id:
         q = q.where(NetworkEvent.device_id == device_id)
     if unacked_only:
@@ -92,6 +96,7 @@ async def export_events_csv(
     hours: int = Query(24, description="Events from last N hours"),
     unacked_only: bool = Query(False),
     site: Optional[str] = Query(None),
+    policy_only: bool = Query(False, description="Only security-policy engine events"),
 ):
     """Export filtered network events as CSV download."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
@@ -106,6 +111,9 @@ async def export_events_csv(
         q = q.where(NetworkEvent.severity == severity)
     if event_type:
         q = q.where(NetworkEvent.event_type == event_type)
+    if policy_only:
+        from app.services.security_policy_service import POLICY_EVENT_TYPES
+        q = q.where(NetworkEvent.event_type.in_(POLICY_EVENT_TYPES))
     if device_id:
         q = q.where(NetworkEvent.device_id == device_id)
     if unacked_only:

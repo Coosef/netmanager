@@ -6,6 +6,8 @@ import { devicesApi } from '@/api/devices'
 import { agentsApi } from '@/api/agents'
 import { credentialProfilesApi } from '@/api/credentialProfiles'
 import { locationsApi } from '@/api/locations'
+import { securityPoliciesApi } from '@/api/securityPolicies'
+import { useSite } from '@/contexts/SiteContext'
 import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS, OS_TYPE_OPTIONS, VENDOR_OPTIONS, VENDOR_OS_MAP } from '@/types'
 import { useTranslation } from 'react-i18next'
@@ -33,6 +35,24 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   const { data: locationsData } = useQuery({
     queryKey: ['locations'],
     queryFn: () => locationsApi.list(),
+    staleTime: 30_000,
+  })
+
+  // T10 Faz C — güvenlik politikası ataması yalnız mevcut cihazı düzenlerken
+  // (atama DeviceUpdate ile gider; yeni cihaz resolver org default'una düşer).
+  // Özellik kapalıysa (features.security_policy === false) bölüm gizlenir.
+  const { features } = useSite()
+  const secPolEnabled = features['security_policy'] !== false && !!device
+  const { data: switchPolicies = [] } = useQuery({
+    queryKey: ['secpol', 'switch'],
+    queryFn: () => securityPoliciesApi.list('switch'),
+    enabled: secPolEnabled,
+    staleTime: 30_000,
+  })
+  const { data: portPolicies = [] } = useQuery({
+    queryKey: ['secpol', 'port'],
+    queryFn: () => securityPoliciesApi.list('port'),
+    enabled: secPolEnabled,
     staleTime: 30_000,
   })
 
@@ -79,6 +99,11 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       if (payload.site === '') payload.site = null
       if (payload.building === '') payload.building = null
       if (payload.floor === '') payload.floor = null
+      if (device) {
+        // boş bırakılan/temizlenen politika alanı → null (atamayı kaldır).
+        payload.security_policy_id = payload.security_policy_id ?? null
+        payload.port_security_policy_id = payload.port_security_policy_id ?? null
+      }
       return device ? devicesApi.update(device.id, payload) : devicesApi.create(payload)
     },
     onSuccess: () => {
@@ -110,6 +135,8 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         building: device.building || '',
         floor: device.floor || '',
         credential_profile_id: (device as any).credential_profile_id ?? null,
+        security_policy_id: (device as any).security_policy_id ?? undefined,
+        port_security_policy_id: (device as any).port_security_policy_id ?? undefined,
         ssh_username: device.ssh_username,
         ssh_port: device.ssh_port,
         agent_id: device.agent_id || '',
@@ -252,6 +279,54 @@ export default function DeviceForm({ device, onSuccess }: Props) {
           unCheckedChildren="Serbest"
         />
       </Form.Item>
+
+      {/* T10 Faz C — Güvenlik politikası ataması (yalnız düzenlemede + özellik açıksa).
+          v1: cihaz-geneli (switch + tek bir default port politikası). Port-bazlı
+          override = v2. Boş = atanmamış → resolver org default'una düşer. */}
+      {secPolEnabled && (
+        <>
+          <Divider orientation="left" plain style={{ fontSize: 12, opacity: 0.6 }}>
+            <SafetyOutlined style={{ marginRight: 4 }} />Güvenlik Politikası
+          </Divider>
+
+          <Form.Item
+            label="Switch Politikası"
+            name="security_policy_id"
+            tooltip="Bu cihaza atanan switch güvenlik politikası (CPU/bellek/PoE eşikleri vb.). Boş = atanmamış → org varsayılanı kullanılır."
+          >
+            <Select
+              allowClear
+              placeholder="— Atanmamış (org varsayılanı) —"
+              options={switchPolicies.map((p: any) => ({
+                label: p.is_default ? `${p.name} (varsayılan)` : p.name,
+                value: p.id,
+              }))}
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="Port Politikası (cihaz geneli)"
+            name="port_security_policy_id"
+            tooltip="Cihazın tüm portları için varsayılan port güvenlik politikası (MAC flood/flap eşikleri). Port-bazlı override = v2. Boş = atanmamış → org varsayılanı."
+          >
+            <Select
+              allowClear
+              placeholder="— Atanmamış (org varsayılanı) —"
+              options={portPolicies.map((p: any) => ({
+                label: p.is_default ? `${p.name} (varsayılan)` : p.name,
+                value: p.id,
+              }))}
+            />
+          </Form.Item>
+
+          <Alert
+            type="info"
+            showIcon
+            style={{ marginBottom: 12, fontSize: 12 }}
+            message="Port politikası v1'de cihaz genelinde uygulanır; tek tek port bazlı atama bir sonraki sürümde (v2) gelecek."
+          />
+        </>
+      )}
 
       <Divider style={{ margin: '12px 0', fontSize: 12 }}>SSH Bağlantısı</Divider>
 

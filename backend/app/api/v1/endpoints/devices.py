@@ -1131,6 +1131,17 @@ async def update_device(
         community = data.pop("snmp_community")
         device.snmp_community = encrypt_credential(community) if community else None
 
+    # T10 Faz C — atanan güvenlik policy id'leri org-scoped doğrula (cross-org atama
+    # engeli). RLS context kurulu (get_current_user) → başka org'un policy'si None döner.
+    if data.get("security_policy_id") is not None:
+        from app.models.security_policy import SwitchSecurityPolicy
+        if await db.get(SwitchSecurityPolicy, data["security_policy_id"]) is None:
+            raise HTTPException(status_code=400, detail="Geçersiz switch security_policy_id")
+    if data.get("port_security_policy_id") is not None:
+        from app.models.security_policy import PortSecurityPolicy
+        if await db.get(PortSecurityPolicy, data["port_security_policy_id"]) is None:
+            raise HTTPException(status_code=400, detail="Geçersiz port security_policy_id")
+
     for field, value in data.items():
         setattr(device, field, value)
 
