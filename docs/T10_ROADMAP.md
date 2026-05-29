@@ -85,6 +85,19 @@
 
 ## Faz C — Security Policy Engine  (docx #5+#6, #8)
 
+> **DURUM (2026-05-29) — Faz C MVP TAMAMLANDI ✅ — main @ `f8f162c`.**
+> **Teslim edilen:**
+> - **C1** Schema (`f9ab`/`f9ac`/`f9ad`, alembic head=`f9adsecrls`) + Faz 7 RLS (FORCE, org-izole) + org bazlı seed (3 switch: Default/CCTV-IoT/Backbone, 7 port preset). NULL=kontrol kapalı.
+> - **C2** Resolver: atanan policy → org `is_default` → hardcoded fallback (switch + port). `[policy=<ad>]` etiketi.
+> - **C3** Anomaly: CPU + Memory eşik değerlendirmesi (`poll_device_health`, 5dk beat) + offline `[policy=]` label. *(sıcaklık + PoE budget → veri-kaynağı yok → v2)*
+> - **C4** MAC flood (**C4a**, opt-in `security.mac_flood_enabled` default-OFF + uplink heuristik skip) + MAC flap (**C4b**, collection-capture, Redis sayaç). Flap → **DRY-RUN** alarm (`dry_run=true`, `suggested_action=quarantine_port`) — **gerçek shutdown YOK**.
+> - **C6** Frontend: **C6a** CRUD sayfası (switch/port tab, NULL UI, feature gate, viewer salt-okunur) · **C6b** cihaz formu atama (switch + cihaz-geneli port; cross-org doğrulama) · **C6c** olay listesinde `[policy]` etiketi + DRY-RUN öneri rozeti + `policy_only` filtre + CSV.
+>
+> **Ertelendi (v2 / sonraki):** **C5** gerçek auto-quarantine (port shutdown operasyonel risk → kill-switch + approval ile gelecek, kullanıcı kararıyla başlatılmadı) · C4 L2 trap parse · C6 optic DOM · C7 PoE budget alarmı · sıcaklık eşiği · C9 config_change · C12 playbook tetik · C13 false-positive hide · **per-port override** (v1 = cihaz-geneli default port policy).
+>
+> **Backlog:** TD-2 — WS auth `OAuth2PasswordBearer` 5xx (pre-existing, C6 değil; `docs/TECH_DEBT_BACKLOG.md`).
+> **Deploy:** Production deploy YOK · VPS deploy hazard geçerli.
+
 **Amaç:** Per-switch + per-port atanabilir güvenlik politikaları. **En büyük modül** — docx'in tam karşılığı, birçok küçük gap'i (port security, L2 trap, optic, MAC flap) tek çatıda toplar.
 
 ### Mevcut
