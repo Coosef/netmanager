@@ -24,6 +24,10 @@ api_router.include_router(tasks.router, prefix="/tasks", tags=["Tasks"])
 api_router.include_router(topology.router, prefix="/topology", tags=["Topology"], dependencies=_feat("topology"))
 api_router.include_router(ws.router, prefix="/ws", tags=["WebSocket"])
 api_router.include_router(agents.router, prefix="/agents", tags=["Agents"], dependencies=_feat("agents"))
+# TD-2 — Agent WS (agent_key ile auth) ayrı router'da, GATE'SİZ include edilir. user-auth
+# gerektiren _feat("agents") (→ oauth2_scheme, HTTP-only) WS scope'ta 5xx üretiyordu; WS
+# endpoint'lerine HTTP auth dependency uygulanmamalı (ws.py de aynı sebeple gate'siz, üstte).
+api_router.include_router(agents.agent_ws_router, prefix="/agents", tags=["Agents"])
 api_router.include_router(agent_stream.router, prefix="/stream", tags=["Streaming"])
 api_router.include_router(monitor.router, prefix="/monitor", tags=["Monitor"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])

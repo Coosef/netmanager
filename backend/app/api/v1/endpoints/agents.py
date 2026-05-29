@@ -47,6 +47,12 @@ CURRENT_AGENT_VERSION: str = _read_agent_version()
 
 router = APIRouter()
 
+# TD-2 — Agent WS, kullanıcı-oturumu değil agent_key ile kimlik doğrular. Bu yüzden
+# user-auth gerektiren `_feat("agents")` router-seviyesi dependency'sinden (→ oauth2_scheme,
+# HTTP-only) AYRI bir router'da durur; aksi halde WS scope'ta oauth2_scheme `request`
+# argümanı bulamayıp 5xx üretiyordu. router.py bunu prefix="/agents" altında GATE'SİZ include eder.
+agent_ws_router = APIRouter()
+
 _redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
 _MAX_FAILED_AUTH = 10   # lock agent WS after this many consecutive failures
 _AGENT_EVENT_DEDUP_TTL = 600   # 10 min — suppress duplicate agent online/offline events
@@ -1242,7 +1248,7 @@ async def refresh_credential_vault(
 
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
-@router.websocket("/ws/{agent_id}")
+@agent_ws_router.websocket("/ws/{agent_id}")
 async def agent_websocket(
     agent_id: str,
     websocket: WebSocket,
