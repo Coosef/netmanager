@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Link as RouterLink, useSearchParams } from 'react-router-dom'
+import { Link as RouterLink, useSearchParams, useNavigate } from 'react-router-dom'
 import { useTaskProgress } from '@/hooks/useTaskProgress'
 import {
   App, Button, Card, Col, Form, Input, Modal, Popconfirm, Progress, Row, Select, Space,
@@ -28,7 +28,8 @@ import { DEVICE_TYPE_OPTIONS } from '@/types'
 import { useTranslation } from 'react-i18next'
 import DeviceForm from './DeviceForm'
 import MoveDeviceModal from './MoveDeviceModal'
-import DeviceDetail from './DeviceDetail'
+// T10 C7.B — DeviceDetail (modal) deprecate; yeni /devices/:id sayfası kullanılıyor.
+// Dosya silinmedi (C7.D'de Detail sekmelerinde embed için referans).
 import OnboardingWizard from './OnboardingWizard'
 import AutoGroupingModal from './AutoGroupingModal'
 import { apiErr } from '@/utils/apiError'
@@ -850,7 +851,8 @@ export default function DevicesPage() {
   const [page, setPage] = useState(1)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editDevice, setEditDevice] = useState<Device | null>(null)
-  const [detailDevice, setDetailDevice] = useState<Device | null>(null)
+  // T10 C7.B — eski "detail modal" deprecate; "Detay" tıklaması artık /devices/:id sayfasına götürür.
+  const navigate = useNavigate()
   // RBAC F9 — single source for mutating action visibility. Mirrors backend
   // `device:*` grant map (SYSTEM_ROLE_PERMISSIONS). Viewer sees no
   // mutating button at all; location_admin sees edit/connect/move but
@@ -1223,7 +1225,7 @@ export default function DevicesPage() {
               key={device.id}
               device={device}
               isDark={isDark}
-              onDetail={() => setDetailDevice(device)}
+              onDetail={() => navigate(`/devices/${device.id}`)}
               onEdit={() => { setEditDevice(device); setDrawerOpen(true) }}
               onTest={() => testMutation.mutate(device.id)}
               onDelete={() => deleteMutation.mutate(device.id)}
@@ -1244,7 +1246,7 @@ export default function DevicesPage() {
           onPage={setPage}
           selected={selectedRowKeys as number[]}
           onSelect={(ids) => setSelectedRowKeys(ids)}
-          onDetail={(d) => setDetailDevice(d)}
+          onDetail={(d) => navigate(`/devices/${d.id}`)}
           onEdit={(d) => { setEditDevice(d); setDrawerOpen(true) }}
           onTest={(d) => testMutation.mutate(d.id)}
           onMove={(d) => setMoveDevice(d)}
@@ -1288,30 +1290,11 @@ export default function DevicesPage() {
         onClose={() => setGroupProfileOpen(false)}
       />
 
-      <Modal
-        open={!!detailDevice}
-        onCancel={() => setDetailDevice(null)}
-        footer={null}
-        width="90vw"
-        style={{ top: 20, maxWidth: 1400 }}
-        styles={{ body: { padding: '12px 16px', minHeight: '70vh' } }}
-        title={
-          <Space>
-            <EyeOutlined />
-            <span style={{ fontWeight: 700 }}>{detailDevice?.hostname}</span>
-            {detailDevice && (
-              <code style={{ background: isDark ? '#0f172a' : '#f5f5f5', padding: '1px 6px', borderRadius: 4, fontSize: 12 }}>
-                {detailDevice.ip_address}
-              </code>
-            )}
-          </Space>
-        }
-        destroyOnHidden
-      >
-        {detailDevice && <DeviceDetail device={detailDevice} />}
-      </Modal>
+      {/* T10 C7.B — eski detay modal'ı kaldırıldı; "Detay" tıklaması artık
+          /devices/:id sayfasını açıyor. DeviceDetail.tsx dosyası C7.D'de Detail
+          Page sekmelerinde embed için referans olarak korunur. */}
 
-      {bulkAgentOpen && (
+{bulkAgentOpen && (
         <BulkAgentModal
           selectedIds={selectedRowKeys as number[]}
           onClose={() => setBulkAgentOpen(false)}

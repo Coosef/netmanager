@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { App as AntApp, ConfigProvider, theme } from 'antd'
 import trTR from 'antd/locale/tr_TR'
 import enUS from 'antd/locale/en_US'
@@ -21,11 +21,19 @@ import AppLayout from '@/components/Layout/AppLayout'
 import LoginPage from '@/pages/Login'
 import DashboardPage from '@/pages/Dashboard'
 import DevicesPage from '@/pages/Devices'
+import DeviceDetailPage from '@/pages/Devices/DeviceDetailPage'
+// T10 C7.B — eski /devices/:id/ports yeni Detail sayfasındaki Ports sekmesine yönlendir.
+function RedirectToPortsTab() {
+  const { deviceId } = useParams<{ deviceId: string }>()
+  return <Navigate to={`/devices/${deviceId}?tab=ports`} replace />
+}
 import TasksPage from '@/pages/Tasks'
 import UsersPage from '@/pages/Users'
 import AuditLogPage from '@/pages/AuditLog'
 import TerminalSessionsPage from '@/pages/TerminalSessions'
-import DevicePortsPage from '@/pages/DevicePorts'
+// T10 C7.B — DevicePortsPage artık doğrudan route'lanmıyor (eski /ports yolu Detail
+// sayfasındaki ?tab=ports'a redirect). Mevcut sayfa dosyası kalır; içeriği C7.C'de
+// Detail Page Ports sekmesinde embed/yeniden kullanılacak.
 import MonitorPage from '@/pages/Monitor'
 import LiveMonitorPage from '@/pages/LiveMonitor'
 import TopologyPage from '@/pages/Topology'
@@ -248,6 +256,8 @@ function ThemedApp() {
             >
               <Route index element={<DashboardPage />} />
               <Route path="devices" element={<DevicesPage />} />
+              {/* T10 C7.B — kalıcı Device Detail sayfası (sekmeli). */}
+              <Route path="devices/:deviceId" element={<RoleRoute minRole="viewer"><DeviceDetailPage /></RoleRoute>} />
               <Route path="tasks" element={<TasksPage />} />
               {/* T4.6 cutover — V2 canonical at /topology when the flag is on.
                   /topology-classic is a permanent kill-switch / escape hatch:
@@ -267,7 +277,9 @@ function ThemedApp() {
               <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
               <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
               <Route path="terminal-sessions" element={<PermRoute module="audit_logs" action="view"><TerminalSessionsPage /></PermRoute>} />
-              <Route path="devices/:deviceId/ports" element={<PermRoute module="devices" action="edit"><DevicePortsPage /></PermRoute>} />
+              {/* T10 C7.B — eski ports route'unu yeni Detail sayfasındaki Ports sekmesine yönlendir
+                  (eski bookmark'lar kırılmaz). Gerçek Ports sekmesi içeriği C7.C'de gelecek. */}
+              <Route path="devices/:deviceId/ports" element={<RedirectToPortsTab />} />
               <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
               <Route path="settings" element={<PermRoute module="settings" action="view"><SettingsPage /></PermRoute>} />
               {/* Profil — her authenticated kullanıcı kendi sayfası. Permission
