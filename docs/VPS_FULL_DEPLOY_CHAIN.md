@@ -332,6 +332,98 @@ smoke gate kırmızı (login, agent connect, RLS izolasyonu, 5xx) / IPAM verisi 
 
 ---
 
+## 8. PRE-FLIGHT CHECKLIST (deploy günü — somut, VPS'e özel)
+
+> Bağlam doğrulandı (staging provası YEŞİL): VPS `0dface5`/`f9aafirmware` → hedef `2a80464`/`f9adsecrls`,
+> **3 additive migration** (f9ab/f9ac/f9ad), migration=`netmgr` & runtime=`netmgr_app` (compose'ta — **env değişikliği gerekmez**).
+> Container'lar `netmanager-*`, dizin `/opt/netmanager`. **Her adım çıktısı kaydedilir; ilk kırmızıda dur → §7 Rollback.**
+
+### P0 — GO ön-koşulları (hepsi ✓ olmadan başlama)
+- [ ] **cloudflared ingress** Cloudflare panelinde public hostname → **`localhost:80`** (`:8000`/`:3000` ise önce :80'e çevir). *(operatör panelden teyit)*
+- [ ] **cloudflared token rotate** edildi (sızmış kabul).
+- [ ] Staging provası YEŞİL (bu doc §0/üst — tamam).
+- [ ] **Maintenance window** ilan edildi; **freeze** (yeni merge/push durdu); hedef SHA sabit = `2a80464`.
+
+### P1 — Fresh backup + SHA (read-only DB; dosya yazar)
+```bash
+cd /opt/netmanager
+TS=$(date -u +%Y%m%d_%H%M%S); OUT=backups/pre-deploy-${TS}.dump
+docker exec -i netmanager-postgres-1 pg_dump -U netmgr -Fc -d network_manager > "$OUT"
+sha256sum "$OUT" | tee backups/pre-deploy-${TS}.sha256
+ls -lah "$OUT"          # boyut makul mü
+```
+- [ ] Dump alındı, **SHA-256 kaydedildi**, boyut ~13MB+ (prova dump'ı referans).
+
+### P2 — Rollback anchor (deploy ÖNCESİ durumu dondur)
+```bash
+git rev-parse HEAD                                   # beklenen: 0dface5...
+docker exec -i netmanager-postgres-1 psql -U netmgr -d network_manager -tAc "SELECT version_num FROM alembic_version;"  # f9aafirmware
+docker inspect --format '{{.Name}} {{.Image}}' $(docker ps -q --filter name=netmanager)  # image digest'leri
+```
+- [ ] Anchor kaydı: git=`0dface5` · alembic=`f9aafirmware` · image digest'leri · dump yolu+SHA (P1). → tek "PRE-DEPLOY ANCHOR" notu.
+
+### P3 — Disk headroom (build öncesi; %80 dolu, 9.3G boş)
+```bash
+df -h /opt/netmanager; docker system df
+docker image prune -f          # dangling image'lar
+docker builder prune -f        # ~1.98GB build cache
+```
+- [ ] Build için yeterli alan (reclaimable ~5.6GB temizlendi).
+
+### P4 — Kod hedef SHA (naive pull DEĞİL — pinned + fast-forward)
+```bash
+git fetch origin
+git merge --ff-only 2a80464     # FF değilse DURUR (diverjans guard); main → 2a80464
+git rev-parse HEAD              # doğrula: 2a80464...
+```
+- [ ] HEAD = `2a80464` (FF temiz). Untracked `a`/`backups/` zararsız.
+
+### P5 — Image build (frontend production)
+```bash
+docker compose build           # FRONTEND_TARGET default=production (dist+nginx)
+```
+- [ ] Build hatasız bitti (tsc+vite build geçer — staging'de kanıtlandı).
+
+### P6 — Migration (3 additive — yeni image, up'tan ÖNCE)
+```bash
+docker compose run --rm backend alembic upgrade head
+# Beklenen TAM OLARAK: f9aafirmware→f9absecpol→f9acdevsecfk→f9adsecrls
+docker exec -i netmanager-postgres-1 psql -U netmgr -d network_manager -tAc "SELECT version_num FROM alembic_version;"  # f9adsecrls
+```
+- [ ] 3 migration koştu, `alembic current = f9adsecrls`, hata yok. *(migration `netmgr` superuser ile — compose MIGRATION_DATABASE_URL)*
+
+### P7 — Servisleri kaldır (rolling recreate; down DEĞİL)
+```bash
+docker compose up -d
+# nginx.conf değiştiyse (B1c): docker compose up -d --force-recreate nginx
+docker compose ps             # tüm servis healthy
+```
+- [ ] Tüm container Up/healthy. B1c: yalnız nginx:80 publish (backend/pg/redis/flower artık expose-only).
+
+### P8 — 11 SMOKE GATE (ilk kırmızıda dur → Rollback)
+```bash
+# host nginx :443 / container :80 üzerinden (operatör admin kimliğiyle)
+curl -s -o /dev/null -w "1 /health/ready: %{http_code}\n" -k https://localhost/health/ready
+# 2 login → token (operatör parolası):  POST /api/v1/auth/login
+# 3 super-admin /api/v1/context/current → orgs/role
+# 4 agent WS /api/v1/agents/ws/{id} → 5xx YOK (TD-2)
+# 5 /api/v1/topology → org/loc-scoped
+# 6 /api/v1/security-policies/switch → 200, seed (org×3)
+# 7 /api/v1/devices → liste
+# 8 /api/v1/ws/events valid token → 101
+# 9 backend log: docker compose logs backend --since 5m | grep -iE "5xx|Traceback|OAuth2"  → BOŞ
+# 10 RLS izolasyon: org-A kullanıcısı yalnız org-A görür
+# 11 DB perm audit: docker compose exec backend python scripts/audit_db_permissions.py → PASS
+```
+- [ ] 11/11 yeşil. Dış erişim (cloudflared/host-nginx → :80) çalışıyor: `https://<domain>/login`.
+
+### P9 — Rollback kriteri & prosedür
+**Geri al:** migration ortada durdu / smoke kırmızı / dış erişim koptu / beklenmedik veri kaybı.
+**Prosedür (DR_RUNBOOK §6):** yazan servisleri durdur → **pre-deploy dump restore** (downgrade tek başına yetmez) →
+`git merge --ff-only`/`checkout 0dface5` → image rollback (anchor digest) → P8 gate'leri (1-3,9,10) yeşil + `alembic current=f9aafirmware`.
+
+---
+
 ## Ek — referanslar
 - `docs/DR_RUNBOOK.md` — §3 key escrow, §4 backup, §5 restore+doğrulama, §6 rollback anchor, §7 VPS hazard + §7.2 fresh bootstrap sırası + §7.3 nginx inode.
 - `docs/M6_DEPLOY_LOG.md` — M6 (f8a5) geçmiş deploy notları.
