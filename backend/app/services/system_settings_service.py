@@ -70,6 +70,11 @@ _DEFAULTS: dict[str, Any] = {
     "retention.agent_command_logs_days":  90,
     "retention.mac_arp_inactive_days":    30,
     "retention.config_backup_days":       90,
+
+    # T10 C4a — MAC flood detection opt-in (default KAPALI). Per-port policy (v2)
+    # gelene kadar device-level granülarite uplink portlarda false-positive üretir;
+    # bu yüzden opt-in. Org açıkça true yapınca flood task'ı çalışır (uplink skip ile).
+    "security.mac_flood_enabled":          False,
 }
 
 # Per-key guardrail'ler — UI uyarı verir, backend de kabul etmez.
@@ -130,6 +135,7 @@ _CATEGORIES: dict[str, str] = {
     "maintenance":  "Bakım Pencereleri",
     "session":      "Oturum / Stale",
     "retention":    "Veri Saklama (Retention)",
+    "security":     "Güvenlik Politikası",
 }
 
 # T10 A2 — yazma kapsamı. "global" = yalnız super-admin, organization_id=None

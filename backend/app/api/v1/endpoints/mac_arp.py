@@ -168,16 +168,43 @@ async def _collect_device(device: Device, db: AsyncSession) -> dict:
         )).scalars().all()
         existing_map = {e.mac_address: e for e in existing_rows}
 
+        # T10 C4b — MAC flap: port-transition'da Redis sayaç + dry-run öneri (shutdown YOK).
+        # Policy + feature device başına BİR kez resolve (transition path nadir; gürültüsüz).
+        from app.services.security_policy_service import (
+            evaluate_mac_flap, resolve_port_policy, security_policy_enabled,
+        )
+        _flap_pol = await resolve_port_policy(db, device)
+        _flap_on = (
+            _flap_pol.mac_flap_window_min is not None
+            and _flap_pol.mac_flap_min_transitions is not None
+            and await security_policy_enabled(db, device.organization_id)
+        )
+        _flap_alarms: list[dict] = []
+        _flap_redis = None
+        if _flap_on:
+            try:
+                from app.workers.tasks.monitor_tasks import _redis as _flap_redis
+            except Exception:
+                _flap_redis = None
+
         for entry in parsed_macs:
             mac = entry["mac_address"]
             vendor = oui_service.lookup(mac)
             dtype = oui_service._classify_vendor(vendor) if vendor else "other"
             if mac in existing_map:
                 row = existing_map[mac]
+                _old_port = row.port
+                _new_port = entry.get("port")
+                # C4b — port değiştiyse (ikisi de dolu) flap sayacını işle.
+                if _flap_on and _flap_redis is not None and _old_port and _new_port and _old_port != _new_port:
+                    spec = evaluate_mac_flap(_flap_redis, _flap_pol, device.organization_id,
+                                             device.id, mac, device.hostname, _new_port)
+                    if spec is not None:
+                        _flap_alarms.append(spec)
                 row.last_seen = now
                 row.is_active = True
                 row.vlan_id = entry.get("vlan_id")
-                row.port = entry.get("port")
+                row.port = _new_port
                 row.entry_type = entry.get("entry_type", "dynamic")
                 row.oui_vendor = vendor
                 row.device_type = dtype
@@ -201,6 +228,17 @@ async def _collect_device(device: Device, db: AsyncSession) -> dict:
             if mac not in current_macs:
                 row.is_active = False
                 row.last_seen = now
+
+        # T10 C4b — flap alarmlarını NetworkEvent olarak ekle (caller commit eder).
+        # _scoping hook org/loc'u device_id'den damgalar. Gerçek shutdown YOK (dry-run).
+        if _flap_alarms:
+            from app.models.network_event import NetworkEvent as _NE
+            for spec in _flap_alarms:
+                db.add(_NE(
+                    device_id=device.id, device_hostname=device.hostname,
+                    event_type=spec["event_type"], severity=spec["severity"],
+                    title=spec["message"], message="", details=spec["details"],
+                ))
 
         mac_count = len(parsed_macs)
     else:

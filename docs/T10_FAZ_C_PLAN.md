@@ -128,7 +128,17 @@ Yeni motor YAZMIYORUZ — mevcut tetik noktalarına policy-okuma ekliyoruz:
 - ⏸️ **Temperature → v2:** veri kaynağı YOK (vendor-specific entity-sensor OID). Trap/optic ile birlikte.
 - ⏸️ **PoE budget % → v2:** switch toplam PoE bütçesi (payda) kayıtlı değil; per-port `max_mw` switch
   budget'ı değil. Ayrı migration + cihaz envanter alanı (`devices.poe_total_budget_mw`) gerektirir.
-- **MAC flood / flap** → C4 (mevcut `mac_arp` verisi).
+- **MAC flood / flap** → C4 (yeni `poll_mac_anomalies` task'ı + collection hook):
+  - **C4a — MAC flood (read-only):** `mac_address_entries`'ten `GROUP BY device_id, port` →
+    aktif MAC sayısı → `resolve_port_policy` (device-level default port policy) `mac_flood_warning/critical`.
+    NULL→skip, feature kapalı→skip, `[policy=]` etiketi, **shutdown YOK** (sadece alarm).
+  - **C4b — MAC flap (transition capture):** mevcut tablo **port-transition geçmişi tutmuyor**
+    (`_collect_device` upsert port'u eziyor) → historical hesap yapılamaz. Bunun yerine
+    `_collect_device`'de `row.port != yeni_port` anında Redis flap-counter (key org/device/mac,
+    TTL=`mac_flap_window_min`); transition ≥ `mac_flap_min_transitions` → flap alarmı + **dry-run
+    karantina önerisi** (`details: dry_run=true, suggested_action="quarantine_port"`). **GERÇEK SHUTDOWN YOK.**
+- **Auto-quarantine (gerçek shutdown)** → **C5 sonrası** kill-switch + approval ile. C4'te `auto_quarantine_on_nth_flap`
+  yalnız recommendation/dry-run metadata.
 - **L2 trap / optic DOM** → v2 (agent UDP trap receiver + vendor OID heterojenliği).
 - **Optic DOM** (event): vendor-specific SFP OID keşfi (Cisco/Ruijie) → `optic_rx/temp` eşiği. Keşif gerektirir.
 - Cron-based vs event-based ayrımı docx'teki gibi korunur.
