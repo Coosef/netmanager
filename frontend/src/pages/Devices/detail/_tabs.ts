@@ -19,7 +19,7 @@ export const DETAIL_TABS: TabSpec[] = [
   { key: 'overview', label: 'Genel' },
   { key: 'ports',    label: 'Portlar' }, // C7.C live
   { key: 'security', label: 'Güvenlik Politikası' },
-  { key: 'vlan',     label: 'VLAN',              placeholder: true }, // C7.D
+  { key: 'vlan',     label: 'VLAN' }, // C7.D live
   { key: 'mac',      label: 'MAC Tablosu',       placeholder: true }, // C7.D
   { key: 'poe',      label: 'PoE',               placeholder: true }, // C7.D
   { key: 'events',   label: 'Olaylar',           placeholder: true }, // C7.D

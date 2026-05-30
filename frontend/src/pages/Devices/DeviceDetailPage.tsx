@@ -15,6 +15,7 @@ import { DETAIL_TABS, normalizeTab, type TabKey } from './detail/_tabs'
 import OverviewTab from './detail/OverviewTab'
 import SecurityPoliciesTab from './detail/SecurityPoliciesTab'
 import PortsTab from './detail/PortsTab'
+import VlanTab from './detail/VlanTab'
 
 const STATUS_BADGE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
   online: 'success', offline: 'error', unreachable: 'warning', unknown: 'default',
@@ -91,6 +92,7 @@ export default function DeviceDetailPage() {
       if (t.key === 'overview') return <OverviewTab device={device} />
       if (t.key === 'security') return <SecurityPoliciesTab device={device} />
       if (t.key === 'ports') return <PortsTab device={device} />
+      if (t.key === 'vlan') return <VlanTab device={device} />
       return <PlaceholderTab name={t.label} eta="C7.D" />
     })(),
   }))
