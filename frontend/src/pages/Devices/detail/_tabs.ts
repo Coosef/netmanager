@@ -24,7 +24,7 @@ export const DETAIL_TABS: TabSpec[] = [
   { key: 'poe',      label: 'PoE' }, // C7.D live
   { key: 'events',   label: 'Olaylar' }, // C7.D live
   { key: 'backup',   label: 'Config Backup' }, // C7.D live
-  { key: 'actions',  label: 'Aksiyonlar',        placeholder: true }, // C7.D
+  { key: 'actions',  label: 'Aksiyonlar' }, // C7.D live
 ]
 
 export const DEFAULT_TAB: TabKey = 'overview'
