@@ -22,7 +22,7 @@ export const DETAIL_TABS: TabSpec[] = [
   { key: 'vlan',     label: 'VLAN' }, // C7.D live
   { key: 'mac',      label: 'MAC Tablosu' }, // C7.D live
   { key: 'poe',      label: 'PoE' }, // C7.D live
-  { key: 'events',   label: 'Olaylar',           placeholder: true }, // C7.D
+  { key: 'events',   label: 'Olaylar' }, // C7.D live
   { key: 'backup',   label: 'Config Backup',     placeholder: true }, // C7.D
   { key: 'actions',  label: 'Aksiyonlar',        placeholder: true }, // C7.D
 ]

@@ -18,6 +18,7 @@ import PortsTab from './detail/PortsTab'
 import VlanTab from './detail/VlanTab'
 import MacTab from './detail/MacTab'
 import PoeTab from './detail/PoeTab'
+import EventsTab from './detail/EventsTab'
 
 const STATUS_BADGE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
   online: 'success', offline: 'error', unreachable: 'warning', unknown: 'default',
@@ -97,6 +98,7 @@ export default function DeviceDetailPage() {
       if (t.key === 'vlan') return <VlanTab device={device} />
       if (t.key === 'mac') return <MacTab device={device} />
       if (t.key === 'poe') return <PoeTab device={device} />
+      if (t.key === 'events') return <EventsTab device={device} />
       return <PlaceholderTab name={t.label} eta="C7.D" />
     })(),
   }))
