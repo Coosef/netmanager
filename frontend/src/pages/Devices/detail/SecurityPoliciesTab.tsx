@@ -4,14 +4,14 @@
  * C6b'den taşınan switch + cihaz-geneli port policy atama UI'sının yeni evi.
  * Atama mevcut PATCH /devices/{id} ile gider (security_policy_id, port_security_policy_id).
  * NULL = "atanmamış" → resolver org default'una düşer (UI'da açıkça yazılı).
- * Per-port override sayısı bilgi olarak gösterilir (CRUD = C7.C Ports sekmesi).
+ * Per-port override sayısı bilgi olarak gösterilir (CRUD = Portlar sekmesi).
  *
  * Yetki: viewer dropdown'ları görür ama Save disabled; org_admin+ kaydeder.
  * Feature gate: bu sekme yalnız `security_policy` özelliği açıkken render edilir
  * (DeviceDetailPage'te `features['security_policy'] !== false` filtresiyle).
  */
 import { useEffect, useState } from 'react'
-import { Select, Button, Card, Alert, Tag, Typography, message } from 'antd'
+import { Select, Button, Card, Tag, Typography, message } from 'antd'
 import { SafetyOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -109,7 +109,7 @@ export default function SecurityPoliciesTab({ device }: { device: Device }) {
         <div>
           <Text strong>Port Politikası (cihaz geneli default)</Text>
           <div style={{ color: 'var(--fg-3, #64748b)', fontSize: 12, marginBottom: 6 }}>
-            Cihazın tüm portları için varsayılan. Port-bazlı override = Portlar sekmesi (C7.C).
+            Cihazın tüm portları için varsayılan. Port-bazlı override = Portlar sekmesi.
           </div>
           <Select
             allowClear
@@ -169,13 +169,6 @@ export default function SecurityPoliciesTab({ device }: { device: Device }) {
               : <><Tag color="red">fallback</Tag> hardcoded baseline</>}
         </div>
       </Card>
-
-      <Alert
-        type="info"
-        showIcon
-        style={{ marginTop: 12, fontSize: 12 }}
-        message="Per-port override CRUD (toplu seçim, tek tek atama, dry-run quarantine önerileri) C7.C ile Portlar sekmesinde gelecek."
-      />
     </div>
   )
 }
