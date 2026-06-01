@@ -19,6 +19,7 @@ import { poeApi } from '@/api/poe'
 import { snmpApi } from '@/api/snmp'
 import { monitorApi } from '@/api/monitor'
 import Sparkline from './_sparkline'
+import Donut from './_donut'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -132,6 +133,14 @@ export default function OverviewTab({ device }: { device: Device }) {
       info: items.filter((e) => e.severity === 'info').length,
     }
   }, [eventsQ.data?.items])
+
+  // Wave 2 #2 F4 — Availability/SLA (devicesApi.getAvailability, 30g pencere)
+  const availQ = useQuery({
+    queryKey: ['device-availability', device.id, 30],
+    queryFn: () => devicesApi.getAvailability(device.id, 30),
+    enabled: device.id > 0,
+    staleTime: 5 * 60_000,
+  })
 
   const stats = useMemo(() => {
     const ifaces = ifaceQ.data?.interfaces ?? []
@@ -304,6 +313,46 @@ export default function OverviewTab({ device }: { device: Device }) {
             <span className="nm-pill crit">{eventStats.critical} kritik</span>
             <span className="nm-pill warn">{eventStats.warning} uyarı</span>
             <span className="nm-pill">{eventStats.info} bilgi</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Wave 2 #2 F4 — SLA / Availability (mockup pages-devices.jsx:547-576) */}
+      <div className="nm-card" style={{
+        padding: 14, marginBottom: 16, border: '1px solid var(--line-soft)',
+        borderRadius: 8, background: 'var(--bg-1)',
+      }}>
+        <div style={{
+          fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.06,
+          color: 'var(--fg-3)', marginBottom: 14, fontWeight: 600,
+        }}>
+          SLA / Availability
+        </div>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap',
+        }}>
+          <Donut value={availQ.data?.current?.availability_7d ?? null} label="uptime · 7g" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'auto auto', gap: '6px 14px', fontSize: 12 }}>
+            <span style={{ color: 'var(--fg-3)' }}>7 günlük uptime</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {availQ.data?.current?.availability_7d?.toFixed(2) ?? '—'}%
+            </span>
+            <span style={{ color: 'var(--fg-3)' }}>30 günlük uptime</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {availQ.data?.current?.availability_24h !== null
+                ? availQ.data?.current?.availability_24h?.toFixed(2)
+                : '—'}%
+            </span>
+            <span style={{ color: 'var(--fg-3)' }}>MTBF (saat)</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {availQ.data?.current?.mtbf_hours?.toFixed(1) ?? '—'}
+            </span>
+            <span style={{ color: 'var(--fg-3)' }}>Experience score</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>
+              {availQ.data?.current?.experience_score?.toFixed(0) ?? '—'} / 100
+            </span>
+            <span style={{ color: 'var(--fg-3)' }}>SLA hedef</span>
+            <span style={{ fontFamily: 'var(--font-mono)' }}>99.00%</span>
           </div>
         </div>
       </div>
