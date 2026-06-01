@@ -423,8 +423,19 @@ def _get_devices_for_filter(db, device_filter: str, site: Optional[str]) -> List
     return ids
 
 
-def _trigger_schedule_backup_sync(device_filter: str, site: Optional[str], created_by: int) -> Optional[int]:
-    """Synchronous version — called from Celery worker context."""
+def _trigger_schedule_backup_sync(
+    device_filter: str,
+    site: Optional[str],
+    created_by: int,
+    organization_id: int,
+) -> Optional[int]:
+    """Synchronous version — called from Celery worker context.
+
+    Wave 3 W3.1: organization_id zorunlu parametre — Task INSERT before_insert
+    hook'u RLS bypass altında bile organization_id'yi türetememek için fail-secure.
+    Caller schedule.organization_id'yi (check_backup_schedules) veya user
+    context'inden (FastAPI endpoint via wrapper) geçer.
+    """
     from app.models.task import Task as TaskModel, TaskType, TaskStatus
     db = _get_db()
     try:
@@ -439,6 +450,9 @@ def _trigger_schedule_backup_sync(device_filter: str, site: Optional[str], creat
             device_ids=device_ids,
             total_devices=len(device_ids),
             created_by=created_by,
+            # Wave 3 W3.1 — Faz 7 RLS bypass altında bile tasks.organization_id
+            # before_insert hook'unu geçmek için açıkça türetilmeli.
+            organization_id=organization_id,
         )
         db.add(task)
         db.commit()
@@ -453,8 +467,17 @@ def _trigger_schedule_backup_sync(device_filter: str, site: Optional[str], creat
         db.close()
 
 
-async def _trigger_schedule_backup(device_filter: str, site: Optional[str], created_by: int) -> Optional[int]:
-    """Async version — called from FastAPI endpoint (run-now)."""
+async def _trigger_schedule_backup(
+    device_filter: str,
+    site: Optional[str],
+    created_by: int,
+    organization_id: int,
+) -> Optional[int]:
+    """Async version — called from FastAPI endpoint (run-now).
+
+    Wave 3 W3.1: organization_id zorunlu (yeni param). Caller (backup_schedules.py
+    run_schedule_now) schedule.organization_id'yi geçer.
+    """
     from app.models.task import Task as TaskModel, TaskType, TaskStatus
     from app.core.database import AsyncSessionLocal
     from sqlalchemy import select as aselect
@@ -491,6 +514,8 @@ async def _trigger_schedule_backup(device_filter: str, site: Optional[str], crea
             device_ids=device_ids,
             total_devices=len(device_ids),
             created_by=created_by,
+            # Wave 3 W3.1 — tasks.organization_id NOT NULL + RLS forced.
+            organization_id=organization_id,
         )
         db.add(task)
         await db.commit()
@@ -525,6 +550,7 @@ def check_backup_schedules():
                     schedule.device_filter,
                     schedule.site,
                     schedule.created_by or 1,
+                    schedule.organization_id,  # Wave 3 W3.1
                 )
                 schedule.last_run_at = now
                 schedule.last_task_id = task_id
@@ -563,6 +589,9 @@ def scheduled_backup():
         if not device_ids:
             return
 
+        # Wave 3 W3.1 — multi-org desteklemek için per-org task gerekirdi;
+        # prod tek-tenant olduğu sürece default org=1 yeterli. Multi-org
+        # genişletme Wave 4+ epik (BackupSchedule per-org iteration).
         task = TaskModel(
             name="Scheduled Daily Backup (Default)",
             type=TaskType.BACKUP_CONFIG,
@@ -570,6 +599,7 @@ def scheduled_backup():
             device_ids=device_ids,
             total_devices=len(device_ids),
             created_by=1,
+            organization_id=1,
         )
         db.add(task)
         db.commit()
