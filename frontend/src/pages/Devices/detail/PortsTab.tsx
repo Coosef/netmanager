@@ -13,15 +13,20 @@
 import { useMemo, useState } from 'react'
 import {
   Table, Tag, Badge, Button, Tooltip, Alert, Spin, Typography, message,
-  Modal, Form, Input, InputNumber, Select,
+  Modal, Form, Input, InputNumber, Select, Popconfirm, App,
 } from 'antd'
-import { ReloadOutlined, PoweroffOutlined, ApartmentOutlined } from '@ant-design/icons'
+import {
+  ReloadOutlined, PoweroffOutlined, ApartmentOutlined, ThunderboltOutlined,
+  ReloadOutlined as RestartOutlined,
+} from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Device, NetworkInterface } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { macArpApi } from '@/api/macarp'
 import { portPolicyAssignmentsApi } from '@/api/portPolicyAssignments'
 import { securityPoliciesApi } from '@/api/securityPolicies'
+import { poeApi } from '@/api/poe'
+import { portControlApi, type BulkPoeResult } from '@/api/portControl'
 import { useAuthStore } from '@/store/auth'
 import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import {
@@ -30,6 +35,7 @@ import {
 import { parseVlanList, VlanListError } from './_vlanHelper'
 import BulkPolicyAssignDrawer from './BulkPolicyAssignDrawer'
 import BulkVlanAssignDrawer from './BulkVlanAssignDrawer'
+import BulkPoeRestartDrawer from './BulkPoeRestartDrawer'
 
 const { Text } = Typography
 
@@ -66,11 +72,15 @@ export default function PortsTab({ device }: { device: Device }) {
   const dev = device as any
   const { isOrgAdmin } = useAuthStore()
   const canWrite = isOrgAdmin()
+  const { notification } = App.useApp()
   const [selected, setSelected] = useState<string[]>([])
   const [bulkOpen, setBulkOpen] = useState(false)
   const [bulkVlanOpen, setBulkVlanOpen] = useState(false)
+  const [bulkPoeRestartOpen, setBulkPoeRestartOpen] = useState(false)
   const [assignVlanIface, setAssignVlanIface] = useState<NetworkInterface | null>(null)
   const [assignVlanForm] = Form.useForm()
+  // W3.3 — restart akışında "işlemde" göstermek için pending port seti
+  const [poePending, setPoePending] = useState<Set<string>>(new Set())
 
   const ifaceQ = useQuery({
     queryKey: ['device-interfaces', device.id],
@@ -92,6 +102,14 @@ export default function PortsTab({ device }: { device: Device }) {
   const portPoliciesQ = useQuery({
     queryKey: ['secpol', 'port'],
     queryFn: () => securityPoliciesApi.list('port'),
+    staleTime: 30_000,
+  })
+  // W3.3 — PoE port snapshot (PoeTab ile aynı queryKey → cache hit).
+  // 404 (cihaz PoE desteklemiyor) → friendly null; capability map boş kalır.
+  const poePortsQ = useQuery({
+    queryKey: ['device-poe', device.id],
+    queryFn: () => poeApi.device(device.id).catch(() => null),
+    enabled: device.id > 0,
     staleTime: 30_000,
   })
   // C7.C dry-run pill: bu cihazın son 24 saatlik mac_flap policy olayları.
@@ -160,7 +178,132 @@ export default function PortsTab({ device }: { device: Device }) {
     qc.invalidateQueries({ queryKey: ['device-interfaces', device.id] })
     qc.invalidateQueries({ queryKey: ['mac-table-device', device.id] })
     qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
+    qc.invalidateQueries({ queryKey: ['device-poe', device.id] })
+    qc.invalidateQueries({ queryKey: ['poe-device', device.id] })  // OverviewTab key
   }
+
+  // W3.3 — port adı → oper_status haritası (PoE Status kolonu için).
+  // Port adı snapshot'ta yoksa "—" (PoE desteklemiyor / henüz keşfedilmedi).
+  const poeStatusByPort = useMemo(() => {
+    const map = new Map<string, 'on' | 'off' | string>()
+    const ports = poePortsQ.data?.ports ?? []
+    for (const p of ports) map.set(p.port, p.oper_status)
+    return map
+  }, [poePortsQ.data?.ports])
+
+  const poeCapableSet = useMemo(() => {
+    return new Set((poePortsQ.data?.ports ?? []).map((p) => p.port))
+  }, [poePortsQ.data?.ports])
+
+  // W3.3 — bulk işlem sonrası PoE snapshot + interface listesi yenilensin
+  const invalidatePoeCaches = () => {
+    qc.invalidateQueries({ queryKey: ['device-poe', device.id] })
+    qc.invalidateQueries({ queryKey: ['poe-device', device.id] })
+    qc.invalidateQueries({ queryKey: ['device-interfaces', device.id] })
+  }
+
+  const reportBulkPoeResult = (
+    res: BulkPoeResult, actionLabel: string,
+  ) => {
+    const lines: string[] = []
+    if (res.ok > 0) lines.push(`${res.ok} port ${actionLabel}`)
+    if (res.skipped > 0) lines.push(`${res.skipped} port PoE desteklemediği için atlandı`)
+    if (res.failed > 0) lines.push(`${res.failed} port başarısız`)
+    const desc = lines.length ? lines.join(' · ') : `${actionLabel} tamamlandı`
+    if (res.failed > 0 || res.skipped > 0) {
+      notification.warning({
+        message: `Toplu PoE ${actionLabel} — sonuç`,
+        description: desc,
+        duration: 6,
+      })
+    } else {
+      notification.success({
+        message: `Toplu PoE ${actionLabel} başarılı`,
+        description: desc,
+        duration: 4,
+      })
+    }
+  }
+
+  // W3.3 — Tek port PoE on/off (Popconfirm'den çağrılır)
+  const setPoeMut = useMutation({
+    mutationFn: ({ iface, enable }: { iface: string; enable: boolean }) =>
+      portControlApi.setPoe(device.id, iface, enable),
+    onSuccess: (_data, vars) => {
+      notification.success({
+        message: `${vars.iface} → PoE ${vars.enable ? 'açıldı' : 'kapatıldı'}`,
+        description: '5dk içinde auto-rollback (geri al butonu rollback panelinde).',
+        duration: 4,
+      })
+      invalidatePoeCaches()
+    },
+    onError: (e: any, vars) => notification.error({
+      message: `${vars.iface} PoE ${vars.enable ? 'açılamadı' : 'kapatılamadı'}`,
+      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+    }),
+  })
+
+  // W3.3 — Tek port PoE restart
+  const restartPoeMut = useMutation({
+    mutationFn: (iface: string) => {
+      setPoePending((prev) => new Set(prev).add(iface))
+      return portControlApi.restartPoe(device.id, iface)
+    },
+    onSuccess: (_data, iface) => {
+      notification.success({
+        message: `${iface} → PoE restart başarılı`,
+        description: 'disable → bekle → enable akışı tamamlandı.',
+        duration: 4,
+      })
+      invalidatePoeCaches()
+    },
+    onError: (e: any, iface) => notification.error({
+      message: `${iface} PoE restart başarısız`,
+      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+    }),
+    onSettled: (_d, _e, iface) => {
+      setPoePending((prev) => {
+        const next = new Set(prev)
+        next.delete(iface)
+        return next
+      })
+    },
+  })
+
+  // W3.3 — Toplu PoE on/off (Popconfirm)
+  const bulkPoeMut = useMutation({
+    mutationFn: ({ action }: { action: 'on' | 'off' }) =>
+      portControlApi.bulkPoe(device.id, selected, action),
+    onSuccess: (res, vars) => {
+      reportBulkPoeResult(res, vars.action === 'on' ? 'açma' : 'kapatma')
+      setSelected([])
+      invalidatePoeCaches()
+    },
+    onError: (e: any) => notification.error({
+      message: 'Toplu PoE işlemi başarısız',
+      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+    }),
+  })
+
+  // W3.3 — Toplu PoE restart (drawer)
+  const bulkPoeRestartMut = useMutation({
+    mutationFn: (opts: { restart_wait_sec: number; rollback_after_sec: number; reason?: string }) => {
+      // İşlem sırasında seçili portları "pending" göster
+      setPoePending(new Set(selected))
+      return portControlApi.bulkPoe(device.id, selected, 'restart', opts)
+    },
+    onSuccess: (res) => {
+      reportBulkPoeResult(res, 'restart')
+      setBulkPoeRestartOpen(false)
+      setSelected([])
+      invalidatePoeCaches()
+    },
+    onError: (e: any) => notification.error({
+      message: 'Toplu PoE restart başarısız',
+      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+    }),
+    onSettled: () => setPoePending(new Set()),
+  })
 
   const bulkSetMut = useMutation({
     mutationFn: (policyId: number) =>
@@ -307,9 +450,18 @@ export default function PortsTab({ device }: { device: Device }) {
       },
     },
     {
-      title: 'PoE', key: 'poe', width: 70,
-      // C7.C v1: PoE federasyonu kapsam dışı (snapshot endpoint farklılıkları); kolon "—".
-      render: () => <span style={{ color: 'var(--fg-3,#64748b)' }}>—</span>,
+      // W3.3 — PoE Status (snapshot tablosundan; on/off/restarting/—).
+      title: 'PoE', key: 'poe', width: 90,
+      render: (_: any, r: Row) => {
+        if (poePending.has(r.key)) {
+          return <Tag color="processing" style={{ fontSize: 11 }}>İşlemde…</Tag>
+        }
+        const st = poeStatusByPort.get(r.key)
+        if (!st) return <span style={{ color: 'var(--fg-3,#64748b)' }}>—</span>
+        if (st === 'on') return <Tag color="green" style={{ fontSize: 11 }}>Açık</Tag>
+        if (st === 'off') return <Tag color="default" style={{ fontSize: 11 }}>Kapalı</Tag>
+        return <Tag color="orange" style={{ fontSize: 11 }}>{st}</Tag>
+      },
     },
     {
       title: 'Policy', key: 'policy', width: 220,
@@ -341,20 +493,71 @@ export default function PortsTab({ device }: { device: Device }) {
     },
     // RBAC: canConnect gerekir; yoksa kolon hiç render edilmez (rows ekleme yok).
     ...(canWrite ? [{
-      title: 'Aksiyon', key: 'rowAction', width: 110,
+      title: 'Aksiyon', key: 'rowAction', width: 280,
       render: (_: any, r: Row) => {
         const iface = (ifaceQ.data?.interfaces ?? []).find((i) => i.name === r.key)
         if (!iface) return null
+        const poeSt = poeStatusByPort.get(r.key)
+        const poeCapable = poeCapableSet.size === 0 || poeCapableSet.has(r.key)
+        const isPending = poePending.has(r.key)
         return (
-          <Tooltip title="Bu porta VLAN ata (tek port hızlı yol)">
-            <Button
-              size="small" type="link"
-              icon={<ApartmentOutlined />}
-              onClick={() => setAssignVlanIface(iface)}
-            >
-              VLAN
-            </Button>
-          </Tooltip>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <Tooltip title="Bu porta VLAN ata (tek port hızlı yol)">
+              <Button
+                size="small" type="link"
+                icon={<ApartmentOutlined />}
+                onClick={() => setAssignVlanIface(iface)}
+              >
+                VLAN
+              </Button>
+            </Tooltip>
+            {poeCapable && (
+              <>
+                <Popconfirm
+                  title={`${r.key} → PoE Aç?`}
+                  description="5dk auto-rollback aktif olacak."
+                  okText="Aç" cancelText="Vazgeç"
+                  onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: true })}
+                  disabled={poeSt === 'on' || isPending}
+                >
+                  <Button
+                    size="small" type="link"
+                    icon={<ThunderboltOutlined />}
+                    disabled={poeSt === 'on' || isPending}
+                    loading={setPoeMut.isPending && setPoeMut.variables?.iface === r.key && setPoeMut.variables?.enable}
+                  >Aç</Button>
+                </Popconfirm>
+                <Popconfirm
+                  title={`${r.key} → PoE Kapat?`}
+                  description="Bu port üzerindeki cihaz güç kaybeder. 5dk auto-rollback aktif olacak."
+                  okText="Kapat" okButtonProps={{ danger: true }} cancelText="Vazgeç"
+                  onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: false })}
+                  disabled={poeSt === 'off' || isPending}
+                >
+                  <Button
+                    size="small" type="link" danger
+                    icon={<PoweroffOutlined />}
+                    disabled={poeSt === 'off' || isPending}
+                    loading={setPoeMut.isPending && setPoeMut.variables?.iface === r.key && !setPoeMut.variables?.enable}
+                  >Kapat</Button>
+                </Popconfirm>
+                <Popconfirm
+                  title={`${r.key} → PoE Restart?`}
+                  description="disable → bekle → enable. ~10sn sürer."
+                  okText="Restart" cancelText="Vazgeç"
+                  onConfirm={() => restartPoeMut.mutate(r.key)}
+                  disabled={isPending}
+                >
+                  <Button
+                    size="small" type="link"
+                    icon={<RestartOutlined />}
+                    disabled={isPending}
+                    loading={restartPoeMut.isPending && restartPoeMut.variables === r.key}
+                  >Restart</Button>
+                </Popconfirm>
+              </>
+            )}
+          </div>
         )
       },
     }] : []),
@@ -485,6 +688,34 @@ export default function PortsTab({ device }: { device: Device }) {
           <Tooltip title="Gerçek port kapatma C5 (approval + kill-switch) ile gelecek">
             <Button icon={<PoweroffOutlined />} disabled>Shutdown</Button>
           </Tooltip>
+          {/* W3.3 — Toplu PoE Aç/Kapat (Popconfirm) + Restart (Drawer) */}
+          <Popconfirm
+            title={`Seçili ${selected.length} portta PoE Aç?`}
+            description="5dk auto-rollback aktif. PoE-uyumsuz portlar atlanır."
+            okText="Aç" cancelText="Vazgeç"
+            onConfirm={() => bulkPoeMut.mutate({ action: 'on' })}
+          >
+            <Button
+              icon={<ThunderboltOutlined />}
+              loading={bulkPoeMut.isPending && bulkPoeMut.variables?.action === 'on'}
+            >PoE Aç</Button>
+          </Popconfirm>
+          <Popconfirm
+            title={`Seçili ${selected.length} portta PoE Kapat?`}
+            description="Bu portlardaki cihazlar güç kaybeder. 5dk auto-rollback aktif."
+            okText="Kapat" okButtonProps={{ danger: true }} cancelText="Vazgeç"
+            onConfirm={() => bulkPoeMut.mutate({ action: 'off' })}
+          >
+            <Button
+              icon={<PoweroffOutlined />}
+              danger
+              loading={bulkPoeMut.isPending && bulkPoeMut.variables?.action === 'off'}
+            >PoE Kapat</Button>
+          </Popconfirm>
+          <Button
+            icon={<RestartOutlined />}
+            onClick={() => setBulkPoeRestartOpen(true)}
+          >PoE Restart ▾</Button>
           <Button type="text" onClick={() => setSelected([])} style={{ marginLeft: 'auto' }}>Seçimi temizle</Button>
         </div>
       )}
@@ -512,6 +743,15 @@ export default function PortsTab({ device }: { device: Device }) {
         saving={bulkAssignVlanMut.isPending}
         onSubmit={(vlan_id, mode, native_vlan_id) =>
           bulkAssignVlanMut.mutate({ vlan_id, mode, native_vlan_id })}
+      />
+
+      {/* W3.3 — Toplu PoE Restart Drawer */}
+      <BulkPoeRestartDrawer
+        open={bulkPoeRestartOpen}
+        onClose={() => setBulkPoeRestartOpen(false)}
+        selectedPorts={selected}
+        saving={bulkPoeRestartMut.isPending}
+        onSubmit={(opts) => bulkPoeRestartMut.mutate(opts)}
       />
 
       {/* Tek port VLAN ata (hızlı yol — row aksiyonundan açılır) */}
