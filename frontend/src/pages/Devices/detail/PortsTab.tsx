@@ -360,8 +360,56 @@ export default function PortsTab({ device }: { device: Device }) {
     }] : []),
   ]
 
+  // Wave 2 #2 F2 — Port Statistics (5 KPI mockup pages-switch.jsx:173-181)
+  const portStats = useMemo(() => {
+    const ifaces = ifaceQ.data?.interfaces ?? []
+    const upCount = ifaces.filter((i) =>
+      /up|connected|forwarding/i.test(i.status || '')).length
+    const errCount = ifaces.filter((i) =>
+      /err|disabled|down|notconnect/i.test(i.status || '')).length
+    const vlanSet = new Set(
+      ifaces.map((i) => i.vlan).filter((v) => v && v !== 'trunk') as string[],
+    )
+    return {
+      total: ifaces.length,
+      up: upCount,
+      err: errCount,
+      vlans: vlanSet.size,
+      macTotal: macQ.data?.total ?? 0,
+    }
+  }, [ifaceQ.data?.interfaces, macQ.data?.total])
+
   return (
     <div style={{ padding: '8px 0 16px' }}>
+      {/* Wave 2 #2 F2 — Port Statistics statbar (5 KPI) */}
+      <div className="nm-statbar" style={{ marginBottom: 12 }}>
+        <div className={`nm-stat ${portStats.up > 0 ? 'ok' : ''}`}>
+          <div className="nm-stat-label">Aktif Port</div>
+          <div className="nm-stat-val">
+            {portStats.up}
+            {portStats.total > 0 && <small> / {portStats.total}</small>}
+          </div>
+        </div>
+        <div className={`nm-stat ${portStats.err > 0 ? 'crit' : ''}`}>
+          <div className="nm-stat-label">Err / Down</div>
+          <div className="nm-stat-val">{portStats.err}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">VLAN (port-bazlı)</div>
+          <div className="nm-stat-val">{portStats.vlans}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">MAC Tablosu</div>
+          <div className="nm-stat-val">{portStats.macTotal}</div>
+          <div className="nm-stat-delta">öğrenilmiş MAC</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Override</div>
+          <div className="nm-stat-val">{overrideSet.size}</div>
+          <div className="nm-stat-delta">port policy override</div>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <Text strong>Port listesi</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
