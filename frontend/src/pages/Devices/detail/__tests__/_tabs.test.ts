@@ -11,15 +11,15 @@ describe('DETAIL_TABS catalog', () => {
     expect(DEFAULT_TAB).toBe('overview')
   })
 
-  it('9 sekme tam küme + tekrar yok', () => {
+  it('10 sekme tam küme + tekrar yok (Dalga 1 sonrası Terminal sonda)', () => {
     const keys = DETAIL_TABS.map((t) => t.key)
     expect(keys).toEqual(
-      ['overview', 'ports', 'security', 'vlan', 'mac', 'poe', 'events', 'backup', 'actions']
+      ['overview', 'ports', 'security', 'vlan', 'mac', 'poe', 'events', 'backup', 'actions', 'terminal']
     )
     expect(new Set(keys).size).toBe(keys.length)
   })
 
-  it('placeholder bayraklar — C7.D sonrası TÜM 9 sekme live, placeholder=0', () => {
+  it('placeholder bayraklar — TÜM 10 sekme live, placeholder=0', () => {
     const placeholders = DETAIL_TABS.filter((t) => t.placeholder).map((t) => t.key)
     expect(placeholders).toEqual([])
   })
@@ -34,6 +34,7 @@ describe('normalizeTab', () => {
     ['ports', 'ports'],
     ['security', 'security'],
     ['vlan', 'vlan'],
+    ['terminal', 'terminal'],    // Dalga 1: yeni 10. sekme
     ['BOGUS', 'overview'],       // bilinmeyen → default
     ['SECURITY', 'overview'],    // case-sensitive (URL formatı küçük)
   ])('normalizeTab(%j) === %j', (input, expected) => {

@@ -9,9 +9,9 @@ import { describe, it, expect } from 'vitest'
 import { DETAIL_TABS } from '../_tabs'
 
 describe('DeviceDetailPage / sekme bileşenleri import graph', () => {
-  it('9 sekme key var', () => {
+  it('10 sekme key var (Dalga 1 sonrası Terminal eklendi)', () => {
     expect(DETAIL_TABS.map((t) => t.key)).toEqual([
-      'overview', 'ports', 'security', 'vlan', 'mac', 'poe', 'events', 'backup', 'actions',
+      'overview', 'ports', 'security', 'vlan', 'mac', 'poe', 'events', 'backup', 'actions', 'terminal',
     ])
   })
 
@@ -26,6 +26,7 @@ describe('DeviceDetailPage / sekme bileşenleri import graph', () => {
     await import('../EventsTab')
     await import('../BackupTab')
     await import('../ActionsTab')
+    await import('../TerminalTab')
     expect(true).toBe(true)
   })
 

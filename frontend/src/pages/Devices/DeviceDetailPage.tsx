@@ -21,6 +21,7 @@ import PoeTab from './detail/PoeTab'
 import EventsTab from './detail/EventsTab'
 import BackupTab from './detail/BackupTab'
 import ActionsTab from './detail/ActionsTab'
+import TerminalTab from './detail/TerminalTab'
 
 const STATUS_BADGE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
   online: 'success', offline: 'error', unreachable: 'warning', unknown: 'default',
@@ -90,6 +91,7 @@ export default function DeviceDetailPage() {
       if (t.key === 'events') return <EventsTab device={device} />
       if (t.key === 'backup') return <BackupTab device={device} />
       if (t.key === 'actions') return <ActionsTab device={device} />
+      if (t.key === 'terminal') return <TerminalTab device={device} />
       return null  // tüm sekmeler artık live; placeholder yok
     })(),
   }))

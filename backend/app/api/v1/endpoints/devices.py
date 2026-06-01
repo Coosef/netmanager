@@ -2794,17 +2794,44 @@ async def check_config_policy(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    """SSH to device, retrieve running config, check against security policy rules."""
+    """Check device config against security policy rules.
+
+    Default: SSH to device + tara running-config.
+    Optional body `{"backup_id": <int>}`: DB'den o backup'ın snapshot'ını çek
+    ve onun üzerinde tara (canlı SSH yapma). Backup başka bir cihaza ait ise 404.
+    """
     if not current_user.has_permission("config:view"):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     device = await _get_device_scoped(db, device_id, current_user)
-    result = await ssh_manager.execute_command(device, "show running-config")
-    if not result.success:
-        raise HTTPException(status_code=502, detail=f"SSH error: {result.error}")
+
+    # Body opsiyonel; check-policy'nin eski (body'siz) sözleşmesi korunur.
+    body: dict = {}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    backup_id = body.get("backup_id") if isinstance(body, dict) else None
+
+    source = "live"
+    if backup_id:
+        backup = (await db.execute(
+            select(ConfigBackup).where(
+                ConfigBackup.id == backup_id,
+                ConfigBackup.device_id == device_id,
+            )
+        )).scalar_one_or_none()
+        if not backup:
+            raise HTTPException(status_code=404, detail="Backup not found")
+        config = backup.config_text or ""
+        source = f"backup#{backup_id}"
+    else:
+        result = await ssh_manager.execute_command(device, "show running-config")
+        if not result.success:
+            raise HTTPException(status_code=502, detail=f"SSH error: {result.error}")
+        config = result.output
 
     import re
-    config = result.output
     config_lower = config.lower()
     violations = []
 
@@ -2828,7 +2855,12 @@ async def check_config_policy(
 
     await log_action(
         db, current_user, "config_policy_check", "device", device_id, device.hostname,
-        details={"violations": len(violations), "score": score},
+        details={
+            "violations": len(violations),
+            "score": score,
+            "source": source,
+            **({"backup_id": backup_id} if backup_id else {}),
+        },
         request=request,
     )
 
@@ -2839,6 +2871,8 @@ async def check_config_policy(
         "violations": violations,
         "violation_count": len(violations),
         "critical_count": sum(1 for v in violations if v["severity"] == "critical"),
+        "source": source,
+        **({"backup_id": backup_id} if backup_id else {}),
     }
 
 

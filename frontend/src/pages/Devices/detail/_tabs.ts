@@ -6,7 +6,7 @@
  */
 export type TabKey =
   | 'overview' | 'ports' | 'security'
-  | 'vlan' | 'mac' | 'poe' | 'events' | 'backup' | 'actions'
+  | 'vlan' | 'mac' | 'poe' | 'events' | 'backup' | 'actions' | 'terminal'
 
 export interface TabSpec {
   key: TabKey
@@ -25,6 +25,7 @@ export const DETAIL_TABS: TabSpec[] = [
   { key: 'events',   label: 'Olaylar' }, // C7.D live
   { key: 'backup',   label: 'Config Backup' }, // C7.D live
   { key: 'actions',  label: 'Aksiyonlar' }, // C7.D live
+  { key: 'terminal', label: 'Terminal' }, // Dalga 1 — REPL + canlı SSH hibrit
 ]
 
 export const DEFAULT_TAB: TabKey = 'overview'
