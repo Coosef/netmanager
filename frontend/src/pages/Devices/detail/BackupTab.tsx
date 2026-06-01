@@ -19,10 +19,12 @@
 import { useState, lazy, Suspense } from 'react'
 import {
   Table, Tag, Button, Space, Typography, Popconfirm, Tabs, Alert, Drawer, Spin, App,
+  Modal, Progress,
 } from 'antd'
 import {
   ReloadOutlined, DownloadOutlined, SaveOutlined, StarOutlined, StarFilled,
   DiffOutlined, ThunderboltOutlined, WarningOutlined, FileTextOutlined,
+  SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Device, ConfigBackup } from '@/types'
@@ -54,6 +56,9 @@ export default function BackupTab({ device }: { device: Device }) {
   const [diffOpen, setDiffOpen] = useState(false)
   const [diffFrom, setDiffFrom] = useState<ConfigBackup | null>(null)
   const [diffTo, setDiffTo] = useState<ConfigBackup | null>(null)
+  // Backup snapshot üzerinde Güvenlik Tarama (backend genişlemesi: backup_id param)
+  const [policyOpen, setPolicyOpen] = useState(false)
+  const [policyBackup, setPolicyBackup] = useState<ConfigBackup | null>(null)
 
   const q = useQuery({
     queryKey: ['device-backups', device.id],
@@ -98,6 +103,18 @@ export default function BackupTab({ device }: { device: Device }) {
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || 'İşaretleme başarısız'),
   })
+
+  // Backup snapshot üzerinde policy check — backend backup_id paramini destekliyor.
+  const checkBackupPolicyMut = useMutation({
+    mutationFn: (backupId: number) => devicesApi.checkConfigPolicy(device.id, backupId),
+    onSuccess: () => setPolicyOpen(true),
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'Politika kontrolü başarısız'),
+  })
+
+  const triggerPolicyCheck = (b: ConfigBackup) => {
+    setPolicyBackup(b)
+    checkBackupPolicyMut.mutate(b.id)
+  }
 
   const items = q.data ?? []
 
@@ -260,10 +277,20 @@ export default function BackupTab({ device }: { device: Device }) {
         onClose={() => setPreviewBackup(null)}
         width={Math.min(900, typeof window !== 'undefined' ? window.innerWidth - 60 : 900)}
         extra={previewBackup && (
-          <Button icon={<DownloadOutlined />}
-            onClick={() => devicesApi.downloadBackup(device.id, previewBackup.id)}>
-            İndir
-          </Button>
+          <Space>
+            <Button
+              icon={<SafetyCertificateOutlined />}
+              loading={checkBackupPolicyMut.isPending && policyBackup?.id === previewBackup.id}
+              onClick={() => triggerPolicyCheck(previewBackup)}
+              disabled={!previewQ.data?.config}
+            >
+              Güvenlik Tarama
+            </Button>
+            <Button icon={<DownloadOutlined />}
+              onClick={() => devicesApi.downloadBackup(device.id, previewBackup.id)}>
+              İndir
+            </Button>
+          </Space>
         )}
       >
         <Spin spinning={previewQ.isLoading}>
@@ -299,6 +326,75 @@ export default function BackupTab({ device }: { device: Device }) {
           />
         </Suspense>
       )}
+
+      {/* Backup snapshot — Güvenlik Politika Kontrolü modal */}
+      <Modal
+        title={
+          <Space>
+            <SafetyCertificateOutlined /> Güvenlik Politika Kontrolü
+            {policyBackup && (
+              <Text type="secondary" style={{ fontSize: 13 }}>
+                — Backup #{policyBackup.id} ({dayjs(policyBackup.created_at).format('YYYY-MM-DD HH:mm')})
+              </Text>
+            )}
+          </Space>
+        }
+        open={policyOpen}
+        onCancel={() => setPolicyOpen(false)}
+        footer={<Button onClick={() => setPolicyOpen(false)}>Kapat</Button>}
+        width={640}
+      >
+        {checkBackupPolicyMut.data && (() => {
+          const d = checkBackupPolicyMut.data
+          const scoreColor = d.policy_score >= 80 ? '#52c41a' : d.policy_score >= 60 ? '#faad14' : '#ff4d4f'
+          return (
+            <>
+              <Alert
+                type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+                message={`Tarama kaynağı: ${d.source}`}
+                description="Bu backup snapshot'ı üzerinde yapılan offline policy taraması — canlı cihaz erişimi gerekmez."
+              />
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: 48, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>
+                  {d.policy_score}
+                </div>
+                <div style={{ color: '#888', marginBottom: 8 }}>Politika Puanı / 100</div>
+                <Progress
+                  percent={d.policy_score}
+                  strokeColor={scoreColor}
+                  showInfo={false}
+                  style={{ maxWidth: 300, margin: '0 auto' }}
+                />
+                <Space style={{ marginTop: 8 }}>
+                  {d.critical_count > 0 && <Tag color="red">{d.critical_count} Kritik</Tag>}
+                  {d.violation_count > 0 && <Tag color="orange">{d.violation_count} İhlal</Tag>}
+                  {d.violation_count === 0 && <Tag color="green">Tüm kurallar geçti</Tag>}
+                </Space>
+              </div>
+              {d.violations.length > 0 && (
+                <Table
+                  dataSource={d.violations}
+                  rowKey="rule_id"
+                  size="small"
+                  pagination={false}
+                  columns={[
+                    {
+                      title: 'Önem', dataIndex: 'severity', width: 90,
+                      render: (v: string) => (
+                        <Tag color={v === 'critical' ? 'red' : v === 'warning' ? 'orange' : 'default'} icon={<WarningOutlined />}>
+                          {v}
+                        </Tag>
+                      ),
+                    },
+                    { title: 'Kural', dataIndex: 'rule_id', width: 160 },
+                    { title: 'Açıklama', dataIndex: 'description' },
+                  ]}
+                />
+              )}
+            </>
+          )
+        })()}
+      </Modal>
     </div>
   )
 }

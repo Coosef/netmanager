@@ -339,7 +339,11 @@ export const devicesApi = {
       diff: string
     }>(`/devices/${deviceId}/backups/diff`, { params: { from_id: fromId, to_id: toId } }).then((r) => r.data),
 
-  checkConfigPolicy: (deviceId: number) =>
+  /**
+   * Güvenlik politika kontrolü. `backupId` verilirse o snapshot taranır (backend
+   * DB'den config_text çeker); yoksa canlı running-config SSH ile çekilir.
+   */
+  checkConfigPolicy: (deviceId: number, backupId?: number) =>
     client.post<{
       device_id: number
       hostname: string
@@ -347,7 +351,12 @@ export const devicesApi = {
       violations: { rule_id: string; severity: string; description: string }[]
       violation_count: number
       critical_count: number
-    }>(`/devices/${deviceId}/config/check-policy`).then((r) => r.data),
+      source: string
+      backup_id?: number
+    }>(
+      `/devices/${deviceId}/config/check-policy`,
+      backupId ? { backup_id: backupId } : {},
+    ).then((r) => r.data),
 
   getNeighbors: (id: number) =>
     client.get<{
