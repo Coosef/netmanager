@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     EVENT_CONSUMER_CLAIM_INTERVAL_SECS: int = 30   # how often to run claim_stale
     EVENT_CONSUMER_CLAIM_MIN_IDLE_SECS: int = 60   # pending age before reclaim
 
+    # Wave 3 W3.3 — PoE Restart akışı (disable → wait → enable) default bekleme
+    POE_RESTART_WAIT_SEC: int = 10
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]
