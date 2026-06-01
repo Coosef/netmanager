@@ -51,4 +51,52 @@ export const portControlApi = {
     client.get<{ items: PortChangeRecord[] }>(
       `/devices/${device_id}/ports/_rollbacks`,
     ).then((r) => r.data),
+
+  /** W3.3 — Tek port PoE restart: disable → wait → enable */
+  restartPoe: (
+    device_id: number, interface_name: string,
+    restart_wait_sec = 0, rollback_after_sec = 300, reason?: string,
+  ) =>
+    client.post<PortChangeRecord>(
+      `/devices/${device_id}/ports/${encodeURIComponent(interface_name)}/poe/restart`,
+      { restart_wait_sec, rollback_after_sec, ...(reason ? { reason } : {}) },
+    ).then((r) => r.data),
+
+  /** W3.3 — Toplu PoE: on/off/restart, tek SSH session, skip+failed sayaç */
+  bulkPoe: (
+    device_id: number,
+    interfaces: string[],
+    action: 'on' | 'off' | 'restart',
+    opts: {
+      restart_wait_sec?: number
+      rollback_after_sec?: number
+      reason?: string
+    } = {},
+  ) =>
+    client.post<BulkPoeResult>(
+      `/devices/${device_id}/ports/bulk-poe`,
+      {
+        interfaces, action,
+        restart_wait_sec: opts.restart_wait_sec ?? 0,
+        rollback_after_sec: opts.rollback_after_sec ?? 300,
+        ...(opts.reason ? { reason: opts.reason } : {}),
+      },
+    ).then((r) => r.data),
+}
+
+export interface BulkPoeItem {
+  interface: string
+  status: 'success' | 'skipped' | 'failed'
+  reason?: string
+  error?: string
+  rollback_id?: number | null
+}
+
+export interface BulkPoeResult {
+  batch_id: string
+  total: number
+  ok: number
+  skipped: number
+  failed: number
+  items: BulkPoeItem[]
 }
