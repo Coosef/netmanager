@@ -21,8 +21,28 @@ _redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
 def _get_db() -> Session:
+    """Sync DB session for Celery Beat sweep tasks.
+
+    Wave 3 W3.1 (2026-06-01) — Faz 7 RLS regression fix:
+    `bulk_tasks.*` Beat sweep'leri tüm orgların verisini görmek zorunda
+    (check_backup_schedules → BackupSchedule fleet-wide tarama;
+    scheduled_backup → tüm cihazlar; bulk_backup_configs → frontend-tetik
+    ama Task tablosu RLS-forced). RLS bypass yapmadan açılan session
+    organization_id NULL ile RLS policy'yi geçemez → 0 satır döner → task
+    sessizce hiçbir şey yapmaz (prod regresyonu: 6 gün boyunca backup yok).
+
+    Doğru pattern: port_rollback_tasks.py:37 ile aynı. Faz 7 Phase 3d
+    "Fleet-wide bypass" listesine `bulk_tasks.*` eklenmiş gibi davranır.
+
+    ⚠ Bypass altında çalışan task'lar yine her INSERT'te `organization_id`'yi
+    device/kaynaktan TÜRETMELI (Faz 7 kuralı: WITH CHECK bypass'ı veri
+    sızıntısına dönüşmesin).
+    """
     from app.core.database import SyncSessionLocal
-    return SyncSessionLocal()
+    from sqlalchemy import text as _sql_text
+    db = SyncSessionLocal()
+    db.execute(_sql_text("SET app.is_super_admin = 'on'"))
+    return db
 
 
 def _update_task_progress(db: Session, task_id: int, completed: int, failed: int, status: str):
