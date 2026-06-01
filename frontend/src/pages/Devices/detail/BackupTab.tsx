@@ -178,25 +178,30 @@ export default function BackupTab({ device }: { device: Device }) {
             label: <span><SaveOutlined /> Yedekler ({items.length})</span>,
             children: (
               <div>
-                {/* Drift alert — yalnız altın baseline ve drift varsa */}
+                {/* Wave 2 #2 F4 — Drift alert mockup pages-devices.jsx:435-460 paterni
+                    (warn-soft background, ⚠ ikonu, vurgulu başlık). */}
                 {driftQ.data?.drift_detected && (
-                  <Alert
-                    type="warning" showIcon style={{ marginBottom: 12 }}
-                    icon={<WarningOutlined />}
-                    message="Config drift tespit edildi"
-                    description={
-                      <span>
-                        Cihazın güncel konfigürasyonu altın baseline'dan farklı:{' '}
-                        <Tag color="green">+{driftQ.data.lines_added ?? 0}</Tag>
-                        <Tag color="red">−{driftQ.data.lines_removed ?? 0}</Tag>
-                        {driftQ.data.golden_created_at && (
-                          <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                            Altın: {dayjs(driftQ.data.golden_created_at).format('YYYY-MM-DD HH:mm')}
-                          </Text>
-                        )}
+                  <div style={{
+                    padding: '10px 14px',
+                    background: 'var(--warn-soft)',
+                    border: '1px solid oklch(from var(--warn) l c h / 0.35)',
+                    borderRadius: 8,
+                    marginBottom: 14,
+                    display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+                  }}>
+                    <WarningOutlined style={{ color: 'var(--warn)', fontSize: 18 }} />
+                    <strong style={{ color: 'var(--warn)' }}>Config drift tespit edildi</strong>
+                    <span style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>
+                      Cihazın güncel konfigürasyonu altın baseline'dan farklı:
+                    </span>
+                    <span className="nm-pill ok">+{driftQ.data.lines_added ?? 0} satır</span>
+                    <span className="nm-pill crit">−{driftQ.data.lines_removed ?? 0} satır</span>
+                    {driftQ.data.golden_created_at && (
+                      <span style={{ fontSize: 11.5, color: 'var(--fg-3)', marginLeft: 'auto' }}>
+                        Altın: {dayjs(driftQ.data.golden_created_at).format('YYYY-MM-DD HH:mm')}
                       </span>
-                    }
-                  />
+                    )}
+                  </div>
                 )}
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>

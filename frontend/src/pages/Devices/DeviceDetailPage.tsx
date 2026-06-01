@@ -2,13 +2,17 @@
  * T10 C7.B — Device Detail Page.
  *
  * Route: /devices/:deviceId. Kalıcı sekmeli sayfa. URL ?tab= ile derin link.
- * C7.B'de aktif: Genel + Güvenlik Politikası. Diğer sekmeler placeholder (C7.C/D).
+ * Wave 2 #2 F1 (2026-06-01) — Header NetManager mockup'a göre refactor edildi:
+ *  - .nm-page-hd / .title-block / .nm-page-title / .nm-page-actions
+ *  - Vendor badge (.nm-vendor.cisco/.aruba/.ruijie + ek vendor'lar)
+ *  - Risk pill: devicesApi.getHealthScores() fleet endpoint'inden cihaz score'u filter
+ *  - Quick Actions tray: Yedek Al / SSH Aç / Yenile (mockup pages-devices.jsx:347-351)
+ * AntD Tabs (Wave 1) korunur.
  */
 import { useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { Button, Spin, Result, Tabs, Tag, Badge } from 'antd'
-import { ArrowLeftOutlined } from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
+import { Spin, Result, Tabs, App } from 'antd'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
 import { DETAIL_TABS, normalizeTab, type TabKey } from './detail/_tabs'
@@ -22,14 +26,29 @@ import EventsTab from './detail/EventsTab'
 import BackupTab from './detail/BackupTab'
 import ActionsTab from './detail/ActionsTab'
 import TerminalTab from './detail/TerminalTab'
+import dayjs from 'dayjs'
 
-const STATUS_BADGE: Record<string, 'success' | 'error' | 'warning' | 'default'> = {
-  online: 'success', offline: 'error', unreachable: 'warning', unknown: 'default',
+/** Wave 2 #2 F1: status → .nm-status-dot class ve Türkçe etiket. */
+const STATUS_MAP: Record<string, { cls: 'ok' | 'crit' | 'warn' | ''; label: string }> = {
+  online:      { cls: 'ok',   label: 'Çevrimiçi' },
+  offline:     { cls: 'crit', label: 'Çevrimdışı' },
+  unreachable: { cls: 'warn', label: 'Ulaşılamıyor' },
+  unknown:     { cls: '',     label: 'Bilinmiyor' },
+}
+
+/** Wave 2 #2 F1: getHealthScores score → risk pill rengi + etiket. */
+function riskFromScore(score: number | null): { cls: 'ok' | 'warn' | 'crit'; label: string } | null {
+  if (score === null || score === undefined) return null
+  if (score >= 80) return { cls: 'ok',   label: 'SAĞLIKLI' }
+  if (score >= 50) return { cls: 'warn', label: 'İZLENMELİ' }
+  return { cls: 'crit', label: 'KRİTİK' }
 }
 
 export default function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>()
   const navigate = useNavigate()
+  const qc = useQueryClient()
+  const { message } = App.useApp()
   const [search, setSearch] = useSearchParams()
   const id = Number(deviceId)
 
@@ -38,6 +57,47 @@ export default function DeviceDetailPage() {
     queryFn: () => devicesApi.get(id),
     enabled: Number.isFinite(id) && id > 0,
   })
+
+  // Wave 2 #2 F1 — Fleet getHealthScores cache (5dk staleTime), cihaz score'u filter.
+  const { data: healthData } = useQuery({
+    queryKey: ['device-health-scores-fleet'],
+    queryFn: () => devicesApi.getHealthScores(),
+    staleTime: 5 * 60_000,
+    enabled: Number.isFinite(id) && id > 0,
+  })
+  const healthScore = useMemo(
+    () => healthData?.items.find((i) => i.device_id === id)?.score ?? null,
+    [healthData, id],
+  )
+  const risk = riskFromScore(healthScore)
+
+  // Wave 2 #2 F1 — Quick Action: Yedek Al
+  const takeBackupMut = useMutation({
+    mutationFn: () => devicesApi.takeBackup(id),
+    onSuccess: () => {
+      message.success('Backup tetiklendi')
+      qc.invalidateQueries({ queryKey: ['device-backups', id] })
+      qc.invalidateQueries({ queryKey: ['device', id] })
+    },
+    onError: (e: any) => {
+      const detail = e?.response?.data?.detail || 'Backup başarısız'
+      if (typeof detail === 'string' && detail.includes("hasn't changed")) {
+        message.info('Config değişmemiş, yeni yedek alınmadı')
+      } else {
+        message.error(detail)
+      }
+    },
+  })
+
+  // Wave 2 #2 F1 — Quick Action: Yenile (invalidate tüm device-* query'leri)
+  const handleRefresh = () => {
+    qc.invalidateQueries({ queryKey: ['device', id] })
+    qc.invalidateQueries({ queryKey: ['device-interfaces', id] })
+    qc.invalidateQueries({ queryKey: ['device-vlans', id] })
+    qc.invalidateQueries({ queryKey: ['device-backups', id] })
+    qc.invalidateQueries({ queryKey: ['device-events', id] })
+    message.success('Veriler yenilendi')
+  }
 
   // Feature gate: security_policy explicit false ise Güvenlik Politikası sekmesi gizlenir.
   const { features } = useSite()
@@ -62,7 +122,7 @@ export default function DeviceDetailPage() {
     return (
       <div style={{ padding: 24 }}>
         <Result status="404" title="Geçersiz cihaz ID" extra={
-          <Button onClick={() => navigate('/devices')}>← Cihazlar</Button>
+          <button className="nm-btn" onClick={() => navigate('/devices')}>← Cihazlar</button>
         } />
       </div>
     )
@@ -73,10 +133,13 @@ export default function DeviceDetailPage() {
       <div style={{ padding: 24 }}>
         <Result status="404" title="Cihaz bulunamadı"
           subTitle="Cihaz silinmiş, başka bir org'a aitmiş ya da erişim yok."
-          extra={<Button onClick={() => navigate('/devices')}>← Cihazlar</Button>} />
+          extra={<button className="nm-btn" onClick={() => navigate('/devices')}>← Cihazlar</button>} />
       </div>
     )
   }
+
+  const status = STATUS_MAP[device.status] ?? STATUS_MAP.unknown
+  const vendorClass = (device.vendor || 'generic').toLowerCase().replace(/[^a-z]/g, '')
 
   const tabItems = visibleTabs.map((t) => ({
     key: t.key,
@@ -98,21 +161,83 @@ export default function DeviceDetailPage() {
 
   return (
     <div style={{ padding: 16 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <Button icon={<ArrowLeftOutlined />} type="text" onClick={() => navigate('/devices')}>Cihazlar</Button>
-        <Badge status={STATUS_BADGE[device.status] ?? 'default'} />
-        <div style={{ fontSize: 20, fontWeight: 600 }}>{device.hostname || device.ip_address}</div>
-        <code style={{ background: 'var(--bg-2, #f5f5f5)', padding: '2px 8px', borderRadius: 4, fontSize: 13 }}>
-          {device.ip_address}
-        </code>
-        <span style={{ fontSize: 12, color: 'var(--fg-3, #64748b)' }}>
-          {device.vendor} · {device.os_type}{device.site ? ' · ' + device.site : ''}
-        </span>
-        {device.lifecycle_status && device.lifecycle_status !== 'production' && (
-          <Tag color={device.lifecycle_status === 'archived' ? 'default' : 'orange'}>
-            {device.lifecycle_status}
-          </Tag>
-        )}
+      {/* Wave 2 #2 F1 — Header (NetManager mockup pages-devices.jsx:328-345 paterni) */}
+      <div className="nm-page-hd" style={{ marginBottom: 16 }}>
+        <div className="title-block">
+          <div className="nm-crumbs">
+            <span
+              onClick={() => navigate('/devices')}
+              style={{ cursor: 'pointer' }}
+            >Cihazlar</span>
+            {' › '}
+            <span>{device.hostname || device.ip_address}</span>
+          </div>
+          <h1 className="nm-page-title">
+            {device.hostname || device.ip_address}
+            {risk && <span className={`nm-risk-pill ${risk.cls}`}>{risk.label}</span>}
+            {device.lifecycle_status && device.lifecycle_status !== 'production' && (
+              <span className="nm-pill">{device.lifecycle_status}</span>
+            )}
+          </h1>
+          <div style={{
+            fontSize: 12.5, color: 'var(--fg-2)',
+            display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+            marginTop: 6,
+          }}>
+            <span className={`nm-status-dot ${status.cls}${status.cls === 'ok' || status.cls === 'crit' ? ' pulse' : ''}`}></span>
+            <span>{status.label}</span>
+            <span style={{ color: 'var(--fg-3)' }}>·</span>
+            <code style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{device.ip_address}</code>
+            {device.vendor && (
+              <>
+                <span style={{ color: 'var(--fg-3)' }}>·</span>
+                <span className={`nm-vendor ${vendorClass}`}>{device.vendor}</span>
+              </>
+            )}
+            {device.os_type && (
+              <>
+                <span style={{ color: 'var(--fg-3)' }}>·</span>
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{device.os_type}</span>
+              </>
+            )}
+            {device.site && (
+              <>
+                <span style={{ color: 'var(--fg-3)' }}>·</span>
+                <span>{device.site}</span>
+              </>
+            )}
+            {device.last_seen && (
+              <>
+                <span style={{ color: 'var(--fg-3)' }}>·</span>
+                <span style={{ color: 'var(--fg-3)' }}>{dayjs(device.last_seen).fromNow()}</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="nm-page-actions">
+          <button
+            className="nm-btn ghost"
+            onClick={() => takeBackupMut.mutate()}
+            disabled={takeBackupMut.isPending}
+            title="Cihazdan SSH ile config backup al"
+          >
+            {takeBackupMut.isPending ? 'Alınıyor…' : 'Yedek Al'}
+          </button>
+          <button
+            className="nm-btn ghost"
+            onClick={() => setTab('terminal')}
+            title="Terminal sekmesine geç (Canlı SSH için Canlı SSH modunu seçin)"
+          >
+            SSH Aç
+          </button>
+          <button
+            className="nm-btn"
+            onClick={handleRefresh}
+            title="Bu cihazın tüm verilerini yeniden çek"
+          >
+            Yenile
+          </button>
+        </div>
       </div>
       <Tabs activeKey={activeTab} onChange={setTab} items={tabItems} destroyInactiveTabPane={false} />
     </div>

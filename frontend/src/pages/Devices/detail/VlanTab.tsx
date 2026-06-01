@@ -146,8 +146,29 @@ export default function VlanTab({ device }: { device: Device }) {
     }] : []),
   ]
 
+  // Wave 2 #2 F4 — VLAN Statistics (3 KPI)
+  const activeCount = vlans.filter((v) => /up|active/i.test(v.status || '')).length
+  const portCarrying = vlans.filter((v) => (v.ports?.length ?? 0) > 0).length
+
   return (
     <div style={{ padding: '8px 0 16px' }}>
+      {/* Wave 2 #2 F4 — VLAN Statistics statbar (3 KPI) */}
+      <div className="nm-statbar" style={{ marginBottom: 12 }}>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Toplam VLAN</div>
+          <div className="nm-stat-val">{vlans.length}</div>
+        </div>
+        <div className={`nm-stat ${activeCount > 0 ? 'ok' : ''}`}>
+          <div className="nm-stat-label">Aktif</div>
+          <div className="nm-stat-val">{activeCount}</div>
+        </div>
+        <div className="nm-stat">
+          <div className="nm-stat-label">Port Taşıyan</div>
+          <div className="nm-stat-val">{portCarrying}</div>
+          <div className="nm-stat-delta">en az 1 port üye</div>
+        </div>
+      </div>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
         <Text strong>VLAN listesi</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
