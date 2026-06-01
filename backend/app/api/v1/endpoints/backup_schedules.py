@@ -157,6 +157,7 @@ async def run_schedule_now(
         schedule.device_filter,
         schedule.site,
         current_user.id,
+        schedule.organization_id,  # Wave 3 W3.1
     )
     if task_id:
         schedule.last_run_at = datetime.now(timezone.utc)
