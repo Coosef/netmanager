@@ -13,7 +13,7 @@
 import { useMemo, useState } from 'react'
 import {
   Table, Tag, Badge, Button, Tooltip, Alert, Spin, Typography, message,
-  Modal, Form, InputNumber, Select,
+  Modal, Form, Input, InputNumber, Select,
 } from 'antd'
 import { ReloadOutlined, PoweroffOutlined, ApartmentOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -27,6 +27,7 @@ import { monitorApi, type NetworkEvent } from '@/api/monitor'
 import {
   effectivePortPolicy, macCountByPort, MAC_COUNT_CAP, type EffectiveSource,
 } from './_portsHelper'
+import { parseVlanList, VlanListError } from './_vlanHelper'
 import BulkPolicyAssignDrawer from './BulkPolicyAssignDrawer'
 import BulkVlanAssignDrawer from './BulkVlanAssignDrawer'
 
@@ -198,9 +199,17 @@ export default function PortsTab({ device }: { device: Device }) {
   })
 
   // Tek port VLAN ata (row aksiyon — hızlı yol). assignVlanIface state ile drive.
+  // Backend (interfaces.py:832): vlan_id int | int[] (trunk allowed), mode, native_vlan_id?
   const assignVlanMut = useMutation({
-    mutationFn: (vals: { vlan_id: number; mode: 'access' | 'trunk' }) =>
-      devicesApi.assignVlan(device.id, assignVlanIface!.name, vals.vlan_id, vals.mode),
+    mutationFn: (vals: {
+      vlan_id: number | number[]
+      mode: 'access' | 'trunk'
+      native_vlan_id?: number
+    }) =>
+      devicesApi.assignVlan(
+        device.id, assignVlanIface!.name,
+        vals.vlan_id, vals.mode, vals.native_vlan_id,
+      ),
     onSuccess: (res) => {
       if (res.success) {
         message.success(`${assignVlanIface!.name} → VLAN ataması yapıldı`)
@@ -217,9 +226,17 @@ export default function PortsTab({ device }: { device: Device }) {
   // Çoklu port toplu VLAN ata — Promise.allSettled (backend bulk endpoint yok).
   // Atomik DEĞİL: kısmen başarılı senaryo mümkün; rapor mesaj olarak gösterilir.
   const bulkAssignVlanMut = useMutation({
-    mutationFn: async ({ vlan_id, mode }: { vlan_id: number; mode: 'access' | 'trunk' }) => {
+    mutationFn: async ({
+      vlan_id, mode, native_vlan_id,
+    }: {
+      vlan_id: number | number[]
+      mode: 'access' | 'trunk'
+      native_vlan_id?: number
+    }) => {
       const results = await Promise.allSettled(
-        selected.map((p) => devicesApi.assignVlan(device.id, p, vlan_id, mode)),
+        selected.map((p) =>
+          devicesApi.assignVlan(device.id, p, vlan_id, mode, native_vlan_id),
+        ),
       )
       const ok = results.filter(
         (r) => r.status === 'fulfilled' && (r.value as { success?: boolean }).success,
@@ -236,6 +253,35 @@ export default function PortsTab({ device }: { device: Device }) {
     },
     onError: () => message.error('Toplu VLAN ataması başarısız'),
   })
+
+  /** Form'dan modal submit'i payload'a çevirir. parseVlanList hata atarsa Form
+   *  setFields ile validation hatası gösterir. */
+  const buildAssignPayload = (
+    vals: {
+      mode: 'access' | 'trunk'
+      access_vlan_id?: number
+      native_vlan_id?: number
+      allowed_vlans?: string
+    },
+    form: typeof assignVlanForm,
+  ): { vlan_id: number | number[]; mode: 'access' | 'trunk'; native_vlan_id?: number } | null => {
+    if (vals.mode === 'access') {
+      return { vlan_id: vals.access_vlan_id!, mode: 'access' }
+    }
+    // trunk
+    try {
+      const allowed = parseVlanList(vals.allowed_vlans || '')
+      return {
+        vlan_id: allowed,
+        mode: 'trunk',
+        ...(vals.native_vlan_id ? { native_vlan_id: vals.native_vlan_id } : {}),
+      }
+    } catch (e: any) {
+      const msg = e instanceof VlanListError ? e.message : 'Allowed VLANs geçersiz'
+      form.setFields([{ name: 'allowed_vlans', errors: [msg] }])
+      return null
+    }
+  }
 
   const columns = [
     {
@@ -416,7 +462,8 @@ export default function PortsTab({ device }: { device: Device }) {
         onClose={() => setBulkVlanOpen(false)}
         selectedPorts={selected}
         saving={bulkAssignVlanMut.isPending}
-        onSubmit={(vlanId, mode) => bulkAssignVlanMut.mutate({ vlan_id: vlanId, mode })}
+        onSubmit={(vlan_id, mode, native_vlan_id) =>
+          bulkAssignVlanMut.mutate({ vlan_id, mode, native_vlan_id })}
       />
 
       {/* Tek port VLAN ata (hızlı yol — row aksiyonundan açılır) */}
@@ -428,11 +475,15 @@ export default function PortsTab({ device }: { device: Device }) {
         confirmLoading={assignVlanMut.isPending}
         okText="Ata" cancelText="İptal"
         destroyOnHidden
+        width={520}
       >
         <Form
           form={assignVlanForm} layout="vertical"
-          onFinish={(vals) => assignVlanMut.mutate(vals)}
           initialValues={{ mode: 'access' }}
+          onFinish={(vals) => {
+            const payload = buildAssignPayload(vals, assignVlanForm)
+            if (payload) assignVlanMut.mutate(payload)
+          }}
         >
           <Form.Item
             name="mode" label="Mod"
@@ -445,14 +496,44 @@ export default function PortsTab({ device }: { device: Device }) {
               ]}
             />
           </Form.Item>
-          <Form.Item
-            name="vlan_id" label="VLAN ID"
-            rules={[
-              { required: true, message: 'VLAN ID zorunlu' },
-              { type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' },
-            ]}
-          >
-            <InputNumber style={{ width: '100%' }} placeholder="ör. 100" min={1} max={4094} />
+
+          {/* Mode'a göre alanlar — Form.Item shouldUpdate ile dinamik render. */}
+          <Form.Item shouldUpdate={(p, c) => p.mode !== c.mode} noStyle>
+            {({ getFieldValue }) => {
+              const mode = getFieldValue('mode') as 'access' | 'trunk'
+              if (mode === 'access') {
+                return (
+                  <Form.Item
+                    name="access_vlan_id" label="Access VLAN ID"
+                    rules={[
+                      { required: true, message: 'Access VLAN ID zorunlu' },
+                      { type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' },
+                    ]}
+                  >
+                    <InputNumber style={{ width: '100%' }} placeholder="ör. 100" min={1} max={4094} />
+                  </Form.Item>
+                )
+              }
+              // trunk
+              return (
+                <>
+                  <Form.Item
+                    name="native_vlan_id" label="Native VLAN ID (opsiyonel)"
+                    rules={[{ type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' }]}
+                    extra="Boş bırakılırsa vendor varsayılanı uygulanır (Cisco/Ruijie: 1)."
+                  >
+                    <InputNumber style={{ width: '100%' }} placeholder="ör. 1" min={1} max={4094} />
+                  </Form.Item>
+                  <Form.Item
+                    name="allowed_vlans" label="Allowed VLANs"
+                    rules={[{ required: true, message: 'Allowed VLANs zorunlu (trunk için)' }]}
+                    extra="Örn: 1,10,20-30,100,200-220 — virgül + tire range."
+                  >
+                    <Input placeholder="ör. 1,10,20-30,2400,2460" />
+                  </Form.Item>
+                </>
+              )
+            }}
           </Form.Item>
         </Form>
       </Modal>

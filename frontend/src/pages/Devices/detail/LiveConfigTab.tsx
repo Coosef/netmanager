@@ -10,7 +10,7 @@
  */
 import { useState } from 'react'
 import {
-  Alert, Button, Space, Typography, Spin, Modal, Tag, Table, Progress, App,
+  Alert, Button, Space, Typography, Spin, Modal, Tag, Table, Progress, App, Tooltip,
 } from 'antd'
 import {
   ReloadOutlined, CopyOutlined, SafetyCertificateOutlined, WarningOutlined,
@@ -72,15 +72,18 @@ export default function LiveConfigTab({ device }: { device: Device }) {
             Kopyala
           </Button>
           {canConnect && (
-            <Button
-              type="primary"
-              icon={<SafetyCertificateOutlined />}
-              loading={checkPolicyMut.isPending}
-              onClick={() => checkPolicyMut.mutate()}
-              disabled={!config}
-            >
-              Güvenlik Tarama
-            </Button>
+            <Tooltip title={!config && !q.isLoading
+              ? 'Cihaz canlı config çekemedi; yine de tetiklerseniz backend SSH ile yeniden dener.'
+              : 'Politika kurallarına göre running-config taraması yapar.'}>
+              <Button
+                type="primary"
+                icon={<SafetyCertificateOutlined />}
+                loading={checkPolicyMut.isPending}
+                onClick={() => checkPolicyMut.mutate()}
+              >
+                Güvenlik Tarama
+              </Button>
+            </Tooltip>
           )}
         </Space>
       </div>
