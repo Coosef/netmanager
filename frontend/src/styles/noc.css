@@ -3823,3 +3823,25 @@
   0%, 100% { opacity: 0.85; box-shadow: 0 0 18px rgba(255, 56, 84, 0.18); }
   50%      { opacity: 1;    box-shadow: 0 0 26px rgba(255, 56, 84, 0.35); }
 }
+
+/* ── Wave 2 #2 F1 — NetManager mockup'tan Vendor Badge (Netmanager/styles.css:1382-1391) ── */
+.nm-vendor {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--fg-2);
+  text-transform: uppercase;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+.nm-vendor.cisco { color: oklch(0.74 0.14 235); }     /* mavi */
+.nm-vendor.aruba { color: oklch(0.78 0.16 145); }     /* yeşil */
+.nm-vendor.ruijie { color: oklch(0.80 0.16 75); }     /* turuncu */
+.nm-vendor.fortinet { color: oklch(0.72 0.18 25); }   /* kırmızı */
+.nm-vendor.mikrotik { color: oklch(0.70 0.14 200); }  /* cyan */
+.nm-vendor.juniper { color: oklch(0.70 0.16 130); }
+.nm-vendor.paloalto { color: oklch(0.75 0.18 50); }
+.nm-vendor.h3c { color: oklch(0.72 0.16 15); }
+.nm-vendor.ubiquiti { color: oklch(0.72 0.14 255); }
+.nm-vendor.apc { color: oklch(0.74 0.14 145); }
+.nm-vendor.other,
+.nm-vendor.generic { color: var(--fg-2); }
