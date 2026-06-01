@@ -22,7 +22,11 @@ const { Text } = Typography
 
 export default function VlanTab({ device }: { device: Device }) {
   const qc = useQueryClient()
-  const { message } = App.useApp()
+  // Wave 1.1 RED-fix: kullanıcı geri bildirimi "vlan oluşturma başarılı sonuçlarını
+  // verdim ama oluştururken başarı/başarısız bilgisi vermedi". message.success
+  // top-center kısa süre kalıyor + Modal animasyonunda maskeleniyordu. notification
+  // (sağ üst, 4.5sn, ikon+başlık+açıklama) ile belirgin feedback.
+  const { message, notification } = App.useApp()
   const canConnect = useAuthStore((s) => s.can('devices', 'connect'))
   const [createOpen, setCreateOpen] = useState(false)
   const [form] = Form.useForm()
@@ -42,31 +46,63 @@ export default function VlanTab({ device }: { device: Device }) {
   const createMut = useMutation({
     mutationFn: (vals: { vlan_id: number; name: string }) =>
       devicesApi.createVlan(device.id, vals.vlan_id, vals.name),
-    onSuccess: (res) => {
+    onSuccess: (res, vars) => {
       if (res.success) {
-        message.success('VLAN oluşturuldu')
+        notification.success({
+          message: 'VLAN oluşturuldu',
+          description: `VLAN ${vars.vlan_id} (${vars.name}) cihaza yazıldı.`,
+          duration: 4.5,
+          placement: 'topRight',
+        })
         setCreateOpen(false)
         form.resetFields()
         invalidateVlans()
       } else {
-        message.error(res.error || 'VLAN oluşturulamadı')
+        notification.error({
+          message: 'VLAN oluşturulamadı',
+          description: res.error || 'Cihaz hatası — backend success=false',
+          duration: 6,
+          placement: 'topRight',
+        })
       }
     },
-    onError: (e: any) => message.error(apiErr(e, 'VLAN oluşturulamadı')),
+    onError: (e: any) => notification.error({
+      message: 'VLAN oluşturulamadı',
+      description: apiErr(e, 'Beklenmeyen hata'),
+      duration: 6,
+      placement: 'topRight',
+    }),
   })
 
   const deleteMut = useMutation({
     mutationFn: (vlan_id: number) => devicesApi.deleteVlan(device.id, vlan_id),
-    onSuccess: (res) => {
+    onSuccess: (res, vlan_id) => {
       if (res.success) {
-        message.success('VLAN silindi')
+        notification.success({
+          message: 'VLAN silindi',
+          description: `VLAN ${vlan_id} cihazdan kaldırıldı.`,
+          duration: 4.5,
+          placement: 'topRight',
+        })
         invalidateVlans()
       } else {
-        message.error(res.error || 'VLAN silinemedi')
+        notification.error({
+          message: 'VLAN silinemedi',
+          description: res.error || 'Cihaz hatası — backend success=false',
+          duration: 6,
+          placement: 'topRight',
+        })
       }
     },
-    onError: (e: any) => message.error(apiErr(e, 'VLAN silinemedi')),
+    onError: (e: any) => notification.error({
+      message: 'VLAN silinemedi',
+      description: apiErr(e, 'Beklenmeyen hata'),
+      duration: 6,
+      placement: 'topRight',
+    }),
   })
+
+  void message  // App.useApp() destructuring koruması — başka mutation eklenmesi için hazır
 
   const columns = [
     { title: 'VLAN ID', dataIndex: 'id', key: 'id', width: 90,
