@@ -11,8 +11,11 @@
  * Bu commit: tablo + read-only kolonlar. Toplu seçim/atama/override-kaldır (commit 3-4).
  */
 import { useMemo, useState } from 'react'
-import { Table, Tag, Badge, Button, Tooltip, Alert, Spin, Typography, message } from 'antd'
-import { ReloadOutlined, PoweroffOutlined } from '@ant-design/icons'
+import {
+  Table, Tag, Badge, Button, Tooltip, Alert, Spin, Typography, message,
+  Modal, Form, InputNumber, Select,
+} from 'antd'
+import { ReloadOutlined, PoweroffOutlined, ApartmentOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { Device, NetworkInterface } from '@/types'
 import { devicesApi } from '@/api/devices'
@@ -25,6 +28,7 @@ import {
   effectivePortPolicy, macCountByPort, MAC_COUNT_CAP, type EffectiveSource,
 } from './_portsHelper'
 import BulkPolicyAssignDrawer from './BulkPolicyAssignDrawer'
+import BulkVlanAssignDrawer from './BulkVlanAssignDrawer'
 
 const { Text } = Typography
 
@@ -63,6 +67,9 @@ export default function PortsTab({ device }: { device: Device }) {
   const canWrite = isOrgAdmin()
   const [selected, setSelected] = useState<string[]>([])
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkVlanOpen, setBulkVlanOpen] = useState(false)
+  const [assignVlanIface, setAssignVlanIface] = useState<NetworkInterface | null>(null)
+  const [assignVlanForm] = Form.useForm()
 
   const ifaceQ = useQuery({
     queryKey: ['device-interfaces', device.id],
@@ -190,6 +197,46 @@ export default function PortsTab({ device }: { device: Device }) {
     onError: () => message.error('Override kaldırma başarısız'),
   })
 
+  // Tek port VLAN ata (row aksiyon — hızlı yol). assignVlanIface state ile drive.
+  const assignVlanMut = useMutation({
+    mutationFn: (vals: { vlan_id: number; mode: 'access' | 'trunk' }) =>
+      devicesApi.assignVlan(device.id, assignVlanIface!.name, vals.vlan_id, vals.mode),
+    onSuccess: (res) => {
+      if (res.success) {
+        message.success(`${assignVlanIface!.name} → VLAN ataması yapıldı`)
+        setAssignVlanIface(null)
+        assignVlanForm.resetFields()
+        qc.invalidateQueries({ queryKey: ['device-interfaces', device.id] })
+      } else {
+        message.error(res.error || 'VLAN atanamadı')
+      }
+    },
+    onError: (e: any) => message.error(e?.response?.data?.detail || 'VLAN atanamadı'),
+  })
+
+  // Çoklu port toplu VLAN ata — Promise.allSettled (backend bulk endpoint yok).
+  // Atomik DEĞİL: kısmen başarılı senaryo mümkün; rapor mesaj olarak gösterilir.
+  const bulkAssignVlanMut = useMutation({
+    mutationFn: async ({ vlan_id, mode }: { vlan_id: number; mode: 'access' | 'trunk' }) => {
+      const results = await Promise.allSettled(
+        selected.map((p) => devicesApi.assignVlan(device.id, p, vlan_id, mode)),
+      )
+      const ok = results.filter(
+        (r) => r.status === 'fulfilled' && (r.value as { success?: boolean }).success,
+      ).length
+      const fail = results.length - ok
+      return { ok, fail }
+    },
+    onSuccess: ({ ok, fail }) => {
+      if (fail > 0) message.warning(`${ok} port güncellendi, ${fail} başarısız`)
+      else message.success(`${ok} port güncellendi`)
+      setBulkVlanOpen(false)
+      setSelected([])
+      qc.invalidateQueries({ queryKey: ['device-interfaces', device.id] })
+    },
+    onError: () => message.error('Toplu VLAN ataması başarısız'),
+  })
+
   const columns = [
     {
       title: 'Port', dataIndex: 'name', key: 'name', width: 180,
@@ -246,6 +293,25 @@ export default function PortsTab({ device }: { device: Device }) {
         )
       },
     },
+    // RBAC: canConnect gerekir; yoksa kolon hiç render edilmez (rows ekleme yok).
+    ...(canWrite ? [{
+      title: 'Aksiyon', key: 'rowAction', width: 110,
+      render: (_: any, r: Row) => {
+        const iface = (ifaceQ.data?.interfaces ?? []).find((i) => i.name === r.key)
+        if (!iface) return null
+        return (
+          <Tooltip title="Bu porta VLAN ata (tek port hızlı yol)">
+            <Button
+              size="small" type="link"
+              icon={<ApartmentOutlined />}
+              onClick={() => setAssignVlanIface(iface)}
+            >
+              VLAN
+            </Button>
+          </Tooltip>
+        )
+      },
+    }] : []),
   ]
 
   return (
@@ -301,6 +367,12 @@ export default function PortsTab({ device }: { device: Device }) {
         }}>
           <Text strong>Seçili {selected.length} port</Text>
           <Button type="primary" onClick={() => setBulkOpen(true)}>Policy ata ▾</Button>
+          <Button
+            icon={<ApartmentOutlined />}
+            onClick={() => setBulkVlanOpen(true)}
+          >
+            VLAN ata ▾
+          </Button>
           <Tooltip title={
             selectedWithOverride.length === 0
               ? 'Seçili portların hiçbirinde override yok'
@@ -338,6 +410,52 @@ export default function PortsTab({ device }: { device: Device }) {
         saving={bulkSetMut.isPending}
         onSubmit={(policyId) => bulkSetMut.mutate(policyId)}
       />
+
+      <BulkVlanAssignDrawer
+        open={bulkVlanOpen}
+        onClose={() => setBulkVlanOpen(false)}
+        selectedPorts={selected}
+        saving={bulkAssignVlanMut.isPending}
+        onSubmit={(vlanId, mode) => bulkAssignVlanMut.mutate({ vlan_id: vlanId, mode })}
+      />
+
+      {/* Tek port VLAN ata (hızlı yol — row aksiyonundan açılır) */}
+      <Modal
+        open={!!assignVlanIface}
+        title={assignVlanIface ? `${assignVlanIface.name} → VLAN ata` : ''}
+        onCancel={() => { setAssignVlanIface(null); assignVlanForm.resetFields() }}
+        onOk={() => assignVlanForm.submit()}
+        confirmLoading={assignVlanMut.isPending}
+        okText="Ata" cancelText="İptal"
+        destroyOnHidden
+      >
+        <Form
+          form={assignVlanForm} layout="vertical"
+          onFinish={(vals) => assignVlanMut.mutate(vals)}
+          initialValues={{ mode: 'access' }}
+        >
+          <Form.Item
+            name="mode" label="Mod"
+            rules={[{ required: true, message: 'Mod seçin' }]}
+          >
+            <Select
+              options={[
+                { label: 'Access (tek VLAN üyesi)', value: 'access' },
+                { label: 'Trunk (çoklu VLAN taşır)', value: 'trunk' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="vlan_id" label="VLAN ID"
+            rules={[
+              { required: true, message: 'VLAN ID zorunlu' },
+              { type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} placeholder="ör. 100" min={1} max={4094} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }
