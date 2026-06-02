@@ -786,16 +786,29 @@ async def probe_agent_devices(
 
 # ── WebSocket helper tasks (called on hello) ──────────────────────────────────
 
-async def _push_device_sync_task(agent_id: str, db: AsyncSession):
-    """Push assigned device list to agent for health monitoring."""
+async def _push_device_sync_task(agent_id: str):
+    """Push assigned device list to agent for health monitoring.
+
+    Incident HF#2 (2026-06-02) — Önceden WS handler'ın `db: AsyncSession`'ı
+    parametre olarak alıp paylaşıyordu. SQLAlchemy AsyncSession concurrent
+    operation desteklemediği için heartbeat commit + push task SELECT race'i
+    `InvalidRequestError: provisioning a new connection` exception'ı üretiyor,
+    bu da WS handler'ı düşürüp agent flap'e yol açıyordu.
+
+    Çözüm: kendi session'ını açar, RLS bypass yapar (org_context taşımıyoruz).
+    SELECT-only, INSERT yok → cross-org sızıntı riski yok (agent_id unique).
+    """
     try:
+        from app.core.database import AsyncSessionLocal
         from app.models.device import Device
         from app.core.security import decrypt_credential
-        from sqlalchemy import select as _select
-        dev_result = await db.execute(
-            _select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
-        )
-        devices = dev_result.scalars().all()
+        from sqlalchemy import select as _select, text as _sql_text
+        async with AsyncSessionLocal() as bg_db:
+            await bg_db.execute(_sql_text("SET app.is_super_admin = 'on'"))
+            dev_result = await bg_db.execute(
+                _select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
+            )
+            devices = dev_result.scalars().all()
         if not devices:
             return
         payload = [
@@ -816,78 +829,89 @@ async def _push_device_sync_task(agent_id: str, db: AsyncSession):
         logging.getLogger("agents").debug(f"Device sync push error for {agent_id}: {exc}")
 
 
-async def _push_vault_task(agent_id: str, db: AsyncSession):
-    """Push credential vault bundle to agent (called on hello with vault_support=True)."""
+async def _push_vault_task(agent_id: str, agent_org_id: int):
+    """Push credential vault bundle to agent (called on hello with vault_support=True).
+
+    Incident HF#2 (2026-06-02) — Önceden WS handler'ın `db: AsyncSession`'ı
+    parametre alıp paylaşıyordu (concurrent session race → WS close → agent
+    flap). Şimdi kendi session'ını açar; RLS bypass uygular; `AgentCredentialBundle`
+    INSERT'inde `organization_id`'yi caller'dan gelen agent_org_id ile set eder
+    (Faz 7 Phase 3d: RLS bypass altında bile org_id doğru yazılmalı).
+    """
     try:
         import os as _os, base64 as _b64
-        from sqlalchemy import select as _select
+        from sqlalchemy import select as _select, text as _sql_text
+        from app.core.database import AsyncSessionLocal
         from app.models.device import Device
         from app.models.agent_credential_bundle import AgentCredentialBundle
         from app.core.security import decrypt_credential, encrypt_credential
 
-        devices = (await db.execute(
-            _select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
-        )).scalars().all()
-        if not devices:
-            return
+        async with AsyncSessionLocal() as bg_db:
+            await bg_db.execute(_sql_text("SET app.is_super_admin = 'on'"))
+            devices = (await bg_db.execute(
+                _select(Device).where(Device.agent_id == agent_id, Device.is_active == True)
+            )).scalars().all()
+            if not devices:
+                return
 
-        # Check if we have a stored key; reuse it for continuity
-        existing = (await db.execute(
-            _select(AgentCredentialBundle).where(AgentCredentialBundle.agent_id == agent_id)
-        )).scalar_one_or_none()
+            # Check if we have a stored key; reuse it for continuity
+            existing = (await bg_db.execute(
+                _select(AgentCredentialBundle).where(AgentCredentialBundle.agent_id == agent_id)
+            )).scalar_one_or_none()
 
-        if existing:
-            from app.core.security import decrypt_credential as _dec
-            aes_key_b64 = _dec(existing.agent_aes_key_enc)
-            aes_key = _b64.b64decode(aes_key_b64)
-        else:
-            aes_key = _os.urandom(32)
-            aes_key_b64 = _b64.b64encode(aes_key).decode()
-
-        try:
-            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-            def _enc(pt: str) -> str:
-                nonce = _os.urandom(12)
-                ct = AESGCM(aes_key).encrypt(nonce, pt.encode(), None)
-                return _b64.b64encode(nonce + ct).decode()
-            has_crypto = True
-        except ImportError:
-            has_crypto = False
-
-        credentials = []
-        for d in devices:
-            pwd = decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else ""
-            enable = decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else ""
-            if has_crypto:
-                credentials.append({
-                    "credential_id": d.id,
-                    "ip": d.ip_address,
-                    "port": d.ssh_port or 22,
-                    "username": d.ssh_username or "",
-                    "password_enc": _enc(pwd),
-                    "enable_enc": _enc(enable) if enable else "",
-                    "os_type": d.os_type or "cisco_ios",
-                })
+            if existing:
+                from app.core.security import decrypt_credential as _dec
+                aes_key_b64 = _dec(existing.agent_aes_key_enc)
+                aes_key = _b64.b64decode(aes_key_b64)
             else:
-                credentials.append({
-                    "credential_id": d.id,
-                    "ip": d.ip_address,
-                    "port": d.ssh_port or 22,
-                    "username": d.ssh_username or "",
-                    "password_enc": "",
-                    "password_plain": pwd,
-                    "enable_enc": "",
-                    "enable_plain": enable,
-                    "os_type": d.os_type or "cisco_ios",
-                })
+                aes_key = _os.urandom(32)
+                aes_key_b64 = _b64.b64encode(aes_key).decode()
 
-        if not existing:
-            db.add(AgentCredentialBundle(
-                agent_id=agent_id,
-                agent_aes_key_enc=encrypt_credential(aes_key_b64),
-                device_count=len(credentials),
-            ))
-            await db.commit()
+            try:
+                from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+                def _enc(pt: str) -> str:
+                    nonce = _os.urandom(12)
+                    ct = AESGCM(aes_key).encrypt(nonce, pt.encode(), None)
+                    return _b64.b64encode(nonce + ct).decode()
+                has_crypto = True
+            except ImportError:
+                has_crypto = False
+
+            credentials = []
+            for d in devices:
+                pwd = decrypt_credential(d.ssh_password_enc) if d.ssh_password_enc else ""
+                enable = decrypt_credential(d.enable_secret_enc) if d.enable_secret_enc else ""
+                if has_crypto:
+                    credentials.append({
+                        "credential_id": d.id,
+                        "ip": d.ip_address,
+                        "port": d.ssh_port or 22,
+                        "username": d.ssh_username or "",
+                        "password_enc": _enc(pwd),
+                        "enable_enc": _enc(enable) if enable else "",
+                        "os_type": d.os_type or "cisco_ios",
+                    })
+                else:
+                    credentials.append({
+                        "credential_id": d.id,
+                        "ip": d.ip_address,
+                        "port": d.ssh_port or 22,
+                        "username": d.ssh_username or "",
+                        "password_enc": "",
+                        "password_plain": pwd,
+                        "enable_enc": "",
+                        "enable_plain": enable,
+                        "os_type": d.os_type or "cisco_ios",
+                    })
+
+            if not existing:
+                bg_db.add(AgentCredentialBundle(
+                    agent_id=agent_id,
+                    agent_aes_key_enc=encrypt_credential(aes_key_b64),
+                    device_count=len(credentials),
+                    organization_id=agent_org_id,  # Faz 7 Phase 3d — INSERT'te org_id zorunlu
+                ))
+                await bg_db.commit()
 
         await agent_manager.send_credential_bundle(agent_id, aes_key_b64, credentials)
     except Exception as exc:
@@ -1463,11 +1487,13 @@ async def agent_websocket(
                         )
 
                 # Push device list for health monitoring
-                asyncio.create_task(_push_device_sync_task(agent_id, db))
+                # Incident HF#2 — bg task kendi session'ını açar (concurrent race fix)
+                asyncio.create_task(_push_device_sync_task(agent_id))
 
                 # Push credential vault if agent supports it
+                # Incident HF#2 — bg task kendi session'ını açar + INSERT'te org_id zorunlu
                 if msg.get("vault_support"):
-                    asyncio.create_task(_push_vault_task(agent_id, db))
+                    asyncio.create_task(_push_vault_task(agent_id, agent.organization_id))
 
                 # D4: Auto-enable SNMP trap receiver (port 1620 avoids root requirement)
                 agent_ver = msg.get("version") or ""
@@ -1480,10 +1506,21 @@ async def agent_websocket(
             elif msg.get("type") == "heartbeat":
                 agent.last_heartbeat = datetime.now(timezone.utc)
                 agent_manager.refresh_online(agent_id)
+                # Incident HF#2 — rollback() kendisi de InvalidRequestError atabilir
+                # ("provisioning a new connection") → WS handler düşer → agent flap.
+                # Şimdi nested try/except + warning log.
                 try:
                     await db.commit()
-                except Exception:
-                    await db.rollback()
+                except Exception as exc:
+                    _agent_logger.warning(
+                        "heartbeat commit failed for %s: %r", agent_id, exc,
+                    )
+                    try:
+                        await db.rollback()
+                    except Exception as roll_exc:
+                        _agent_logger.warning(
+                            "heartbeat rollback failed for %s: %r", agent_id, roll_exc,
+                        )
 
             await agent_manager.handle_message(agent_id, raw)
 
@@ -1494,10 +1531,19 @@ async def agent_websocket(
         await agent_manager.disconnect(agent_id)
         agent.status = "offline"
         agent.last_disconnected_at = datetime.now(timezone.utc)
+        # Incident HF#2 — silent pass yerine warning + best-effort rollback.
+        # Aksi halde commit fail olursa agent.status DB'ye yazılmaz,
+        # UI'da agent "online" görünmeye devam edebilir.
         try:
             await db.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            _agent_logger.warning(
+                "disconnect commit failed for %s: %r", agent_id, exc,
+            )
+            try:
+                await db.rollback()
+            except Exception:
+                pass
 
         # T8.4 — poll-skip flag'ini DISCONNECT ANINDA set et. Önce
         # `_emit_agent_event`'in içinde set ediliyordu; biz event yazımını
