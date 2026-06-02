@@ -81,7 +81,8 @@ def test_pydantic_bulk_payload_validation():
 
     p = BulkPoePayload(interfaces=["Gi0/1"], action="on")
     assert p.action == "on"
-    assert p.rollback_after_sec == 300
+    # W3.3 hotfix — optional; endpoint action-aware default türetir (on/off→0, restart→300)
+    assert p.rollback_after_sec is None
     assert p.restart_wait_sec == 0  # 0 → settings default kullanılır
 
     p2 = BulkPoePayload(interfaces=["Gi0/1"], action="restart", restart_wait_sec=15)
@@ -135,3 +136,57 @@ def test_inverse_commands_poe_round_trip():
     # Verb kısmı eşleşmeli; interface/exit aynı
     assert any("power inline never" in c for c in inv)
     assert any("power inline never" in c for c in off_cmds)
+
+
+# ---------------------------------------------------------------------------
+# W3.3 Hotfix testleri (2026-06-01) — PoE on/off kalıcı default
+# ---------------------------------------------------------------------------
+
+
+def test_hotfix_port_poe_payload_default_zero():
+    """PortPoePayload — PoE Aç/Kapat için rollback_after_sec default=0 (kalıcı).
+    Hotfix kararı: kullanıcı kasıtlı kapattığı portun 5dk sonra geri açılmasını istemiyor."""
+    from app.api.v1.endpoints.port_control import PortPoePayload
+    p = PortPoePayload(enable=True)
+    assert p.rollback_after_sec == 0
+    # Explicit override hâlâ çalışmalı
+    p2 = PortPoePayload(enable=False, rollback_after_sec=120)
+    assert p2.rollback_after_sec == 120
+
+
+def test_hotfix_bulk_poe_payload_default_optional():
+    """BulkPoePayload.rollback_after_sec optional (None) — endpoint action-aware türetir."""
+    from app.api.v1.endpoints.port_control import BulkPoePayload
+    p = BulkPoePayload(interfaces=["Gi0/1"], action="on")
+    assert p.rollback_after_sec is None
+    # Explicit override aynen korunur
+    p2 = BulkPoePayload(interfaces=["Gi0/1"], action="off", rollback_after_sec=600)
+    assert p2.rollback_after_sec == 600
+
+
+def test_hotfix_bulk_rollback_default_helper():
+    """_bulk_rollback_default — on/off → 0 (kalıcı), restart → 300 (fail-safe), explicit korunur."""
+    from app.api.v1.endpoints.port_control import _bulk_rollback_default
+
+    assert _bulk_rollback_default(None, "on") == 0
+    assert _bulk_rollback_default(None, "off") == 0
+    assert _bulk_rollback_default(None, "restart") == 300
+    # Explicit her zaman korunur — kullanıcı 0 verirse 0, 120 verirse 120
+    assert _bulk_rollback_default(0, "restart") == 0
+    assert _bulk_rollback_default(120, "on") == 120
+    assert _bulk_rollback_default(300, "off") == 300
+
+
+def test_hotfix_port_change_payload_admin_unchanged():
+    """Regression: admin endpoint (PortChangePayload) default=300 KALIR.
+    Hotfix kapsamı dışı — sadece PoE on/off değişti."""
+    from app.api.v1.endpoints.port_control import PortChangePayload
+    p = PortChangePayload(enable=True)
+    assert p.rollback_after_sec == 300
+
+
+def test_hotfix_poe_restart_payload_unchanged():
+    """Regression: PoE Restart default=300 fail-safe KALIR (enable yeniden uygulanır)."""
+    from app.api.v1.endpoints.port_control import PoeRestartPayload
+    p = PoeRestartPayload()
+    assert p.rollback_after_sec == 300

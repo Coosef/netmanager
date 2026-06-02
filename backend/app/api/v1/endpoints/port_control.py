@@ -56,23 +56,42 @@ _POE_UNSUPPORTED_OS = {"comware"}
 
 
 class PortChangePayload(BaseModel):
+    """Admin (port up/down) endpoint için. Default 5dk safety rollback korunur."""
     enable: bool
     reason: Optional[str] = None
     rollback_after_sec: int = 300   # default 5dk; 0 → rollback yok (kalıcı)
 
 
+class PortPoePayload(BaseModel):
+    """W3.3 hotfix — PoE Aç/Kapat için ayrı model. Kalıcı işlem default'u.
+    Admin tarafının (set_port_admin) PortChangePayload default'u (300) korunur."""
+    enable: bool
+    reason: Optional[str] = None
+    rollback_after_sec: int = 0     # W3.3 hotfix: kalıcı (kullanıcı kararı 2026-06-01)
+
+
 class PoeRestartPayload(BaseModel):
     restart_wait_sec: int = Field(default=0, ge=0, le=60)  # 0 → settings default
-    rollback_after_sec: int = 300
+    rollback_after_sec: int = 300                          # fail-safe (enable yeniden uygulanır)
     reason: Optional[str] = None
 
 
 class BulkPoePayload(BaseModel):
+    """W3.3 hotfix — rollback_after_sec optional; endpoint action'a göre default türetir:
+    on/off → 0 (kalıcı), restart → 300 (fail-safe). Explicit verilen değer her zaman korunur."""
     interfaces: list[str] = Field(min_length=1, max_length=192)
     action: Literal["on", "off", "restart"]
     restart_wait_sec: int = Field(default=0, ge=0, le=60)
-    rollback_after_sec: int = 300
+    rollback_after_sec: Optional[int] = Field(default=None, ge=0, le=3600)
     reason: Optional[str] = None
+
+
+def _bulk_rollback_default(explicit: Optional[int], action: str) -> int:
+    """W3.3 hotfix — Bulk PoE rollback default türetici.
+    Explicit verilirse aynen; aksi halde restart→300, on/off→0."""
+    if explicit is not None:
+        return explicit
+    return 300 if action == "restart" else 0
 
 
 def _serialize(row: PortChangeRollback) -> dict:
@@ -243,12 +262,12 @@ async def set_port_admin(
 @router.post("/{device_id}/ports/{interface:path}/poe")
 async def set_port_poe(
     device_id: int, interface: str,
-    payload: PortChangePayload,
+    payload: PortPoePayload,
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    """PoE enable/disable + 5dk safety rollback."""
+    """PoE enable/disable. W3.3 hotfix: rollback_after_sec default=0 (kalıcı)."""
     _require_edit(current_user)
     device = (await db.execute(
         select(Device).where(Device.id == device_id)
@@ -456,6 +475,8 @@ async def bulk_set_poe(
     os_type = device.os_type or "generic"
     batch_id = str(uuid.uuid4())
     requested_state = payload.action
+    # W3.3 hotfix — action'a göre rollback default (on/off=0 kalıcı, restart=300 fail-safe).
+    effective_rollback = _bulk_rollback_default(payload.rollback_after_sec, requested_state)
     total = len(payload.interfaces)
     items: list[dict] = []
     ok = skipped = failed = 0
@@ -523,7 +544,7 @@ async def bulk_set_poe(
                 ssh_out = ""
 
             now = datetime.now(timezone.utc)
-            rb_at = now + timedelta(seconds=max(0, payload.rollback_after_sec))
+            rb_at = now + timedelta(seconds=max(0, effective_rollback))
             for iface, fwd in per_iface_forward.items():
                 rb_cmds = per_iface_rollback[iface]
                 row = PortChangeRollback(
@@ -533,10 +554,10 @@ async def bulk_set_poe(
                     requested_state=requested_state,
                     forward_cmds=fwd, rollback_cmds=rb_cmds,
                     forward_output=ssh_out if ssh_ok else f"FAIL: {ssh_err}",
-                    status=("pending" if (ssh_ok and payload.rollback_after_sec > 0) else
+                    status=("pending" if (ssh_ok and effective_rollback > 0) else
                             ("committed" if ssh_ok else "failed")),
                     apply_at=now, rollback_at=rb_at,
-                    completed_at=None if (ssh_ok and payload.rollback_after_sec > 0) else now,
+                    completed_at=None if (ssh_ok and effective_rollback > 0) else now,
                 )
                 db.add(row)
             await db.commit()
@@ -554,11 +575,11 @@ async def bulk_set_poe(
                 if ssh_ok:
                     items.append({"interface": iface, "status": "success", "rollback_id": rid})
                     ok += 1
-                    if rid and payload.rollback_after_sec > 0:
+                    if rid and effective_rollback > 0:
                         try:
                             from app.workers.tasks.port_rollback_tasks import apply_rollback_if_pending
                             apply_rollback_if_pending.apply_async(
-                                args=[rid], countdown=payload.rollback_after_sec,
+                                args=[rid], countdown=effective_rollback,
                             )
                         except Exception:
                             pass
@@ -573,7 +594,7 @@ async def bulk_set_poe(
                     details={
                         "bulk_batch_id": batch_id, "interface": iface,
                         "change_type": "poe", "requested_state": requested_state,
-                        "rollback_after_sec": payload.rollback_after_sec,
+                        "rollback_after_sec": effective_rollback,
                         "rollback_id": rid,
                         "result": "success" if ssh_ok else "failed",
                         **({"error": ssh_err} if not ssh_ok else {}),
@@ -588,7 +609,7 @@ async def bulk_set_poe(
                 await _apply_poe_restart_single(
                     db=db, current_user=current_user, device=device, interface=iface,
                     restart_wait_sec=payload.restart_wait_sec,
-                    rollback_after_sec=payload.rollback_after_sec,
+                    rollback_after_sec=effective_rollback,
                     request=request, bulk_batch_id=batch_id,
                 )
                 items.append({"interface": iface, "status": "success"})
