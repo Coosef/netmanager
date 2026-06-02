@@ -58,8 +58,15 @@ export const devicesApi = {
   get: (id: number) =>
     client.get<Device>(`/devices/${id}`).then((r) => r.data),
 
-  create: (data: Record<string, unknown>) =>
-    client.post<Device>('/devices/', data).then((r) => r.data),
+  /** Incident HF#5 (2026-06-02) — opts.headers ile per-request header override
+   *  (örn. X-Location-Id) destekler. DeviceForm drawer'ı içinde lokasyon
+   *  seçildiğinde global SiteContext.setLocation() tetikleyip queryClient.clear()
+   *  yan etkisi yaratmadan POST'un doğru lokasyona gitmesini sağlar. Default
+   *  (opts geçilmezse) davranış: axios interceptor localStorage'dan X-Location-Id
+   *  okur — geri uyumlu. */
+  create: (data: Record<string, unknown>, opts?: { headers?: Record<string, string> }) =>
+    client.post<Device>('/devices/', data, opts?.headers ? { headers: opts.headers } : undefined)
+      .then((r) => r.data),
 
   update: (id: number, data: Record<string, unknown>) =>
     client.patch<Device>(`/devices/${id}`, data).then((r) => r.data),

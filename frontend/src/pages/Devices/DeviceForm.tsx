@@ -6,6 +6,7 @@ import { devicesApi } from '@/api/devices'
 import { agentsApi } from '@/api/agents'
 import { credentialProfilesApi } from '@/api/credentialProfiles'
 import { locationsApi } from '@/api/locations'
+import { useSite } from '@/contexts/SiteContext'
 import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS, OS_TYPE_OPTIONS, VENDOR_OPTIONS, VENDOR_OS_MAP } from '@/types'
 import { useTranslation } from 'react-i18next'
@@ -19,6 +20,14 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   const { message } = App.useApp()
   const { t } = useTranslation()
   const [form] = Form.useForm()
+  // Incident HF#5 (2026-06-02) — Cihaz CREATE'te backend require_active_location
+  // X-Location-Id header'ına bakar. Drawer'da seçilen lokasyon adından id türetip
+  // mutation'da PER-REQUEST header override olarak gönderiyoruz; global SiteContext
+  // submit ÖNCESİ değiştirilmez (setLocation → queryClient.clear → drawer içindeki
+  // agents/credProfiles/locations dropdown'larında loading flash riski).
+  // POST başarılı olduktan SONRA (drawer kapanınca) opsiyonel olarak setLocation
+  // çağrılır → kullanıcı yeni cihazı listede görür.
+  const { setLocation, activeLocationId } = useSite()
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents'],
@@ -85,11 +94,39 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       if (payload.floor === '') payload.floor = null
       // T10 C7.B — security_policy_id / port_security_policy_id alanları artık
       // Drawer'dan gönderilmez (atama Detail > Güvenlik Politikası sekmesinde).
-      return device ? devicesApi.update(device.id, payload) : devicesApi.create(payload)
+      if (device) {
+        return devicesApi.update(device.id, payload)
+      }
+      // Incident HF#5 — CREATE'te drawer'da seçilen lokasyon adından id türet,
+      // axios per-request X-Location-Id header override olarak gönder. Global
+      // SiteContext submit ÖNCESİ değiştirilmez → drawer içi dropdown'larda
+      // queryClient.clear flash riski yok. Kullanıcı seçim yapmadıysa interceptor
+      // mevcut localStorage değerini kullanır (geri uyumlu).
+      const siteName = typeof values.site === 'string' ? values.site : ''
+      const matched = siteName
+        ? (locationsData?.items ?? []).find((l) => l.name === siteName)
+        : undefined
+      const headers = matched
+        ? { 'X-Location-Id': String(matched.id) }
+        : undefined
+      return devicesApi.create(payload, headers ? { headers } : undefined)
     },
-    onSuccess: () => {
+    onSuccess: (_data, values) => {
       message.success(t('common.success'))
+      // Parent callback önce çalışsın — drawer kapansın, devices listesi
+      // invalidate edilsin. ANCAK sırasıyla sync execution: setLocation
+      // çağrısı queryClient.clear yapar → drawer zaten kapalı olduğu için
+      // UX bozulmaz; list refetch yeni active location header'ı ile yapılır
+      // → yeni cihaz görünür.
       onSuccess()
+      if (device) return  // update akışında lokasyon zaten değişmez
+      const siteName = typeof values.site === 'string' ? values.site : ''
+      const matched = siteName
+        ? (locationsData?.items ?? []).find((l) => l.name === siteName)
+        : undefined
+      if (matched && matched.id !== activeLocationId) {
+        setLocation(matched.id)
+      }
     },
     onError: (err: any) => {
       message.error(err?.response?.data?.detail || t('common.error'))
@@ -197,7 +234,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         name="site"
         tooltip={device
           ? 'Lokasyon değiştirmek için cihaz listesindeki "Lokasyona Taşı" işlemini kullanın'
-          : 'Cihaz, üstteki etkin lokasyona oluşturulur'}
+          : 'Cihaz, seçilen lokasyona oluşturulur. Kayıt başarılı olduğunda liste o lokasyona filtrelenir.'}
       >
         <Select
           allowClear
