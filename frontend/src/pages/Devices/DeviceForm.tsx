@@ -94,20 +94,27 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       if (payload.floor === '') payload.floor = null
       // T10 C7.B — security_policy_id / port_security_policy_id alanları artık
       // Drawer'dan gönderilmez (atama Detail > Güvenlik Politikası sekmesinde).
+
+      // Incident HF#6 (2026-06-02) — Lokasyon form alanı artık `location_id`
+      // (number). Backend body'de location_id ALANI YOK (DeviceCreate schema
+      // sadece `site` Optional[str] kabul eder), bu yüzden payload'dan
+      // location_id silinir ve label olarak `site = matched.name` set edilir.
+      // X-Location-Id header'ı doğrudan location_id'den türetilir — name
+      // eşleştirme race'i tamamen ortadan kalkar.
+      const locationId = typeof values.location_id === 'number' ? values.location_id : undefined
+      const matched = locationId != null
+        ? (locationsData?.items ?? []).find((l) => l.id === locationId)
+        : undefined
+      // Body cleanup: backend body'den location_id okumaz; geri uyumluluk için
+      // site label olarak gönder (UI'da görünür ad).
+      delete payload.location_id
+      if (matched) payload.site = matched.name
+
       if (device) {
         return devicesApi.update(device.id, payload)
       }
-      // Incident HF#5 — CREATE'te drawer'da seçilen lokasyon adından id türet,
-      // axios per-request X-Location-Id header override olarak gönder. Global
-      // SiteContext submit ÖNCESİ değiştirilmez → drawer içi dropdown'larda
-      // queryClient.clear flash riski yok. Kullanıcı seçim yapmadıysa interceptor
-      // mevcut localStorage değerini kullanır (geri uyumlu).
-      const siteName = typeof values.site === 'string' ? values.site : ''
-      const matched = siteName
-        ? (locationsData?.items ?? []).find((l) => l.name === siteName)
-        : undefined
-      const headers = matched
-        ? { 'X-Location-Id': String(matched.id) }
+      const headers = locationId != null
+        ? { 'X-Location-Id': String(locationId) }
         : undefined
       return devicesApi.create(payload, headers ? { headers } : undefined)
     },
@@ -120,12 +127,10 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       // → yeni cihaz görünür.
       onSuccess()
       if (device) return  // update akışında lokasyon zaten değişmez
-      const siteName = typeof values.site === 'string' ? values.site : ''
-      const matched = siteName
-        ? (locationsData?.items ?? []).find((l) => l.name === siteName)
-        : undefined
-      if (matched && matched.id !== activeLocationId) {
-        setLocation(matched.id)
+      // HF#6 — id-tabanlı; name eşleştirmesi yok
+      const locationId = typeof values.location_id === 'number' ? values.location_id : undefined
+      if (locationId != null && locationId !== activeLocationId) {
+        setLocation(locationId)
       }
     },
     onError: (err: any) => {
@@ -150,6 +155,12 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         alias: device.alias,
         layer: device.layer || '',
         site: device.site || '',
+        // HF#6 — edit mode'da Select disabled, ama görsel olarak seçili lokasyonu
+        // göstermek için device.site adından id türetilir. Lokasyon değişimi
+        // "Lokasyona Taşı" endpoint'inden yapılır; bu davranış değişmez.
+        location_id: device.site
+          ? (locationsData?.items ?? []).find((l) => l.name === device.site)?.id
+          : undefined,
         building: device.building || '',
         floor: device.floor || '',
         credential_profile_id: (device as any).credential_profile_id ?? null,
@@ -229,9 +240,13 @@ export default function DeviceForm({ device, onSuccess }: Props) {
           read-only; it changes ONLY through the audited "Lokasyona Taşı"
           (move) action. On create, the device is placed in the active
           location (the header location selector). */}
+      {/* HF#6 — Lokasyon Form alanı artık `location_id` (number). Select value=l.id;
+          name eşleştirmesi yok → unicode/whitespace race riski sıfır. Submit'te
+          mutationFn doğrudan id'den X-Location-Id türetir + body'ye `site` label
+          olarak gönderir (DeviceCreate schema `site: Optional[str]`). */}
       <Form.Item
         label="Lokasyon"
-        name="site"
+        name="location_id"
         tooltip={device
           ? 'Lokasyon değiştirmek için cihaz listesindeki "Lokasyona Taşı" işlemini kullanın'
           : 'Cihaz, seçilen lokasyona oluşturulur. Kayıt başarılı olduğunda liste o lokasyona filtrelenir.'}
@@ -242,7 +257,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
           placeholder="Lokasyon seçin"
           options={[
             ...(locationsData?.items ?? []).map((l) => ({
-              value: l.name,
+              value: l.id,
               label: (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <span style={{ width: 8, height: 8, borderRadius: '50%', background: l.color || '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
