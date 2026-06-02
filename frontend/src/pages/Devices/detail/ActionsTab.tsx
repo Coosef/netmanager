@@ -2,14 +2,16 @@
  * T10 C7.D — Device Detail > Aksiyonlar sekmesi.
  *
  * Cihaz seviyesi aksiyonlar: bağlantı testi, bilgi çek, yaşam döngüsü, lokasyon
- * taşı, arşive al, sil. Shutdown / port quarantine = disabled (C5 ile gelecek).
+ * taşı, arşive al, sil. W3.3 hotfix (2026-06-01): disabled "Port Shutdown /
+ * Quarantine" placeholder kaldırıldı — gerçek aksiyonlar W3.4 ActionsTab
+ * restructure ile gelecek.
  * Viewer: read-only — bilgi banner. org_admin+ aksiyon yapabilir.
  */
 import { useState } from 'react'
 import { Card, Button, Space, Tag, Popconfirm, message, Tooltip, Alert, Select } from 'antd'
 import {
   ApiOutlined, ReloadOutlined, EnvironmentOutlined, InboxOutlined,
-  DeleteOutlined, PoweroffOutlined, SyncOutlined, HeartOutlined,
+  DeleteOutlined, SyncOutlined, HeartOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -137,11 +139,6 @@ export default function ActionsTab({ device }: { device: Device }) {
       <Card size="small" title={<span style={{ color: '#cf1322' }}>Tehlikeli Bölge</span>}
         styles={{ header: { background: '#fff1f0' } }} style={{ marginBottom: 16 }}>
         <Space wrap>
-          <Tooltip title="Gerçek port kapatma / quarantine C5 (approval + kill-switch) ile gelecek. Şu an UI placeholder.">
-            <Button icon={<PoweroffOutlined />} disabled>
-              Port Shutdown / Quarantine
-            </Button>
-          </Tooltip>
           <Popconfirm
             title={<span>{ident} <strong>kalıcı olarak silinsin</strong> mi? Bu işlem geri alınamaz.</span>}
             okText="Sil" okButtonProps={{ danger: true }}

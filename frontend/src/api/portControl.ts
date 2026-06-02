@@ -26,9 +26,10 @@ export const portControlApi = {
       { enable, rollback_after_sec, ...(reason ? { reason } : {}) },
     ).then((r) => r.data),
 
-  /** PoE enable/disable + safety rollback */
+  /** PoE enable/disable. W3.3 hotfix: rollback_after_sec default=0 (kalıcı).
+   *  Restart için fail-safe 300 ayrı endpoint (restartPoe). */
   setPoe: (device_id: number, interface_name: string, enable: boolean,
-           rollback_after_sec = 300, reason?: string) =>
+           rollback_after_sec = 0, reason?: string) =>
     client.post<PortChangeRecord>(
       `/devices/${device_id}/ports/${encodeURIComponent(interface_name)}/poe`,
       { enable, rollback_after_sec, ...(reason ? { reason } : {}) },
@@ -78,7 +79,11 @@ export const portControlApi = {
       {
         interfaces, action,
         restart_wait_sec: opts.restart_wait_sec ?? 0,
-        rollback_after_sec: opts.rollback_after_sec ?? 300,
+        // W3.3 hotfix — explicit verilmezse backend action-aware default uygular
+        // (on/off → 0 kalıcı, restart → 300 fail-safe).
+        ...(opts.rollback_after_sec !== undefined
+          ? { rollback_after_sec: opts.rollback_after_sec }
+          : {}),
         ...(opts.reason ? { reason: opts.reason } : {}),
       },
     ).then((r) => r.data),

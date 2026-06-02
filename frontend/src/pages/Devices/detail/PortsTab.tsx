@@ -232,7 +232,7 @@ export default function PortsTab({ device }: { device: Device }) {
     onSuccess: (_data, vars) => {
       notification.success({
         message: `${vars.iface} → PoE ${vars.enable ? 'açıldı' : 'kapatıldı'}`,
-        description: '5dk içinde auto-rollback (geri al butonu rollback panelinde).',
+        description: 'İşlem kalıcıdır. Geri almak için aksi yönde aksiyon uygula.',
         duration: 4,
       })
       invalidatePoeCaches()
@@ -515,7 +515,7 @@ export default function PortsTab({ device }: { device: Device }) {
               <>
                 <Popconfirm
                   title={`${r.key} → PoE Aç?`}
-                  description="5dk auto-rollback aktif olacak."
+                  description="İşlem kalıcıdır."
                   okText="Aç" cancelText="Vazgeç"
                   onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: true })}
                   disabled={poeSt === 'on' || isPending}
@@ -529,7 +529,7 @@ export default function PortsTab({ device }: { device: Device }) {
                 </Popconfirm>
                 <Popconfirm
                   title={`${r.key} → PoE Kapat?`}
-                  description="Bu port üzerindeki cihaz güç kaybeder. 5dk auto-rollback aktif olacak."
+                  description="Bu port üzerindeki cihaz güç kaybeder. İşlem kalıcıdır."
                   okText="Kapat" okButtonProps={{ danger: true }} cancelText="Vazgeç"
                   onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: false })}
                   disabled={poeSt === 'off' || isPending}
@@ -685,13 +685,12 @@ export default function PortsTab({ device }: { device: Device }) {
               {selectedWithOverride.length > 0 && ` (${selectedWithOverride.length})`}
             </Button>
           </Tooltip>
-          <Tooltip title="Gerçek port kapatma C5 (approval + kill-switch) ile gelecek">
-            <Button icon={<PoweroffOutlined />} disabled>Shutdown</Button>
-          </Tooltip>
-          {/* W3.3 — Toplu PoE Aç/Kapat (Popconfirm) + Restart (Drawer) */}
+          {/* W3.3 — Toplu PoE Aç/Kapat (Popconfirm) + Restart (Drawer)
+              W3.3 hotfix (2026-06-01): disabled "Shutdown" placeholder kaldırıldı —
+              gerçek Port Aç/Kapat W3.4'te gelecek. */}
           <Popconfirm
             title={`Seçili ${selected.length} portta PoE Aç?`}
-            description="5dk auto-rollback aktif. PoE-uyumsuz portlar atlanır."
+            description="İşlem kalıcıdır. PoE-uyumsuz portlar atlanır."
             okText="Aç" cancelText="Vazgeç"
             onConfirm={() => bulkPoeMut.mutate({ action: 'on' })}
           >
@@ -702,7 +701,7 @@ export default function PortsTab({ device }: { device: Device }) {
           </Popconfirm>
           <Popconfirm
             title={`Seçili ${selected.length} portta PoE Kapat?`}
-            description="Bu portlardaki cihazlar güç kaybeder. 5dk auto-rollback aktif."
+            description="Bu portlardaki cihazlar güç kaybeder. İşlem kalıcıdır."
             okText="Kapat" okButtonProps={{ danger: true }} cancelText="Vazgeç"
             onConfirm={() => bulkPoeMut.mutate({ action: 'off' })}
           >
