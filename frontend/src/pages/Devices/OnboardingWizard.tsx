@@ -12,6 +12,7 @@ import { useQuery } from '@tanstack/react-query'
 import { devicesApi } from '@/api/devices'
 import { agentsApi } from '@/api/agents'
 import { credentialProfilesApi } from '@/api/credentialProfiles'
+import { formatApiError } from '@/api/_errors'
 import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS, OS_TYPE_OPTIONS, VENDOR_OPTIONS, VENDOR_OS_MAP } from '@/types'
 
@@ -404,6 +405,12 @@ function Step4({
         payload.snmp_enabled = false
       }
 
+      // Incident HF#9 (2026-06-03) — DeviceForm ile aynı; HF#8 sonrası kimlik
+      // profili seçiliyken SSH alanları undefined kalabilir → backend Pydantic
+      // 422 missing field. Empty string fallback ile sözleşme korunur.
+      payload.ssh_username = typeof formValues.ssh_username === 'string' ? formValues.ssh_username : ''
+      payload.ssh_password = typeof formValues.ssh_password === 'string' ? formValues.ssh_password : ''
+
       const device = await devicesApi.create(payload)
       setState('testing')
 
@@ -411,7 +418,8 @@ function Step4({
       setResult({ device, success: testRes.success, message: testRes.message, latency_ms: testRes.latency_ms })
       setState('done')
     } catch (err: any) {
-      msg.error(err?.response?.data?.detail || 'Cihaz oluşturulamadı')
+      // HF#9 — Pydantic v2 detail array crash korumasi
+      msg.error(formatApiError(err, 'Cihaz oluşturulamadı'))
       setState('idle')
     }
   }
