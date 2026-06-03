@@ -840,6 +840,12 @@ class AgentManager:
         payload: dict,
         timeout: int = _COMMAND_TIMEOUT,
         device_id: int | None = None,
+        # QF-2 (2026-06-03) — timeout audit context. When _send_request raises
+        # on agent timeout, write an agent_command_logs row so forensics is not
+        # blind. Passed by callers; if any field is None, audit is skipped.
+        command_type: str | None = None,
+        command: str | None = None,
+        device_ip: str | None = None,
     ) -> dict:
         ws = self._connections.get(agent_id)
         if not ws:
@@ -859,9 +865,22 @@ class AgentManager:
                 self._update_latency(agent_id, device_id, latency_ms, success=result.get("success", True))
             return result
         except asyncio.TimeoutError:
+            duration_ms = int((time.perf_counter() - t0) * 1000)
             self._pending.pop(rid, None)
             if device_id is not None:
                 self._update_latency(agent_id, device_id, float(timeout * 1000), success=False)
+            # QF-2 — record the failed call in agent_command_logs. command_type
+            # is the only literal we accept from the caller; payload's password
+            # fields are NEVER passed to _log_command_async (security regression
+            # protection — see test_qf2_log_has_no_password).
+            if command_type is not None:
+                self._log_command_async(
+                    agent_id=agent_id, device_id=device_id, device_ip=device_ip,
+                    command_type=command_type, command=command,
+                    success=False, duration_ms=duration_ms,
+                    blocked=False, block_reason=f"timeout_after_{timeout}s",
+                    request_id=rid,
+                )
             raise RuntimeError(f"Agent {agent_id} did not respond within {timeout}s")
         except Exception:
             self._pending.pop(rid, None)
@@ -955,7 +974,11 @@ class AgentManager:
                 "allowed_commands": sec["allowed_commands"],
             }
         t0 = time.perf_counter()
-        result = await self._send_request(agent_id, payload, device_id=device.id)
+        # QF-2 — pass audit context so _send_request logs on timeout
+        result = await self._send_request(
+            agent_id, payload, device_id=device.id,
+            command_type="ssh_command", command=command, device_ip=device.ip_address,
+        )
         duration_ms = int((time.perf_counter() - t0) * 1000)
 
         self._log_command_async(
@@ -1013,12 +1036,17 @@ class AgentManager:
                 "allowed_commands": sec["allowed_commands"],
             }
         t0 = time.perf_counter()
-        result = await self._send_request(agent_id, payload, device_id=device.id)
+        # QF-2 — audit context for timeout path
+        _cfg_label = f"config:{len(commands)} komut"
+        result = await self._send_request(
+            agent_id, payload, device_id=device.id,
+            command_type="ssh_config", command=_cfg_label, device_ip=device.ip_address,
+        )
         duration_ms = int((time.perf_counter() - t0) * 1000)
 
         self._log_command_async(
             agent_id=agent_id, device_id=device.id, device_ip=device.ip_address,
-            command_type="ssh_config", command=f"config:{len(commands)} komut",
+            command_type="ssh_config", command=_cfg_label,
             success=result.get("success", False), duration_ms=duration_ms,
             blocked=False, block_reason=None, request_id=rid,
         )
@@ -1086,7 +1114,11 @@ class AgentManager:
             "full_auth": True,
         }
         t0 = time.perf_counter()
-        result = await self._send_request(agent_id, payload, timeout=30, device_id=device.id)
+        # QF-2 — audit context for timeout path
+        result = await self._send_request(
+            agent_id, payload, timeout=30, device_id=device.id,
+            command_type="ssh_test", command="ssh_test", device_ip=device.ip_address,
+        )
         duration_ms = int((time.perf_counter() - t0) * 1000)
         self._log_command_async(
             agent_id=agent_id, device_id=device.id, device_ip=device.ip_address,
