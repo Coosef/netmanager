@@ -18,7 +18,7 @@ from app.core.security import encrypt_credential
 # M6 final drop — Tenant model removed.
 from app.models.config_backup import ConfigBackup
 from app.models.credential_profile import CredentialProfile
-from app.models.device import Device, DeviceGroup
+from app.models.device import Device, DeviceGroup, DeviceStatus
 from app.models.location import Location
 from app.models.shared.organization import Organization
 from app.models.topology import TopologyLink
@@ -1912,11 +1912,41 @@ async def test_device_connection(
 
     device = await _get_device_scoped(db, device_id, current_user)
     result = await ssh_manager.test_connection(device)
+
+    # Mevcut audit kaydı (geri uyum) — her durumda yazılır.
     await log_action(
         db, current_user, "device_tested", "device", device_id, device.hostname,
         details={"success": result.success, "error": result.error},
         request=request,
     )
+
+    # HF#1 (incident sprint 2026-06-03) — Başarılı testte Device state'ini
+    # güncelle. Önceden POST /devices/{id}/test sadece SSH'i deniyor, sonucu
+    # döndürüyor ama Device.status / last_seen kolonlarına HİÇ yazmıyordu →
+    # kullanıcı "test başarılı" toast'u görüp listede hâlâ "offline" görüyordu.
+    # Başarısız testte state'e DOKUNULMAZ (Beat task'ı + agent heartbeat
+    # karar verir; kullanıcı kararı: trigger="manual_test" anlık doğrulama,
+    # poll_device_status 5dk'da bir ICMP ile gerçek durumu yansıtır).
+    if result.success:
+        from datetime import datetime, timezone
+        previous_status = device.status
+        device.status = DeviceStatus.ONLINE.value
+        device.last_seen = datetime.now(timezone.utc)
+        await db.commit()
+        await log_action(
+            db, current_user,
+            "device_reachability_confirmed",
+            "device", device_id, device.hostname,
+            details={
+                "previous_status": previous_status,
+                "new_status": DeviceStatus.ONLINE.value,
+                "latency_ms": result.duration_ms,
+                "trigger": "manual_test",
+                "tested_by": current_user.id,
+            },
+            request=request,
+        )
+
     return DeviceTestResult(
         device_id=device.id,
         hostname=device.hostname,
