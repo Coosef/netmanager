@@ -173,16 +173,59 @@ class SSHManager:
         online.sort(key=lambda aid: agent_manager.get_latency(aid, device.id) or float("inf"))
         return online[0]
 
+    def _load_profile_sync(self, device):
+        """Incident HF#11 (2026-06-03) — sync CredentialProfile loader.
+
+        `_load_profile` async (worker_session); sync caller'lar (Celery worker
+        → _relay_ssh / _relay_config) için ayrı yol gerek. SyncSessionLocal +
+        W3.1 paterni: SET app.is_super_admin='on' (CredentialProfile tablosu
+        RLS-forced, worker context org_id taşımaz).
+
+        Profile yoksa/erişilemezse None döner — caller device fallback'ine
+        geçer (HF#11 öncesi davranış).
+        """
+        profile_id = getattr(device, "credential_profile_id", None)
+        if not profile_id:
+            return None
+        try:
+            from sqlalchemy import select, text as _sql_text
+            from app.core.database import SyncSessionLocal
+            from app.models.credential_profile import CredentialProfile
+            with SyncSessionLocal() as db:
+                db.execute(_sql_text("SET app.is_super_admin = 'on'"))
+                r = db.execute(select(CredentialProfile).where(CredentialProfile.id == profile_id))
+                return r.scalar_one_or_none()
+        except Exception:
+            return None
+
     def _relay_payload(self, device) -> dict:
+        """Incident HF#11 — credential_profile_id varsa profile değerleri
+        device alanlarından önceliklidir. HF#9 ile device.ssh_username='' ve
+        device.ssh_password_enc=encrypt('') olabiliyor; bu boş değerler
+        agent'a relay edildiğinde "Authentication failed" üretiyordu.
+
+        Mantık: profile varsa ve profile alanı dolu ise profile kullanılır;
+        aksi halde device alanına fallback. Profile yoksa tamamen device.
+        """
+        profile = self._load_profile_sync(device)
+
+        def _pick(attr: str):
+            """profile.<attr> dolu ise onu kullan, aksi halde device.<attr>."""
+            if profile is not None:
+                pv = getattr(profile, attr, None)
+                if pv:
+                    return pv
+            return getattr(device, attr, None)
+
         return {
             "device_id": device.id,
             "hostname": getattr(device, "hostname", ""),
             "ip_address": device.ip_address,
-            "ssh_username": getattr(device, "ssh_username", None),
-            "ssh_password_enc": getattr(device, "ssh_password_enc", None),
+            "ssh_username": _pick("ssh_username"),
+            "ssh_password_enc": _pick("ssh_password_enc"),
             "ssh_port": getattr(device, "ssh_port", None) or 22,
             "os_type": getattr(device, "os_type", None) or "cisco_ios",
-            "enable_secret_enc": getattr(device, "enable_secret_enc", None),
+            "enable_secret_enc": _pick("enable_secret_enc"),
             "credential_profile_id": getattr(device, "credential_profile_id", None),
         }
 
