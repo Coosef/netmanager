@@ -867,8 +867,52 @@ class AgentManager:
             self._pending.pop(rid, None)
             raise
 
-    async def execute_ssh_command(self, agent_id: str, device, command: str) -> dict:
+    async def _resolve_credentials(self, device) -> tuple[str, str, str]:
+        """Incident HF#11 (2026-06-03) — CredentialProfile resolve.
+
+        device.credential_profile_id set ise profile değerleri device alanlarına
+        göre önceliklidir (HF#9 sonrası device.ssh_username='' /
+        device.ssh_password_enc=encrypt('') olabiliyor; bu boş değerler ile
+        execute_ssh_command/execute_ssh_config/test_ssh_connection agent'a
+        relay edildiğinde "Authentication failed" üretiyordu).
+
+        Returns:
+            (ssh_username, ssh_password_plain, enable_secret_plain)
+            — agent payload'ında düz metin olarak kullanılır (mevcut sözleşme).
+        """
         from app.core.security import decrypt_credential
+        profile_id = getattr(device, "credential_profile_id", None)
+        profile = None
+        if profile_id:
+            try:
+                from sqlalchemy import select
+                from app.core.database import make_worker_session
+                from app.models.credential_profile import CredentialProfile
+                async with make_worker_session()() as db:
+                    r = await db.execute(
+                        select(CredentialProfile).where(CredentialProfile.id == profile_id)
+                    )
+                    profile = r.scalar_one_or_none()
+            except Exception:
+                profile = None
+
+        def _pick(attr: str, default=None):
+            if profile is not None:
+                pv = getattr(profile, attr, None)
+                if pv:
+                    return pv
+            return getattr(device, attr, default)
+
+        ssh_username = _pick("ssh_username", "") or ""
+        ssh_password_enc = _pick("ssh_password_enc")
+        enable_secret_enc = _pick("enable_secret_enc")
+
+        ssh_password = decrypt_credential(ssh_password_enc) if ssh_password_enc else ""
+        enable_secret = decrypt_credential(enable_secret_enc) if enable_secret_enc else ""
+        return ssh_username, ssh_password, enable_secret
+
+    async def execute_ssh_command(self, agent_id: str, device, command: str) -> dict:
+        from app.core.security import decrypt_credential  # noqa: F401 — vault path için
 
         self._enforce_device_scope(agent_id, device, "ssh_command")
         sec = self.get_security_config(agent_id)
@@ -895,15 +939,17 @@ class AgentManager:
                 "allowed_commands": sec["allowed_commands"],
             }
         else:
+            # HF#11 — credential_profile_id varsa profile resolve; aksi halde device fallback
+            _user, _pass, _enable = await self._resolve_credentials(device)
             payload = {
                 "type": "ssh_command",
                 "request_id": rid,
                 "device_ip": device.ip_address,
-                "ssh_username": device.ssh_username,
-                "ssh_password": decrypt_credential(device.ssh_password_enc),
+                "ssh_username": _user,
+                "ssh_password": _pass,
                 "ssh_port": device.ssh_port or 22,
                 "os_type": device.os_type,
-                "enable_secret": decrypt_credential(device.enable_secret_enc) if device.enable_secret_enc else "",
+                "enable_secret": _enable,
                 "command": command,
                 "command_mode": sec["command_mode"],
                 "allowed_commands": sec["allowed_commands"],
@@ -951,15 +997,17 @@ class AgentManager:
                 "allowed_commands": sec["allowed_commands"],
             }
         else:
+            # HF#11 — credential_profile_id varsa profile resolve; aksi halde device fallback
+            _user, _pass, _enable = await self._resolve_credentials(device)
             payload = {
                 "type": "ssh_config",
                 "request_id": rid,
                 "device_ip": device.ip_address,
-                "ssh_username": device.ssh_username,
-                "ssh_password": decrypt_credential(device.ssh_password_enc),
+                "ssh_username": _user,
+                "ssh_password": _pass,
                 "ssh_port": device.ssh_port or 22,
                 "os_type": device.os_type,
-                "enable_secret": decrypt_credential(device.enable_secret_enc) if device.enable_secret_enc else "",
+                "enable_secret": _enable,
                 "commands": commands,
                 "command_mode": sec["command_mode"],
                 "allowed_commands": sec["allowed_commands"],
@@ -1023,17 +1071,18 @@ class AgentManager:
             return False
 
     async def test_ssh_connection(self, agent_id: str, device) -> dict:
-        from app.core.security import decrypt_credential
+        # HF#11 — credential_profile_id varsa profile resolve; aksi halde device fallback
+        _user, _pass, _enable = await self._resolve_credentials(device)
         rid = uuid.uuid4().hex
         payload = {
             "type": "ssh_test",
             "request_id": rid,
             "device_ip": device.ip_address,
-            "ssh_username": device.ssh_username,
-            "ssh_password": decrypt_credential(device.ssh_password_enc),
+            "ssh_username": _user,
+            "ssh_password": _pass,
             "ssh_port": device.ssh_port or 22,
             "os_type": device.os_type,
-            "enable_secret": decrypt_credential(device.enable_secret_enc) if device.enable_secret_enc else "",
+            "enable_secret": _enable,
             "full_auth": True,
         }
         t0 = time.perf_counter()
@@ -1273,15 +1322,17 @@ class AgentManager:
                 "command": command,
             }
         else:
+            # HF#11 — credential_profile_id varsa profile resolve
+            _user, _pass, _enable = await self._resolve_credentials(device)
             payload = {
                 "type": "ssh_command_stream",
                 "request_id": rid,
                 "device_ip": device.ip_address,
-                "ssh_username": device.ssh_username,
-                "ssh_password": decrypt_credential(device.ssh_password_enc),
+                "ssh_username": _user,
+                "ssh_password": _pass,
                 "ssh_port": device.ssh_port or 22,
                 "os_type": device.os_type,
-                "enable_secret": decrypt_credential(device.enable_secret_enc) if device.enable_secret_enc else "",
+                "enable_secret": _enable,
                 "command": command,
             }
 
@@ -1520,14 +1571,16 @@ class AgentManager:
         fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._shell_open_pending[session_id] = fut
 
+        # HF#11 — credential_profile_id varsa profile resolve
+        _user, _pass, _enable = await self._resolve_credentials(device)
         payload = {
             "type": "ssh_shell_open",
             "session_id": session_id,
             "request_id": session_id,  # log korelasyonu için alias
             "device_ip": device.ip_address,
             "ssh_port":  device.ssh_port or 22,
-            "ssh_username": device.ssh_username,
-            "ssh_password": decrypt_credential(device.ssh_password_enc),
+            "ssh_username": _user,
+            "ssh_password": _pass,
             "cols": int(cols), "rows": int(rows),
         }
 
