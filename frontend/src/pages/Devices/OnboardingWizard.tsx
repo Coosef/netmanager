@@ -160,6 +160,11 @@ function Step2({
     })),
   ]
 
+  // Incident HF#8 (2026-06-03) — Kimlik profili seçiliyse SSH credential
+  // alanlari opsiyonel olur. Form en yakindaki Form context'ten okur.
+  const watchedCredentialProfileId = Form.useWatch('credential_profile_id')
+  const hasCredentialProfile = watchedCredentialProfileId != null
+
   const fallbackAgentOptions = agents.map((a) => ({
     label: (
       <span>
@@ -212,16 +217,25 @@ function Step2({
 
       <Divider plain style={{ fontSize: 12 }}>SSH Bağlantısı</Divider>
 
-      <Form.Item label="SSH Kullanıcısı" name="ssh_username" rules={[{ required: true, message: 'Kullanıcı adı gerekli' }]}>
-        <Input placeholder="admin" />
+      {/* HF#8 — Kimlik profili seçiliyse SSH alanları opsiyonel fallback olur */}
+      <Form.Item
+        label={<span>SSH Kullanıcısı {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+        name="ssh_username"
+        rules={[{ required: !hasCredentialProfile, message: 'Kullanıcı adı gerekli' }]}
+      >
+        <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'admin'} />
       </Form.Item>
 
-      <Form.Item label="SSH Şifre" name="ssh_password" rules={[{ required: true, message: 'Şifre gerekli' }]}>
-        <Input.Password />
+      <Form.Item
+        label={<span>SSH Şifre {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+        name="ssh_password"
+        rules={[{ required: !hasCredentialProfile, message: 'Şifre gerekli' }]}
+      >
+        <Input.Password placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : ''} />
       </Form.Item>
 
       <Form.Item label="Enable Secret" name="enable_secret">
-        <Input.Password placeholder="(opsiyonel — Cisco enable için)" />
+        <Input.Password placeholder={hasCredentialProfile ? '(profil değeri kullanılır; opsiyonel override)' : '(opsiyonel — Cisco enable için)'} />
       </Form.Item>
 
       <Form.Item label="SSH Port" name="ssh_port">
@@ -263,6 +277,10 @@ function Step2({
 // ── Step 3: SNMP ──────────────────────────────────────────────────────────────
 
 function Step3() {
+  // HF#8 — Step2 ile aynı: profil seçiliyse SNMP credential alanları opsiyonel
+  const watchedCredentialProfileId = Form.useWatch('credential_profile_id')
+  const hasCredentialProfile = watchedCredentialProfileId != null
+
   return (
     <>
       <Form.Item label="SNMP Aktif" name="snmp_enabled" valuePropName="checked">
@@ -290,17 +308,23 @@ function Step3() {
             </Form.Item>
 
             {getFieldValue('snmp_version') !== 'v3' && (
-              <Form.Item label="Community" name="snmp_community"
-                rules={[{ required: true, message: 'Community gerekli' }]}>
-                <Input placeholder="public" />
+              <Form.Item
+                label={<span>Community {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+                name="snmp_community"
+                rules={[{ required: !hasCredentialProfile, message: 'Community gerekli' }]}
+              >
+                <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'public'} />
               </Form.Item>
             )}
 
             {getFieldValue('snmp_version') === 'v3' && (
               <>
-                <Form.Item label="v3 Username" name="snmp_v3_username"
-                  rules={[{ required: true, message: 'Username gerekli' }]}>
-                  <Input placeholder="snmpv3user" />
+                <Form.Item
+                  label={<span>v3 Username {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+                  name="snmp_v3_username"
+                  rules={[{ required: !hasCredentialProfile, message: 'Username gerekli' }]}
+                >
+                  <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'snmpv3user'} />
                 </Form.Item>
                 <Form.Item label="Auth Protokol" name="snmp_v3_auth_protocol">
                   <Select allowClear placeholder="Yok (noAuth)" options={[
