@@ -68,7 +68,7 @@ try:
 except ImportError:
     _HAS_CRYPTO = False
 
-VERSION = "1.4.0"
+VERSION = "1.4.1"
 BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
 AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
 AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
@@ -121,7 +121,12 @@ _SNMP_LATENCY_THRESHOLD_MS: float = 5000.0  # fire anomaly if avg > 5 s
 _SSH_ERROR_RATE_THRESHOLD: float = 0.5       # fire anomaly if >50% fail
 
 # ── Feature 1: SSH Connection Pool ────────────────────────────────────────
-_ssh_pool: dict = {}          # key: (device_ip, port, username) -> {"conn": ..., "last_used": float}
+# QF-5 (2026-06-03) — entry shape extended with per-entry threading.Lock so
+# concurrent ssh_command calls to the SAME (host, port, username) serialize on
+# the shared netmiko connection. _pool_lock continues to guard dict access only;
+# entry["lock"] guards the connection's read/write buffer (netmiko ConnectHandler
+# is NOT thread-safe). Different devices remain parallel.
+_ssh_pool: dict = {}          # key: (device_ip, port, username) -> {"conn", "last_used", "lock"}
 _pool_lock = threading.Lock()
 _POOL_TTL = 300               # 5 minutes
 
@@ -322,8 +327,13 @@ def _get_metrics():
 # Feature 1: SSH Connection Pool helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _pool_get(msg):
-    """Return a pooled SSH connection, reconnecting if stale."""
+def _pool_acquire(msg):
+    """Return a pooled SSH entry {"conn", "last_used", "lock"}; reconnect if stale.
+
+    QF-5 — caller MUST use ``with entry["lock"]:`` around any conn.send_* call
+    to serialize same-device commands. _pool_lock here covers only dict access
+    (lookup/insert/delete), NOT the connection's I/O buffer.
+    """
     params = _build_params(msg)
     key = (params["host"], params["port"], params["username"])
 
@@ -338,7 +348,10 @@ def _pool_get(msg):
 
             if alive:
                 entry["last_used"] = time.time()
-                return conn
+                # Backward-compat: entries from older pool layout may lack lock
+                if "lock" not in entry:
+                    entry["lock"] = threading.Lock()
+                return entry
             else:
                 # Stale connection — close and reconnect
                 try:
@@ -347,14 +360,26 @@ def _pool_get(msg):
                     pass
                 del _ssh_pool[key]
 
-        # Open a fresh connection and store it
+        # Open a fresh connection and store it (with per-entry lock)
         conn = _get_connection(msg)
-        _ssh_pool[key] = {"conn": conn, "last_used": time.time()}
-        return conn
+        entry = {"conn": conn, "last_used": time.time(), "lock": threading.Lock()}
+        _ssh_pool[key] = entry
+        return entry
+
+
+# Backward-compat shim for any caller still expecting a bare conn (none in tree).
+def _pool_get(msg):
+    return _pool_acquire(msg)["conn"]
 
 
 def _pool_evict_idle():
-    """Evict connections idle longer than _POOL_TTL. Runs synchronously."""
+    """Evict connections idle longer than _POOL_TTL. Runs synchronously.
+
+    QF-5 — skip entries whose lock is held by another thread (in-flight
+    command); otherwise disconnect would happen mid-read and corrupt netmiko's
+    buffer for the running command. Skipped entries are picked up on the next
+    eviction cycle once the command finishes.
+    """
     now = time.time()
     with _pool_lock:
         stale_keys = [
@@ -362,10 +387,24 @@ def _pool_evict_idle():
             if (now - v["last_used"]) > _POOL_TTL
         ]
         for k in stale_keys:
+            entry = _ssh_pool[k]
+            entry_lock = entry.get("lock")
+            if entry_lock is not None and not entry_lock.acquire(blocking=False):
+                # Busy — leave for next cycle; refresh last_used so we don't
+                # spin-evict every minute on a long-running command.
+                entry["last_used"] = now
+                log.debug("Pool: skipping eviction (busy) for {}".format(k[0]))
+                continue
             try:
-                _ssh_pool[k]["conn"].disconnect()
+                entry["conn"].disconnect()
             except Exception:
                 pass
+            finally:
+                if entry_lock is not None:
+                    try:
+                        entry_lock.release()
+                    except Exception:
+                        pass
             del _ssh_pool[k]
             log.debug("Pool: evicted idle connection to {}".format(k[0]))
 
@@ -691,11 +730,12 @@ def _ssh_test(msg):
 
 
 def _ssh_command(msg):
-    """Uses pooled connection."""
+    """Uses pooled connection. QF-5 — per-entry lock serializes same-device commands."""
     t0 = time.time()
     try:
-        conn = _pool_get(msg)
-        output = conn.send_command(msg["command"], read_timeout=120)
+        entry = _pool_acquire(msg)
+        with entry["lock"]:                       # QF-5 — netmiko conn not thread-safe
+            output = entry["conn"].send_command(msg["command"], read_timeout=120)
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
     except Exception as e:
         # On error, remove from pool so next call gets a fresh connection
@@ -707,12 +747,13 @@ def _ssh_command(msg):
 
 
 def _ssh_config(msg):
-    """Uses pooled connection."""
+    """Uses pooled connection. QF-5 — per-entry lock serializes same-device commands."""
     t0 = time.time()
     try:
-        conn = _pool_get(msg)
-        output = conn.send_config_set(msg["commands"], read_timeout=120)
-        conn.save_config()
+        entry = _pool_acquire(msg)
+        with entry["lock"]:                       # QF-5
+            output = entry["conn"].send_config_set(msg["commands"], read_timeout=120)
+            entry["conn"].save_config()
         return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
     except Exception as e:
         params = _build_params(msg)
@@ -727,12 +768,17 @@ def _ssh_config(msg):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _ssh_command_stream_sync(msg, chunk_queue, main_loop):
-    """Run SSH command and push ~512B chunks into chunk_queue via main_loop."""
+    """Run SSH command and push ~512B chunks into chunk_queue via main_loop.
+
+    QF-5 — per-entry lock held across send_command_timing so chunk production
+    cannot interleave with a concurrent ssh_command on the same pooled conn.
+    """
     CHUNK_SIZE = 512
     try:
-        conn = _pool_get(msg)
-        output = conn.send_command_timing(msg["command"], read_timeout=120)
-        # Split output into chunks
+        entry = _pool_acquire(msg)
+        with entry["lock"]:                       # QF-5
+            output = entry["conn"].send_command_timing(msg["command"], read_timeout=120)
+        # Split output into chunks (outside lock — chunking is pure str ops)
         for i in range(0, max(len(output), 1), CHUNK_SIZE):
             chunk = output[i:i + CHUNK_SIZE]
             main_loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
