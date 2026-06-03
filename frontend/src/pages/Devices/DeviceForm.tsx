@@ -84,6 +84,14 @@ export default function DeviceForm({ device, onSuccess }: Props) {
     ? OS_TYPE_OPTIONS.filter((o) => VENDOR_OS_MAP[selectedVendor].includes(o.value))
     : OS_TYPE_OPTIONS
 
+  // Incident HF#8 (2026-06-03) — Kimlik profili seçiliyse SSH/SNMP credential
+  // alanlari opsiyonel fallback/override gibi davranir (backend SSH manager
+  // _load_profile ile profili yukler, device alanlari ikincil kalir). Form
+  // validation reactive okumalidir; aksi halde kullanici "Profil seçtim ama
+  // SSH Kullanicisi gerekli" hatasi alir.
+  const watchedCredentialProfileId = Form.useWatch('credential_profile_id', form)
+  const hasCredentialProfile = watchedCredentialProfileId != null
+
   const mutation = useMutation({
     mutationFn: (values: Record<string, unknown>) => {
       const payload = { ...values }
@@ -368,20 +376,30 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         />
       </Form.Item>
 
-      <Form.Item label="SSH Kullanıcısı" name="ssh_username" rules={[{ required: true }]}>
-        <Input placeholder="admin" />
+      {/* HF#8 — Kimlik profili seçiliyse required kalkar; alan opsiyonel
+          override olarak kullanılır. Label'a "(opsiyonel)" + placeholder net. */}
+      <Form.Item
+        label={<span>SSH Kullanıcısı {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+        name="ssh_username"
+        rules={[{ required: !hasCredentialProfile, message: 'SSH Kullanıcısı gerekli' }]}
+      >
+        <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'admin'} />
       </Form.Item>
 
       <Form.Item
-        label="SSH Şifre"
+        label={<span>SSH Şifre {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
         name="ssh_password"
-        rules={[{ required: !device, message: 'Şifre gerekli' }]}
+        rules={[{ required: !device && !hasCredentialProfile, message: 'Şifre gerekli' }]}
       >
-        <Input.Password placeholder={device ? '(değiştirmek için girin)' : ''} />
+        <Input.Password placeholder={
+          hasCredentialProfile
+            ? '(profil değeri kullanılır; gerekirse override girin)'
+            : (device ? '(değiştirmek için girin)' : '')
+        } />
       </Form.Item>
 
       <Form.Item label="Enable Secret" name="enable_secret">
-        <Input.Password placeholder="(opsiyonel)" />
+        <Input.Password placeholder={hasCredentialProfile ? '(profil değeri kullanılır; opsiyonel override)' : '(opsiyonel)'} />
       </Form.Item>
 
       <Form.Item label="SSH Port" name="ssh_port">
@@ -411,22 +429,26 @@ export default function DeviceForm({ device, onSuccess }: Props) {
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
-            {/* v1/v2c: community string */}
+            {/* v1/v2c: community string — HF#8: profil seçiliyse opsiyonel */}
             {getFieldValue('snmp_version') !== 'v3' && (
               <Form.Item
-                label="Community"
+                label={<span>Community {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
                 name="snmp_community"
-                rules={[{ required: getFieldValue('snmp_version') !== 'v3', message: 'Community gerekli' }]}
+                rules={[{ required: !hasCredentialProfile && getFieldValue('snmp_version') !== 'v3', message: 'Community gerekli' }]}
               >
-                <Input placeholder="public" />
+                <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'public'} />
               </Form.Item>
             )}
 
-            {/* v3 USM fields */}
+            {/* v3 USM fields — HF#8: profil seçiliyse v3 username opsiyonel */}
             {getFieldValue('snmp_version') === 'v3' && (
               <>
-                <Form.Item label="v3 Username" name="snmp_v3_username" rules={[{ required: true, message: 'Username gerekli' }]}>
-                  <Input placeholder="snmpv3user" />
+                <Form.Item
+                  label={<span>v3 Username {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+                  name="snmp_v3_username"
+                  rules={[{ required: !hasCredentialProfile, message: 'Username gerekli' }]}
+                >
+                  <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'snmpv3user'} />
                 </Form.Item>
                 <Form.Item label="Auth Protokol" name="snmp_v3_auth_protocol">
                   <Select
