@@ -6,6 +6,7 @@ import { devicesApi } from '@/api/devices'
 import { agentsApi } from '@/api/agents'
 import { credentialProfilesApi } from '@/api/credentialProfiles'
 import { locationsApi } from '@/api/locations'
+import { formatApiError } from '@/api/_errors'
 import { useSite } from '@/contexts/SiteContext'
 import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS, OS_TYPE_OPTIONS, VENDOR_OPTIONS, VENDOR_OS_MAP } from '@/types'
@@ -100,6 +101,16 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       if (payload.site === '') payload.site = null
       if (payload.building === '') payload.building = null
       if (payload.floor === '') payload.floor = null
+
+      // Incident HF#9 (2026-06-03) — Kimlik profili seçiliyse HF#8 SSH alanlarını
+      // opsiyonel yaptı, kullanıcı boş bırakırsa AntD form `undefined` döndürür
+      // → JSON.stringify alan düşürür → backend DeviceCreate `ssh_username: str`
+      // missing field → Pydantic 422 (HF#8 sonrası prod crash kaynağı).
+      // Backend mevcut sözleşmesi bozulmasın diye empty string fallback.
+      // SSH manager runtime'da _load_profile ile profili önceleyip device
+      // alanlarını ikincil kullanır; boş string fonksiyonel olarak güvenli.
+      payload.ssh_username = typeof values.ssh_username === 'string' ? values.ssh_username : ''
+      payload.ssh_password = typeof values.ssh_password === 'string' ? values.ssh_password : ''
       // T10 C7.B — security_policy_id / port_security_policy_id alanları artık
       // Drawer'dan gönderilmez (atama Detail > Güvenlik Politikası sekmesinde).
 
@@ -142,7 +153,10 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       }
     },
     onError: (err: any) => {
-      message.error(err?.response?.data?.detail || t('common.error'))
+      // HF#9 — Pydantic v2 422 detail array'i React render'inde object child
+      // olarak gecince "Minified React error #31" tetikleniyordu. formatApiError
+      // detail'i her formatta string'e normalize eder.
+      message.error(formatApiError(err, t('common.error')))
     },
   })
 
