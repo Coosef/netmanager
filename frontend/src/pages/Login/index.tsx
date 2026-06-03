@@ -1,288 +1,394 @@
-// LoginPage — Charon-style gold/dark login. 2-step flow:
-//   (1) credentials → /auth/login
-//   (2) MFA OTP    → /auth/mfa/verify    (only if user has MFA enabled;
-//                                          backend returns mfa_required + challenge_token)
-// Step 2 supports TOTP and 'recovery' fallback.
+// LoginPage — Charon Secure Gateway (yeni tasarım, 2026-06-03).
+// Tasarım kaynağı: Netmanager/Charon Login.html — port edildi React/TSX'e.
+// Auth akışı korunur: (1) credentials → /auth/login → (2) MFA (TOTP/recovery/email)
+// → /auth/mfa/verify. Backend dokunulmadı; SSO butonları placeholder (henüz konfigüre).
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
 import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
-import CharonLogo from '@/components/CharonLogo'
 
 const CSS = `
 :root.charon-login {
-  --c-bg-0: #0a0a0e;
-  --c-bg-1: #14140f;
-  --c-gold: #b8924b;
+  --c-bg-0: #050505;
+  --c-gold: #c8a35a;
   --c-gold-soft: #8a6f3d;
   --c-gold-deep: #5a4729;
-  --c-ember: #d4a86a;
+  --c-ember: #e0bd7e;
   --c-fg: #e8dcc4;
-  --c-fg-dim: rgba(232,220,196,0.55);
-  --c-fg-deep: rgba(232,220,196,0.32);
-  --c-line: rgba(184,146,75,0.18);
+  --c-fg-dim: rgba(232, 220, 196, 0.55);
+  --c-fg-deep: rgba(232, 220, 196, 0.30);
+  --c-line: rgba(184, 146, 75, 0.18);
   --c-crit: #c44a3d;
+  --c-ok: #6fae7a;
+  --c-font-tac: 'Orbitron', 'IBM Plex Mono', monospace;
+  --c-font-mono: 'IBM Plex Mono', monospace;
+  --c-font-serif: 'Cormorant Garamond', serif;
 }
-.charon-bg {
-  position: fixed; inset: 0;
-  background: #050505 url('/login/login-bg.png') center / cover no-repeat;
-  filter: brightness(0.95); z-index: 0;
+html.charon-login, html.charon-login body {
+  margin: 0; padding: 0; height: 100%;
+  background: #030303;
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  color: var(--c-fg);
+  overflow: hidden;
 }
-.charon-bg::after {
+
+/* ── Layer 0: datacenter aisle background ── */
+.cl-bg {
+  position: fixed; inset: 0; z-index: 0;
+  background:
+    radial-gradient(ellipse 46% 30% at 50% 40%, rgba(110,80,36,0.30) 0%, transparent 64%),
+    radial-gradient(ellipse 70% 50% at 50% 106%, rgba(5,4,7,0.94) 0%, transparent 60%),
+    linear-gradient(180deg, #070710 0%, #08070c 40%, #0a0809 62%, #050407 100%);
+}
+.cl-bg::after {
   content: ""; position: absolute; inset: 0;
   background:
-    radial-gradient(ellipse 80% 90% at 50% 50%, transparent 30%, rgba(0,0,0,0.55) 100%),
-    linear-gradient(180deg, rgba(0,0,0,0.4) 0%, transparent 30%, transparent 70%, rgba(0,0,0,0.65) 100%);
+    radial-gradient(ellipse 92% 96% at 50% 44%, transparent 58%, rgba(2,2,3,0.45) 100%),
+    linear-gradient(180deg, rgba(3,3,4,0.42) 0%, transparent 22%, transparent 52%, rgba(2,2,3,0.72) 100%);
 }
-.charon-grain {
-  position: fixed; inset: 0; pointer-events: none; z-index: 2;
-  background-image: repeating-linear-gradient(0deg, transparent 0 2px, rgba(184,146,75,0.008) 2px 3px);
+.cl-bg-tint {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background: radial-gradient(ellipse 80% 70% at 50% 45%, rgba(140,100,44,0.18), transparent 70%);
   mix-blend-mode: overlay;
 }
-.charon-stage {
-  position: fixed; inset: 0; z-index: 3;
-  display: grid; grid-template-rows: auto 1fr auto auto;
-  padding: 36px 56px; pointer-events: none;
-}
-.charon-stage > * { pointer-events: auto; }
 
-.charon-brand { text-align: center; pointer-events: none; }
-.charon-brand-mark { width: 38px; height: 38px; margin: 0 auto 12px; opacity: 0.95; }
-.charon-brand-name {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 56px; font-weight: 400; letter-spacing: 0.42em;
-  color: var(--c-gold);
-  text-shadow: 0 0 24px rgba(184,146,75,0.4), 0 0 60px rgba(184,146,75,0.15);
-  margin: 0; padding-left: 0.42em; line-height: 1;
+/* ── Layer 1: live network canvas ── */
+.cl-net { position: fixed; inset: 0; z-index: 1; pointer-events: none; }
+
+/* ── Layer 2: HUD scanline + grid ── */
+.cl-hud-grid {
+  position: fixed; inset: 0; z-index: 2; pointer-events: none;
+  background-image:
+    linear-gradient(rgba(184,146,75,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(184,146,75,0.025) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 90% 90% at 50% 45%, black 35%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 90% at 50% 45%, black 35%, transparent 80%);
 }
-.charon-brand-tagline {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 11px; font-weight: 400; letter-spacing: 0.5em;
-  color: var(--c-gold-soft); text-transform: uppercase;
-  margin: 14px 0 0; padding-left: 0.5em;
+.cl-scanbeam {
+  position: fixed; left: 0; right: 0; top: 0; height: 140px;
+  z-index: 2; pointer-events: none;
+  background: linear-gradient(180deg, transparent, rgba(200,163,90,0.05) 60%, rgba(200,163,90,0.12) 100%);
+  border-bottom: 1px solid rgba(200,163,90,0.10);
+  animation: cl-scan 9s linear infinite;
+  opacity: 0.7;
+}
+@keyframes cl-scan { 0% { transform: translateY(-160px); } 100% { transform: translateY(100vh); } }
+.cl-grain {
+  position: fixed; inset: 0; z-index: 3; pointer-events: none;
+  background-image: repeating-linear-gradient(0deg, transparent 0 2px, rgba(184,146,75,0.006) 2px 3px);
+  mix-blend-mode: overlay;
 }
 
-.charon-ornament {
-  position: fixed; z-index: 4; pointer-events: none;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 10px; letter-spacing: 0.32em;
-  color: var(--c-gold-soft); text-transform: uppercase; opacity: 0.65;
+/* ── Tactical corner HUD ── */
+.cl-hud {
+  position: fixed; z-index: 5; pointer-events: none;
+  font-family: var(--c-font-mono);
+  font-size: 10px; letter-spacing: 0.14em;
+  color: var(--c-fg-dim); line-height: 1.7;
 }
-.charon-ornament .l { font-size: 9px; color: var(--c-fg-deep); margin-bottom: 4px; }
-.charon-ornament .frame {
-  position: absolute; width: 22px; height: 22px;
+.cl-hud .k {
+  font-family: var(--c-font-tac);
+  font-size: 8.5px; font-weight: 600;
+  letter-spacing: 0.26em; color: var(--c-gold-soft);
+  text-transform: uppercase;
+}
+.cl-hud .v { color: var(--c-ember); }
+.cl-hud .ok { color: var(--c-ok); }
+.cl-hud .sep { color: var(--c-gold-deep); margin: 0 6px; }
+.cl-hud-row { display: flex; align-items: baseline; gap: 8px; }
+.cl-hud.tl { top: 40px; left: 52px; }
+.cl-hud.bl { bottom: 40px; left: 52px; }
+.cl-hud.tr { top: 40px; right: 52px; text-align: right; }
+.cl-hud.br { bottom: 40px; right: 52px; text-align: right; }
+.cl-hud.tr .cl-hud-row, .cl-hud.br .cl-hud-row { justify-content: flex-end; }
+.cl-hud .bracket {
+  position: absolute; width: 26px; height: 26px;
   border: 1px solid var(--c-gold-soft); opacity: 0.5;
 }
-.charon-ornament.tl { top: 40px; left: 56px; }
-.charon-ornament.tr { top: 40px; right: 56px; text-align: right; }
-.charon-ornament.bl { bottom: 40px; left: 56px; }
-.charon-ornament.br { bottom: 40px; right: 56px; text-align: right; }
-.charon-ornament.tl .frame { top: -10px; left: -16px; border-right: 0; border-bottom: 0; }
-.charon-ornament.tr .frame { top: -10px; right: -16px; border-left: 0; border-bottom: 0; }
-.charon-ornament.bl .frame { bottom: -10px; left: -16px; border-right: 0; border-top: 0; }
-.charon-ornament.br .frame { bottom: -10px; right: -16px; border-left: 0; border-top: 0; }
+.cl-hud.tl .bracket { top: -14px; left: -18px; border-right: 0; border-bottom: 0; }
+.cl-hud.tr .bracket { top: -14px; right: -18px; border-left: 0; border-bottom: 0; }
+.cl-hud.bl .bracket { bottom: -14px; left: -18px; border-right: 0; border-top: 0; }
+.cl-hud.br .bracket { bottom: -14px; right: -18px; border-left: 0; border-top: 0; }
+.cl-live-dot {
+  display: inline-block; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--c-ok); box-shadow: 0 0 7px var(--c-ok);
+  animation: cl-blink 1.8s ease-in-out infinite; vertical-align: middle;
+}
+@keyframes cl-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-.charon-auth-wrap { grid-row: 3; display: grid; place-items: center; padding: 0 0 16px; }
-.charon-auth-card {
-  width: 100%; max-width: 460px;
-  background: linear-gradient(180deg, rgba(20,15,10,0.72) 0%, rgba(10,8,5,0.85) 100%);
-  -webkit-backdrop-filter: blur(20px) saturate(140%);
-  backdrop-filter: blur(20px) saturate(140%);
-  border: 1px solid rgba(184,146,75,0.22);
-  border-radius: 4px;
-  padding: 28px 32px 26px;
-  position: relative;
-  box-shadow: 0 24px 60px rgba(0,0,0,0.6), inset 0 0 32px rgba(184,146,75,0.025);
-  animation: charonIn .55s cubic-bezier(0.22,1,0.36,1) both;
+/* ── Stage — flex layout, brand + card grup olarak dikey ortalı ── */
+.cl-stage {
+  position: fixed; inset: 0; z-index: 6;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 40px 56px 80px; pointer-events: none;
+  gap: 28px;
 }
-@keyframes charonIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
-.charon-auth-card::before, .charon-auth-card::after,
-.charon-auth-card .corner-tr, .charon-auth-card .corner-br {
-  content: ""; position: absolute; width: 18px; height: 18px;
-  border: 1px solid var(--c-gold); opacity: 0.7;
-}
-.charon-auth-card::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
-.charon-auth-card .corner-tr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
-.charon-auth-card::after { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
-.charon-auth-card .corner-br { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+.cl-stage > * { pointer-events: auto; }
 
-.charon-step-bar { display: flex; gap: 4px; margin: -2px 0 18px; }
-.charon-step-bar > i {
-  flex: 1; height: 1.5px;
-  background: rgba(184,146,75,0.15); transition: background .3s;
+/* ── Brand — daha kompakt, card'a yakın ── */
+.cl-brand { text-align: center; pointer-events: none; }
+.cl-brand-mark { width: 36px; height: 36px; margin: 0 auto 10px; opacity: 0.96; }
+.cl-brand-mark svg { width: 100%; height: 100%; }
+.cl-brand-name {
+  font-family: var(--c-font-serif);
+  font-size: 48px; font-weight: 400; letter-spacing: 0.36em;
+  color: var(--c-gold);
+  text-shadow: 0 0 24px rgba(200,163,90,0.42), 0 0 60px rgba(200,163,90,0.16);
+  margin: 0; padding-left: 0.36em; line-height: 1;
 }
-.charon-step-bar > i.active { background: var(--c-gold); box-shadow: 0 0 8px var(--c-gold); }
-.charon-step-bar > i.done { background: rgba(184,146,75,0.5); }
+.cl-brand-tagline {
+  font-family: var(--c-font-tac);
+  font-size: 9px; font-weight: 500; letter-spacing: 0.44em;
+  color: var(--c-gold-soft); text-transform: uppercase;
+  margin: 12px 0 0; padding-left: 0.44em;
+}
+.cl-brand-under {
+  font-family: var(--c-font-mono); font-size: 9.5px;
+  letter-spacing: 0.28em; color: var(--c-fg-deep);
+  margin-top: 8px; text-transform: uppercase;
+}
+.cl-brand-under .cl-live-dot { margin-right: 7px; }
 
-.charon-step-label {
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9.5px; color: var(--c-gold-soft);
-  letter-spacing: 0.32em; text-transform: uppercase; margin-bottom: 6px;
+/* ── Auth zone ── */
+.cl-auth-wrap { width: 100%; display: flex; justify-content: center; }
+.cl-auth-card {
+  width: 100%; max-width: 470px;
+  background: linear-gradient(180deg, rgba(16,13,9,0.82) 0%, rgba(7,6,4,0.90) 100%);
+  -webkit-backdrop-filter: blur(22px) saturate(135%);
+  backdrop-filter: blur(22px) saturate(135%);
+  border: 1px solid rgba(184,146,75,0.24);
+  border-radius: 5px; position: relative;
+  box-shadow: 0 30px 70px rgba(0,0,0,0.65), inset 0 0 36px rgba(184,146,75,0.03);
+  overflow: hidden;
 }
-.charon-title {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 26px; font-weight: 400; letter-spacing: 0.04em;
+.cl-auth-card::before {
+  content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, var(--c-gold), transparent);
+  opacity: 0.6;
+}
+.cl-corner { position: absolute; width: 16px; height: 16px; border: 1px solid var(--c-gold); opacity: 0.65; z-index: 2; }
+.cl-corner.tl { top: -1px; left: -1px; border-right: 0; border-bottom: 0; }
+.cl-corner.tr { top: -1px; right: -1px; border-left: 0; border-bottom: 0; }
+.cl-corner.bl { bottom: -1px; left: -1px; border-right: 0; border-top: 0; }
+.cl-corner.br { bottom: -1px; right: -1px; border-left: 0; border-top: 0; }
+
+.cl-card-strip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 18px; border-bottom: 1px solid rgba(184,146,75,0.16);
+  background: rgba(184,146,75,0.04);
+  font-family: var(--c-font-mono); font-size: 10px;
+  letter-spacing: 0.14em; color: var(--c-fg-dim);
+}
+.cl-card-strip .seg { display: flex; align-items: center; gap: 6px; }
+.cl-card-strip .seg svg { color: var(--c-gold); }
+.cl-card-strip .sep { color: var(--c-gold-deep); }
+.cl-card-strip .grow { flex: 1; }
+.cl-card-strip .handshake { color: var(--c-ok); }
+.cl-card-body { padding: 24px 30px 26px; }
+
+.cl-step-bar { display: flex; gap: 4px; margin: 0 0 16px; }
+.cl-step-bar > i { flex: 1; height: 2px; background: rgba(184,146,75,0.15); transition: background .3s; border-radius: 2px; }
+.cl-step-bar > i.active { background: var(--c-gold); box-shadow: 0 0 8px var(--c-gold); }
+.cl-step-bar > i.done { background: rgba(184,146,75,0.5); }
+
+.cl-step-label {
+  font-family: var(--c-font-tac); font-size: 8.5px; font-weight: 600;
+  color: var(--c-gold-soft); letter-spacing: 0.28em; text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.cl-title {
+  font-family: var(--c-font-serif);
+  font-size: 28px; font-weight: 400; letter-spacing: 0.03em;
   color: var(--c-fg); margin: 0 0 4px;
 }
-.charon-sub { font-size: 12.5px; color: var(--c-fg-dim); line-height: 1.55; margin-bottom: 20px; }
+.cl-sub { font-size: 12.5px; color: var(--c-fg-dim); line-height: 1.55; margin-bottom: 20px; }
 
-.charon-field { margin-bottom: 12px; }
-.charon-field-label {
+.cl-err {
+  background: rgba(196,74,61,0.10); border: 1px solid rgba(196,74,61,0.35);
+  border-radius: 4px; padding: 8px 12px; margin: 0 0 14px;
+  color: #f4c4bf; font-family: var(--c-font-mono); font-size: 11.5px; letter-spacing: 0.04em;
+}
+
+.cl-field { margin-bottom: 13px; }
+.cl-field-label {
   display: flex; justify-content: space-between;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9.5px; color: var(--c-fg-dim);
-  letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 5px;
+  font-family: var(--c-font-mono); font-size: 9.5px; color: var(--c-fg-dim);
+  letter-spacing: 0.18em; text-transform: uppercase; margin-bottom: 6px;
 }
-.charon-field-label a {
-  color: var(--c-gold); text-decoration: none;
-  text-transform: none; letter-spacing: 0.04em; font-size: 11px;
-}
-.charon-field-label a:hover { color: var(--c-ember); }
-.charon-input-wrap { position: relative; display: flex; align-items: center; }
-.charon-input-wrap .ico { position: absolute; left: 12px; color: var(--c-gold-soft); pointer-events: none; }
-.charon-input {
-  width: 100%; height: 42px;
-  background: rgba(8,6,4,0.7);
-  border: 1px solid rgba(184,146,75,0.18); border-radius: 3px;
-  color: var(--c-fg); font-family: 'IBM Plex Sans', sans-serif;
-  font-size: 13.5px; padding: 0 12px 0 38px; outline: none;
+.cl-field-label a { color: var(--c-gold); text-decoration: none; text-transform: none; letter-spacing: 0.04em; font-size: 11px; }
+.cl-field-label a:hover { color: var(--c-ember); }
+.cl-input-wrap { position: relative; display: flex; align-items: center; }
+.cl-input-wrap .ico { position: absolute; left: 13px; color: var(--c-gold-soft); pointer-events: none; display: flex; }
+.cl-input {
+  width: 100%; height: 44px;
+  background: rgba(6,5,3,0.7);
+  border: 1px solid rgba(184,146,75,0.20);
+  border-radius: 4px; color: var(--c-fg);
+  font-family: var(--c-font-mono); font-size: 13px;
+  padding: 0 12px 0 40px; outline: none;
   transition: border-color .15s, box-shadow .15s, background .15s;
+  letter-spacing: 0.02em;
 }
-.charon-input::placeholder { color: var(--c-fg-deep); }
-.charon-input:focus {
+.cl-input::placeholder { color: var(--c-fg-deep); font-family: var(--c-font-mono); }
+.cl-input:focus {
   border-color: var(--c-gold);
   box-shadow: 0 0 0 3px rgba(184,146,75,0.10);
-  background: rgba(8,6,4,0.95);
+  background: rgba(6,5,3,0.96);
 }
-.charon-pwd-toggle {
-  position: absolute; right: 12px;
-  background: none; border: 0; color: var(--c-gold-soft); cursor: pointer; padding: 4px;
-}
-.charon-pwd-toggle:hover { color: var(--c-ember); }
+.cl-pwd-toggle { position: absolute; right: 12px; background: none; border: 0; color: var(--c-gold-soft); cursor: pointer; padding: 4px; display: flex; }
+.cl-pwd-toggle:hover { color: var(--c-ember); }
 
-.charon-cb-row {
-  display: flex; align-items: center; gap: 9px;
-  margin-bottom: 18px; font-size: 12px; color: var(--c-fg-dim);
+.cl-cb-row { display: flex; align-items: center; gap: 9px; margin-bottom: 18px; font-size: 12px; color: var(--c-fg-dim); }
+.cl-cb-row .box {
+  width: 15px; height: 15px; border: 1px solid rgba(184,146,75,0.38);
+  background: rgba(6,5,3,0.5); border-radius: 3px;
+  display: grid; place-items: center; cursor: pointer; transition: background .15s, border-color .15s;
 }
-.charon-cb-row .box {
-  width: 14px; height: 14px;
-  border: 1px solid rgba(184,146,75,0.35);
-  background: rgba(8,6,4,0.5);
-  display: grid; place-items: center; cursor: pointer;
-  transition: background .15s, border-color .15s;
-}
-.charon-cb-row .box.on { background: var(--c-gold); border-color: var(--c-gold); }
+.cl-cb-row .box.on { background: var(--c-gold); border-color: var(--c-gold); }
+.cl-cb-row label { cursor: pointer; user-select: none; }
 
-.charon-btn-primary {
-  width: 100%; height: 44px;
-  background: linear-gradient(180deg, var(--c-gold) 0%, var(--c-gold-soft) 100%);
-  border: 0; border-radius: 3px;
-  color: #1a1208;
-  font-family: 'IBM Plex Sans', sans-serif;
-  font-size: 12.5px; font-weight: 600;
-  letter-spacing: 0.22em; text-transform: uppercase;
-  cursor: pointer;
+.cl-btn-primary {
+  width: 100%; height: 46px;
+  background: linear-gradient(180deg, var(--c-ember) 0%, var(--c-gold-soft) 100%);
+  border: 0; border-radius: 4px; color: #160f06;
+  font-family: var(--c-font-tac); font-size: 11px; font-weight: 600;
+  letter-spacing: 0.22em; text-transform: uppercase; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 10px;
-  transition: filter .12s, transform .12s, box-shadow .2s;
-  box-shadow: 0 4px 16px rgba(184,146,75,0.25), inset 0 1px 0 rgba(255,220,160,0.3);
+  transition: filter .12s, transform .12s, box-shadow .2s; position: relative; overflow: hidden;
+  box-shadow: 0 4px 18px rgba(184,146,75,0.28), inset 0 1px 0 rgba(255,228,170,0.35);
 }
-.charon-btn-primary:hover:not(:disabled) { filter: brightness(1.08); box-shadow: 0 6px 20px rgba(184,146,75,0.35); }
-.charon-btn-primary:active:not(:disabled) { transform: translateY(1px); }
-.charon-btn-primary:disabled { opacity: 0.55; cursor: not-allowed; }
+.cl-btn-primary:not(:disabled):hover { filter: brightness(1.08); box-shadow: 0 6px 22px rgba(184,146,75,0.4); }
+.cl-btn-primary:not(:disabled):active { transform: translateY(1px); }
+.cl-btn-primary:disabled { filter: grayscale(0.4) brightness(0.85); cursor: not-allowed; }
+.cl-btn-primary .sheen {
+  position: absolute; top: 0; bottom: 0; width: 40%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  transform: skewX(-20deg); left: -50%;
+  animation: cl-sheen 3.5s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes cl-sheen { 0% { left: -60%; } 55%,100% { left: 160%; } }
 
-.charon-divider {
-  display: flex; align-items: center; gap: 12px;
-  margin: 18px 0 12px; color: var(--c-fg-deep);
-  font-family: 'IBM Plex Mono', monospace; font-size: 9.5px; letter-spacing: 0.32em;
+.cl-divider {
+  display: flex; align-items: center; gap: 12px; margin: 18px 0 12px;
+  color: var(--c-fg-deep); font-family: var(--c-font-mono);
+  font-size: 9px; letter-spacing: 0.3em; text-transform: uppercase;
 }
-.charon-divider::before, .charon-divider::after {
+.cl-divider::before, .cl-divider::after {
   content: ""; flex: 1; height: 1px;
   background: linear-gradient(90deg, transparent, rgba(184,146,75,0.22), transparent);
 }
-.charon-sso-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
-.charon-sso-btn {
-  height: 38px;
-  background: rgba(8,6,4,0.5);
-  border: 1px solid rgba(184,146,75,0.14); border-radius: 3px;
-  color: var(--c-fg-dim);
-  font-size: 11px; font-family: 'IBM Plex Mono', monospace;
-  letter-spacing: 0.08em; cursor: pointer;
+
+.cl-sso-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
+.cl-sso-btn {
+  height: 40px; background: rgba(6,5,3,0.5);
+  border: 1px solid rgba(184,146,75,0.16); border-radius: 4px;
+  color: var(--c-fg-dim); font-size: 11px; font-family: var(--c-font-mono);
+  letter-spacing: 0.06em; cursor: pointer;
   display: flex; align-items: center; justify-content: center; gap: 6px;
   transition: border-color .15s, color .15s, background .15s;
 }
-.charon-sso-btn:hover {
-  border-color: rgba(184,146,75,0.4); color: var(--c-ember); background: rgba(184,146,75,0.05);
-}
+.cl-sso-btn:hover { border-color: rgba(184,146,75,0.42); color: var(--c-ember); background: rgba(184,146,75,0.05); }
+.cl-sso-btn svg { flex-shrink: 0; }
 
-.charon-err {
-  background: rgba(196,74,61,0.12); border: 1px solid rgba(196,74,61,0.35);
-  color: #f1a39b; font-size: 12px;
-  padding: 9px 12px; border-radius: 3px; margin-bottom: 14px;
-  font-family: 'IBM Plex Mono', monospace; letter-spacing: 0.04em;
+/* OTP */
+.cl-otp-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 6px; }
+.cl-otp-input {
+  height: 54px; background: rgba(6,5,3,0.7);
+  border: 1px solid rgba(184,146,75,0.22); border-radius: 4px;
+  color: var(--c-fg); font-family: var(--c-font-mono); font-size: 22px; font-weight: 500;
+  text-align: center; outline: none; transition: border-color .15s, box-shadow .15s;
 }
+.cl-otp-input:focus { border-color: var(--c-gold); box-shadow: 0 0 0 3px rgba(184,146,75,0.12); }
+.cl-otp-input.filled { border-color: rgba(184,146,75,0.55); }
+.cl-resend-row { display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--c-fg-dim); margin-top: 12px; margin-bottom: 18px; }
+.cl-resend-row .timer { font-family: var(--c-font-mono); color: var(--c-gold); }
+.cl-resend-row .timer.clickable { cursor: pointer; }
 
-.charon-footer-line {
-  grid-row: 4; text-align: center;
-  font-family: 'IBM Plex Mono', monospace;
-  font-size: 9.5px; letter-spacing: 0.28em; text-transform: uppercase;
-  color: var(--c-fg-deep);
-  padding-top: 10px;
-}
-.charon-footer-line .sep { color: var(--c-gold-soft); }
-
-/* MFA Step */
-.charon-otp-row {
-  display: grid; grid-template-columns: repeat(6, 1fr);
-  gap: 8px; margin-bottom: 6px;
-}
-.charon-otp-input {
-  height: 52px;
-  background: rgba(8,6,4,0.7);
-  border: 1px solid rgba(184,146,75,0.22); border-radius: 3px;
-  color: var(--c-fg); font-family: 'IBM Plex Mono', monospace;
-  font-size: 22px; font-weight: 500; text-align: center;
-  outline: none; transition: border-color .15s, box-shadow .15s;
-}
-.charon-otp-input:focus {
-  border-color: var(--c-gold); box-shadow: 0 0 0 3px rgba(184,146,75,0.12);
-}
-.charon-mfa-info {
-  display: flex; align-items: center; gap: 12px;
-  padding: 14px; background: rgba(8,6,4,0.45);
-  border: 1px solid rgba(184,146,75,0.18); border-radius: 3px; margin-bottom: 16px;
-}
-.charon-mfa-info .ico {
-  width: 36px; height: 36px;
-  background: rgba(184,146,75,0.10);
-  border: 1px solid rgba(184,146,75,0.3); border-radius: 3px;
-  display: grid; place-items: center; color: var(--c-gold); flex-shrink: 0;
-}
-.charon-mfa-info .info { flex: 1; min-width: 0; }
-.charon-mfa-info .info .name { font-size: 12.5px; font-weight: 500; color: var(--c-fg); }
-.charon-mfa-info .info .sub { font-size: 10.5px; color: var(--c-fg-dim); margin-top: 2px; font-family: 'IBM Plex Mono', monospace; }
-.charon-back-btn {
+.cl-back-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  background: transparent; border: 0;
-  color: var(--c-fg-dim); font-size: 11px; cursor: pointer;
-  padding: 0; margin-bottom: 12px;
-  font-family: 'IBM Plex Sans', sans-serif; letter-spacing: 0.04em;
+  background: transparent; border: 0; color: var(--c-fg-dim);
+  font-size: 11px; cursor: pointer; padding: 0; margin-bottom: 12px;
+  letter-spacing: 0.04em;
 }
-.charon-back-btn:hover { color: var(--c-gold); }
-.charon-resend {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 11.5px; color: var(--c-fg-dim);
-  margin-top: 12px; margin-bottom: 18px;
+.cl-back-btn:hover { color: var(--c-gold); }
+
+/* MFA yöntem segmented control — backend'in mfa.methods listesine göre dinamik */
+.cl-mfa-seg {
+  display: flex; gap: 0; margin-bottom: 16px;
+  background: rgba(6,5,3,0.5);
+  border: 1px solid rgba(184,146,75,0.20);
+  border-radius: 4px; padding: 3px;
 }
-.charon-resend .timer { font-family: 'IBM Plex Mono', monospace; color: var(--c-gold); }
+.cl-mfa-seg button {
+  flex: 1; background: transparent; border: 0;
+  color: var(--c-fg-dim); font-family: var(--c-font-mono);
+  font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  padding: 9px 6px; cursor: pointer; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  transition: background .15s, color .15s;
+}
+.cl-mfa-seg button:hover:not(.active) { color: var(--c-ember); }
+.cl-mfa-seg button.active {
+  background: rgba(184,146,75,0.14);
+  color: var(--c-gold);
+  box-shadow: inset 0 0 0 1px rgba(184,146,75,0.32);
+}
+.cl-mfa-seg button svg { flex-shrink: 0; opacity: 0.9; }
+
+/* Seçilen yöntem için kısa bilgi satırı (masked email vb.) */
+.cl-mfa-hint {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; margin-bottom: 14px;
+  background: rgba(6,5,3,0.4);
+  border: 1px solid rgba(184,146,75,0.14);
+  border-radius: 4px;
+  font-family: var(--c-font-mono); font-size: 11px;
+  color: var(--c-fg-dim); letter-spacing: 0.02em;
+}
+.cl-mfa-hint .ico { color: var(--c-gold); display: flex; flex-shrink: 0; }
+.cl-mfa-hint strong { color: var(--c-fg); font-weight: 500; }
+
+.cl-success-icon {
+  width: 72px; height: 72px; margin: 0 auto 16px; border-radius: 50%;
+  background: rgba(184,146,75,0.10); border: 1.5px solid var(--c-gold);
+  display: grid; place-items: center; color: var(--c-gold); position: relative;
+}
+.cl-success-icon::after {
+  content: ""; position: absolute; inset: -4px;
+  border: 1px solid rgba(184,146,75,0.3); border-radius: 50%;
+  animation: cl-pulse 2.4s ease-out infinite;
+}
+@keyframes cl-pulse { 0% { transform: scale(0.95); opacity: 1; } 100% { transform: scale(1.4); opacity: 0; } }
+
+.cl-footer-line {
+  position: fixed; bottom: 16px; left: 0; right: 0;
+  text-align: center; font-family: var(--c-font-mono);
+  font-size: 9px; color: var(--c-fg-deep);
+  letter-spacing: 0.36em; text-transform: uppercase; pointer-events: none;
+  z-index: 6;
+}
+.cl-footer-line .sep { color: var(--c-gold-soft); margin: 0 12px; }
+
+@media (max-width: 720px) {
+  .cl-stage { padding: 26px 18px; }
+  .cl-hud { display: none; }
+  .cl-brand-name { font-size: 40px; letter-spacing: 0.30em; }
+  .cl-brand-tagline { font-size: 8.5px; letter-spacing: 0.3em; }
+  .cl-card-body { padding: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cl-scanbeam, .cl-btn-primary .sheen { animation: none; }
+}
 `
 
+const FONTS_HREF = 'https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=Orbitron:wght@400;500;600;700&display=swap'
+
 type Step = 1 | 2 | 3
-// Backend method ids: 'totp' (Google Auth / Microsoft / Authy / 1Password)
-// and 'recovery' (one-shot codes). UI groups TOTP-class apps under 'app'
-// for the user-facing copy; the wire value sent to /auth/mfa/verify is
-// 'totp' or 'recovery'.
 type MfaMethod = 'totp' | 'recovery' | 'email' | 'sms'
 
 interface MfaChallenge {
@@ -303,36 +409,391 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [mfa, setMfa] = useState<MfaChallenge>({ required: false })
-  // Recovery codes are 11 chars (XXXXX-XXXXX) — separate textbox UX from
-  // the 6-digit OTP grid so the user doesn't fight the per-cell input.
   const [recoveryCode, setRecoveryCode] = useState('')
   const [useRecovery, setUseRecovery] = useState(false)
-  // T9 Tur 2 #2b — Email MFA kanalı seçim akışı.
-  // useEmail=true iken kullanıcı önce "Yolla" butonuna basar (backend OTP
-  // emaile gönderir, emailSent=true olur), sonra 6-haneli input görür.
   const [useEmail, setUseEmail] = useState(false)
   const [emailSent, setEmailSent] = useState(false)
   const [emailError, setEmailError] = useState('')
   const [timer, setTimer] = useState(30)
   const otpRefs = useRef<(HTMLInputElement | null)[]>([])
 
+  // Telemetry / HUD
+  const [clock, setClock] = useState('--:--:--')
+  const [rtt, setRtt] = useState('— ms')
+  const [session] = useState(() => {
+    const hex = '0123456789ABCDEF'
+    let s = '0x'
+    for (let i = 0; i < 6; i++) s += hex[Math.floor(Math.random() * 16)]
+    return s
+  })
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const { setAuth } = useAuthStore()
   const navigate = useNavigate()
   const { t } = useTranslation()
 
-  // .charon-login class'ını <html>'a ekleyip kaldır (sadece login sayfasında)
+  // Fontları yükle + .charon-login class
   useEffect(() => {
     document.documentElement.classList.add('charon-login')
-    return () => { document.documentElement.classList.remove('charon-login') }
+    // Google Fonts <link>
+    const linkEl = document.createElement('link')
+    linkEl.rel = 'stylesheet'
+    linkEl.href = FONTS_HREF
+    document.head.appendChild(linkEl)
+    return () => {
+      document.documentElement.classList.remove('charon-login')
+      document.head.removeChild(linkEl)
+    }
+  }, [])
+
+  // Live clock + RTT telemetry (HUD süsleme)
+  useEffect(() => {
+    const pad = (n: number) => String(n).padStart(2, '0')
+    const tick = () => {
+      const d = new Date()
+      setClock(`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`)
+    }
+    tick()
+    const clockId = window.setInterval(tick, 1000)
+    const rttTick = () => setRtt(`${8 + Math.floor(Math.random() * 9)} ms`)
+    rttTick()
+    const rttId = window.setInterval(rttTick, 2200)
+    return () => { window.clearInterval(clockId); window.clearInterval(rttId) }
   }, [])
 
   // OTP timer
   useEffect(() => {
     if (step !== 2) return
     setTimer(30)
-    const id = setInterval(() => setTimer((t) => Math.max(0, t - 1)), 1000)
-    return () => clearInterval(id)
+    const id = window.setInterval(() => setTimer((s) => Math.max(0, s - 1)), 1000)
+    return () => window.clearInterval(id)
   }, [step])
+
+  // Canvas scene — datacenter aisle + network packets (HTML port)
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    let DPR = 1, w = 0, h = 0, riverY = 0
+    let skyline: any[] = []
+    let rackLinks: { a: number; b: number; up: boolean }[] = []
+    let packets: any[] = []
+    let fog: any[] = []
+    const mouse = { x: 0, y: 0, tx: 0, ty: 0 }
+    let raf = 0
+    let stopped = false
+
+    const labelPool: Record<string, string[]> = {
+      '-1': ['CORE-SW-01', 'DIST-SW-01', 'SRV-CL-A', 'FW-01', 'ACC-SW-07'],
+      '1':  ['CORE-SW-02', 'DIST-SW-02', 'SRV-CL-B', 'LB-01', 'ACC-SW-11'],
+    }
+    const typeBy = (lbl: string) =>
+      lbl.startsWith('CORE') ? 'core'
+      : lbl.startsWith('DIST') || lbl.startsWith('ACC') ? 'switch'
+      : lbl.startsWith('SRV') ? 'server'
+      : lbl.startsWith('FW') ? 'fw' : 'lb'
+
+    function build() {
+      riverY = h * 0.42
+      skyline = []
+      const rows = w < 720 ? 7 : 11
+      const vanX = w * 0.5, vanY = riverY
+      const easeIn = (tt: number) => tt * tt
+      for (const side of [-1, 1] as const) {
+        for (let i = 0; i < rows; i++) {
+          const tt = i / rows
+          const e = easeIn(tt)
+          const edgeX = side < 0 ? (0.055 * w) : (0.945 * w)
+          const cx = edgeX + (vanX - edgeX) * (0.04 + 0.86 * e)
+          const cy = (h * 0.74) + (vanY - h * 0.74) * (0.02 + 0.94 * e)
+          const rh = (h * 0.54) * (1 - 0.90 * tt)
+          const rw = (w * 0.06) * (1 - 0.82 * tt)
+          const ledRows = Math.max(3, Math.round(rh / 7.5))
+          const leds: any[] = []
+          for (let r = 0; r < ledRows; r++) {
+            leds.push({
+              yf: (r + 0.5) / ledRows,
+              on: Math.random() < 0.8,
+              green: Math.random() < 0.3,
+              blink: 0.4 + Math.random() * 2.2,
+              ph: Math.random() * 6.28,
+              w2: Math.random() < 0.45,
+            })
+          }
+          skyline.push({
+            side, cx, cy, rw: Math.max(2, rw), rh: Math.max(6, rh),
+            depth: tt, seed: Math.random() * 999, leds,
+            portYf: 0.04 + Math.random() * 0.42,
+          })
+        }
+      }
+      skyline.sort((a, b) => b.depth - a.depth)
+
+      const counters: Record<string, number> = { '-1': 0, '1': 0 }
+      ;[...skyline].sort((a, b) => a.depth - b.depth).forEach((rk: any) => {
+        const key = rk.side < 0 ? '-1' : '1'
+        if (rk.depth < 0.5 && counters[key] < labelPool[key].length) {
+          rk.label = labelPool[key][counters[key]++]
+          rk.dtype = typeBy(rk.label)
+          rk.core = rk.dtype === 'core'
+        }
+      })
+
+      rackLinks = []
+      for (let i = 0; i < skyline.length; i++) {
+        const ri = skyline[i]
+        const rpx = ri.cx
+        const rpy = (ri.cy - ri.rh) + ri.rh * ri.portYf
+        const cand: { j: number; d: number }[] = []
+        for (let j = 0; j < skyline.length; j++) {
+          if (j === i) continue
+          const rj = skyline[j]
+          const jx = rj.cx
+          const jy = (rj.cy - rj.rh) + rj.rh * rj.portYf
+          cand.push({ j, d: Math.hypot(rpx - jx, rpy - jy) })
+        }
+        cand.sort((a, b) => a.d - b.d)
+        const k = 1 + (Math.random() < 0.55 ? 1 : 0)
+        for (let n = 0; n < k && n < cand.length; n++) {
+          const j = cand[n].j
+          if (cand[n].d > w * 0.34) continue
+          if (!rackLinks.some(l => (l.a === j && l.b === i) || (l.a === i && l.b === j))) {
+            rackLinks.push({ a: i, b: j, up: false })
+          }
+        }
+      }
+      skyline.forEach((rk: any, i: number) => {
+        if (rk.label && (rk.dtype === 'core' || rk.dtype === 'dist')) {
+          rackLinks.push({ a: i, b: -1, up: true })
+        }
+      })
+
+      packets = []
+      const P = w < 720 ? 16 : 32
+      for (let i = 0; i < P; i++) spawnPacket()
+
+      fog = []
+      const F = w < 720 ? 6 : 12
+      for (let i = 0; i < F; i++) {
+        fog.push({
+          x: Math.random() * w,
+          y: riverY - 30 + Math.random() * 150,
+          r: 40 + Math.random() * 90,
+          sp: 2 + Math.random() * 5,
+          ph: Math.random() * 6.28,
+        })
+      }
+    }
+
+    function spawnPacket() {
+      if (!rackLinks.length) return
+      const li = Math.floor(Math.random() * rackLinks.length)
+      packets.push({
+        li, t: Math.random(),
+        dir: rackLinks[li].up ? 1 : (Math.random() < 0.5 ? 1 : -1),
+        sp: 0.16 + Math.random() * 0.20,
+        size: 1.0 + Math.random() * 1.2,
+        ember: Math.random() < 0.3,
+      })
+    }
+
+    function resize() {
+      DPR = Math.min(window.devicePixelRatio || 1, 2)
+      w = window.innerWidth || document.documentElement.clientWidth || 0
+      h = window.innerHeight || document.documentElement.clientHeight || 0
+      if (w < 2 || h < 2) { window.setTimeout(resize, 60); return }
+      canvas!.width = w * DPR
+      canvas!.height = h * DPR
+      canvas!.style.width = w + 'px'
+      canvas!.style.height = h + 'px'
+      ctx!.setTransform(DPR, 0, 0, DPR, 0, 0)
+      build()
+    }
+
+    function linkEnds(l: { a: number; b: number; up: boolean }) {
+      const a = skyline[l.a]
+      const A = { x: a._portx, y: a._porty }
+      const vp = { x: w * 0.5, y: riverY }
+      const B = l.up ? vp : { x: skyline[l.b]._portx, y: skyline[l.b]._porty }
+      return [A, B] as const
+    }
+
+    let t0 = performance.now()
+    function frame(now: number) {
+      if (stopped) return
+      const dt = Math.min(now - t0, 50); t0 = now
+      ctx!.clearRect(0, 0, w, h)
+      mouse.x += (mouse.tx - mouse.x) * 0.04
+      mouse.y += (mouse.ty - mouse.y) * 0.04
+      const par = reduce ? 0 : 1
+      const time = now * 0.001
+      const px = mouse.x * 10 * par
+
+      // Datacenter racks + LEDs
+      for (const rk of skyline) {
+        const fade = 1 - rk.depth * 0.45
+        const cx = rk.cx + px * (0.2 + rk.depth * 0.5) * rk.side
+        const x0 = cx - rk.rw / 2, y0 = rk.cy - rk.rh, ww = rk.rw, hh = rk.rh
+        rk._portx = cx; rk._porty = y0 + hh * rk.portYf
+        const body = ctx!.createLinearGradient(x0, 0, x0 + ww, 0)
+        const aisle = rk.side < 0 ? 1 : 0
+        body.addColorStop(0, `rgba(${aisle ? 30 : 18},${aisle ? 30 : 18},${aisle ? 40 : 26},${0.96 * fade})`)
+        body.addColorStop(0.5, `rgba(34,34,46,${0.97 * fade})`)
+        body.addColorStop(1, `rgba(${aisle ? 18 : 30},${aisle ? 18 : 30},${aisle ? 26 : 40},${0.96 * fade})`)
+        ctx!.fillStyle = body
+        ctx!.fillRect(x0, y0, ww, hh)
+        ctx!.fillStyle = `rgba(224,189,126,${0.55 * fade})`
+        ctx!.fillRect(rk.side < 0 ? x0 + ww - 1.5 : x0, y0, 1.5, hh)
+        ctx!.fillStyle = `rgba(230,194,130,${0.4 * fade})`
+        ctx!.fillRect(x0, y0, ww, 1.5)
+        const ledX = x0 + ww * 0.16, ledW = ww * 0.68
+        for (const L of rk.leds) {
+          if (!L.on) continue
+          const blinkV = 0.5 + 0.5 * Math.sin(time * L.blink + L.ph)
+          const a = (0.4 + 0.55 * blinkV) * fade * 0.92
+          const ly = y0 + hh * L.yf
+          const col = L.green ? '110,205,140' : '235,200,135'
+          const lh = Math.max(1.4, hh * 0.022)
+          ctx!.fillStyle = `rgba(${col},${a})`
+          const lw = Math.max(1.2, ledW * (L.w2 ? 0.32 : 0.52))
+          ctx!.fillRect(ledX, ly, lw, lh)
+          ctx!.fillStyle = `rgba(${col},${a * 0.25})`
+          ctx!.fillRect(ledX - 1, ly - 1, lw + 2, lh + 2)
+          if (L.w2) {
+            const col2 = L.green ? '235,200,135' : '110,205,140'
+            ctx!.fillStyle = `rgba(${col2},${a * 0.9})`
+            ctx!.fillRect(ledX + ledW * 0.52, ly, lw, lh)
+          }
+        }
+      }
+
+      // Floor glow
+      const fl = ctx!.createLinearGradient(0, riverY, 0, h)
+      fl.addColorStop(0, 'rgba(200,163,90,0.05)')
+      fl.addColorStop(0.5, 'rgba(140,100,44,0.03)')
+      fl.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx!.fillStyle = fl
+      ctx!.fillRect(0, riverY, w, h - riverY)
+
+      // Horizon glow
+      const hz = ctx!.createRadialGradient(w * 0.5, riverY, 0, w * 0.5, riverY, w * 0.22)
+      hz.addColorStop(0, 'rgba(230,194,130,0.16)')
+      hz.addColorStop(1, 'rgba(230,194,130,0)')
+      ctx!.fillStyle = hz
+      ctx!.fillRect(0, riverY - w * 0.18, w, w * 0.36)
+
+      // Fog motes
+      for (const m of fog) {
+        m.x += m.sp * dt * 0.012
+        if (m.x - m.r > w) m.x = -m.r
+        const a = 0.016 + 0.010 * Math.sin(time * 0.3 + m.ph)
+        const g = ctx!.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r)
+        g.addColorStop(0, `rgba(200,163,90,${a})`)
+        g.addColorStop(1, 'rgba(200,163,90,0)')
+        ctx!.fillStyle = g
+        ctx!.beginPath(); ctx!.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx!.fill()
+      }
+
+      // Network links
+      ctx!.lineWidth = 1.2
+      for (const l of rackLinks) {
+        const a = skyline[l.a]
+        if (a._portx == null) continue
+        const [A, B] = linkEnds(l)
+        const pulse = 0.5 + 0.5 * Math.sin(time * 1.4 + l.a)
+        const base = l.up ? 0.28 : 0.20
+        const al = (base + 0.18 * pulse) * (1 - a.depth * 0.4)
+        const grad = ctx!.createLinearGradient(A.x, A.y, B.x, B.y)
+        grad.addColorStop(0, `rgba(224,189,126,${al})`)
+        grad.addColorStop(1, `rgba(200,163,90,${al * 0.5})`)
+        ctx!.strokeStyle = grad
+        ctx!.beginPath(); ctx!.moveTo(A.x, A.y); ctx!.lineTo(B.x, B.y); ctx!.stroke()
+      }
+
+      // Packets
+      if (!reduce) {
+        for (let pi = packets.length - 1; pi >= 0; pi--) {
+          const p = packets[pi]
+          p.t += p.sp * p.dir * dt * 0.001
+          if (p.t > 1 || p.t < 0) { packets.splice(pi, 1); spawnPacket(); continue }
+          const l = rackLinks[p.li]
+          if (!l || skyline[l.a]._portx == null) continue
+          const [A, B] = linkEnds(l)
+          const x = A.x + (B.x - A.x) * p.t
+          const y = A.y + (B.y - A.y) * p.t
+          const col = p.ember ? '235,200,135' : '200,163,90'
+          const g = ctx!.createRadialGradient(x, y, 0, x, y, p.size * 4.5)
+          g.addColorStop(0, `rgba(${col},0.95)`)
+          g.addColorStop(1, `rgba(${col},0)`)
+          ctx!.fillStyle = g
+          ctx!.beginPath(); ctx!.arc(x, y, p.size * 4.5, 0, Math.PI * 2); ctx!.fill()
+          ctx!.fillStyle = `rgba(${col},1)`
+          ctx!.beginPath(); ctx!.arc(x, y, p.size, 0, Math.PI * 2); ctx!.fill()
+        }
+      }
+
+      // Port nodes + labels
+      ctx!.textBaseline = 'middle'
+      for (const rk of skyline) {
+        if (rk._portx == null) continue
+        const pulse = 0.55 + 0.45 * Math.sin(time * 1.8 + rk.seed)
+        if (rk.label || rk.depth < 0.35) {
+          const nr = rk.label ? (rk.core ? 3.4 : 2.6) : 1.8
+          const g = ctx!.createRadialGradient(rk._portx, rk._porty, 0, rk._portx, rk._porty, nr * 5)
+          g.addColorStop(0, `rgba(235,200,135,${0.45 * pulse})`)
+          g.addColorStop(1, 'rgba(235,200,135,0)')
+          ctx!.fillStyle = g
+          ctx!.beginPath(); ctx!.arc(rk._portx, rk._porty, nr * 5, 0, Math.PI * 2); ctx!.fill()
+          ctx!.fillStyle = `rgba(245,228,196,0.95)`
+          ctx!.beginPath(); ctx!.arc(rk._portx, rk._porty, nr, 0, Math.PI * 2); ctx!.fill()
+          if (rk.core) {
+            ctx!.strokeStyle = `rgba(235,200,135,${0.5 * pulse})`
+            ctx!.lineWidth = 1
+            ctx!.beginPath(); ctx!.arc(rk._portx, rk._porty, nr * 2.4, 0, Math.PI * 2); ctx!.stroke()
+          }
+        }
+        if (rk.label) {
+          const lx = rk._portx, ly = rk._porty - 14
+          const icon = rk.dtype === 'core' || rk.dtype === 'switch' ? '⇄'
+            : rk.dtype === 'server' ? '▤' : rk.dtype === 'fw' ? '⛨' : '◇'
+          ctx!.font = '600 9px Orbitron, monospace'
+          ctx!.textAlign = 'center'
+          const txt = icon + ' ' + rk.label
+          const tw = ctx!.measureText(txt).width + 10
+          ctx!.strokeStyle = 'rgba(200,163,90,0.4)'
+          ctx!.lineWidth = 1
+          ctx!.beginPath(); ctx!.moveTo(rk._portx, rk._porty); ctx!.lineTo(lx, ly + 6); ctx!.stroke()
+          ctx!.fillStyle = 'rgba(10,9,7,0.75)'
+          ctx!.fillRect(lx - tw / 2, ly - 7, tw, 14)
+          ctx!.fillStyle = 'rgba(200,163,90,0.5)'
+          ctx!.fillRect(lx - tw / 2, ly - 7, tw, 1)
+          ctx!.fillStyle = rk.core ? 'rgba(245,228,196,0.95)' : 'rgba(220,196,150,0.9)'
+          ctx!.fillText(txt, lx, ly)
+        }
+      }
+      ctx!.textAlign = 'left'
+
+      raf = requestAnimationFrame(frame)
+    }
+
+    const onMouse = (ev: MouseEvent) => {
+      mouse.tx = (ev.clientX / window.innerWidth - 0.5)
+      mouse.ty = (ev.clientY / window.innerHeight - 0.5)
+    }
+    resize()
+    raf = requestAnimationFrame(frame)
+    window.addEventListener('resize', resize)
+    window.addEventListener('mousemove', onMouse)
+    return () => {
+      stopped = true
+      cancelAnimationFrame(raf)
+      window.removeEventListener('resize', resize)
+      window.removeEventListener('mousemove', onMouse)
+    }
+  }, [])
 
   const finalizeSession = (res: TokenResponse) => {
     setAuth(
@@ -341,7 +802,9 @@ export default function LoginPage() {
         system_role: (res.system_role as any) ?? 'member', org_id: res.org_id },
       res.permissions,
     )
-    navigate('/')
+    setStep(3)
+    // Kısa "Geçiş onaylandı" gösterimi sonrası yönlendir
+    window.setTimeout(() => navigate('/'), 800)
   }
 
   const submitStep1 = async (e?: React.FormEvent) => {
@@ -351,7 +814,6 @@ export default function LoginPage() {
     try {
       const res = await authApi.login(username, password)
       if ('mfa_required' in res && res.mfa_required) {
-        // Backend method ids are 'totp' / 'recovery'; UI defaults to TOTP.
         const methods = (res.mfa_methods?.length ? res.mfa_methods : ['totp']) as MfaMethod[]
         const def = (res.mfa_default_method || methods[0] || 'totp') as MfaMethod
         setMfa({
@@ -386,7 +848,6 @@ export default function LoginPage() {
     try {
       const res = await authApi.sendMfaEmailCode(mfa.challengeToken)
       setEmailSent(true)
-      // backend mevcut masked_email'i bu yanıtla yenileyebilir
       setMfa((m) => ({ ...m, maskedEmail: res.email_masked || m.maskedEmail }))
     } catch (err: any) {
       const detail = err?.response?.data?.detail
@@ -396,9 +857,6 @@ export default function LoginPage() {
 
   const submitStep2 = async () => {
     if (!mfa.challengeToken) { setError('Doğrulama oturumu yok — tekrar giriş yapın'); return }
-    // Email modu: input 6-haneli (otp grid), yöntem 'email'
-    // Recovery: textbox 11-char, yöntem 'recovery'
-    // TOTP (default): 6-haneli grid, yöntem 'totp'
     const code = useRecovery ? recoveryCode.trim() : otp.join('')
     const method: 'totp' | 'recovery' | 'email' =
       useEmail ? 'email' : (useRecovery ? 'recovery' : 'totp')
@@ -409,7 +867,6 @@ export default function LoginPage() {
       const res = await authApi.verifyMfa(mfa.challengeToken, code, method)
       finalizeSession(res)
     } catch (err: any) {
-      // 401 — bad code / expired challenge. Reset OTP cells so retry feels fresh.
       const status = err?.response?.status
       const detail = err?.response?.data?.detail
       if (status === 401 && detail?.toLowerCase?.().includes('challenge')) {
@@ -433,247 +890,344 @@ export default function LoginPage() {
     if (e.key === 'Backspace' && !otp[i] && i > 0) otpRefs.current[i - 1]?.focus()
   }
 
+  const methodLabel = useEmail ? 'E-posta'
+    : useRecovery ? 'Kurtarma Kodu' : 'Authenticator App'
+  const methodSub = useEmail
+    ? (mfa.maskedEmail || 'Kayıtlı email adresinize gönderilir')
+    : useRecovery
+      ? 'Tek kullanımlık · MFA kayıt sırasında verildi'
+      : 'Google · Microsoft · Authy · 1Password'
+
   return (
     <>
       <style>{CSS}</style>
-      <div className="charon-bg" />
-      <div className="charon-grain" />
+      <div className="cl-bg" />
+      <div className="cl-bg-tint" />
+      <canvas ref={canvasRef} className="cl-net" />
+      <div className="cl-hud-grid" />
+      <div className="cl-scanbeam" />
+      <div className="cl-grain" />
 
-      {/* Köşe süslemeleri (dekoratif) */}
-      <div className="charon-ornament tl"><span className="frame" /><div className="l">— ⊕ —</div></div>
-      <div className="charon-ornament tr"><span className="frame" /><div className="l">— ⊕ —</div></div>
-      <div className="charon-ornament bl"><span className="frame" /><div className="l">est · mmxxvi</div></div>
-      <div className="charon-ornament br"><span className="frame" /><div className="l">— ⊕ —</div></div>
+      {/* HUD corners */}
+      <div className="cl-hud tl">
+        <span className="bracket" />
+        <div className="k">Styx Gateway</div>
+        <div className="cl-hud-row"><span className="v">gw-styx-01.charon.net</span></div>
+        <div className="cl-hud-row" style={{ marginTop: 8 }}>
+          <span className="k">Region</span><span className="v">eu-central · iad</span>
+        </div>
+      </div>
+      <div className="cl-hud tr">
+        <span className="bracket" />
+        <div className="k">Secure Channel</div>
+        <div className="cl-hud-row"><span className="ok">TLS 1.3</span><span className="sep">·</span><span className="v">AES-256-GCM</span></div>
+        <div className="cl-hud-row" style={{ marginTop: 8 }}>
+          <span className="k">Cipher</span><span className="v">X25519-Kyber768</span>
+        </div>
+      </div>
+      <div className="cl-hud bl">
+        <span className="bracket" />
+        <div className="k">Channel Status</div>
+        <div className="cl-hud-row"><span className="cl-live-dot" /><span className="ok">ENCRYPTED · READY</span></div>
+        <div className="cl-hud-row" style={{ marginTop: 8 }}>
+          <span className="k">RTT</span><span className="v">{rtt}</span>
+        </div>
+      </div>
+      <div className="cl-hud br">
+        <span className="bracket" />
+        <div className="k">Build</div>
+        <div className="cl-hud-row"><span className="v">v4.2.0 · gold</span></div>
+        <div className="cl-hud-row" style={{ marginTop: 8 }}>
+          <span className="k">Session</span><span className="v">{session}</span>
+        </div>
+      </div>
 
-      <div className="charon-stage">
-        {/* Brand — T8.4: kullanıcının verdiği marka logosu (altın elmas + Ω
-            + dik mızrak). Eski geometric placeholder kaldırıldı. */}
-        <div className="charon-brand">
-          <div className="charon-brand-mark" style={{ width: 72, height: 72 }}>
-            <CharonLogo size={72} />
+      <div className="cl-stage">
+        {/* Brand */}
+        <div className="cl-brand">
+          <div className="cl-brand-mark">
+            <svg viewBox="0 0 40 40" fill="none">
+              <defs>
+                <linearGradient id="cl-markGrad" x1="0" y1="0" x2="40" y2="40">
+                  <stop offset="0%" stopColor="#e0bd7e" />
+                  <stop offset="100%" stopColor="#8a6f3d" />
+                </linearGradient>
+              </defs>
+              <polygon points="20,3 37,20 20,37 3,20" fill="none" stroke="url(#cl-markGrad)" strokeWidth="1.5" />
+              <polygon points="20,12 28,20 20,28 12,20" fill="none" stroke="url(#cl-markGrad)" strokeWidth="1" />
+              <circle cx="20" cy="20" r="1.6" fill="#e0bd7e" />
+            </svg>
           </div>
-          <h1 className="charon-brand-name">CHARON</h1>
-          <div className="charon-brand-tagline">Universal Network Intelligence</div>
+          <h1 className="cl-brand-name">CHARON</h1>
+          <div className="cl-brand-tagline">Networks Between Worlds</div>
+          <div className="cl-brand-under"><span className="cl-live-dot" />Enterprise Network Intelligence</div>
         </div>
 
-        {/* Auth Card */}
-        <div className="charon-auth-wrap">
-          <div className="charon-auth-card">
-            <span className="corner-tr" /><span className="corner-br" />
+        {/* Auth card */}
+        <div className="cl-auth-wrap">
+          <div className="cl-auth-card">
+            <span className="cl-corner tl" />
+            <span className="cl-corner tr" />
+            <span className="cl-corner bl" />
+            <span className="cl-corner br" />
 
-            {step === 1 && (
-              <form onSubmit={submitStep1}>
-                <div className="charon-step-bar"><i className="active" /><i /></div>
-                <div className="charon-step-label">— Adım 1 / 2 · Kimlik —</div>
-                <h2 className="charon-title">Hoş geldiniz</h2>
-                <p className="charon-sub">Geçişe başlamak için kimlik bilgilerinizi sunun.</p>
+            <div className="cl-card-strip">
+              <span className="seg">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="5" y="11" width="14" height="9" rx="1.5" />
+                  <path d="M8 11V8a4 4 0 018 0v3" />
+                </svg>
+                SECURE LOGIN
+              </span>
+              <span className="sep">·</span>
+              <span className="seg handshake">HANDSHAKE OK</span>
+              <span className="grow" />
+              <span className="seg">{clock}</span>
+            </div>
 
-                {error && <div className="charon-err">{error}</div>}
+            <div className="cl-card-body">
+              {step === 1 && (
+                <form onSubmit={submitStep1}>
+                  <div className="cl-step-bar"><i className="active" /><i /></div>
+                  <div className="cl-step-label">Adım 1 / 2 · Kimlik Doğrulama</div>
+                  <h2 className="cl-title">Geçiş için kimlik doğrulayın</h2>
+                  <p className="cl-sub">Ağ komuta merkezine erişmek için kimlik bilgilerinizi girin.</p>
 
-                <div className="charon-field">
-                  <div className="charon-field-label"><span>Kullanıcı</span></div>
-                  <div className="charon-input-wrap">
-                    <span className="ico">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                        <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" />
-                      </svg>
-                    </span>
-                    <input type="text" id="username" className="charon-input" placeholder="kullanici.adi"
-                      value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus />
-                  </div>
-                </div>
+                  {error && <div className="cl-err">{error}</div>}
 
-                <div className="charon-field">
-                  <div className="charon-field-label">
-                    <span>Şifre</span>
-                    <a href="#" onClick={(e) => { e.preventDefault() }}>Unuttunuz mu?</a>
-                  </div>
-                  <div className="charon-input-wrap">
-                    <span className="ico">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                        <rect x="5" y="11" width="14" height="9" rx="1.5" /><path d="M8 11V8a4 4 0 018 0v3" />
-                      </svg>
-                    </span>
-                    <input id="password" className="charon-input" type={showPwd ? 'text' : 'password'} placeholder="••••••••"
-                      value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" />
-                    <button type="button" className="charon-pwd-toggle" onClick={() => setShowPwd((v) => !v)}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-                      </svg>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="charon-cb-row">
-                  <span className={`box ${remember ? 'on' : ''}`} onClick={() => setRemember(!remember)}>
-                    {remember && <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
-                      <path d="M3 8.5L6 11.5L13 4.5" stroke="#1a1208" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>}
-                  </span>
-                  <label onClick={() => setRemember(!remember)} style={{ cursor: 'pointer' }}>Bu cihazda kal</label>
-                </div>
-
-                <button type="submit" className="charon-btn-primary" disabled={loading}>
-                  {loading ? 'GİRİŞ YAPILIYOR…' : 'DEVAM ET'}
-                  {!loading && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
-                    <path d="M5 12h14M13 6l6 6-6 6" />
-                  </svg>}
-                </button>
-
-                <div className="charon-divider">— ya da —</div>
-                <div className="charon-sso-row">
-                  {[
-                    { id: 'azure', label: 'Azure AD' },
-                    { id: 'okta',  label: 'Okta' },
-                    { id: 'saml',  label: 'SAML' },
-                  ].map((s) => (
-                    <button key={s.id} type="button" className="charon-sso-btn"
-                      onClick={() => setError(`${s.label} SSO henüz konfigüre edilmedi`)}>
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </form>
-            )}
-
-            {step === 2 && (
-              <div>
-                <div className="charon-step-bar"><i className="done" /><i className="active" /></div>
-                <button type="button" className="charon-back-btn" onClick={() => { setStep(1); setError('') }}>
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                    <path d="M19 12H5M11 18l-6-6 6-6" />
-                  </svg>
-                  Geri
-                </button>
-                <div className="charon-step-label">— Adım 2 / 2 · Doğrulama —</div>
-                <h2 className="charon-title">Kimliğinizi doğrulayın</h2>
-                <p className="charon-sub">
-                  {!useRecovery && !useEmail && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
-                  {useEmail && !emailSent && <>Doğrulama kodunu emailinize göndermek için aşağıdaki butona basın.</>}
-                  {useEmail && emailSent && <>Email'inize gönderilen <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
-                  {useRecovery && <>Tek-kullanımlık <strong style={{ color: 'var(--c-fg)' }}>kurtarma kodunuzu</strong> girin (XXXXX-XXXXX).</>}
-                </p>
-
-                {(error || emailError) && <div className="charon-err">{error || emailError}</div>}
-
-                <div className="charon-mfa-info">
-                  <div className="ico">
-                    {!useRecovery && !useEmail && (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                        <rect x="5" y="2" width="14" height="20" rx="2" /><path d="M9 7h6M12 18v.01" />
-                      </svg>
-                    )}
-                    {useEmail && (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                        <rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" />
-                      </svg>
-                    )}
-                    {useRecovery && (
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-                        <path d="M12 2l3 6 6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z" />
-                      </svg>
-                    )}
-                  </div>
-                  <div className="info">
-                    <div className="name">
-                      {useEmail ? 'Email Doğrulama' : useRecovery ? 'Kurtarma Kodu' : 'Authenticator App'}
-                    </div>
-                    <div className="sub">
-                      {useEmail
-                        ? (mfa.maskedEmail || 'Kayıtlı email adresinize gönderilir')
-                        : useRecovery
-                          ? 'Tek kullanımlık · MFA kayıt sırasında verildi'
-                          : 'Google · Microsoft · Authy · 1Password'}
+                  <div className="cl-field">
+                    <div className="cl-field-label"><span>Kullanıcı</span></div>
+                    <div className="cl-input-wrap">
+                      <span className="ico">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                          <circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" />
+                        </svg>
+                      </span>
+                      <input type="text" className="cl-input" placeholder="kullanici.adi"
+                        value={username} onChange={(e) => setUsername(e.target.value)}
+                        autoComplete="username" autoFocus />
                     </div>
                   </div>
-                  {/* Method switcher — methods'a göre 2 veya 3 mod */}
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    {(useRecovery || useEmail) && (
-                      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
-                        onClick={() => { setUseRecovery(false); setUseEmail(false); setEmailSent(false); setError(''); setEmailError('') }}>
-                        Authenticator
+
+                  <div className="cl-field">
+                    <div className="cl-field-label">
+                      <span>Şifre</span>
+                      <a href="#" onClick={(e) => e.preventDefault()}>Unuttunuz mu?</a>
+                    </div>
+                    <div className="cl-input-wrap">
+                      <span className="ico">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                          <rect x="5" y="11" width="14" height="9" rx="1.5" />
+                          <path d="M8 11V8a4 4 0 018 0v3" />
+                        </svg>
                       </span>
+                      <input className="cl-input" type={showPwd ? 'text' : 'password'} placeholder="••••••••"
+                        value={password} onChange={(e) => setPassword(e.target.value)}
+                        autoComplete="current-password" />
+                      <button type="button" className="cl-pwd-toggle" onClick={() => setShowPwd((v) => !v)}>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                          <circle cx="12" cy="12" r="3" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="cl-cb-row">
+                    <span className={`box ${remember ? 'on' : ''}`} onClick={() => setRemember(!remember)}>
+                      {remember && (
+                        <svg width="9" height="9" viewBox="0 0 16 16" fill="none">
+                          <path d="M3 8.5L6 11.5L13 4.5" stroke="#160f06" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      )}
+                    </span>
+                    <label onClick={() => setRemember(!remember)}>Bu cihazda beni hatırla</label>
+                  </div>
+
+                  <button type="submit" className="cl-btn-primary" disabled={loading}>
+                    <span className="sheen" />
+                    {loading ? 'GİRİŞ YAPILIYOR…' : 'Devam Et'}
+                    {!loading && (
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+                        <path d="M5 12h14M13 6l6 6-6 6" />
+                      </svg>
                     )}
-                    {mfa.methods?.includes('email') && !useEmail && (
-                      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
-                        onClick={() => { setUseEmail(true); setUseRecovery(false); setEmailSent(false); setError(''); setEmailError(''); setOtp(['', '', '', '', '', '']) }}>
-                        Email
-                      </span>
-                    )}
-                    {!useRecovery && (
-                      <span style={{ fontFamily: 'IBM Plex Mono', fontSize: 9.5, color: 'var(--c-gold)', letterSpacing: '0.14em', textTransform: 'uppercase', cursor: 'pointer', padding: '4px 8px' }}
-                        onClick={() => { setUseRecovery(true); setUseEmail(false); setError(''); setEmailError('') }}>
-                        Kurtarma
-                      </span>
-                    )}
+                  </button>
+                </form>
+              )}
+
+              {step === 2 && (
+                <div>
+                  <div className="cl-step-bar"><i className="done" /><i className="active" /></div>
+                  <button type="button" className="cl-back-btn" onClick={() => { setStep(1); setError('') }}>
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M19 12H5M11 18l-6-6 6-6" />
+                    </svg>
+                    Geri
+                  </button>
+                  <div className="cl-step-label">Adım 2 / 2 · Çok Faktörlü Doğrulama</div>
+                  <h2 className="cl-title">Kimliğinizi doğrulayın</h2>
+                  <p className="cl-sub">
+                    {!useRecovery && !useEmail && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
+                    {useEmail && !emailSent && <>Doğrulama kodunu emailinize göndermek için aşağıdaki butona basın.</>}
+                    {useEmail && emailSent && <>Email'inize gönderilen <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
+                    {useRecovery && <>Tek-kullanımlık <strong style={{ color: 'var(--c-fg)' }}>kurtarma kodunuzu</strong> girin (XXXXX-XXXXX).</>}
+                  </p>
+
+                  {(error || emailError) && <div className="cl-err">{error || emailError}</div>}
+
+                  {/* Backend mfa.methods'a göre dinamik segmented control —
+                      yalnız sunulan yöntemler buton olarak render edilir */}
+                  {(() => {
+                    const hasTotp = !mfa.methods || mfa.methods.includes('totp')
+                    const hasEmail = mfa.methods?.includes('email') ?? false
+                    const hasRecovery = !mfa.methods || mfa.methods.includes('recovery')
+                    const totalCount = (hasTotp ? 1 : 0) + (hasEmail ? 1 : 0) + (hasRecovery ? 1 : 0)
+                    if (totalCount <= 1) return null
+                    return (
+                      <div className="cl-mfa-seg">
+                        {hasTotp && (
+                          <button type="button"
+                            className={(!useRecovery && !useEmail) ? 'active' : ''}
+                            onClick={() => { setUseRecovery(false); setUseEmail(false); setEmailSent(false); setError(''); setEmailError('') }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                              <rect x="5" y="2" width="14" height="20" rx="2" />
+                              <path d="M9 7h6M12 18v.01" />
+                            </svg>
+                            Auth App
+                          </button>
+                        )}
+                        {hasEmail && (
+                          <button type="button"
+                            className={useEmail ? 'active' : ''}
+                            onClick={() => { setUseEmail(true); setUseRecovery(false); setEmailSent(false); setError(''); setEmailError(''); setOtp(['', '', '', '', '', '']) }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                              <rect x="3" y="5" width="18" height="14" rx="2" />
+                              <path d="M3 8l9 6 9-6" />
+                            </svg>
+                            E-posta
+                          </button>
+                        )}
+                        {hasRecovery && (
+                          <button type="button"
+                            className={useRecovery ? 'active' : ''}
+                            onClick={() => { setUseRecovery(true); setUseEmail(false); setError(''); setEmailError('') }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                              <path d="M12 2l3 6 6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z" />
+                            </svg>
+                            Kurtarma
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })()}
+
+                  {/* Aktif yöntem için kısa kontekst (masked email vb.) */}
+                  <div className="cl-mfa-hint">
+                    <span className="ico">
+                      {!useRecovery && !useEmail && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                          <rect x="5" y="2" width="14" height="20" rx="2" />
+                          <path d="M9 7h6M12 18v.01" />
+                        </svg>
+                      )}
+                      {useEmail && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                          <rect x="3" y="5" width="18" height="14" rx="2" />
+                          <path d="M3 8l9 6 9-6" />
+                        </svg>
+                      )}
+                      {useRecovery && (
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+                          <path d="M12 2l3 6 6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z" />
+                        </svg>
+                      )}
+                    </span>
+                    <span>
+                      <strong>{methodLabel}</strong> · {methodSub}
+                    </span>
+                  </div>
+
+                  {/* Input alanı: moda göre */}
+                  {useEmail && !emailSent ? (
+                    <button type="button" className="cl-btn-primary"
+                      disabled={loading} onClick={sendEmailCode} style={{ marginBottom: 12 }}>
+                      <span className="sheen" />
+                      {loading ? 'GÖNDERİLİYOR…' : 'KODU EMAİL\'E GÖNDER'}
+                    </button>
+                  ) : !useRecovery ? (
+                    <div className="cl-otp-row">
+                      {otp.map((d, i) => (
+                        <input key={i}
+                          ref={(el) => { otpRefs.current[i] = el }}
+                          className={`cl-otp-input ${d ? 'filled' : ''}`}
+                          type="text" inputMode="numeric" maxLength={1}
+                          value={d} onChange={(e) => onOtpChange(i, e.target.value)}
+                          onKeyDown={(e) => onOtpKey(i, e)} autoFocus={i === 0} />
+                      ))}
+                    </div>
+                  ) : (
+                    <input className="cl-input"
+                      style={{ padding: '0 12px', textAlign: 'center', letterSpacing: '0.2em', fontSize: 15, textTransform: 'uppercase' }}
+                      value={recoveryCode}
+                      onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
+                      placeholder="XXXXX-XXXXX"
+                      maxLength={13} autoFocus />
+                  )}
+
+                  {!useRecovery && !useEmail && (
+                    <div className="cl-resend-row">
+                      <span>Kod 30 sn'de bir yenilenir.</span>
+                      {timer > 0 && <span className="timer">{`00:${String(timer).padStart(2, '0')}`}</span>}
+                    </div>
+                  )}
+                  {useEmail && emailSent && (
+                    <div className="cl-resend-row">
+                      <span>Email gönderildi · {mfa.maskedEmail || ''}</span>
+                      <span className="timer clickable" onClick={sendEmailCode}>YENİDEN YOLLA</span>
+                    </div>
+                  )}
+                  {useRecovery && <div style={{ height: 12 }} />}
+
+                  {(!useEmail || emailSent) && (
+                    <button type="button" className="cl-btn-primary"
+                      disabled={loading || (useRecovery
+                        ? recoveryCode.replace(/[-\s]/g, '').length < 8
+                        : otp.join('').length !== 6)}
+                      onClick={submitStep2}>
+                      <span className="sheen" />
+                      {loading ? 'DOĞRULANIYOR…' : 'Doğrula ve Geç'}
+                      {!loading && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
+                          <path d="M5 12h14M13 6l6 6-6 6" />
+                        </svg>
+                      )}
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {step === 3 && (
+                <div style={{ textAlign: 'center', padding: '14px 0 6px' }}>
+                  <div className="cl-success-icon">
+                    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="10" />
+                    </svg>
+                  </div>
+                  <h2 className="cl-title">Geçiş onaylandı</h2>
+                  <p className="cl-sub">Ağ komuta merkezine bağlanılıyor.</p>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'var(--c-font-mono)', fontSize: 10.5, color: 'var(--c-gold)', marginTop: 16, letterSpacing: '0.18em' }}>
+                    <span className="cl-live-dot" /> yönlendiriliyor…
                   </div>
                 </div>
-
-                {/* Input alanı: mod'a göre */}
-                {useEmail && !emailSent ? (
-                  <button type="button" className="charon-btn-primary"
-                    disabled={loading} onClick={sendEmailCode} style={{ marginBottom: 12 }}>
-                    {loading ? 'GÖNDERİLİYOR…' : 'KODU EMAİL\'E GÖNDER'}
-                  </button>
-                ) : !useRecovery ? (
-                  <div className="charon-otp-row">
-                    {otp.map((d, i) => (
-                      <input key={i}
-                        ref={(el) => { otpRefs.current[i] = el }}
-                        className="charon-otp-input"
-                        type="text" inputMode="numeric" maxLength={1}
-                        value={d} onChange={(e) => onOtpChange(i, e.target.value)}
-                        onKeyDown={(e) => onOtpKey(i, e)} autoFocus={i === 0} />
-                    ))}
-                  </div>
-                ) : (
-                  <input
-                    className="charon-input"
-                    style={{ padding: '0 12px', textAlign: 'center', fontFamily: 'IBM Plex Mono', letterSpacing: '0.2em', fontSize: 15, textTransform: 'uppercase' }}
-                    value={recoveryCode}
-                    onChange={(e) => setRecoveryCode(e.target.value.toUpperCase())}
-                    placeholder="XXXXX-XXXXX"
-                    maxLength={13}
-                    autoFocus
-                  />
-                )}
-
-                {!useRecovery && !useEmail && (
-                  <div className="charon-resend">
-                    <span>Kod 30 sn'de bir yenilenir.</span>
-                    {timer > 0 && <span className="timer">{`00:${String(timer).padStart(2, '0')}`}</span>}
-                  </div>
-                )}
-                {useEmail && emailSent && (
-                  <div className="charon-resend">
-                    <span>Email gönderildi · {mfa.maskedEmail || ''}</span>
-                    <span className="timer" style={{ cursor: 'pointer' }} onClick={sendEmailCode}>YENİDEN YOLLA</span>
-                  </div>
-                )}
-                {useRecovery && <div style={{ height: 12 }} />}
-
-                {/* Doğrula butonu — email modunda emailSent=true ise aktif */}
-                {(!useEmail || emailSent) && (
-                  <button type="button" className="charon-btn-primary"
-                    disabled={loading || (useRecovery
-                      ? recoveryCode.replace(/[-\s]/g, '').length < 8
-                      : otp.join('').length !== 6)}
-                    onClick={submitStep2}>
-                    {loading ? 'DOĞRULANIYOR…' : 'DOĞRULA VE GEÇ'}
-                    {!loading && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
-                      <path d="M5 12h14M13 6l6 6-6 6" />
-                    </svg>}
-                  </button>
-                )}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
+      </div>
 
-        {/* Footer */}
-        <div className="charon-footer-line">
-          Charon <span className="sep">·</span> Universal Network Intelligence <span className="sep">·</span> © 2026
-        </div>
+      <div className="cl-footer-line">
+        Charon <span className="sep">·</span> Enterprise Network Intelligence Platform <span className="sep">·</span> © 2026
       </div>
     </>
   )
