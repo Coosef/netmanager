@@ -53,6 +53,15 @@ router = APIRouter()
 # argümanı bulamayıp 5xx üretiyordu. router.py bunu prefix="/agents" altında GATE'SİZ include eder.
 agent_ws_router = APIRouter()
 
+# Incident HF#10A (2026-06-03) — Installer download endpoint'leri (agent kurulum
+# script'i) X-Agent-Key header ile kimlik doğrular; installer machine'in user
+# session'ı yoktur. Mevcut `router`'a `_feat("agents")` Bearer gate uygulandığı
+# için bu endpoint'ler kendi key auth'una bile gelmeden 401 "Not authenticated"
+# döndürüyordu (T10 Faz A1 feature gate regression).
+# Public router gate'siz include edilir (router.py); endpoint kodu kendi
+# X-Agent-Key / agent_key doğrulamasını yapar.
+agents_public_router = APIRouter()
+
 _redis = _redis_lib.from_url(settings.REDIS_URL, decode_responses=True)
 _MAX_FAILED_AUTH = 10   # lock agent WS after this many consecutive failures
 _AGENT_EVENT_DEDUP_TTL = 600   # 10 min — suppress duplicate agent online/offline events
@@ -558,7 +567,8 @@ async def get_agent_commands(
 
 # ── Installer download ────────────────────────────────────────────────────────
 
-@router.get("/{agent_id}/download/{platform}")
+# HF#10A — public router (gate'siz). X-Agent-Key endpoint içinde doğrulanır.
+@agents_public_router.get("/{agent_id}/download/{platform}")
 async def download_installer(
     agent_id: str,
     platform: str,
@@ -675,7 +685,8 @@ async def download_installer(
     )
 
 
-@router.get("/download/script")
+# HF#10A — public router (gate'siz). X-Agent-ID + X-Agent-Key endpoint içinde doğrulanır.
+@agents_public_router.get("/download/script")
 async def download_agent_script(
     request: Request,
     db: AsyncSession = Depends(get_db),

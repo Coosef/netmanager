@@ -30,6 +30,11 @@ api_router.include_router(agents.router, prefix="/agents", tags=["Agents"], depe
 # gerektiren _feat("agents") (→ oauth2_scheme, HTTP-only) WS scope'ta 5xx üretiyordu; WS
 # endpoint'lerine HTTP auth dependency uygulanmamalı (ws.py de aynı sebeple gate'siz, üstte).
 api_router.include_router(agents.agent_ws_router, prefix="/agents", tags=["Agents"])
+# Incident HF#10A (2026-06-03) — installer download endpoint'leri X-Agent-Key
+# header ile public-credential auth kullanır; user oturumu yoktur. _feat("agents")
+# Bearer dependency'sine takılıp 401 dönmesin diye ayrı public router + gate'siz
+# include. Endpoint kodu kendi X-Agent-Key/agent_key doğrulamasını yapar.
+api_router.include_router(agents.agents_public_router, prefix="/agents", tags=["Agents (Installer)"])
 api_router.include_router(agent_stream.router, prefix="/stream", tags=["Streaming"])
 api_router.include_router(monitor.router, prefix="/monitor", tags=["Monitor"])
 api_router.include_router(reports.router, prefix="/reports", tags=["Reports"])
