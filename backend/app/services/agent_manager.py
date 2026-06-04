@@ -949,10 +949,19 @@ class AgentManager:
         # Use vault if active (avoids sending plaintext password in WS message)
         meta = self._meta.get(agent_id, {})
         if meta.get("vault_active"):
+            # Incident HF#12 (2026-06-04) — agent _build_params ALWAYS reads
+            # msg["device_ip"] / ssh_port / os_type regardless of vault path.
+            # Pre-HF#12 the vault payload omitted these, triggering KeyError
+            # 'device_ip' inside _ssh_command on every call; backend then hit
+            # _COMMAND_TIMEOUT=90s because the agent thread crashed before
+            # sending ssh_result. Add them here so the contract matches.
             payload = {
                 "type": "ssh_command",
                 "request_id": rid,
                 "credential_id": device.id,
+                "device_ip": device.ip_address,
+                "ssh_port": device.ssh_port or 22,
+                "os_type": device.os_type,
                 "command": command,
                 "command_mode": sec["command_mode"],
                 "allowed_commands": sec["allowed_commands"],
@@ -1011,10 +1020,15 @@ class AgentManager:
         rid = uuid.uuid4().hex
         meta = self._meta.get(agent_id, {})
         if meta.get("vault_active"):
+            # HF#12 — agent _build_params requires device_ip/ssh_port/os_type
+            # regardless of vault path. See ssh_command branch for context.
             payload = {
                 "type": "ssh_config",
                 "request_id": rid,
                 "credential_id": device.id,
+                "device_ip": device.ip_address,
+                "ssh_port": device.ssh_port or 22,
+                "os_type": device.os_type,
                 "commands": commands,
                 "command_mode": sec["command_mode"],
                 "allowed_commands": sec["allowed_commands"],
@@ -1347,10 +1361,15 @@ class AgentManager:
         rid = uuid.uuid4().hex
         meta = self._meta.get(agent_id, {})
         if meta.get("vault_active"):
+            # HF#12 — agent _build_params requires device_ip/ssh_port/os_type
+            # regardless of vault path. See ssh_command branch for context.
             payload = {
                 "type": "ssh_command_stream",
                 "request_id": rid,
                 "credential_id": device.id,
+                "device_ip": device.ip_address,
+                "ssh_port": device.ssh_port or 22,
+                "os_type": device.os_type,
                 "command": command,
             }
         else:
