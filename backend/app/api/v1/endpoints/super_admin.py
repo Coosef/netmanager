@@ -594,6 +594,10 @@ class AssignResourcesPayload(BaseModel):
     resource_type: str          # "device" | "agent"
     resource_ids: List[Union[int, str]]
     org_id: int
+    # QF-7 (2026-06-04) — optional location move within target org. When set,
+    # the target location_id must belong to org_id (validated server-side) so
+    # super_admin cannot accidentally cross-link resources across organizations.
+    location_id: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -819,27 +823,68 @@ async def assign_resources(
     if not payload.resource_ids:
         raise HTTPException(400, "En az bir kaynak seçilmeli")
 
+    # QF-7 — validate location_id (if given) belongs to target org. Cross-org
+    # location moves are rejected; this preserves Faz 8 organization isolation
+    # even under super_admin manual reassignment.
+    location_obj = None
+    if payload.location_id is not None:
+        from app.models.location import Location
+        location_obj = (await db.execute(
+            select(Location).where(Location.id == payload.location_id)
+        )).scalar_one_or_none()
+        if not location_obj:
+            raise HTTPException(404, "Hedef lokasyon bulunamadı")
+        if location_obj.organization_id != payload.org_id:
+            raise HTTPException(
+                400,
+                f"Lokasyon (id={payload.location_id}) hedef organizasyona ait değil "
+                f"(loc.org={location_obj.organization_id}, hedef={payload.org_id})",
+            )
+
+    values_common = {"organization_id": payload.org_id}
+    if payload.location_id is not None:
+        values_common["location_id"] = payload.location_id
+
     if payload.resource_type == "device":
         await db.execute(
             update(Device)
             .where(Device.id.in_(payload.resource_ids))
-            .values(organization_id=payload.org_id)
+            .values(**values_common)
         )
     elif payload.resource_type == "agent":
         await db.execute(
             update(Agent)
             .where(Agent.id.in_(payload.resource_ids))
-            .values(organization_id=payload.org_id)
+            .values(**values_common)
         )
     else:
         raise HTTPException(400, "resource_type 'device' veya 'agent' olmalı")
 
     await db.commit()
+
+    # QF-7 — if agents got a new location, their existing WS sessions still
+    # cache the old sandbox; disconnect them so the next hello picks up fresh
+    # org+location scope. Avoids "agent-scope rejected" until manual restart.
+    if payload.resource_type == "agent" and payload.location_id is not None:
+        try:
+            from app.services.agent_manager import agent_manager as _am
+            for aid in payload.resource_ids:
+                ws = _am._connections.get(str(aid))
+                if ws is not None:
+                    try:
+                        await ws.close(code=1001, reason="location moved")
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     return {
         "ok": True,
         "assigned": len(payload.resource_ids),
         "org_id": payload.org_id,
         "org_name": org.name,
+        "location_id": payload.location_id,
+        "location_name": location_obj.name if location_obj is not None else None,
     }
 
 
