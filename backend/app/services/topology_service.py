@@ -495,6 +495,16 @@ class TopologyService:
 
             stmt = pg_insert(TopologyLink).values(
                 device_id=device.id,
+                # Incident HF#13 (2026-06-04) — Faz 7/Faz 8 RLS WITH CHECK on
+                # topology_links requires organization_id + location_id to be
+                # set on insert; without these the policy raises
+                # InsufficientPrivilegeError ("new row violates row-level
+                # security policy for table 'topology_links'") and the LLDP
+                # discover-single endpoint returns 500 → UI "LLDP keşfi
+                # başarısız". Stamp them from the parent device so RLS is
+                # satisfied and the row inherits the same scope as the device.
+                organization_id=device.organization_id,
+                location_id=device.location_id,
                 local_port=n.local_port,
                 neighbor_hostname=n.neighbor_hostname,
                 neighbor_ip=n.neighbor_ip,
