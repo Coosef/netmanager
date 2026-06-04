@@ -220,7 +220,17 @@ class AgentManager:
             count = msg.get("credential_count", 0)
             log.info(f"Agent {agent_id} vault loaded: {count} credentials")
             if agent_id in self._meta:
-                self._meta[agent_id]["vault_active"] = True
+                # Incident HF#12b (2026-06-04) — vault_active is the routing
+                # flag execute_ssh_command/config/stream consult to decide
+                # whether to send only credential_id (vault path) or the full
+                # plaintext credentials (non-vault path). An empty vault still
+                # used to set vault_active=True, which then routed every SSH
+                # call to a credential_id the agent could not resolve →
+                # _build_params fell back to msg.get("ssh_username", "") = ""
+                # → netmiko "Authentication failed". Treat count == 0 as
+                # "vault not really active" so the non-vault path (HF#11
+                # _resolve_credentials with full creds) is used instead.
+                self._meta[agent_id]["vault_active"] = count > 0
                 self._meta[agent_id]["vault_credential_count"] = count
 
         elif msg_type == "security_blocked":
