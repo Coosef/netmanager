@@ -17,6 +17,7 @@ import {
   type ResourceAgent,
   type OrganizationWithCounts,
 } from '@/api/superadmin'
+import { locationsApi } from '@/api/locations'
 import { useTheme } from '@/contexts/ThemeContext'
 
 const { Text, Title } = Typography
@@ -89,15 +90,34 @@ function AssignModal({
   resourceType: 'device' | 'agent'
   selectedIds: (number | string)[]
   orgs: OrganizationWithCounts[]
-  onAssign: (orgId: number) => void
+  onAssign: (orgId: number, locationId: number | null) => void
   loading: boolean
 }) {
   const [targetOrgId, setTargetOrgId] = useState<number | null>(null)
+  // QF-7 — optional location move within the target org. If the user picks
+  // a location it's sent to the backend; otherwise the org-only transfer
+  // path (backward-compatible) is used.
+  const [targetLocationId, setTargetLocationId] = useState<number | null>(null)
+
+  const { data: locData, isFetching: locFetching } = useQuery({
+    queryKey: ['sa-locations-for-org', targetOrgId],
+    queryFn: () => locationsApi.list({ organization_id: targetOrgId! }),
+    enabled: open && targetOrgId != null,
+  })
+
+  const reset = () => { setTargetOrgId(null); setTargetLocationId(null) }
+
+  // Drop stale location when org changes
+  const onOrgChange = (v: number | null) => {
+    setTargetOrgId(v)
+    setTargetLocationId(null)
+  }
+
   return (
     <Modal
       open={open}
-      onCancel={() => { setTargetOrgId(null); onClose() }}
-      onOk={() => { if (targetOrgId) onAssign(targetOrgId) }}
+      onCancel={() => { reset(); onClose() }}
+      onOk={() => { if (targetOrgId) onAssign(targetOrgId, targetLocationId) }}
       okText="Taşı"
       cancelText="İptal"
       okButtonProps={{ disabled: !targetOrgId, loading }}
@@ -107,18 +127,18 @@ function AssignModal({
           {`${selectedIds.length} ${resourceType === 'device' ? 'Cihaz' : 'Agent'} Taşı`}
         </Space>
       }
-      width={420}
-      afterClose={() => setTargetOrgId(null)}
+      width={460}
+      afterClose={reset}
     >
       <div style={{ marginTop: 16 }}>
-        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-          Seçilen {selectedIds.length} kaynağı hangi organizasyona taşımak istiyorsunuz?
+        <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+          Hedef organizasyon
         </Text>
         <Select
-          placeholder="Hedef organizasyonu seçin..."
+          placeholder="Organizasyonu seçin..."
           style={{ width: '100%' }}
           value={targetOrgId}
-          onChange={setTargetOrgId}
+          onChange={onOrgChange}
           showSearch
           optionFilterProp="label"
           options={orgs.map((o) => ({
@@ -126,6 +146,38 @@ function AssignModal({
             value: o.id,
           }))}
         />
+
+        <Text
+          type="secondary"
+          style={{ display: 'block', marginTop: 16, marginBottom: 8 }}
+        >
+          Hedef lokasyon <Text type="secondary" style={{ fontSize: 11 }}>(opsiyonel)</Text>
+        </Text>
+        <Select
+          placeholder={
+            targetOrgId == null
+              ? 'Önce organizasyon seçin'
+              : 'Aynı lokasyonda kalsın (boş bırak)'
+          }
+          style={{ width: '100%' }}
+          value={targetLocationId}
+          onChange={(v) => setTargetLocationId(v ?? null)}
+          disabled={targetOrgId == null}
+          loading={locFetching}
+          allowClear
+          showSearch
+          optionFilterProp="label"
+          options={(locData?.items ?? []).map((l) => ({
+            label: l.name,
+            value: l.id,
+          }))}
+        />
+        <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 11 }}>
+          Lokasyon seçilirse seçili {resourceType === 'agent' ? 'agent\'lar' : 'cihazlar'} bu
+          lokasyona taşınır. {resourceType === 'agent'
+            ? 'Agent WS oturumları otomatik yeniden başlatılır.'
+            : 'Boş bırakırsanız yalnız organizasyon güncellenir.'}
+        </Text>
       </div>
     </Modal>
   )
@@ -165,10 +217,13 @@ function ResourceAssignTab({ orgs }: { orgs: OrganizationWithCounts[] }) {
   })
 
   const assignMut = useMutation({
-    mutationFn: ({ ids, orgId }: { ids: (number | string)[]; orgId: number }) =>
-      superadminApi.assignResources(resourceType, ids, orgId),
+    mutationFn: (
+      { ids, orgId, locationId }:
+      { ids: (number | string)[]; orgId: number; locationId: number | null }
+    ) => superadminApi.assignResources(resourceType, ids, orgId, locationId),
     onSuccess: (res) => {
-      message.success(`${res.assigned} kaynak "${res.org_name}" organizasyonuna taşındı`)
+      const tail = res.location_name ? ` / "${res.location_name}" lokasyonuna` : ''
+      message.success(`${res.assigned} kaynak "${res.org_name}" organizasyonuna${tail} taşındı`)
       setAssignOpen(false)
       setSingleAssignId(null)
       setSelectedDeviceIds([])
@@ -323,7 +378,7 @@ function ResourceAssignTab({ orgs }: { orgs: OrganizationWithCounts[] }) {
         resourceType={resourceType}
         selectedIds={activeIds}
         orgs={orgs}
-        onAssign={(orgId) => assignMut.mutate({ ids: activeIds, orgId })}
+        onAssign={(orgId, locationId) => assignMut.mutate({ ids: activeIds, orgId, locationId })}
         loading={assignMut.isPending}
       />
     </div>

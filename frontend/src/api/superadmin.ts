@@ -134,10 +134,29 @@ export const superadminApi = {
     client.get<{ agents: ResourceAgent[] }>('/super-admin/resources/agents', { params })
       .then((r) => r.data),
 
-  assignResources: (resource_type: 'device' | 'agent', resource_ids: (number | string)[], org_id: number) =>
-    client.patch<{ ok: boolean; assigned: number; org_id: number; org_name: string }>(
+  /**
+   * QF-7 — assign resources to an organization, optionally moving them to a
+   * specific location within that organization. `location_id` must belong to
+   * the target org or the backend returns 400.
+   */
+  assignResources: (
+    resource_type: 'device' | 'agent',
+    resource_ids: (number | string)[],
+    org_id: number,
+    location_id?: number | null,
+  ) =>
+    client.patch<{
+      ok: boolean;
+      assigned: number;
+      org_id: number;
+      org_name: string;
+      location_id: number | null;
+      location_name: string | null;
+    }>(
       '/super-admin/resources/assign',
-      { resource_type, resource_ids, org_id },
+      location_id != null
+        ? { resource_type, resource_ids, org_id, location_id }
+        : { resource_type, resource_ids, org_id },
     ).then((r) => r.data),
 
   // ── Faz 8 Phase H — organization management (super-admin only) ─────────────
