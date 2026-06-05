@@ -746,5 +746,144 @@
   "error_boundary": {
     "title": "Произошла непредвиденная ошибка",
     "reload": "Обновить страницу"
+  },
+  "racks": {
+    "crumb_inventory": "Инвентарь",
+    "crumb_racks": "Стойки",
+    "page_title": "Шкафы и стойки",
+    "page_stat_summary": "{{racks}} стоек · {{devices}} устройств · {{items}} элементов",
+    "subtitle": "Физическое размещение · карта устройств по U · реальный инвентарь (RackItem: PDU/ИБП/патч-панель/и т.д.).",
+    "add_rack": "+ Добавить стойку",
+    "loading": "Загрузка…",
+    "stat": {
+      "total_u": "Всего U",
+      "fill_pct": "{{pct}}% заполнено",
+      "healthy": "Исправно",
+      "attention": "Внимание",
+      "critical": "Критично",
+      "total_devices": "Всего устройств",
+      "items": "Элементы",
+      "items_caption": "PDU · ИБП · патч · …"
+    },
+    "empty": {
+      "racks_title": "Стоек пока нет",
+      "no_devices": "В этой стойке пока нет устройств. Нажми на пустую U слева → размести устройство.",
+      "no_items": "В этой стойке пока нет элементов.",
+      "no_cables": "Записей о кабелях пока нет.",
+      "select_device_hint": "Выбери устройство → карта портов откроется в этой панели."
+    },
+    "toasts": {
+      "rack_created": "Стойка создана",
+      "rack_create_failed": "Не удалось создать",
+      "rack_deleted": "Стойка удалена",
+      "rack_delete_failed": "Не удалось удалить",
+      "placement_removed": "Устройство снято со стойки",
+      "placement_remove_failed": "Не удалось снять",
+      "item_deleted": "Элемент удалён",
+      "item_delete_failed": "Не удалось удалить",
+      "device_placed": "Устройство размещено в стойке",
+      "device_place_failed": "Не удалось разместить",
+      "item_created": "Элемент добавлен в стойку",
+      "item_create_failed": "Не удалось добавить",
+      "no_empty_u": "В стойке нет свободных U"
+    },
+    "card": {
+      "delete_confirm_title": "Удалить стойку?",
+      "delete_confirm_desc": "Размещения устройств будут сняты (устройства останутся).",
+      "delete_title": "Удалить стойку",
+      "stat_device": "УСТРОЙСТВО",
+      "stat_fill": "ЗАПОЛНЕНИЕ",
+      "stat_items": "ЭЛЕМЕНТЫ"
+    },
+    "detail": {
+      "summary": "{{devices}} устройств · {{items}} элементов · {{totalU}}U",
+      "click_empty_hint": "Нажми на пустую U или",
+      "add_device_or_item": "+ Добавить устройство / элемент"
+    },
+    "tabs": {
+      "devices": "Устройства",
+      "cables": "Кабели",
+      "items": "Элементы"
+    },
+    "frame": {
+      "empty_u_title": "U{{u}} — пусто (нажми → размести устройство)",
+      "empty_u_btn": "добавить"
+    },
+    "device_list": {
+      "title": "Список устройств · {{count}}",
+      "col_u": "U",
+      "col_device": "Устройство",
+      "col_vendor": "Производитель",
+      "col_type": "Тип",
+      "col_ip": "IP",
+      "col_status": "Статус",
+      "remove_confirm_title": "Снять размещение?",
+      "remove_confirm_desc": "Устройство не удаляется — снимается только размещение в стойке.",
+      "remove_confirm_ok": "Снять",
+      "remove_title": "Снять со стойки"
+    },
+    "items_list": {
+      "title": "Элементы стойки · {{count}}",
+      "caption": "(PDU · ИБП · патч-панель · вентилятор · KVM · заглушка · полка)",
+      "col_u": "U",
+      "col_label": "Метка",
+      "col_type": "Тип",
+      "col_notes": "Заметка",
+      "delete_confirm": "Удалить элемент?"
+    },
+    "cabling": {
+      "title": "Кабели",
+      "all_cables": "ВСЕ КАБЕЛИ",
+      "port_map_caption": "· КАРТА ПОРТОВ",
+      "cihaz_default": "устройство",
+      "port_count": "{{count}} портов",
+      "cable_count": "{{count}} кабелей",
+      "back_to_devices": "← Устройства",
+      "linking_selected_sub": "выбран → нажми порт другого устройства, чтобы соединить кабель.",
+      "cable_label": "КАБЕЛЬ:",
+      "port_tooltip_connected": "подключён: {{kind}} {{speed}}",
+      "port_tooltip_empty": "свободный порт {{port}}",
+      "no_ports_for_type": "Для этого типа устройства не описаны порты ({{type}}).",
+      "no_ports_hint": "Карты портов есть для сетевых устройств: маршрутизаторов, коммутаторов, межсетевых экранов, точек доступа.",
+      "connections": "СОЕДИНЕНИЯ",
+      "no_connections": "Кабельных соединений пока нет. Нажми на порт выше.",
+      "port_label": "порт {{port}}"
+    },
+    "place_modal": {
+      "ok_device": "Разместить",
+      "ok_item": "Добавить",
+      "title": "{{rack}} · U{{u}} — Добавить",
+      "mode_device": "Разместить устройство",
+      "mode_item": "Добавить элемент (PDU / ИБП / патч / …)",
+      "max_height_info": "На U{{u}} есть макс. <s>{{max}}U</s> подряд свободного места.",
+      "device_label": "Устройство",
+      "device_loading": "Загрузка…",
+      "device_placeholder": "Выбрать из неразмещённых устройств…",
+      "device_not_found": "Неразмещённое устройство не найдено",
+      "device_hint": "Устройство должно уже существовать на странице \"Устройства\", но ещё не быть размещено ни в одной стойке ({{count}} кандидатов).",
+      "height_label": "Высота",
+      "height_unit": "U (1–{{max}})",
+      "label_label": "Метка",
+      "label_placeholder": "напр. \"PDU-A1-Левый\" / \"Патч-панель 48p\"",
+      "type_label": "Тип",
+      "type_mode_select": "Из списка",
+      "type_mode_custom": "Свой ввод",
+      "type_select_placeholder": "Выбрать тип (pdu / ups / patch_panel / …)",
+      "type_not_found": "Тип не найден — добавь свой через 'Свой ввод'",
+      "type_custom_placeholder": "напр. \"smart-pdu\", \"kvm-2u\"",
+      "type_custom_hint": "Твой тип сохраняется для этой локации и появится в списке в следующий раз.",
+      "notes_label": "Заметка",
+      "notes_optional": "(необязательно)",
+      "notes_placeholder": "напр. серийный номер, мощность, число портов…"
+    },
+    "add_modal": {
+      "title": "Новая стойка",
+      "ok": "Создать",
+      "name_placeholder": "Имя стойки (напр. A1 · Core)",
+      "total_u_label": "Всего U",
+      "total_u_standard": "Стандарт: 42U",
+      "desc_placeholder": "Описание (необязательно — площадка, локация и т.п.)",
+      "footer_hint": "Устройства можно назначить этой стойке позже на странице Устройства."
+    }
   }
 }

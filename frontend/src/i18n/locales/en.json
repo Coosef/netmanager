@@ -789,5 +789,144 @@
   "error_boundary": {
     "title": "An unexpected error occurred",
     "reload": "Reload page"
+  },
+  "racks": {
+    "crumb_inventory": "Inventory",
+    "crumb_racks": "Racks",
+    "page_title": "Cabinets & Racks",
+    "page_stat_summary": "{{racks}} racks · {{devices}} devices · {{items}} items",
+    "subtitle": "Physical layout · U-based device map · real inventory (RackItem: PDU/UPS/patch panel/etc.).",
+    "add_rack": "+ Add Rack",
+    "loading": "Loading…",
+    "stat": {
+      "total_u": "Total U",
+      "fill_pct": "{{pct}}% full",
+      "healthy": "Healthy",
+      "attention": "Attention",
+      "critical": "Critical",
+      "total_devices": "Total Devices",
+      "items": "Items",
+      "items_caption": "PDU · UPS · patch · …"
+    },
+    "empty": {
+      "racks_title": "No racks yet",
+      "no_devices": "No devices in this rack yet. Click an empty U on the left → place a device.",
+      "no_items": "No items in this rack yet.",
+      "no_cables": "No cable records yet.",
+      "select_device_hint": "Select a device → the port map opens in this panel."
+    },
+    "toasts": {
+      "rack_created": "Rack created",
+      "rack_create_failed": "Could not create",
+      "rack_deleted": "Rack deleted",
+      "rack_delete_failed": "Could not delete",
+      "placement_removed": "Device removed from rack",
+      "placement_remove_failed": "Could not remove",
+      "item_deleted": "Item deleted",
+      "item_delete_failed": "Could not delete",
+      "device_placed": "Device placed in rack",
+      "device_place_failed": "Could not place",
+      "item_created": "Item added to rack",
+      "item_create_failed": "Could not add",
+      "no_empty_u": "No empty U in the rack"
+    },
+    "card": {
+      "delete_confirm_title": "Delete rack?",
+      "delete_confirm_desc": "Device placements will be cleared (devices stay).",
+      "delete_title": "Delete rack",
+      "stat_device": "DEVICE",
+      "stat_fill": "FILL",
+      "stat_items": "ITEMS"
+    },
+    "detail": {
+      "summary": "{{devices}} devices · {{items}} items · {{totalU}}U",
+      "click_empty_hint": "Click an empty U or",
+      "add_device_or_item": "+ Add Device / Item"
+    },
+    "tabs": {
+      "devices": "Devices",
+      "cables": "Cabling",
+      "items": "Items"
+    },
+    "frame": {
+      "empty_u_title": "U{{u}} — empty (click → place a device)",
+      "empty_u_btn": "add"
+    },
+    "device_list": {
+      "title": "Device List · {{count}}",
+      "col_u": "U",
+      "col_device": "Device",
+      "col_vendor": "Vendor",
+      "col_type": "Type",
+      "col_ip": "IP",
+      "col_status": "Status",
+      "remove_confirm_title": "Remove placement?",
+      "remove_confirm_desc": "The device is not deleted — only its rack placement is cleared.",
+      "remove_confirm_ok": "Remove",
+      "remove_title": "Remove from rack"
+    },
+    "items_list": {
+      "title": "Rack Items · {{count}}",
+      "caption": "(PDU · UPS · patch panel · fan · KVM · blank · shelf)",
+      "col_u": "U",
+      "col_label": "Label",
+      "col_type": "Type",
+      "col_notes": "Notes",
+      "delete_confirm": "Delete item?"
+    },
+    "cabling": {
+      "title": "Cabling",
+      "all_cables": "ALL CABLES",
+      "port_map_caption": "· PORT MAP",
+      "cihaz_default": "device",
+      "port_count": "{{count}} ports",
+      "cable_count": "{{count}} cables",
+      "back_to_devices": "← Devices",
+      "linking_selected_sub": "selected → click a port on another device to wire the cable.",
+      "cable_label": "CABLE:",
+      "port_tooltip_connected": "connected: {{kind}} {{speed}}",
+      "port_tooltip_empty": "empty port {{port}}",
+      "no_ports_for_type": "No port definition for this device type ({{type}}).",
+      "no_ports_hint": "Port maps are available for network devices such as routers / switches / firewalls / APs.",
+      "connections": "CONNECTIONS",
+      "no_connections": "No cable connections yet. Click a port above.",
+      "port_label": "port {{port}}"
+    },
+    "place_modal": {
+      "ok_device": "Place",
+      "ok_item": "Add",
+      "title": "{{rack}} · U{{u}} — Add",
+      "mode_device": "Place Device",
+      "mode_item": "Add Item (PDU / UPS / patch / …)",
+      "max_height_info": "At U{{u}} there is max <s>{{max}}U</s> of consecutive free space.",
+      "device_label": "Device",
+      "device_loading": "Loading…",
+      "device_placeholder": "Select from unassigned devices…",
+      "device_not_found": "No unassigned device found",
+      "device_hint": "The device must already exist on the \"Devices\" page but not yet be placed in any rack ({{count}} candidates).",
+      "height_label": "Height",
+      "height_unit": "U (1–{{max}})",
+      "label_label": "Label",
+      "label_placeholder": "e.g. \"PDU-A1-Left\" / \"Patch Panel 48p\"",
+      "type_label": "Type",
+      "type_mode_select": "Pick from list",
+      "type_mode_custom": "Type custom",
+      "type_select_placeholder": "Pick a type (pdu / ups / patch_panel / …)",
+      "type_not_found": "Type not found — use 'Type custom' to add a new one",
+      "type_custom_placeholder": "e.g. \"smart-pdu\", \"kvm-2u\"",
+      "type_custom_hint": "Your custom type is saved within this location and will appear in the list next time.",
+      "notes_label": "Notes",
+      "notes_optional": "(optional)",
+      "notes_placeholder": "e.g. serial number, wattage, port count…"
+    },
+    "add_modal": {
+      "title": "Add New Rack",
+      "ok": "Create",
+      "name_placeholder": "Rack name (e.g. A1 · Core)",
+      "total_u_label": "Total U",
+      "total_u_standard": "Standard: 42U",
+      "desc_placeholder": "Description (optional — site, location, etc.)",
+      "footer_hint": "You can assign devices to this rack later from the Devices page."
+    }
   }
 }

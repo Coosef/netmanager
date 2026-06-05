@@ -12,6 +12,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { App, Modal, Input, InputNumber, Popconfirm, Tag, Select } from 'antd'
 import { DeleteOutlined, AppstoreOutlined, HddOutlined, PlusOutlined } from '@ant-design/icons'
+import { useTranslation, Trans } from 'react-i18next'
 import { racksApi, type RackSummary, type RackDetail, type RackDeviceSummary, type RackItem } from '@/api/racks'
 
 // ── Cabling (mockup pages-racks.jsx "Kablolama") ──────────────────────────
@@ -102,6 +103,7 @@ const buildMiniMap = (totalU: number, devices: RackDeviceSummary[], items: RackI
 export default function NocRacks() {
   const qc = useQueryClient()
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const { data: racks = [], isLoading } = useQuery({
     queryKey: ['racks-list'],
     queryFn: () => racksApi.list(),
@@ -175,36 +177,36 @@ export default function NocRacks() {
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['racks-list'] })
       setActive(r.rack_name); setAddOpen(false)
-      message.success('Kabin oluşturuldu')
+      message.success(t('racks.toasts.rack_created'))
     },
-    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Oluşturulamadı'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('racks.toasts.rack_create_failed')),
   })
   const deleteRackMut = useMutation({
     mutationFn: (rackName: string) => racksApi.deleteRack(rackName),
     onSuccess: (_d, rackName) => {
       qc.invalidateQueries({ queryKey: ['racks-list'] })
       if (active === rackName) setActive(null)
-      message.success('Kabin silindi')
+      message.success(t('racks.toasts.rack_deleted'))
     },
-    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Silinemedi'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('racks.toasts.rack_delete_failed')),
   })
   const removePlacementMut = useMutation({
     mutationFn: (deviceId: number) => racksApi.removePlacement(deviceId),
     onSuccess: () => {
       if (active) qc.invalidateQueries({ queryKey: ['rack-detail', active] })
       qc.invalidateQueries({ queryKey: ['racks-list'] })
-      message.success('Cihaz kabinden çıkarıldı')
+      message.success(t('racks.toasts.placement_removed'))
     },
-    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Çıkarılamadı'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('racks.toasts.placement_remove_failed')),
   })
   const deleteItemMut = useMutation({
     mutationFn: ({ rackName, itemId }: { rackName: string; itemId: number }) => racksApi.deleteItem(rackName, itemId),
     onSuccess: () => {
       if (active) qc.invalidateQueries({ queryKey: ['rack-detail', active] })
       qc.invalidateQueries({ queryKey: ['racks-list'] })
-      message.success('Item silindi')
+      message.success(t('racks.toasts.item_deleted'))
     },
-    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Silinemedi'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('racks.toasts.item_delete_failed')),
   })
   const placeMut = useMutation({
     mutationFn: (vars: { deviceId: number; rack_name: string; rack_unit: number; rack_height: number }) =>
@@ -214,9 +216,9 @@ export default function NocRacks() {
       qc.invalidateQueries({ queryKey: ['racks-list'] })
       qc.invalidateQueries({ queryKey: ['rack-unassigned'] })
       setPlaceAtU(null)
-      message.success('Cihaz kabine yerleştirildi')
+      message.success(t('racks.toasts.device_placed'))
     },
-    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Yerleştirilemedi'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('racks.toasts.device_place_failed')),
   })
   const createItemMut = useMutation({
     mutationFn: (vars: { rackName: string; label: string; item_type: string; unit_start: number; unit_height: number; notes?: string }) =>
@@ -228,9 +230,9 @@ export default function NocRacks() {
       if (active) qc.invalidateQueries({ queryKey: ['rack-detail', active] })
       qc.invalidateQueries({ queryKey: ['racks-list'] })
       setPlaceAtU(null)
-      message.success('Item kabine eklendi')
+      message.success(t('racks.toasts.item_created'))
     },
-    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Eklenemedi'),
+    onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || t('racks.toasts.item_create_failed')),
   })
 
   // Lokasyon kapsamında daha önce kullanılmış item_type değerleri — kullanıcı
@@ -248,37 +250,37 @@ export default function NocRacks() {
     <div className="nm-page" style={{ padding: '4px 2px' }}>
       <div className="nm-page-hd">
         <div className="title-block">
-          <div className="nm-crumbs"><span>Envanter</span><span>Kabinler</span></div>
+          <div className="nm-crumbs"><span>{t('racks.crumb_inventory')}</span><span>{t('racks.crumb_racks')}</span></div>
           <h1 className="nm-page-title">
-            Kabinler &amp; Rack&apos;lar
-            <span className="nm-pill mono">{racks.length} kabin · {totalDevices} cihaz · {totalItems} item</span>
+            {t('racks.page_title')}
+            <span className="nm-pill mono">{t('racks.page_stat_summary', { racks: racks.length, devices: totalDevices, items: totalItems })}</span>
           </h1>
-          <div className="nm-page-sub">Fiziksel yerleşim · U bazlı cihaz haritası · gerçek envanter (RackItem: PDU/UPS/patch panel/etc.).</div>
+          <div className="nm-page-sub">{t('racks.subtitle')}</div>
         </div>
         <div className="nm-page-actions">
-          <button className="nm-btn primary" onClick={() => setAddOpen(true)}>+ Kabin Ekle</button>
+          <button className="nm-btn primary" onClick={() => setAddOpen(true)}>{t('racks.add_rack')}</button>
         </div>
       </div>
 
       <div className="nm-statbar">
         <div className="nm-stat">
-          <div className="nm-stat-label">Toplam U</div>
+          <div className="nm-stat-label">{t('racks.stat.total_u')}</div>
           <div className="nm-stat-val">{usedU}<small>/ {totalU}</small></div>
-          <div className="nm-stat-delta">{totalU > 0 ? Math.round((usedU / totalU) * 100) : 0}% dolu</div>
+          <div className="nm-stat-delta">{t('racks.stat.fill_pct', { pct: totalU > 0 ? Math.round((usedU / totalU) * 100) : 0 })}</div>
         </div>
-        <div className="nm-stat ok"><div className="nm-stat-label">Sağlıklı</div><div className="nm-stat-val">{ok}</div></div>
-        <div className="nm-stat warn"><div className="nm-stat-label">Dikkat</div><div className="nm-stat-val">{warn}</div></div>
-        <div className="nm-stat crit"><div className="nm-stat-label">Kritik</div><div className="nm-stat-val">{crit}</div></div>
-        <div className="nm-stat"><div className="nm-stat-label">Toplam Cihaz</div><div className="nm-stat-val">{totalDevices}</div></div>
-        <div className="nm-stat"><div className="nm-stat-label">Items</div><div className="nm-stat-val">{totalItems}</div><div className="nm-stat-delta">PDU · UPS · patch · …</div></div>
+        <div className="nm-stat ok"><div className="nm-stat-label">{t('racks.stat.healthy')}</div><div className="nm-stat-val">{ok}</div></div>
+        <div className="nm-stat warn"><div className="nm-stat-label">{t('racks.stat.attention')}</div><div className="nm-stat-val">{warn}</div></div>
+        <div className="nm-stat crit"><div className="nm-stat-label">{t('racks.stat.critical')}</div><div className="nm-stat-val">{crit}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">{t('racks.stat.total_devices')}</div><div className="nm-stat-val">{totalDevices}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">{t('racks.stat.items')}</div><div className="nm-stat-val">{totalItems}</div><div className="nm-stat-delta">{t('racks.stat.items_caption')}</div></div>
       </div>
 
       {isLoading ? (
-        <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)' }}>Yükleniyor…</div>
+        <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)' }}>{t('racks.loading')}</div>
       ) : racks.length === 0 ? (
         <div style={{ padding: 48, textAlign: 'center', color: 'var(--fg-3)' }}>
           <HddOutlined style={{ fontSize: 28, opacity: 0.4 }} />
-          <div style={{ marginTop: 10 }}>Henüz kabin yok — <button className="nm-btn ghost" style={{ height: 24, fontSize: 11, padding: '0 10px', marginLeft: 4 }} onClick={() => setAddOpen(true)}>+ Kabin Ekle</button></div>
+          <div style={{ marginTop: 10 }}>{t('racks.empty.racks_title')} — <button className="nm-btn ghost" style={{ height: 24, fontSize: 11, padding: '0 10px', marginLeft: 4 }} onClick={() => setAddOpen(true)}>{t('racks.add_rack')}</button></div>
         </div>
       ) : (
         <div className="nm-rack-grid">
@@ -295,11 +297,11 @@ export default function NocRacks() {
               <div>
                 <div style={{ fontSize: 14, fontWeight: 500 }}>{activeDetail.rack_name}</div>
                 <div className="mono" style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                  {activeDetail.devices.length} cihaz · {activeDetail.items.length} item · {activeDetail.total_u}U
+                  {t('racks.detail.summary', { devices: activeDetail.devices.length, items: activeDetail.items.length, totalU: activeDetail.total_u })}
                 </div>
               </div>
               <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>Boş U'ya tıkla veya</span>
+                <span style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>{t('racks.detail.click_empty_hint')}</span>
                 <button className="nm-btn primary" style={{ height: 26, fontSize: 11 }}
                   onClick={() => {
                     // İlk uygun boş U'yu bul; yoksa U1 fallback.
@@ -308,10 +310,10 @@ export default function NocRacks() {
                     for (const d of activeDetail.devices) for (let i = 0; i < (d.rack_height || 1); i++) occupied.add(d.rack_unit + i)
                     for (const it of activeDetail.items) for (let i = 0; i < (it.unit_height || 1); i++) occupied.add(it.unit_start + i)
                     let u = 1; while (u <= totalU && occupied.has(u)) u++
-                    if (u > totalU) { message.warning('Kabinde boş U yok'); return }
+                    if (u > totalU) { message.warning(t('racks.toasts.no_empty_u')); return }
                     let max = 0; for (let i = u; i <= totalU; i++) { if (occupied.has(i)) break; max++ }
                     setPlaceAtU({ u, maxHeight: max })
-                  }}>+ Cihaz / Item Ekle</button>
+                  }}>{t('racks.detail.add_device_or_item')}</button>
               </div>
             </div>
             <RackFrame detail={activeDetail}
@@ -323,13 +325,13 @@ export default function NocRacks() {
           <div className="nm-rack-rule">
             <div className="nm-rack-toolbar">
               <button className={`nm-btn ${tab === 'devices' ? 'primary' : 'ghost'}`} onClick={() => setTab('devices')}>
-                Cihazlar <span className="nm-pill mono" style={{ marginLeft: 4 }}>{activeDetail.devices.length}</span>
+                {t('racks.tabs.devices')} <span className="nm-pill mono" style={{ marginLeft: 4 }}>{activeDetail.devices.length}</span>
               </button>
               <button className={`nm-btn ${tab === 'cables' ? 'primary' : 'ghost'}`} onClick={() => setTab('cables')}>
-                Kablolama <span className="nm-pill mono" style={{ marginLeft: 4 }}>{cables.length}</span>
+                {t('racks.tabs.cables')} <span className="nm-pill mono" style={{ marginLeft: 4 }}>{cables.length}</span>
               </button>
               <button className={`nm-btn ${tab === 'items' ? 'primary' : 'ghost'}`} onClick={() => setTab('items')}>
-                Items <span className="nm-pill mono" style={{ marginLeft: 4 }}>{activeDetail.items.length}</span>
+                {t('racks.tabs.items')} <span className="nm-pill mono" style={{ marginLeft: 4 }}>{activeDetail.items.length}</span>
               </button>
             </div>
 
@@ -378,6 +380,7 @@ export default function NocRacks() {
 // ── Rack card ─────────────────────────────────────────────────────────────
 function RackCard({ rack, detail, active, onSelect, onDelete }:
   { rack: RackSummary; detail?: RackDetail; active: boolean; onSelect: () => void; onDelete: () => void }) {
+  const { t } = useTranslation()
   const status = detail ? RACK_STATUS(detail.devices) : 'empty'
   const mini = detail ? buildMiniMap(detail.total_u, detail.devices, detail.items) : Array(rack.total_u).fill('empty') as string[]
   const fillPct = rack.total_u > 0 ? Math.round((rack.used_u / rack.total_u) * 100) : 0
@@ -389,9 +392,9 @@ function RackCard({ rack, detail, active, onSelect, onDelete }:
         <span className="name">{rack.rack_name}</span>
         <span className="meta">{rack.used_u}/{rack.total_u}U</span>
         <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: 4 }}>
-          <Popconfirm title="Kabin silinsin mi?" description="Cihazların yerleşimi kaldırılır (cihazlar kalır)."
-            okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }} onConfirm={onDelete}>
-            <button className="nm-btn ghost" style={{ height: 20, fontSize: 10, padding: '0 6px' }} title="Kabini sil">×</button>
+          <Popconfirm title={t('racks.card.delete_confirm_title')} description={t('racks.card.delete_confirm_desc')}
+            okText={t('common.delete')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }} onConfirm={onDelete}>
+            <button className="nm-btn ghost" style={{ height: 20, fontSize: 10, padding: '0 6px' }} title={t('racks.card.delete_title')}>×</button>
           </Popconfirm>
         </span>
       </div>
@@ -399,9 +402,9 @@ function RackCard({ rack, detail, active, onSelect, onDelete }:
         {mini.map((s, i) => <div key={i} className={`nm-rack-mini-u ${s}`}></div>)}
       </div>
       <div className="nm-rack-stats">
-        <div><div className="v">{rack.device_count}</div><div className="l">CİHAZ</div></div>
-        <div><div className="v">{fillPct}<small>%</small></div><div className="l">DOLULUK</div></div>
-        <div><div className="v">{rack.item_count}</div><div className="l">ITEMS</div></div>
+        <div><div className="v">{rack.device_count}</div><div className="l">{t('racks.card.stat_device')}</div></div>
+        <div><div className="v">{fillPct}<small>%</small></div><div className="l">{t('racks.card.stat_fill')}</div></div>
+        <div><div className="v">{rack.item_count}</div><div className="l">{t('racks.card.stat_items')}</div></div>
       </div>
     </div>
   )
@@ -418,6 +421,7 @@ function RackFrame({ detail, selectedDeviceId, onSelectDevice, onClickEmpty }: {
   onSelectDevice: (id: number) => void
   onClickEmpty: (u: number, maxHeight: number) => void
 }) {
+  const { t } = useTranslation()
   const totalU = detail.total_u
   type Slot = { kind: 'dev'; dev: RackDeviceSummary } | { kind: 'item'; item: RackItem } | { kind: 'empty' } | { kind: 'continuation' }
   const slots: Slot[] = Array.from({ length: totalU }, () => ({ kind: 'empty' }))
@@ -457,11 +461,11 @@ function RackFrame({ detail, selectedDeviceId, onSelectDevice, onClickEmpty }: {
         if (slot.kind === 'empty') {
           const maxH = emptyRunFrom(idx)
           return (
-            <div key={u} className="nm-rack-u empty" title={`U${u} — boş (tıkla → cihaz yerleştir)`}
+            <div key={u} className="nm-rack-u empty" title={t('racks.frame.empty_u_title', { u })}
               onClick={() => onClickEmpty(u, maxH)} style={{ height: UH }}>
               <span className="u-num">U{u}</span>
               <span style={{ fontSize: 10, color: 'var(--fg-3)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <PlusOutlined style={{ fontSize: 9 }} /> ekle
+                <PlusOutlined style={{ fontSize: 9 }} /> {t('racks.frame.empty_u_btn')}
               </span>
             </div>
           )
@@ -510,18 +514,19 @@ function RackFrame({ detail, selectedDeviceId, onSelectDevice, onClickEmpty }: {
 // ── Device list tab ───────────────────────────────────────────────────────
 function DeviceList({ detail, selectedDeviceId, onSelect, onRemove }:
   { detail: RackDetail; selectedDeviceId: number | null; onSelect: (id: number) => void; onRemove: (id: number) => void }) {
+  const { t } = useTranslation()
   // U numarası küçükten büyüğe (U1 üstte konvansiyonuna uyumlu).
   const devs = [...detail.devices].sort((a, b) => a.rack_unit - b.rack_unit)
   return (
     <>
-      <div className="nm-drawer-section-hd" style={{ padding: '8px 0 12px' }}>Cihaz Listesi · {devs.length}</div>
+      <div className="nm-drawer-section-hd" style={{ padding: '8px 0 12px' }}>{t('racks.device_list.title', { count: devs.length })}</div>
       {devs.length === 0 ? (
         <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 12, border: '1px dashed var(--line)', borderRadius: 8 }}>
-          Bu kabinde henüz cihaz yok. Sol taraftaki boş U'lardan birine tıkla → cihaz yerleştir.
+          {t('racks.empty.no_devices')}
         </div>
       ) : (
         <table className="nm-table">
-          <thead><tr><th>U</th><th>Cihaz</th><th>Vendor</th><th>Tür</th><th>IP</th><th>Durum</th><th></th></tr></thead>
+          <thead><tr><th>{t('racks.device_list.col_u')}</th><th>{t('racks.device_list.col_device')}</th><th>{t('racks.device_list.col_vendor')}</th><th>{t('racks.device_list.col_type')}</th><th>{t('racks.device_list.col_ip')}</th><th>{t('racks.device_list.col_status')}</th><th></th></tr></thead>
           <tbody>
             {devs.map((d) => {
               const st = STATUS_OF(d)
@@ -544,10 +549,10 @@ function DeviceList({ detail, selectedDeviceId, onSelect, onRemove }:
                     <span className={`nm-pill ${st === 'ok' ? 'ok' : st === 'warn' ? 'warn' : st === 'crit' ? 'crit' : ''}`}>{st}</span>
                   </td>
                   <td>
-                    <Popconfirm title="Yerleşimi kaldır?" description="Cihaz silinmez — sadece rack yerleşimi temizlenir."
-                      okText="Çıkar" cancelText="İptal" okButtonProps={{ danger: true }}
+                    <Popconfirm title={t('racks.device_list.remove_confirm_title')} description={t('racks.device_list.remove_confirm_desc')}
+                      okText={t('racks.device_list.remove_confirm_ok')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }}
                       onConfirm={() => onRemove(d.id)}>
-                      <button className="nm-btn ghost" style={{ height: 24, fontSize: 11 }} title="Kabinden çıkar"
+                      <button className="nm-btn ghost" style={{ height: 24, fontSize: 11 }} title={t('racks.device_list.remove_title')}
                         onClick={(e) => e.stopPropagation()}>
                         <DeleteOutlined />
                       </button>
@@ -565,20 +570,21 @@ function DeviceList({ detail, selectedDeviceId, onSelect, onRemove }:
 
 // ── Items tab (PDU / UPS / patch panel / ...) ──────────────────────────────
 function ItemList({ detail, onRemove }: { detail: RackDetail; onRemove: (itemId: number) => void }) {
+  const { t } = useTranslation()
   const items = [...detail.items].sort((a, b) => b.unit_start - a.unit_start)
   return (
     <>
       <div className="nm-drawer-section-hd" style={{ padding: '8px 0 12px' }}>
-        Rack Items · {items.length}
-        <span style={{ color: 'var(--fg-3)', fontWeight: 400, fontSize: 11, marginLeft: 8 }}>(PDU · UPS · patch panel · fan · KVM · blank · shelf)</span>
+        {t('racks.items_list.title', { count: items.length })}
+        <span style={{ color: 'var(--fg-3)', fontWeight: 400, fontSize: 11, marginLeft: 8 }}>{t('racks.items_list.caption')}</span>
       </div>
       {items.length === 0 ? (
         <div style={{ padding: '24px 12px', textAlign: 'center', color: 'var(--fg-3)', fontSize: 12, border: '1px dashed var(--line)', borderRadius: 8 }}>
-          Bu kabinde henüz item yok.
+          {t('racks.empty.no_items')}
         </div>
       ) : (
         <table className="nm-table">
-          <thead><tr><th>U</th><th>Etiket</th><th>Tür</th><th>Not</th><th></th></tr></thead>
+          <thead><tr><th>{t('racks.items_list.col_u')}</th><th>{t('racks.items_list.col_label')}</th><th>{t('racks.items_list.col_type')}</th><th>{t('racks.items_list.col_notes')}</th><th></th></tr></thead>
           <tbody>
             {items.map((it) => (
               <tr key={it.id}>
@@ -587,7 +593,7 @@ function ItemList({ detail, onRemove }: { detail: RackDetail; onRemove: (itemId:
                 <td><Tag color="blue" style={{ borderRadius: 4 }}>{it.item_type}</Tag></td>
                 <td style={{ color: 'var(--fg-2)', fontSize: 12 }}>{it.notes || '—'}</td>
                 <td>
-                  <Popconfirm title="Item silinsin mi?" okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
+                  <Popconfirm title={t('racks.items_list.delete_confirm')} okText={t('common.delete')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }}
                     onConfirm={() => onRemove(it.id)}>
                     <button className="nm-btn ghost" style={{ height: 24, fontSize: 11 }}>
                       <DeleteOutlined />
@@ -619,6 +625,7 @@ function CablingPanel({
   cables: Cable[]
   setCables: (next: Cable[] | ((c: Cable[]) => Cable[])) => void
 }) {
+  const { t } = useTranslation()
   const [linking, setLinking] = useState<{ deviceId: number; deviceName: string; port: string } | null>(null)
   const [kind, setKind] = useState<CableKind>('cat6')
   const [speed, setSpeed] = useState('1G')
@@ -665,20 +672,20 @@ function CablingPanel({
   if (!dev) {
     return (
       <>
-        <div className="nm-drawer-section-hd" style={{ padding: '8px 0 8px' }}>Kablolama</div>
+        <div className="nm-drawer-section-hd" style={{ padding: '8px 0 8px' }}>{t('racks.cabling.title')}</div>
         <div style={{
           padding: '40px 20px', textAlign: 'center', border: '1px dashed var(--line)',
           borderRadius: 10, color: 'var(--fg-2)', fontSize: 13, marginBottom: 18,
         }}>
-          Bir cihaz seç → port haritası bu panelde açılır.
+          {t('racks.empty.select_device_hint')}
         </div>
 
         <div className="nm-drawer-section-hd" style={{ padding: '0 0 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span>TÜM KABLOLAR</span>
+          <span>{t('racks.cabling.all_cables')}</span>
           <span className="mono" style={{ color: 'var(--fg-3)' }}>· {cables.length}</span>
         </div>
         {cables.length === 0 && (
-          <div style={{ color: 'var(--fg-3)', fontSize: 12, padding: '10px 0' }}>Henüz kablo kaydı yok.</div>
+          <div style={{ color: 'var(--fg-3)', fontSize: 12, padding: '10px 0' }}>{t('racks.empty.no_cables')}</div>
         )}
         {cables.map((c) => {
           const a = detail.devices.find((d) => d.id === c.from.deviceId)
@@ -704,16 +711,16 @@ function CablingPanel({
   return (
     <>
       <div className="nm-drawer-section-hd" style={{ padding: '8px 0 6px' }}>
-        {dev.hostname.toUpperCase()} <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>· PORT HARİTASI</span>
+        {dev.hostname.toUpperCase()} <span style={{ color: 'var(--fg-3)', fontWeight: 400 }}>{t('racks.cabling.port_map_caption')}</span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 11.5, color: 'var(--fg-2)' }}>
-        <span>{dev.device_type || 'cihaz'}</span>
+        <span>{dev.device_type || t('racks.cabling.cihaz_default')}</span>
         <span>·</span>
-        <span>{ports} port</span>
+        <span>{t('racks.cabling.port_count', { count: ports })}</span>
         <span>·</span>
-        <span>{devCables.length} kablo</span>
+        <span>{t('racks.cabling.cable_count', { count: devCables.length })}</span>
         <button className="nm-btn ghost" style={{ height: 24, fontSize: 11, marginLeft: 'auto' }}
-          onClick={() => onSelectDevice(null)}>← Cihazlar</button>
+          onClick={() => onSelectDevice(null)}>{t('racks.cabling.back_to_devices')}</button>
       </div>
 
       {linking && (
@@ -723,15 +730,15 @@ function CablingPanel({
           color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 6,
         }}>
           🔗 <strong className="mono">{linking.deviceName}:{linking.port}</strong>
-          <span style={{ color: 'var(--fg-2)' }}>seçildi → kabloyu bağlamak için başka bir cihazın portuna tıkla.</span>
+          <span style={{ color: 'var(--fg-2)' }}>{t('racks.cabling.linking_selected_sub')}</span>
           <button className="nm-btn ghost" style={{ height: 22, fontSize: 11, marginLeft: 'auto' }}
-            onClick={() => setLinking(null)}>İptal</button>
+            onClick={() => setLinking(null)}>{t('common.cancel')}</button>
         </div>
       )}
 
       {/* Kablo türü + hız */}
       <div className="nm-rack-toolbar" style={{ marginBottom: 12, fontSize: 11, flexWrap: 'wrap' }}>
-        <span style={{ alignSelf: 'center', color: 'var(--fg-3)', fontFamily: 'var(--font-mono)', fontSize: 10, marginRight: 4 }}>KABLO:</span>
+        <span style={{ alignSelf: 'center', color: 'var(--fg-3)', fontFamily: 'var(--font-mono)', fontSize: 10, marginRight: 4 }}>{t('racks.cabling.cable_label')}</span>
         {CABLE_KINDS.map((k) => (
           <button key={k} className={`nm-btn ${kind === k ? 'primary' : 'ghost'}`}
             style={{ height: 24, fontSize: 11, padding: '0 10px', display: 'inline-flex', alignItems: 'center', gap: 5 }}
@@ -761,7 +768,7 @@ function CablingPanel({
             return (
               <div key={portNum}
                 onClick={() => startOrComplete(portNum)}
-                title={c ? `bağlı: ${c.kind} ${c.speed}` : `boş port ${portNum}`}
+                title={c ? t('racks.cabling.port_tooltip_connected', { kind: c.kind, speed: c.speed }) : t('racks.cabling.port_tooltip_empty', { port: portNum })}
                 style={{
                   aspectRatio: '1',
                   border: `1.5px solid ${isLinking ? 'var(--accent)' : color}`,
@@ -789,15 +796,15 @@ function CablingPanel({
         </div>
       ) : (
         <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)', border: '1px dashed var(--line)', borderRadius: 8, fontSize: 12, marginBottom: 12 }}>
-          Bu cihaz tipi için port tanımı yok ({dev.device_type || '—'}).
-          <div style={{ marginTop: 6, fontSize: 10.5 }}>Router/switch/firewall/AP gibi network cihazları için port haritası vardır.</div>
+          {t('racks.cabling.no_ports_for_type', { type: dev.device_type || '—' })}
+          <div style={{ marginTop: 6, fontSize: 10.5 }}>{t('racks.cabling.no_ports_hint')}</div>
         </div>
       )}
 
       {/* Bağlantılar */}
-      <div className="nm-drawer-section-hd" style={{ padding: '4px 0 8px' }}>BAĞLANTILAR</div>
+      <div className="nm-drawer-section-hd" style={{ padding: '4px 0 8px' }}>{t('racks.cabling.connections')}</div>
       {devCables.length === 0 && (
-        <div style={{ color: 'var(--fg-3)', fontSize: 12 }}>Henüz kablo bağlantısı yok. Yukarıdan bir porta tıkla.</div>
+        <div style={{ color: 'var(--fg-3)', fontSize: 12 }}>{t('racks.cabling.no_connections')}</div>
       )}
       {devCables.map((c) => {
         const isFrom = c.from.deviceId === dev.id
@@ -807,7 +814,7 @@ function CablingPanel({
         return (
           <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderBottom: '1px solid var(--line-soft)' }}>
             <span style={{ width: 8, height: 8, borderRadius: '50%', background: CABLE_COLORS[c.kind] }}></span>
-            <span className="mono" style={{ fontSize: 11.5 }}>port {ourPort}</span>
+            <span className="mono" style={{ fontSize: 11.5 }}>{t('racks.cabling.port_label', { port: ourPort })}</span>
             <span style={{ color: 'var(--fg-3)' }}>↔</span>
             <span className="mono" style={{ fontSize: 11.5, fontWeight: 500 }}>
               {otherDev?.hostname || '?'}<span style={{ color: 'var(--fg-3)' }}>:{other.port}</span>
@@ -850,6 +857,7 @@ function PlaceModal({
   onPlaceDevice: (deviceId: number, height: number) => void
   onCreateItem: (vars: { label: string; item_type: string; height: number; notes?: string }) => void
 }) {
+  const { t } = useTranslation()
   const { data: unassigned = [], isLoading: unLoading } = useQuery({
     queryKey: ['rack-unassigned'],
     queryFn: () => racksApi.unassigned(),
@@ -893,8 +901,8 @@ function PlaceModal({
 
   return (
     <Modal open={open} onCancel={onClose} onOk={submit}
-      okText={mode === 'device' ? 'Yerleştir' : 'Ekle'} cancelText="İptal"
-      title={`${rackName} · U${u} — Ekle`}
+      okText={mode === 'device' ? t('racks.place_modal.ok_device') : t('racks.place_modal.ok_item')} cancelText={t('common.cancel')}
+      title={t('racks.place_modal.title', { rack: rackName, u })}
       confirmLoading={mode === 'device' ? deviceLoading : itemLoading}
       okButtonProps={{ disabled: okDisabled }}
       afterClose={() => {
@@ -905,80 +913,80 @@ function PlaceModal({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', gap: 6 }}>
           <button className={`nm-btn ${mode === 'device' ? 'primary' : 'ghost'}`} style={{ flex: 1, height: 30 }}
-            onClick={() => setMode('device')}>Cihaz Yerleştir</button>
+            onClick={() => setMode('device')}>{t('racks.place_modal.mode_device')}</button>
           <button className={`nm-btn ${mode === 'item' ? 'primary' : 'ghost'}`} style={{ flex: 1, height: 30 }}
-            onClick={() => setMode('item')}>Item Ekle (PDU / UPS / patch / …)</button>
+            onClick={() => setMode('item')}>{t('racks.place_modal.mode_item')}</button>
         </div>
         <div style={{ fontSize: 11.5, color: 'var(--fg-3)' }}>
-          U{u} için max <strong style={{ color: 'var(--fg-2)' }}>{maxHeight}U</strong> ardışık boşluk var.
+          <Trans i18nKey="racks.place_modal.max_height_info" values={{ u, max: maxHeight }}
+            components={{ s: <strong style={{ color: 'var(--fg-2)' }} /> }} />
         </div>
 
         {mode === 'device' ? (
           <>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Cihaz</div>
-              <Select<number> showSearch placeholder={unLoading ? 'Yükleniyor…' : 'Atanmamış cihazlardan seç…'}
+              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>{t('racks.place_modal.device_label')}</div>
+              <Select<number> showSearch placeholder={unLoading ? t('racks.place_modal.device_loading') : t('racks.place_modal.device_placeholder')}
                 value={deviceId} onChange={setDeviceId} loading={unLoading} style={{ width: '100%' }}
                 options={unassigned.map((d) => ({
                   value: d.id,
                   label: `${d.hostname} — ${d.ip_address}${d.vendor ? ' · ' + d.vendor : ''}${d.model ? ' · ' + d.model : ''}`,
                 }))}
                 filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
-                notFoundContent={unLoading ? 'Yükleniyor…' : 'Atanmamış cihaz bulunamadı'} />
+                notFoundContent={unLoading ? t('racks.place_modal.device_loading') : t('racks.place_modal.device_not_found')} />
               <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 4 }}>
-                Yerleştirilecek cihaz, "Cihazlar" sayfasında mevcut ama henüz hiçbir kabine atanmamış olmalı
-                ({unassigned.length} aday).
+                {t('racks.place_modal.device_hint', { count: unassigned.length })}
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Yükseklik</span>
+              <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>{t('racks.place_modal.height_label')}</span>
               <InputNumber min={1} max={maxHeight} value={devHeight}
                 onChange={(v) => setDevHeight(typeof v === 'number' ? v : 1)} style={{ width: 100 }} />
-              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>U (1–{maxHeight})</span>
+              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{t('racks.place_modal.height_unit', { max: maxHeight })}</span>
             </div>
           </>
         ) : (
           <>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Etiket</div>
-              <Input placeholder='örn. "PDU-A1-Sol" / "Patch Panel 48p"'
+              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>{t('racks.place_modal.label_label')}</div>
+              <Input placeholder={t('racks.place_modal.label_placeholder')}
                 value={itemLabel} onChange={(e) => setItemLabel(e.target.value)} autoFocus />
             </div>
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>Tür</span>
+                <span style={{ fontSize: 11, color: 'var(--fg-2)' }}>{t('racks.place_modal.type_label')}</span>
                 <button className={`nm-btn ${itemTypeMode === 'select' ? 'primary' : 'ghost'}`}
                   style={{ height: 22, fontSize: 10.5, padding: '0 8px' }}
-                  onClick={() => setItemTypeMode('select')}>Listeden seç</button>
+                  onClick={() => setItemTypeMode('select')}>{t('racks.place_modal.type_mode_select')}</button>
                 <button className={`nm-btn ${itemTypeMode === 'custom' ? 'primary' : 'ghost'}`}
                   style={{ height: 22, fontSize: 10.5, padding: '0 8px' }}
-                  onClick={() => setItemTypeMode('custom')}>Elle yaz</button>
+                  onClick={() => setItemTypeMode('custom')}>{t('racks.place_modal.type_mode_custom')}</button>
               </div>
               {itemTypeMode === 'select' ? (
-                <Select<string> showSearch placeholder="Tür seç (pdu / ups / patch_panel / …)"
+                <Select<string> showSearch placeholder={t('racks.place_modal.type_select_placeholder')}
                   value={itemTypeSel} onChange={setItemTypeSel} style={{ width: '100%' }}
-                  options={typeOptions.map((t) => ({ value: t, label: t }))}
+                  options={typeOptions.map((opt) => ({ value: opt, label: opt }))}
                   filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
-                  notFoundContent="Tür bulunamadı — 'Elle yaz' ile özel tür ekle" />
+                  notFoundContent={t('racks.place_modal.type_not_found')} />
               ) : (
                 <>
-                  <Input placeholder='örn. "kumandalı-switch", "kvm-2u"'
+                  <Input placeholder={t('racks.place_modal.type_custom_placeholder')}
                     value={itemTypeCustom} onChange={(e) => setItemTypeCustom(e.target.value)} />
                   <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 4 }}>
-                    Eklediğin tür bu lokasyonda kayıtlı kalır, bir sonraki seferde listede çıkar.
+                    {t('racks.place_modal.type_custom_hint')}
                   </div>
                 </>
               )}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Yükseklik</span>
+              <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>{t('racks.place_modal.height_label')}</span>
               <InputNumber min={1} max={maxHeight} value={itemHeight}
                 onChange={(v) => setItemHeight(typeof v === 'number' ? v : 1)} style={{ width: 100 }} />
-              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>U (1–{maxHeight})</span>
+              <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{t('racks.place_modal.height_unit', { max: maxHeight })}</span>
             </div>
             <div>
-              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>Not <span style={{ color: 'var(--fg-3)' }}>(opsiyonel)</span></div>
-              <Input.TextArea rows={2} placeholder="örn. seri no, watt, port sayısı…"
+              <div style={{ fontSize: 11, color: 'var(--fg-2)', marginBottom: 4 }}>{t('racks.place_modal.notes_label')} <span style={{ color: 'var(--fg-3)' }}>{t('racks.place_modal.notes_optional')}</span></div>
+              <Input.TextArea rows={2} placeholder={t('racks.place_modal.notes_placeholder')}
                 value={itemNotes} onChange={(e) => setItemNotes(e.target.value)} />
             </div>
           </>
@@ -991,6 +999,7 @@ function PlaceModal({
 // ── Add rack modal ────────────────────────────────────────────────────────
 function AddRackModal({ open, onClose, onSubmit, loading }:
   { open: boolean; onClose: () => void; onSubmit: (v: { rack_name: string; total_u: number; description?: string }) => void; loading: boolean }) {
+  const { t } = useTranslation()
   const [name, setName] = useState('')
   const [totalU, setTotalU] = useState<number>(42)
   const [desc, setDesc] = useState('')
@@ -1000,19 +1009,19 @@ function AddRackModal({ open, onClose, onSubmit, loading }:
     onSubmit({ rack_name: n, total_u: totalU, description: desc.trim() || undefined })
   }
   return (
-    <Modal open={open} title="Yeni Kabin Ekle" onCancel={onClose} onOk={submit} okText="Oluştur" cancelText="İptal"
+    <Modal open={open} title={t('racks.add_modal.title')} onCancel={onClose} onOk={submit} okText={t('racks.add_modal.ok')} cancelText={t('common.cancel')}
       confirmLoading={loading} okButtonProps={{ disabled: !name.trim() || totalU < 1 }}
       afterClose={() => { setName(''); setTotalU(42); setDesc('') }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <Input placeholder="Kabin adı (örn. A1 · Core)" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        <Input placeholder={t('racks.add_modal.name_placeholder')} value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>Toplam U</span>
+          <span style={{ fontSize: 12, color: 'var(--fg-2)', minWidth: 70 }}>{t('racks.add_modal.total_u_label')}</span>
           <InputNumber min={1} max={60} value={totalU} onChange={(v) => setTotalU(typeof v === 'number' ? v : 42)} style={{ width: 100 }} />
-          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>Standart: 42U</span>
+          <span style={{ fontSize: 11, color: 'var(--fg-3)' }}>{t('racks.add_modal.total_u_standard')}</span>
         </div>
-        <Input.TextArea placeholder="Açıklama (opsiyonel — site, konum, vb.)" value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} />
+        <Input.TextArea placeholder={t('racks.add_modal.desc_placeholder')} value={desc} onChange={(e) => setDesc(e.target.value)} rows={2} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--fg-3)', marginTop: 4 }}>
-          <AppstoreOutlined /> Cihazları sonra Cihazlar sayfasından bu kabine atayabilirsin.
+          <AppstoreOutlined /> {t('racks.add_modal.footer_hint')}
         </div>
       </div>
     </Modal>
