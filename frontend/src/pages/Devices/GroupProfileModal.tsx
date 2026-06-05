@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Alert, App, Button, Form, Modal, Select, Space, Typography } from 'antd'
 import { KeyOutlined, ApartmentOutlined, UserSwitchOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { devicesApi } from '@/api/devices'
 import { credentialProfilesApi } from '@/api/credentialProfiles'
 import type { DeviceGroup } from '@/types'
@@ -15,6 +16,7 @@ interface Props {
 
 export default function GroupProfileModal({ open, onClose }: Props) {
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [form] = Form.useForm()
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
@@ -35,14 +37,15 @@ export default function GroupProfileModal({ open, onClose }: Props) {
     mutationFn: ({ groupId, profileId }: { groupId: number; profileId: number | null }) =>
       devicesApi.assignGroupCredentialProfile(groupId, profileId),
     onSuccess: (res) => {
-      const profileLabel = res.profile_name ? `"${res.profile_name}"` : 'kaldırıldı'
       message.success(
-        `${res.group_name} grubundaki ${res.updated} cihaza credential profil ${profileLabel === 'kaldırıldı' ? profileLabel : `atandı: ${profileLabel}`}`
+        res.profile_name
+          ? t('devices.group_profile.toast_assigned', { group: res.group_name, count: res.updated, profile: res.profile_name })
+          : t('devices.group_profile.toast_removed', { group: res.group_name, count: res.updated })
       )
       queryClient.invalidateQueries({ queryKey: ['devices'] })
       handleClose()
     },
-    onError: (err: any) => message.error(err?.response?.data?.detail || 'Atama başarısız'),
+    onError: (err: any) => message.error(err?.response?.data?.detail || t('devices.group_profile.toast_failed')),
   })
 
   const handleClose = () => {
@@ -67,7 +70,7 @@ export default function GroupProfileModal({ open, onClose }: Props) {
   }))
 
   const profileOptions = [
-    { label: <Text type="secondary">— Profil Kaldır —</Text>, value: null },
+    { label: <Text type="secondary">{t('devices.group_profile.profile_remove')}</Text>, value: null },
     ...profiles.map((p) => ({
       label: (
         <Space size={6}>
@@ -87,7 +90,7 @@ export default function GroupProfileModal({ open, onClose }: Props) {
       title={
         <Space>
           <UserSwitchOutlined style={{ color: '#1677ff' }} />
-          <span>Gruba Credential Profil Ata</span>
+          <span>{t('devices.group_profile.title')}</span>
         </Space>
       }
       footer={null}
@@ -98,15 +101,15 @@ export default function GroupProfileModal({ open, onClose }: Props) {
         type="info"
         showIcon
         style={{ marginBottom: 20, fontSize: 12 }}
-        message="Seçilen gruptaki tüm cihazların credential profili toplu olarak güncellenir."
-        description="Cihaza bireysel atanan profil varsa bu işlem onu geçersiz kılar."
+        message={t('devices.group_profile.alert_title')}
+        description={t('devices.group_profile.alert_desc')}
       />
 
       <Form form={form} layout="vertical" onFinish={onFinish}>
-        <Form.Item label="Cihaz Grubu" name="group_id" rules={[{ required: true, message: 'Grup seçin' }]}>
+        <Form.Item label={t('devices.group_profile.group_label')} name="group_id" rules={[{ required: true, message: t('devices.group_profile.group_required') }]}>
           <Select
             showSearch
-            placeholder="Grup seçin..."
+            placeholder={t('devices.group_profile.group_placeholder')}
             options={groupOptions}
             onChange={(v) => setSelectedGroupId(v)}
             filterOption={(input, option) =>
@@ -118,18 +121,18 @@ export default function GroupProfileModal({ open, onClose }: Props) {
         </Form.Item>
 
         <Form.Item
-          label="Credential Profil"
+          label={t('devices.group_profile.profile_label')}
           name="credential_profile_id"
           rules={[{ required: false }]}
           help={
             selectedGroupId
-              ? 'Boş bırakırsanız gruptaki cihazların profil ataması kaldırılır.'
+              ? t('devices.group_profile.profile_help_empty')
               : undefined
           }
         >
           <Select
             showSearch
-            placeholder="Profil seçin (boş = kaldır)..."
+            placeholder={t('devices.group_profile.profile_placeholder')}
             options={profileOptions}
             allowClear
             filterOption={(input, option) =>
@@ -141,7 +144,7 @@ export default function GroupProfileModal({ open, onClose }: Props) {
 
         <Form.Item style={{ marginBottom: 0 }}>
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-            <Button onClick={handleClose}>İptal</Button>
+            <Button onClick={handleClose}>{t('common.cancel')}</Button>
             <Button
               type="primary"
               htmlType="submit"
@@ -149,7 +152,7 @@ export default function GroupProfileModal({ open, onClose }: Props) {
               loading={mutation.isPending}
               disabled={!selectedGroupId}
             >
-              Ata
+              {t('devices.group_profile.assign_btn')}
             </Button>
           </Space>
         </Form.Item>
