@@ -832,5 +832,144 @@
   "error_boundary": {
     "title": "Beklenmeyen bir hata oluştu",
     "reload": "Sayfayı Yenile"
+  },
+  "racks": {
+    "crumb_inventory": "Envanter",
+    "crumb_racks": "Kabinler",
+    "page_title": "Kabinler & Rack'lar",
+    "page_stat_summary": "{{racks}} kabin · {{devices}} cihaz · {{items}} item",
+    "subtitle": "Fiziksel yerleşim · U bazlı cihaz haritası · gerçek envanter (RackItem: PDU/UPS/patch panel/etc.).",
+    "add_rack": "+ Kabin Ekle",
+    "loading": "Yükleniyor…",
+    "stat": {
+      "total_u": "Toplam U",
+      "fill_pct": "{{pct}}% dolu",
+      "healthy": "Sağlıklı",
+      "attention": "Dikkat",
+      "critical": "Kritik",
+      "total_devices": "Toplam Cihaz",
+      "items": "Items",
+      "items_caption": "PDU · UPS · patch · …"
+    },
+    "empty": {
+      "racks_title": "Henüz kabin yok",
+      "no_devices": "Bu kabinde henüz cihaz yok. Sol taraftaki boş U'lardan birine tıkla → cihaz yerleştir.",
+      "no_items": "Bu kabinde henüz item yok.",
+      "no_cables": "Henüz kablo kaydı yok.",
+      "select_device_hint": "Bir cihaz seç → port haritası bu panelde açılır."
+    },
+    "toasts": {
+      "rack_created": "Kabin oluşturuldu",
+      "rack_create_failed": "Oluşturulamadı",
+      "rack_deleted": "Kabin silindi",
+      "rack_delete_failed": "Silinemedi",
+      "placement_removed": "Cihaz kabinden çıkarıldı",
+      "placement_remove_failed": "Çıkarılamadı",
+      "item_deleted": "Item silindi",
+      "item_delete_failed": "Silinemedi",
+      "device_placed": "Cihaz kabine yerleştirildi",
+      "device_place_failed": "Yerleştirilemedi",
+      "item_created": "Item kabine eklendi",
+      "item_create_failed": "Eklenemedi",
+      "no_empty_u": "Kabinde boş U yok"
+    },
+    "card": {
+      "delete_confirm_title": "Kabin silinsin mi?",
+      "delete_confirm_desc": "Cihazların yerleşimi kaldırılır (cihazlar kalır).",
+      "delete_title": "Kabini sil",
+      "stat_device": "CİHAZ",
+      "stat_fill": "DOLULUK",
+      "stat_items": "ITEMS"
+    },
+    "detail": {
+      "summary": "{{devices}} cihaz · {{items}} item · {{totalU}}U",
+      "click_empty_hint": "Boş U'ya tıkla veya",
+      "add_device_or_item": "+ Cihaz / Item Ekle"
+    },
+    "tabs": {
+      "devices": "Cihazlar",
+      "cables": "Kablolama",
+      "items": "Items"
+    },
+    "frame": {
+      "empty_u_title": "U{{u}} — boş (tıkla → cihaz yerleştir)",
+      "empty_u_btn": "ekle"
+    },
+    "device_list": {
+      "title": "Cihaz Listesi · {{count}}",
+      "col_u": "U",
+      "col_device": "Cihaz",
+      "col_vendor": "Vendor",
+      "col_type": "Tür",
+      "col_ip": "IP",
+      "col_status": "Durum",
+      "remove_confirm_title": "Yerleşimi kaldır?",
+      "remove_confirm_desc": "Cihaz silinmez — sadece rack yerleşimi temizlenir.",
+      "remove_confirm_ok": "Çıkar",
+      "remove_title": "Kabinden çıkar"
+    },
+    "items_list": {
+      "title": "Rack Items · {{count}}",
+      "caption": "(PDU · UPS · patch panel · fan · KVM · blank · shelf)",
+      "col_u": "U",
+      "col_label": "Etiket",
+      "col_type": "Tür",
+      "col_notes": "Not",
+      "delete_confirm": "Item silinsin mi?"
+    },
+    "cabling": {
+      "title": "Kablolama",
+      "all_cables": "TÜM KABLOLAR",
+      "port_map_caption": "· PORT HARİTASI",
+      "cihaz_default": "cihaz",
+      "port_count": "{{count}} port",
+      "cable_count": "{{count}} kablo",
+      "back_to_devices": "← Cihazlar",
+      "linking_selected_sub": "seçildi → kabloyu bağlamak için başka bir cihazın portuna tıkla.",
+      "cable_label": "KABLO:",
+      "port_tooltip_connected": "bağlı: {{kind}} {{speed}}",
+      "port_tooltip_empty": "boş port {{port}}",
+      "no_ports_for_type": "Bu cihaz tipi için port tanımı yok ({{type}}).",
+      "no_ports_hint": "Router/switch/firewall/AP gibi network cihazları için port haritası vardır.",
+      "connections": "BAĞLANTILAR",
+      "no_connections": "Henüz kablo bağlantısı yok. Yukarıdan bir porta tıkla.",
+      "port_label": "port {{port}}"
+    },
+    "place_modal": {
+      "ok_device": "Yerleştir",
+      "ok_item": "Ekle",
+      "title": "{{rack}} · U{{u}} — Ekle",
+      "mode_device": "Cihaz Yerleştir",
+      "mode_item": "Item Ekle (PDU / UPS / patch / …)",
+      "max_height_info": "U{{u}} için max <s>{{max}}U</s> ardışık boşluk var.",
+      "device_label": "Cihaz",
+      "device_loading": "Yükleniyor…",
+      "device_placeholder": "Atanmamış cihazlardan seç…",
+      "device_not_found": "Atanmamış cihaz bulunamadı",
+      "device_hint": "Yerleştirilecek cihaz, \"Cihazlar\" sayfasında mevcut ama henüz hiçbir kabine atanmamış olmalı ({{count}} aday).",
+      "height_label": "Yükseklik",
+      "height_unit": "U (1–{{max}})",
+      "label_label": "Etiket",
+      "label_placeholder": "örn. \"PDU-A1-Sol\" / \"Patch Panel 48p\"",
+      "type_label": "Tür",
+      "type_mode_select": "Listeden seç",
+      "type_mode_custom": "Elle yaz",
+      "type_select_placeholder": "Tür seç (pdu / ups / patch_panel / …)",
+      "type_not_found": "Tür bulunamadı — 'Elle yaz' ile özel tür ekle",
+      "type_custom_placeholder": "örn. \"kumandalı-switch\", \"kvm-2u\"",
+      "type_custom_hint": "Eklediğin tür bu lokasyonda kayıtlı kalır, bir sonraki seferde listede çıkar.",
+      "notes_label": "Not",
+      "notes_optional": "(opsiyonel)",
+      "notes_placeholder": "örn. seri no, watt, port sayısı…"
+    },
+    "add_modal": {
+      "title": "Yeni Kabin Ekle",
+      "ok": "Oluştur",
+      "name_placeholder": "Kabin adı (örn. A1 · Core)",
+      "total_u_label": "Toplam U",
+      "total_u_standard": "Standart: 42U",
+      "desc_placeholder": "Açıklama (opsiyonel — site, konum, vb.)",
+      "footer_hint": "Cihazları sonra Cihazlar sayfasından bu kabine atayabilirsin."
+    }
   }
 }

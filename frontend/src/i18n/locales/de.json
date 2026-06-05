@@ -746,5 +746,144 @@
   "error_boundary": {
     "title": "Ein unerwarteter Fehler ist aufgetreten",
     "reload": "Seite neu laden"
+  },
+  "racks": {
+    "crumb_inventory": "Inventar",
+    "crumb_racks": "Racks",
+    "page_title": "Schränke & Racks",
+    "page_stat_summary": "{{racks}} Racks · {{devices}} Geräte · {{items}} Items",
+    "subtitle": "Physische Anordnung · U-basierte Gerätekarte · echtes Inventar (RackItem: PDU/USV/Patch Panel/etc.).",
+    "add_rack": "+ Rack hinzufügen",
+    "loading": "Laden…",
+    "stat": {
+      "total_u": "U gesamt",
+      "fill_pct": "{{pct}}% belegt",
+      "healthy": "Gesund",
+      "attention": "Achtung",
+      "critical": "Kritisch",
+      "total_devices": "Geräte gesamt",
+      "items": "Items",
+      "items_caption": "PDU · USV · Patch · …"
+    },
+    "empty": {
+      "racks_title": "Noch keine Racks",
+      "no_devices": "In diesem Rack sind noch keine Geräte. Auf eine leere U links klicken → Gerät platzieren.",
+      "no_items": "In diesem Rack sind noch keine Items.",
+      "no_cables": "Noch keine Kabel erfasst.",
+      "select_device_hint": "Gerät auswählen → die Port-Karte öffnet sich in diesem Panel."
+    },
+    "toasts": {
+      "rack_created": "Rack erstellt",
+      "rack_create_failed": "Konnte nicht erstellt werden",
+      "rack_deleted": "Rack gelöscht",
+      "rack_delete_failed": "Konnte nicht gelöscht werden",
+      "placement_removed": "Gerät aus dem Rack entfernt",
+      "placement_remove_failed": "Konnte nicht entfernt werden",
+      "item_deleted": "Item gelöscht",
+      "item_delete_failed": "Konnte nicht gelöscht werden",
+      "device_placed": "Gerät im Rack platziert",
+      "device_place_failed": "Konnte nicht platziert werden",
+      "item_created": "Item zum Rack hinzugefügt",
+      "item_create_failed": "Konnte nicht hinzugefügt werden",
+      "no_empty_u": "Keine freie U im Rack"
+    },
+    "card": {
+      "delete_confirm_title": "Rack löschen?",
+      "delete_confirm_desc": "Gerätestandorte werden entfernt (Geräte bleiben).",
+      "delete_title": "Rack löschen",
+      "stat_device": "GERÄT",
+      "stat_fill": "FÜLLUNG",
+      "stat_items": "ITEMS"
+    },
+    "detail": {
+      "summary": "{{devices}} Geräte · {{items}} Items · {{totalU}}U",
+      "click_empty_hint": "Klick auf eine leere U oder",
+      "add_device_or_item": "+ Gerät / Item hinzufügen"
+    },
+    "tabs": {
+      "devices": "Geräte",
+      "cables": "Verkabelung",
+      "items": "Items"
+    },
+    "frame": {
+      "empty_u_title": "U{{u}} — leer (klicken → Gerät platzieren)",
+      "empty_u_btn": "hinzufügen"
+    },
+    "device_list": {
+      "title": "Geräteliste · {{count}}",
+      "col_u": "U",
+      "col_device": "Gerät",
+      "col_vendor": "Hersteller",
+      "col_type": "Typ",
+      "col_ip": "IP",
+      "col_status": "Status",
+      "remove_confirm_title": "Platzierung entfernen?",
+      "remove_confirm_desc": "Das Gerät wird nicht gelöscht — nur die Rack-Platzierung wird aufgehoben.",
+      "remove_confirm_ok": "Entfernen",
+      "remove_title": "Aus dem Rack entfernen"
+    },
+    "items_list": {
+      "title": "Rack Items · {{count}}",
+      "caption": "(PDU · USV · Patch Panel · Lüfter · KVM · Blende · Ablage)",
+      "col_u": "U",
+      "col_label": "Bezeichnung",
+      "col_type": "Typ",
+      "col_notes": "Notiz",
+      "delete_confirm": "Item löschen?"
+    },
+    "cabling": {
+      "title": "Verkabelung",
+      "all_cables": "ALLE KABEL",
+      "port_map_caption": "· PORT-KARTE",
+      "cihaz_default": "Gerät",
+      "port_count": "{{count}} Ports",
+      "cable_count": "{{count}} Kabel",
+      "back_to_devices": "← Geräte",
+      "linking_selected_sub": "ausgewählt → klicke einen Port auf einem anderen Gerät, um das Kabel zu verbinden.",
+      "cable_label": "KABEL:",
+      "port_tooltip_connected": "verbunden: {{kind}} {{speed}}",
+      "port_tooltip_empty": "leerer Port {{port}}",
+      "no_ports_for_type": "Für diesen Gerätetyp ist keine Port-Definition vorhanden ({{type}}).",
+      "no_ports_hint": "Port-Karten gibt es für Netzwerkgeräte wie Router / Switches / Firewalls / APs.",
+      "connections": "VERBINDUNGEN",
+      "no_connections": "Noch keine Kabelverbindungen. Oben auf einen Port klicken.",
+      "port_label": "Port {{port}}"
+    },
+    "place_modal": {
+      "ok_device": "Platzieren",
+      "ok_item": "Hinzufügen",
+      "title": "{{rack}} · U{{u}} — Hinzufügen",
+      "mode_device": "Gerät platzieren",
+      "mode_item": "Item hinzufügen (PDU / USV / Patch / …)",
+      "max_height_info": "Bei U{{u}} gibt es max. <s>{{max}}U</s> zusammenhängenden freien Platz.",
+      "device_label": "Gerät",
+      "device_loading": "Laden…",
+      "device_placeholder": "Aus nicht zugewiesenen Geräten wählen…",
+      "device_not_found": "Kein nicht zugewiesenes Gerät gefunden",
+      "device_hint": "Das Gerät muss auf der \"Geräte\"-Seite existieren, darf aber noch keinem Rack zugewiesen sein ({{count}} Kandidaten).",
+      "height_label": "Höhe",
+      "height_unit": "U (1–{{max}})",
+      "label_label": "Bezeichnung",
+      "label_placeholder": "z.B. \"PDU-A1-Links\" / \"Patch Panel 48p\"",
+      "type_label": "Typ",
+      "type_mode_select": "Aus Liste wählen",
+      "type_mode_custom": "Selbst eingeben",
+      "type_select_placeholder": "Typ wählen (pdu / ups / patch_panel / …)",
+      "type_not_found": "Typ nicht gefunden — mit 'Selbst eingeben' einen neuen anlegen",
+      "type_custom_placeholder": "z.B. \"smart-pdu\", \"kvm-2u\"",
+      "type_custom_hint": "Dein eigener Typ wird in dieser Lokation gespeichert und erscheint beim nächsten Mal in der Liste.",
+      "notes_label": "Notiz",
+      "notes_optional": "(optional)",
+      "notes_placeholder": "z.B. Seriennummer, Wattzahl, Portanzahl…"
+    },
+    "add_modal": {
+      "title": "Neues Rack hinzufügen",
+      "ok": "Erstellen",
+      "name_placeholder": "Rack-Name (z.B. A1 · Core)",
+      "total_u_label": "U gesamt",
+      "total_u_standard": "Standard: 42U",
+      "desc_placeholder": "Beschreibung (optional — Site, Standort, etc.)",
+      "footer_hint": "Geräte kannst du später auf der Geräte-Seite diesem Rack zuweisen."
+    }
   }
 }
