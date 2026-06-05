@@ -43,7 +43,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
   const qc = useQueryClient()
   const { isDark, toggle } = useTheme()
   const { message } = App.useApp()
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const isMobile = useIsMobile()
   const { soundEnabled, setSoundEnabled, applyLayout } = useCustomize()
 
@@ -336,9 +336,10 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
       {/* Clock — mockup nm-clock (HH:MM:SS + DD MMM CMT) */}
       {!isMobile && (
         <div className="nm-clock">
-          <span>{now.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-          <small>{now.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' }).toUpperCase()}{' '}
-            {Intl.DateTimeFormat('en', { timeZoneName: 'short' }).formatToParts(now).find((p) => p.type === 'timeZoneName')?.value || ''}</small>
+          {/* LANG-INFRA: BCP47 yerine i18n.language; dil değişiminde otomatik takip eder. */}
+          <span>{now.toLocaleTimeString(i18n.language, { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+          <small>{now.toLocaleDateString(i18n.language, { day: '2-digit', month: 'short' }).toUpperCase()}{' '}
+            {Intl.DateTimeFormat(i18n.language, { timeZoneName: 'short' }).formatToParts(now).find((p) => p.type === 'timeZoneName')?.value || ''}</small>
         </div>
       )}
 

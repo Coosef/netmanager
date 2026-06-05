@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { App as AntApp, ConfigProvider, theme } from 'antd'
-import trTR from 'antd/locale/tr_TR'
-import enUS from 'antd/locale/en_US'
-import ruRU from 'antd/locale/ru_RU'
-import deDE from 'antd/locale/de_DE'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import 'dayjs/locale/tr'
-import i18n from './i18n'
+// LANG-INFRA: dayjs locale paketleri + AntD locale registry + dayjs.locale()
+// otomatik switch i18n/ modülünün içine alındı. App.tsx artık yeni dil
+// ekleme sürecinde dokunulmaz.
+import i18n, { getAntdLocale } from './i18n'
 
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
@@ -83,7 +81,8 @@ import SshTerminalPage from '@/pages/SshTerminalPage'
 import EscalationRulesPage from '@/pages/EscalationRules'
 
 dayjs.extend(relativeTime)
-dayjs.locale('tr')
+// LANG-INFRA: dayjs.locale() artık i18n modülünün içindeki languageChanged
+// listener'ı tarafından yönetiliyor (init + dil değişimi otomatik).
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -143,12 +142,9 @@ const LIGHT_TOKENS = {
   },
 }
 
-const ANTD_LOCALES: Record<string, object> = {
-  tr: trTR,
-  en: enUS,
-  ru: ruRU,
-  de: deDE,
-}
+// LANG-INFRA: ANTD_LOCALES hardcoded map kaldırıldı. AntD locale registry
+// `frontend/src/i18n/antdLocales.ts` dosyasında. `getAntdLocale(code)` ile
+// alınır; yeni dil için App.tsx dokunulmaz.
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { token } = useAuthStore()
@@ -219,7 +215,7 @@ const GLOBAL_CSS_LIGHT = `
 
 function ThemedApp() {
   const { isDark } = useTheme()
-  const [antdLocale, setAntdLocale] = useState(ANTD_LOCALES[i18n.language] || trTR)
+  const [antdLocale, setAntdLocale] = useState(getAntdLocale(i18n.language))
   const { token, setAuth, user } = useAuthStore()
 
   // Re-fetch permissions on every app load so stale/null localStorage entries get refreshed
@@ -232,7 +228,7 @@ function ThemedApp() {
 
   useEffect(() => {
     const handler = (lng: string) => {
-      setAntdLocale(ANTD_LOCALES[lng] || trTR)
+      setAntdLocale(getAntdLocale(lng))
     }
     i18n.on('languageChanged', handler)
     return () => i18n.off('languageChanged', handler)

@@ -6,7 +6,10 @@
     "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "i18n:check": "node scripts/i18n-parity.mjs",
+    "i18n:check:strict": "node scripts/i18n-parity.mjs --strict",
+    "i18n:fix": "node scripts/i18n-parity.mjs --fix"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.1",
