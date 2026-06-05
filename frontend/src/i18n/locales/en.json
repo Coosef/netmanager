@@ -1452,6 +1452,90 @@
     "col_detail": "Detail",
     "col_ip": "IP"
   },
+  "terminal_sessions": {
+    "crumb_security": "Security",
+    "crumb_audit": "SSH Session Audit",
+    "page_title": "SSH Session Audit",
+    "page_subtitle": "Interactive SSH terminal sessions opened from the browser · extracted commands, IO bytes, output excerpt · forensic audit.",
+    "records_count": "{{count}} records",
+    "stat": {
+      "sessions_24h": "SESSIONS (24H)",
+      "commands_24h": "COMMANDS (24H)",
+      "avg_duration": "AVG. DURATION",
+      "active_now": "ACTIVE NOW"
+    },
+    "alert": {
+      "ai_coming_title": "AI summary feature coming soon (T9 Tur 3B)",
+      "ai_coming_desc": "Each session's command list + IO bytes + last ~10KB output is currently being recorded. AI session summarization (Claude API) will be enabled in the next increment."
+    },
+    "toolbar": {
+      "search_placeholder": "Search user or device…",
+      "status_all": "All statuses",
+      "status_active_only": "Active only",
+      "status_closed_only": "Closed only"
+    },
+    "col": {
+      "started_at": "STARTED",
+      "username": "USER",
+      "device": "DEVICE",
+      "connection_path": "PATH",
+      "commands": "CMDS",
+      "duration": "DURATION",
+      "io": "I/O",
+      "status": "STATUS",
+      "client_ip": "IP"
+    },
+    "status": {
+      "in_progress": "In progress",
+      "user_closed": "User closed",
+      "idle_timeout": "Idle timeout",
+      "agent_disconnected": "Agent disconnected",
+      "paramiko_error": "Paramiko error",
+      "ws_error": "WebSocket error",
+      "stale_cleanup": "Auto cleanup"
+    },
+    "path": {
+      "agent_relay": "Agent",
+      "direct_paramiko": "Direct"
+    },
+    "drawer": {
+      "title": "Session Detail"
+    },
+    "general": {
+      "title": "General",
+      "label_user": "User",
+      "label_device": "Device",
+      "label_path": "Path",
+      "label_agent": "Agent",
+      "label_started": "Started",
+      "label_ended": "Ended",
+      "label_duration": "Duration",
+      "label_exit_reason": "Exit Reason",
+      "label_client_ip": "Client IP",
+      "label_io": "I/O"
+    },
+    "ai": {
+      "card_title": "AI Summary",
+      "btn_regenerate": "Regenerate",
+      "btn_generate": "Generate Summary",
+      "status_running_text": "Generating AI summary… (3-8 seconds)",
+      "empty_title": "No AI summary generated for this session yet.",
+      "empty_provider_hint": "AI Assistant uses the active provider (Settings → AI Assistant). You will get an error if no provider is configured."
+    },
+    "commands": {
+      "card_title": "Extracted Commands",
+      "empty": "No commands extracted (empty input or ongoing session)"
+    },
+    "output": {
+      "card_title": "Output Excerpt (last ~10KB)",
+      "empty": "Output not recorded"
+    },
+    "toast": {
+      "ai_ready": "AI summary ready ({{provider}} / {{tokens}} tokens)",
+      "ai_status_other": "Status: {{status}}",
+      "ai_failed": "AI summary could not be generated"
+    }
+  },
   "settings": {
     "title": "Settings",
     "language": "Language",

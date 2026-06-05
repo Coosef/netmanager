@@ -1445,6 +1445,90 @@
     "col_detail": "Detail",
     "col_ip": "IP"
   },
+  "terminal_sessions": {
+    "crumb_security": "Sicherheit",
+    "crumb_audit": "SSH-Sitzungs-Audit",
+    "page_title": "SSH-Sitzungs-Audit",
+    "page_subtitle": "Interaktive SSH-Terminalsitzungen aus dem Browser · extrahierte Befehle, IO-Bytes, Ausgabe-Auszug · forensisches Audit.",
+    "records_count": "{{count}} Einträge",
+    "stat": {
+      "sessions_24h": "SITZUNGEN (24H)",
+      "commands_24h": "BEFEHLE (24H)",
+      "avg_duration": "DURCHSCHN. DAUER",
+      "active_now": "JETZT AKTIV"
+    },
+    "alert": {
+      "ai_coming_title": "KI-Zusammenfassung bald verfügbar (T9 Tur 3B)",
+      "ai_coming_desc": "Aktuell werden Befehlsliste + IO-Bytes + letzte ~10 KB Ausgabe jeder Sitzung gespeichert. KI-Sitzungszusammenfassung (Claude API) wird im nächsten Increment aktiviert."
+    },
+    "toolbar": {
+      "search_placeholder": "Benutzer oder Gerät suchen…",
+      "status_all": "Alle Status",
+      "status_active_only": "Nur aktiv",
+      "status_closed_only": "Nur geschlossen"
+    },
+    "col": {
+      "started_at": "BEGINN",
+      "username": "BENUTZER",
+      "device": "GERÄT",
+      "connection_path": "PFAD",
+      "commands": "BEFEHLE",
+      "duration": "DAUER",
+      "io": "I/O",
+      "status": "STATUS",
+      "client_ip": "IP"
+    },
+    "status": {
+      "in_progress": "Läuft",
+      "user_closed": "Vom Benutzer geschlossen",
+      "idle_timeout": "Leerlauf-Timeout",
+      "agent_disconnected": "Agent getrennt",
+      "paramiko_error": "Paramiko-Fehler",
+      "ws_error": "WebSocket-Fehler",
+      "stale_cleanup": "Automatische Bereinigung"
+    },
+    "path": {
+      "agent_relay": "Agent",
+      "direct_paramiko": "Direkt"
+    },
+    "drawer": {
+      "title": "Sitzungsdetails"
+    },
+    "general": {
+      "title": "Allgemein",
+      "label_user": "Benutzer",
+      "label_device": "Gerät",
+      "label_path": "Pfad",
+      "label_agent": "Agent",
+      "label_started": "Beginn",
+      "label_ended": "Ende",
+      "label_duration": "Dauer",
+      "label_exit_reason": "Beendigungsgrund",
+      "label_client_ip": "Client-IP",
+      "label_io": "I/O"
+    },
+    "ai": {
+      "card_title": "KI-Zusammenfassung",
+      "btn_regenerate": "Neu erstellen",
+      "btn_generate": "Zusammenfassung erstellen",
+      "status_running_text": "KI-Zusammenfassung wird erstellt… (3-8 Sekunden)",
+      "empty_title": "Für diese Sitzung wurde noch keine KI-Zusammenfassung erstellt.",
+      "empty_provider_hint": "Der KI-Assistent verwendet den aktiven Provider (Einstellungen → KI-Assistent). Wenn kein Provider konfiguriert ist, erhalten Sie einen Fehler."
+    },
+    "commands": {
+      "card_title": "Extrahierte Befehle",
+      "empty": "Keine Befehle extrahiert (leere Eingabe oder laufende Sitzung)"
+    },
+    "output": {
+      "card_title": "Ausgabe-Auszug (letzte ~10 KB)",
+      "empty": "Ausgabe nicht aufgezeichnet"
+    },
+    "toast": {
+      "ai_ready": "KI-Zusammenfassung bereit ({{provider}} / {{tokens}} Token)",
+      "ai_status_other": "Status: {{status}}",
+      "ai_failed": "KI-Zusammenfassung konnte nicht erstellt werden"
+    }
+  },
   "settings": {
     "title": "Einstellungen",
     "language": "Sprache",
