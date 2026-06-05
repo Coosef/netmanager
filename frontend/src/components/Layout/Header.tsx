@@ -140,7 +140,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
     // T8.4 — Profil sayfası: kimlik bilgileri, lokasyonlar, şifre + MFA tek
     // sayfada. Eski "Şifre Değiştir" modal kısayolu da korunuyor (hızlı
     // erişim için), MFA yönetimi sadece Profile sayfasında.
-    { key: 'profile', icon: <UserOutlined />, label: 'Profilim', onClick: () => navigate('/profile') },
+    { key: 'profile', icon: <UserOutlined />, label: t('header.profile'), onClick: () => navigate('/profile') },
     { key: 'change-password', icon: <KeyOutlined />, label: t('header.change_password'), onClick: () => { pwForm.resetFields(); setPwModalOpen(true) } },
     { type: 'divider' as const },
     { key: 'logout', icon: <LogoutOutlined />, label: t('header.logout'), danger: true, onClick: handleLogout },
@@ -295,15 +295,15 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
       {!isMobile && (
         <div className="nm-tabs">
           {[
-            { id: 'operator' as const, label: 'NOC' },
-            { id: 'admin' as const,    label: 'Admin' },
-            { id: 'exec' as const,     label: 'Yönetici' },
-          ].map((t) => (
-            <div key={t.id}
-              className={`nm-tab ${roleTab === t.id ? 'active' : ''}`}
-              onClick={() => setRole(t.id)}>
+            { id: 'operator' as const, label: t('header.role_noc') },
+            { id: 'admin' as const,    label: t('header.role_admin') },
+            { id: 'exec' as const,     label: t('header.role_exec') },
+          ].map((tab) => (
+            <div key={tab.id}
+              className={`nm-tab ${roleTab === tab.id ? 'active' : ''}`}
+              onClick={() => setRole(tab.id)}>
               <span className="dot"></span>
-              {t.label}
+              {tab.label}
             </div>
           ))}
         </div>
@@ -347,7 +347,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
       <button className={`nm-customize-btn ${customizeOpen ? 'active' : ''}`}
         onClick={() => setCustomizeOpen(true)}>
         <SettingOutlined style={{ fontSize: 13 }} />
-        <span>Özelleştir</span>
+        <span>{t('header.customize_btn')}</span>
       </button>
       <CustomizePanel open={customizeOpen} onClose={() => setCustomizeOpen(false)} />
 
@@ -361,7 +361,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           </span>
         </Tooltip>
 
-        <Tooltip title={soundEnabled ? 'Sesli alarm açık' : 'Sesli alarm kapalı'}>
+        <Tooltip title={soundEnabled ? t('header.sound_on') : t('header.sound_off')}>
           <span className="nm-iconbtn" onClick={() => setSoundEnabled(!soundEnabled)}
             style={soundEnabled ? { color: 'var(--accent)' } : undefined}>
             {soundEnabled ? <NotificationOutlined style={{ fontSize: 14 }} /> : <SoundOutlined style={{ fontSize: 14 }} />}
@@ -386,7 +386,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           arrow={false}
           overlayInnerStyle={{ padding: 0, borderRadius: 10, overflow: 'hidden', width: isMobile ? 'calc(100vw - 16px)' : 360, maxWidth: 360 }}
         >
-          <span className="nm-iconbtn" title="Bildirimler">
+          <span className="nm-iconbtn" title={t('header.notifications')}>
             <BellOutlined style={{
               fontSize: 14,
               color: unacked > 0 ? '#f97316' : undefined,
@@ -396,7 +396,7 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           </span>
         </Popover>
 
-        <Tooltip title="Tam ekran">
+        <Tooltip title={t('header.fullscreen')}>
           <span className="nm-iconbtn" onClick={goFullscreen}>
             <FullscreenOutlined style={{ fontSize: 14 }} />
           </span>

@@ -72,7 +72,15 @@
     "password_changed": "Passwort erfolgreich geändert",
     "password_change_error": "Passwort konnte nicht geändert werden",
     "change_password_btn": "Passwort ändern",
-    "password_min_length": "Mindestens 8 Zeichen"
+    "password_min_length": "Mindestens 8 Zeichen",
+    "profile": "Mein Profil",
+    "role_noc": "NOC",
+    "role_admin": "Admin",
+    "role_exec": "Leiter",
+    "customize_btn": "Anpassen",
+    "sound_on": "Tonalarm ein",
+    "sound_off": "Tonalarm aus",
+    "fullscreen": "Vollbild"
   },
   "common": {
     "add": "Hinzufügen",
@@ -112,7 +120,9 @@
     "unknown": "Unbekannt",
     "last_seen": "Zuletzt gesehen",
     "created_at": "Erstellt",
-    "updated_at": "Aktualisiert"
+    "updated_at": "Aktualisiert",
+    "apply": "Anwenden",
+    "no_results": "Keine Ergebnisse gefunden"
   },
   "login": {
     "subtitle": "Netzwerkverwaltungsplattform",
@@ -543,5 +553,198 @@
     "role_operator_desc": "Geräte-, Aufgaben- und Konfigurationsverwaltung. Kann keine Benutzer erstellen.",
     "role_viewer_title": "Viewer",
     "role_viewer_desc": "Nur-Lese-Zugriff. Kann keine Änderungen vornehmen."
+  },
+  "customize": {
+    "panel_title": "Anpassen",
+    "presets": {
+      "title": "VORDEFINIERTE LAYOUTS",
+      "subtitle": "Rollenbasierte Ansichten — mit einem Klick anwenden"
+    },
+    "saved": {
+      "title": "GESPEICHERTE LAYOUTS",
+      "subtitle": "Aktuelle Anordnung mit einem Namen speichern und schnell zurückkehren",
+      "empty": "Noch keine gespeicherten Layouts",
+      "name_placeholder": "Layout-Name (z.B. Frühschicht)",
+      "delete_confirm": "Dieses Layout löschen?"
+    },
+    "view": {
+      "title": "ANSICHT",
+      "subtitle": "Gesamteindruck der Seiten: dichte Arbeit, Kontrollraum oder minimales Lesen",
+      "workspace_label": "Workspace",
+      "workspace_sub": "Dichte, widget-reiche Arbeitsansicht",
+      "mission_label": "Mission",
+      "mission_sub": "Kontrollraum — große Zahlen, wenig Detail",
+      "editorial_label": "Editorial",
+      "editorial_sub": "Breite Typografie, ruhig und fokussiert"
+    },
+    "menu": {
+      "title": "MENÜPOSITION",
+      "subtitle": "Soll die Hauptnavigation in der Seitenspalte oder im oberen Banner sein?",
+      "side_label": "Seitlich",
+      "side_sub": "Linke Spalte, klassisches vertikales Menü",
+      "top_label": "Oben",
+      "top_sub": "Horizontales Menü mit Dropdowns"
+    },
+    "theme": {
+      "title": "DESIGN",
+      "subtitle": "Dunkel ist augenschonend, hell hat hohen Kontrast",
+      "dark_label": "Dunkel",
+      "dark_sub": "Für schwach beleuchtete NOC-Umgebungen",
+      "light_label": "Hell",
+      "light_sub": "Für helle Bürobedingungen"
+    },
+    "density": {
+      "title": "DICHTE",
+      "subtitle": "Tabellenzeilen- und Schaltflächenhöhe",
+      "compact_label": "Kompakt",
+      "compact_sub": "Mehr Daten auf einem Bildschirm",
+      "regular_label": "Standard",
+      "regular_sub": "Empfohlene ausgewogene Ansicht",
+      "spacious_label": "Geräumig",
+      "spacious_sub": "Leichteres Antippen, weniger Dichte"
+    },
+    "accent": {
+      "title": "AKZENTFARBE",
+      "subtitle": "Hauptfarbpalette für Hervorhebungen und aktive Zustände",
+      "custom_primary": "Eigene Hauptfarbe"
+    },
+    "edit_mode": {
+      "title": "BEARBEITUNGSMODUS",
+      "subtitle": "Wenn aktiv, können Widgets verschoben und neu angeordnet werden",
+      "on_label": "Bearbeitung aktiv",
+      "off_label": "Bearbeitung aus",
+      "on_sub": "Widgets können verschoben und ausgeblendet werden",
+      "off_sub": "Layout gesperrt — keine versehentlichen Änderungen"
+    },
+    "widgets": {
+      "title": "WIDGETS",
+      "subtitle": "Wählen Sie aus, welche Karten auf dem Dashboard erscheinen"
+    },
+    "sound": {
+      "title": "TONALARM",
+      "subtitle": "Soll der Browser bei neuen kritischen Ereignissen einen Ton abspielen?",
+      "on_desc": "Bei neuen kritischen Ereignissen wird ein Browser-Warnton wiedergegeben.",
+      "off_desc": "Stumm — nur visueller Hinweis (Glocke + Zähler)."
+    },
+    "wall": {
+      "title": "NOC-WAND-MODUS",
+      "subtitle": "Vollbild, Seiten rotieren automatisch — für Großbild-Kontrollräume",
+      "active_label": "Aktive Route:",
+      "seconds_per_page": "s/Seite",
+      "start": "Wand-Modus starten",
+      "stop": "Wand-Modus stoppen",
+      "default_route": "Standard-Route:"
+    },
+    "reset": "Standardwerte wiederherstellen",
+    "storage_note": "Alle Auswahlen werden lokal in diesem Browser gespeichert — auf einem neuen Gerät neu einstellen."
+  },
+  "search": {
+    "input_placeholder": "Gerät, VLAN, Seite, Ereignis suchen…",
+    "no_device_found": "Kein Gerät gefunden",
+    "see_all_results": "Alle Ergebnisse für \"{{query}}\" anzeigen →",
+    "footer_hint": "Enter zum Auswählen · ↑↓ navigieren · Esc zum Schließen",
+    "section": {
+      "pages": "SEITEN",
+      "devices": "GERÄTE",
+      "events": "EREIGNISSE",
+      "recent_events_unacked": "AKTUELLE EREIGNISSE (unbestätigt)"
+    },
+    "pages": {
+      "devices": "Geräteliste",
+      "ipam": "IPAM",
+      "vlans": "VLAN-Verwaltung",
+      "backups": "Backup-Center",
+      "compliance": "Compliance-Prüfung",
+      "sla": "SLA & Betriebszeit-Bericht",
+      "topology": "Topologiekarte",
+      "monitor": "Monitor & Ereignisse"
+    }
+  },
+  "command": {
+    "search_placeholder": "Befehl, Seite oder Gerät suchen…",
+    "no_results": "Keine Ergebnisse",
+    "group": {
+      "nav": "NAV",
+      "action": "AKTION",
+      "device": "GERÄT"
+    },
+    "foot": {
+      "navigate": "navigieren",
+      "select": "auswählen",
+      "close": "schließen"
+    },
+    "action": {
+      "theme_to_light": "Zu hellem Design wechseln",
+      "theme_to_dark": "Zu dunklem Design wechseln",
+      "open_customize": "Anpassen-Panel öffnen",
+      "sound_off": "Kritischen Alarmton stummschalten",
+      "sound_on": "Kritischen Alarmton einschalten",
+      "wall_stop": "NOC-Wand-Modus stoppen",
+      "wall_start": "NOC-Wand-Modus starten (Auto-Rotation)"
+    },
+    "nav": {
+      "dashboard": "Dashboard",
+      "monitor": "Warnungen & Ereignisse",
+      "topology": "Topologie",
+      "topology_next": "Topologie · Gold",
+      "devices": "Geräte",
+      "discovery": "Erkundungsinventar",
+      "ipam": "IPAM",
+      "vlan": "VLAN-Verwaltung",
+      "backups": "Backup-Center",
+      "config_drift": "Config Drift",
+      "compliance": "Compliance-Prüfung",
+      "racks": "Racks",
+      "floor_plan": "Grundriss",
+      "intelligence": "Netzwerkanalytik",
+      "alert_rules": "Alarmregeln",
+      "bandwidth": "Bandbreite",
+      "port_intelligence": "Port Intelligence",
+      "security_audit": "Sicherheitsprüfung",
+      "asset_lifecycle": "Asset-Lebenszyklus",
+      "diagnostics": "Netzwerkdiagnose",
+      "tasks": "Aufgaben",
+      "playbooks": "Playbooks",
+      "config_templates": "Konfigurationsvorlagen",
+      "approvals": "Genehmigungen",
+      "sla": "SLA & Betriebszeit",
+      "synthetic_probes": "Synthetic Probes",
+      "incident_rca": "Incident RCA",
+      "escalation_rules": "Eskalationsregeln",
+      "service_impact": "Service-Auswirkungskarte",
+      "network_twin": "Network Digital Twin",
+      "reports": "Berichte",
+      "audit": "Auditprotokoll",
+      "settings": "Einstellungen"
+    }
+  },
+  "mobile_nav": {
+    "home": "Startseite",
+    "devices": "Geräte",
+    "topology": "Topologie",
+    "events": "Ereignisse",
+    "settings": "Einstellungen"
+  },
+  "noc_wall": {
+    "seconds_per_page": "{{count}}s/Seite",
+    "resume": "Fortsetzen",
+    "pause": "Pause",
+    "next": "Weiter",
+    "exit": "Beenden"
+  },
+  "location_gate": {
+    "resolving": "Standortkontext wird aufgelöst…",
+    "no_access_title": "Kein zugewiesener Standort",
+    "no_access_desc": "Ihrem Konto ist noch kein Standort zugewiesen. Ohne Standortzugriff können Geräte-, Topologie- und Überwachungsdaten nicht angezeigt werden. Bitte wenden Sie sich an einen Administrator."
+  },
+  "location_selector": {
+    "no_access_tooltip": "Ihrem Konto ist kein Standort zugewiesen",
+    "no_access_tag": "Kein Standort",
+    "none_defined": "Kein Standort definiert",
+    "all_locations": "Alle Standorte"
+  },
+  "error_boundary": {
+    "title": "Ein unerwarteter Fehler ist aufgetreten",
+    "reload": "Seite neu laden"
   }
 }

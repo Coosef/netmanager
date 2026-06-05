@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Result, Button, Spin } from 'antd'
 import { EnvironmentOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
 
@@ -20,6 +21,7 @@ import { useAuthStore } from '@/store/auth'
  */
 export default function LocationGate({ children }: { children: ReactNode }) {
   const { sitesLoading, hasLocationAccess } = useSite()
+  const { t } = useTranslation()
 
   if (sitesLoading) {
     return (
@@ -31,7 +33,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
           minHeight: '60vh',
         }}
       >
-        <Spin size="large" tip="Lokasyon bağlamı çözümleniyor…">
+        <Spin size="large" tip={t('location_gate.resolving')}>
           <div style={{ padding: 48 }} />
         </Spin>
       </div>
@@ -48,6 +50,7 @@ export default function LocationGate({ children }: { children: ReactNode }) {
 /** Controlled empty-state for a user with no assigned location. */
 export function NoLocationAccess() {
   const { logout } = useAuthStore()
+  const { t } = useTranslation()
   return (
     <div
       style={{
@@ -60,12 +63,8 @@ export function NoLocationAccess() {
       <Result
         icon={<EnvironmentOutlined style={{ color: '#f59e0b' }} />}
         status="warning"
-        title="Atanmış lokasyon yok"
-        subTitle={
-          'Hesabınıza henüz bir lokasyon atanmamış. Lokasyon erişimi ' +
-          'olmadan cihaz, topoloji ve izleme verileri görüntülenemez. ' +
-          'Lütfen bir yöneticiyle iletişime geçin.'
-        }
+        title={t('location_gate.no_access_title')}
+        subTitle={t('location_gate.no_access_desc')}
         extra={
           <Button
             onClick={() => {
@@ -73,7 +72,7 @@ export function NoLocationAccess() {
               window.location.href = '/login'
             }}
           >
-            Çıkış Yap
+            {t('header.logout')}
           </Button>
         }
       />

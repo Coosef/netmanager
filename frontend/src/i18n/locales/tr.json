@@ -72,7 +72,15 @@
     "password_changed": "Şifre başarıyla değiştirildi",
     "password_change_error": "Şifre değiştirilemedi",
     "change_password_btn": "Şifreyi Değiştir",
-    "password_min_length": "En az 8 karakter"
+    "password_min_length": "En az 8 karakter",
+    "profile": "Profilim",
+    "role_noc": "NOC",
+    "role_admin": "Admin",
+    "role_exec": "Yönetici",
+    "customize_btn": "Özelleştir",
+    "sound_on": "Sesli alarm açık",
+    "sound_off": "Sesli alarm kapalı",
+    "fullscreen": "Tam ekran"
   },
   "common": {
     "add": "Ekle",
@@ -112,7 +120,9 @@
     "unknown": "Bilinmiyor",
     "last_seen": "Son Görülme",
     "created_at": "Oluşturulma",
-    "updated_at": "Güncellenme"
+    "updated_at": "Güncellenme",
+    "apply": "Uygula",
+    "no_results": "Sonuç bulunamadı"
   },
   "login": {
     "subtitle": "Network Yönetim Platformu",
@@ -629,5 +639,198 @@
     "faq_policy_a": "Agents sayfasında her agent için komut politikası belirlenebilir: 'Tümüne İzin Ver' (varsayılan), 'Whitelist' (yalnızca belirlenen komutlar) veya 'Blacklist' (belirlenen komutlar hariç tümüne izin). Bu sayede bir agent'ı ele geçiren birinin cihazlara zarar vermesi engellenir. Whitelist boşsa yalnızca show/display gibi okuma komutları izinlidir.",
     "faq_csv_q": "Toplu cihaz ekleme nasıl yapılır?",
     "faq_csv_a": "Cihazlar sayfasında üst sağdaki 'İçe Aktar' butonuna tıklayın. Önce 'Şablon İndir' ile CSV formatını alın, doldurun ve yükleyin. IP adresi, hostname, vendor, os_type, SSH bilgileri, lokasyon kolonları bulunur. Hatalı satırlar import sonrası raporlanır, hatasız olanlar eklenir."
+  },
+  "customize": {
+    "panel_title": "Özelleştir",
+    "presets": {
+      "title": "HAZIR LAYOUT'LAR",
+      "subtitle": "Rolüne göre hazır görünüm — tek tıkla uygula"
+    },
+    "saved": {
+      "title": "KAYITLI LAYOUT'LAR",
+      "subtitle": "Mevcut düzenini bir isimle kaydet, sonra hızlıca dön",
+      "empty": "Henüz kayıtlı layout yok",
+      "name_placeholder": "Layout adı (örn. Sabah Vardiyası)",
+      "delete_confirm": "Bu layout'u sil?"
+    },
+    "view": {
+      "title": "GÖRÜNÜM",
+      "subtitle": "Sayfaların genel hissi: yoğun çalışma, kontrol odası veya minimal okuma",
+      "workspace_label": "Workspace",
+      "workspace_sub": "Yoğun, çok widget'lı çalışma görünümü",
+      "mission_label": "Mission",
+      "mission_sub": "Kontrol odası — büyük sayılar, az detay",
+      "editorial_label": "Editorial",
+      "editorial_sub": "Geniş tipografi, sade ve odak"
+    },
+    "menu": {
+      "title": "MENÜ POZİSYONU",
+      "subtitle": "Ana navigasyon yan kolonda mı yoksa üst banner'da mı dursun?",
+      "side_label": "Yan",
+      "side_sub": "Sol kolon, klasik dikey menü",
+      "top_label": "Üst",
+      "top_sub": "Yatay üst menü, açılan alt başlıklar"
+    },
+    "theme": {
+      "title": "TEMA",
+      "subtitle": "Karanlık göz dostu, aydınlık yüksek kontrast",
+      "dark_label": "Karanlık",
+      "dark_sub": "Az ışıklı NOC ortamı için",
+      "light_label": "Aydınlık",
+      "light_sub": "Aydınlık ofis koşulları için"
+    },
+    "density": {
+      "title": "YOĞUNLUK",
+      "subtitle": "Tablo satırı ve buton yüksekliği",
+      "compact_label": "Sıkışık",
+      "compact_sub": "Daha çok veri tek ekranda",
+      "regular_label": "Standart",
+      "regular_sub": "Önerilen dengeli görünüm",
+      "spacious_label": "Geniş",
+      "spacious_sub": "Daha rahat tıklama, daha az yoğunluk"
+    },
+    "accent": {
+      "title": "AKSAN RENGİ",
+      "subtitle": "Vurgular ve etkin durumlar için ana renk paleti",
+      "custom_primary": "Özel ana renk"
+    },
+    "edit_mode": {
+      "title": "DÜZENLEME MODU",
+      "subtitle": "Açıkken widget'ları sürükleyip yeniden düzenleyebilirsin",
+      "on_label": "Düzenleme açık",
+      "off_label": "Düzenleme kapalı",
+      "on_sub": "Widget'lar taşınabilir, gizlenebilir",
+      "off_sub": "Kilitli düzen — kazara değişiklik olmaz"
+    },
+    "widgets": {
+      "title": "WIDGET'LAR",
+      "subtitle": "Dashboard'da hangi kartların görüneceğini seç"
+    },
+    "sound": {
+      "title": "SESLİ ALARM",
+      "subtitle": "Yeni kritik olay geldiğinde tarayıcı sesi çalsın mı?",
+      "on_desc": "Kritik olay geldiğinde tarayıcı uyarı sesi çalar.",
+      "off_desc": "Sessiz — sadece görsel uyarı (zil + sayaç)."
+    },
+    "wall": {
+      "title": "NOC DUVAR MODU",
+      "subtitle": "Tam ekran, sayfalar otomatik döner — büyük ekran kontrol odası için",
+      "active_label": "Aktif rota:",
+      "seconds_per_page": "s/sayfa",
+      "start": "Duvar Modunu Başlat",
+      "stop": "Duvar Modunu Durdur",
+      "default_route": "Varsayılan rota:"
+    },
+    "reset": "Varsayılana Sıfırla",
+    "storage_note": "Tüm seçimler tarayıcına yerel olarak kayıtlanır — cihaz değişince tekrar ayarla."
+  },
+  "search": {
+    "input_placeholder": "Cihaz, VLAN, sayfa, olay ara…",
+    "no_device_found": "Cihaz bulunamadı",
+    "see_all_results": "\"{{query}}\" için tüm sonuçları gör →",
+    "footer_hint": "Enter ile seç · ↑↓ gezin · Esc kapat",
+    "section": {
+      "pages": "SAYFALAR",
+      "devices": "CİHAZLAR",
+      "events": "OLAYLAR",
+      "recent_events_unacked": "SON OLAYLAR (onaylanmamış)"
+    },
+    "pages": {
+      "devices": "Cihaz Listesi",
+      "ipam": "IPAM",
+      "vlans": "VLAN Yönetimi",
+      "backups": "Backup Merkezi",
+      "compliance": "Uyumluluk Denetimi",
+      "sla": "SLA & Uptime Raporu",
+      "topology": "Topoloji Haritası",
+      "monitor": "Monitör & Olaylar"
+    }
+  },
+  "command": {
+    "search_placeholder": "Komut, sayfa veya cihaz ara…",
+    "no_results": "Hiçbir sonuç yok",
+    "group": {
+      "nav": "NAV",
+      "action": "AKSIYON",
+      "device": "CİHAZ"
+    },
+    "foot": {
+      "navigate": "gez",
+      "select": "seç",
+      "close": "kapat"
+    },
+    "action": {
+      "theme_to_light": "Aydınlık temaya geç",
+      "theme_to_dark": "Karanlık temaya geç",
+      "open_customize": "Özelleştir panelini aç",
+      "sound_off": "Kritik alarm sesini kapat",
+      "sound_on": "Kritik alarm sesini aç",
+      "wall_stop": "NOC Duvar modunu durdur",
+      "wall_start": "NOC Duvar modunu başlat (auto-rotation)"
+    },
+    "nav": {
+      "dashboard": "Dashboard",
+      "monitor": "Uyarılar & Olaylar",
+      "topology": "Topoloji",
+      "topology_next": "Topology · Gold",
+      "devices": "Cihazlar",
+      "discovery": "Keşif Envanteri",
+      "ipam": "IPAM",
+      "vlan": "VLAN Yönetimi",
+      "backups": "Yedekleme Merkezi",
+      "config_drift": "Config Drift",
+      "compliance": "Uyumluluk Denetimi",
+      "racks": "Kabinler",
+      "floor_plan": "Kat Planı",
+      "intelligence": "Ağ Analitik",
+      "alert_rules": "Alert Kuralları",
+      "bandwidth": "Bant Genişliği",
+      "port_intelligence": "Port Intelligence",
+      "security_audit": "Güvenlik Denetimi",
+      "asset_lifecycle": "Asset Lifecycle",
+      "diagnostics": "Ağ Tanılama",
+      "tasks": "Görevler",
+      "playbooks": "Playbook'lar",
+      "config_templates": "Config Şablonları",
+      "approvals": "Onaylar",
+      "sla": "SLA & Uptime",
+      "synthetic_probes": "Synthetic Probes",
+      "incident_rca": "Incident RCA",
+      "escalation_rules": "Escalation Kuralları",
+      "service_impact": "Servis Etki Haritası",
+      "network_twin": "Network Digital Twin",
+      "reports": "Raporlar",
+      "audit": "Audit Log",
+      "settings": "Ayarlar"
+    }
+  },
+  "mobile_nav": {
+    "home": "Ana Sayfa",
+    "devices": "Cihazlar",
+    "topology": "Topoloji",
+    "events": "Olaylar",
+    "settings": "Ayarlar"
+  },
+  "noc_wall": {
+    "seconds_per_page": "{{count}}s/sayfa",
+    "resume": "Devam",
+    "pause": "Duraklat",
+    "next": "Sonraki",
+    "exit": "Çık"
+  },
+  "location_gate": {
+    "resolving": "Lokasyon bağlamı çözümleniyor…",
+    "no_access_title": "Atanmış lokasyon yok",
+    "no_access_desc": "Hesabınıza henüz bir lokasyon atanmamış. Lokasyon erişimi olmadan cihaz, topoloji ve izleme verileri görüntülenemez. Lütfen bir yöneticiyle iletişime geçin."
+  },
+  "location_selector": {
+    "no_access_tooltip": "Hesabınıza atanmış bir lokasyon yok",
+    "no_access_tag": "Lokasyon yok",
+    "none_defined": "Lokasyon tanımlı değil",
+    "all_locations": "Tüm Lokasyonlar"
+  },
+  "error_boundary": {
+    "title": "Beklenmeyen bir hata oluştu",
+    "reload": "Sayfayı Yenile"
   }
 }
