@@ -30,6 +30,7 @@ import { useCustomize, ALL_WIDGETS } from '@/contexts/CustomizeContext'
 import CountUp from '@/components/CountUp'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
+import { useTranslation, Trans } from 'react-i18next'
 
 dayjs.extend(relativeTime)
 
@@ -145,6 +146,7 @@ const WIDGET_SPAN: Record<string, string> = {
 export default function NocDashboard() {
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { activeSite } = useSite()
   const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget, viewVariant } = useCustomize()
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
@@ -208,11 +210,11 @@ export default function NocDashboard() {
   // sadece görsel düzen farklı.
   if (viewVariant === 'mission') {
     return <MissionVariant ctx={{ navigate, online, offline, total, events24h, liveEvents,
-      impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now }} />
+      impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now, t }} />
   }
   if (viewVariant === 'editorial') {
     return <EditorialVariant ctx={{ navigate, online, offline, total, events24h, liveEvents,
-      impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now }} />
+      impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now, t }} />
   }
 
   // Default: workspace variant — mevcut nm-grid widget düzeni
@@ -223,11 +225,11 @@ export default function NocDashboard() {
       <div className="nm-ticker">
         <div className="nm-ticker-label">
           <span className="nm-status-dot ok pulse"></span>
-          CANLI AKIŞ
+          {t('dashboard.ticker.label')}
         </div>
         <div className="nm-ticker-track" style={liveEvents.length === 0 ? { animation: 'none' } : undefined}>
           {liveEvents.length === 0 ? (
-            <span className="nm-ticker-item"><span style={{ color: 'var(--fg-3)' }}>Son 30 dakikada olay yok</span></span>
+            <span className="nm-ticker-item"><span style={{ color: 'var(--fg-3)' }}>{t('dashboard.ticker.empty')}</span></span>
           ) : (
             <>
               {liveEvents.slice(0, 12).map((e, i) => (
@@ -254,17 +256,17 @@ export default function NocDashboard() {
 
       {/* KPI hero */}
       <div className="nm-hero">
-        <Kpi label="ÇEVRİMİÇİ" value={online} unit={`/ ${total}`} status="ok"
-          delta={`${offline} çevrimdışı`} dir={offline > 0 ? 'down' : 'flat'}
+        <Kpi label={t('dashboard.kpi.online')} value={online} unit={`/ ${total}`} status="ok"
+          delta={t('dashboard.kpi.online_delta', { count: offline })} dir={offline > 0 ? 'down' : 'flat'}
           spark={eventsTrend} sparkColor="var(--ok)" />
-        <Kpi label="AKTİF UYARI" value={unacked} status={unacked > 0 ? 'crit' : 'ok'}
-          delta="onaylanmamış" dir="flat" pulse={unacked > 0} />
-        <Kpi label="24SA OLAY" value={events24h} delta="son 24 saat" dir="down"
+        <Kpi label={t('dashboard.kpi.alert')} value={unacked} status={unacked > 0 ? 'crit' : 'ok'}
+          delta={t('dashboard.kpi.alert_delta')} dir="flat" pulse={unacked > 0} />
+        <Kpi label={t('dashboard.kpi.events_24h')} value={events24h} delta={t('dashboard.kpi.events_24h_delta')} dir="down"
           spark={eventsTrend} sparkColor="var(--accent)" />
-        <Kpi label="AVAILABILITY" value={availPct ?? '—'} unit={availPct != null ? '%' : ''} status="ok"
-          delta="24h ort. uptime" dir="up" />
-        <Kpi label="EXPERIENCE" value={expPct ?? '—'} unit={expPct != null ? '/100' : ''} status="info"
-          delta="deneyim skoru" dir="up" />
+        <Kpi label={t('dashboard.kpi.availability')} value={availPct ?? '—'} unit={availPct != null ? '%' : ''} status="ok"
+          delta={t('dashboard.kpi.availability_delta')} dir="up" />
+        <Kpi label={t('dashboard.kpi.experience')} value={expPct ?? '—'} unit={expPct != null ? '/100' : ''} status="info"
+          delta={t('dashboard.kpi.experience_delta')} dir="up" />
       </div>
 
       {/* widget grid — data-driven, drag-drop edit mode */}
@@ -277,7 +279,7 @@ export default function NocDashboard() {
         render={(id) => renderWidget(id, {
           navigate, online, offline, total, events24h, liveEvents,
           impact, risk, agents, sla, anom, approvalCount, driftReport,
-          devicesData, tasks, now,
+          devicesData, tasks, now, t,
         })}
       />
     </div>
@@ -292,6 +294,7 @@ interface WidgetRenderCtx {
   impact: any; risk: any; agents: any[]; sla: any; anom: any
   approvalCount: any; driftReport: any; devicesData: any
   tasks: any[]; now: string
+  t: (key: string, opts?: Record<string, unknown>) => string
 }
 
 function DashboardGrid({ editMode, order, hidden, setOrder, toggleWidget, render }: {
@@ -302,6 +305,7 @@ function DashboardGrid({ editMode, order, hidden, setOrder, toggleWidget, render
   toggleWidget: (id: string) => void
   render: (id: string) => React.ReactNode
 }) {
+  const { t } = useTranslation()
   // ALL_WIDGETS dışı id'leri at, hidden'da olanları çıkar.
   const validIds = ALL_WIDGETS.map((w) => w.id)
   const visibleIds = order.filter((id) => validIds.includes(id) && !hidden.includes(id))
@@ -339,7 +343,7 @@ function DashboardGrid({ editMode, order, hidden, setOrder, toggleWidget, render
                 padding: 48, textAlign: 'center', color: 'var(--fg-3)',
                 border: '1px dashed var(--line)', borderRadius: 10,
               }}>
-                Tüm widget'lar gizli. Özelleştir → Widget Görünürlüğü'nden seçim yap.
+                {t('dashboard.empty_grid')}
               </div>
             )}
           </div>
@@ -377,6 +381,7 @@ function SortableWidget({ id, span, editMode, onRemove, children }: {
   id: string; span: string; editMode: boolean
   onRemove: () => void; children: React.ReactNode
 }) {
+  const { t } = useTranslation()
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id })
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -391,7 +396,7 @@ function SortableWidget({ id, span, editMode, onRemove, children }: {
           <>
             <button
               {...attributes} {...listeners}
-              title="Sürükle"
+              title={t('dashboard.widget_drag')}
               style={{
                 position: 'absolute', top: 8, right: 36, zIndex: 5,
                 width: 26, height: 26, borderRadius: 6,
@@ -401,7 +406,7 @@ function SortableWidget({ id, span, editMode, onRemove, children }: {
               }}>
               <HolderOutlined />
             </button>
-            <button onClick={onRemove} title="Gizle"
+            <button onClick={onRemove} title={t('dashboard.widget_hide')}
               style={{
                 position: 'absolute', top: 8, right: 8, zIndex: 5,
                 width: 26, height: 26, borderRadius: 6,
@@ -422,12 +427,12 @@ function SortableWidget({ id, span, editMode, onRemove, children }: {
 // Widget id → JSX render. Tüm queries parent'tan ctx ile geçiyor.
 function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
   const { navigate, online, offline, total, events24h, liveEvents,
-    impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData } = ctx
+    impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, t } = ctx
 
   switch (id) {
     case 'topo':
       return (
-        <Card title="Topoloji Önizleme" pill={{ label: `${offline} down`, kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => navigate('/topology-next')}>
+        <Card title={t('dashboard.card.topo_title')} pill={{ label: t('dashboard.card.topo_pill_down', { count: offline }), kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => navigate('/topology-next')}>
           <TopoMini online={online} offline={offline} total={total} devices={devicesData?.items}
             onSelectDevice={(did) => navigate(`/devices/${did}`)} />
         </Card>
@@ -435,14 +440,14 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     case 'activity':
       // T8.4 — 24h saat-bazında event yoğunluğu (heatmap strip)
       return (
-        <Card title="Aktivite Yoğunluğu" pill={{ label: 'son 24sa' }} span="span-12" onTitle={() => navigate('/monitor')}>
+        <Card title={t('dashboard.card.activity_title')} pill={{ label: t('dashboard.card.activity_pill') }} span="span-12" onTitle={() => navigate('/monitor')}>
           <ActivityHeatStrip liveEvents={liveEvents} events24h={events24h} />
         </Card>
       )
     case 'events':
       return (
-        <Card title="Olay Akışı" pill={{ label: `24sa · ${events24h}`, kind: 'accent' }} span="span-12" onTitle={() => navigate('/monitor')}>
-          {liveEvents.length === 0 ? <Empty>Son 30 dakikada olay yok</Empty> :
+        <Card title={t('dashboard.card.events_title')} pill={{ label: t('dashboard.card.events_pill', { count: events24h }), kind: 'accent' }} span="span-12" onTitle={() => navigate('/monitor')}>
+          {liveEvents.length === 0 ? <Empty>{t('dashboard.ticker.empty')}</Empty> :
             liveEvents.slice(0, 7).map((e, i) => (
               // nm-fadein → yeni olay geldikçe yumuşak fade-in
               <div key={e.id || i} className="nm-row nm-fadein" style={{ gridTemplateColumns: 'auto auto 1fr auto' }}>
@@ -460,8 +465,8 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'services':
       return (
-        <Card title="Servis Etkisi" pill={impact?.critical_count ? { label: `${impact.critical_count} kesinti`, kind: 'crit' } : undefined} span="span-12" onTitle={() => navigate('/services')}>
-          {!impact?.affected_services?.length ? <Empty>Etkilenen servis yok</Empty> :
+        <Card title={t('dashboard.card.services_title')} pill={impact?.critical_count ? { label: t('dashboard.card.services_pill_critical', { count: impact.critical_count }), kind: 'crit' } : undefined} span="span-12" onTitle={() => navigate('/services')}>
+          {!impact?.affected_services?.length ? <Empty>{t('dashboard.card.services_empty')}</Empty> :
             impact.affected_services.slice(0, 6).map((svc: any) => {
               const st = svc.impact_level === 'critical' ? 'crit' : svc.impact_level === 'high' ? 'warn' : svc.impact_level === 'medium' ? 'warn' : 'ok'
               return (
@@ -469,9 +474,9 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
                   <span className="nm-pill" style={{ background: 'var(--bg-3)', color: 'var(--fg-1)' }}>{svc.priority || 'P?'}</span>
                   <div style={{ minWidth: 0 }}>
                     <div className="host" style={{ fontSize: 12 }}>{svc.service_name}</div>
-                    <div className="ip">{svc.total_device_count} cihaz</div>
+                    <div className="ip">{t('dashboard.card.services_device_count', { count: svc.total_device_count })}</div>
                   </div>
-                  {svc.impact_pct > 0 ? <span className={`nm-chip ${st}`}>{svc.impact_pct}% etki</span> : <span className="nm-chip ok">stabil</span>}
+                  {svc.impact_pct > 0 ? <span className={`nm-chip ${st}`}>{t('dashboard.card.services_impact_pct', { pct: svc.impact_pct })}</span> : <span className="nm-chip ok">{t('dashboard.card.services_stable')}</span>}
                   {/* Etkilenen servis → kırmızı pulse; stabil → yeşil pulse */}
                   <span className={`nm-status-dot ${svc.impact_pct > 0 ? `${st} pulse` : 'ok pulse'}`} />
                 </div>
@@ -481,8 +486,8 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'worst':
       return (
-        <Card title="En Sorunlu Cihazlar" pill={{ label: 'son 7g' }} span="span-12" onTitle={() => navigate('/intelligence')}>
-          {!risk?.top_risky?.length ? <Empty>Risk verisi yok</Empty> :
+        <Card title={t('dashboard.card.worst_title')} pill={{ label: t('dashboard.card.worst_pill') }} span="span-12" onTitle={() => navigate('/intelligence')}>
+          {!risk?.top_risky?.length ? <Empty>{t('dashboard.card.worst_empty')}</Empty> :
             risk.top_risky.slice(0, 5).map((d: any) => {
               const sc = Math.round(d.risk_score ?? 0)
               const cls = sc >= 80 ? 'crit' : sc >= 60 ? 'warn' : 'ok'
@@ -501,27 +506,27 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'approvals':
       return (
-        <Card title="Onay Bekleyenler" pill={(approvalCount?.count ?? 0) > 0 ? { label: String(approvalCount?.count), kind: 'warn' } : undefined} span="span-12" onTitle={() => navigate('/approvals')}>
-          {(approvalCount?.count ?? 0) === 0 ? <Empty>Bekleyen onay yok</Empty> : (
+        <Card title={t('dashboard.card.approvals_title')} pill={(approvalCount?.count ?? 0) > 0 ? { label: String(approvalCount?.count), kind: 'warn' } : undefined} span="span-12" onTitle={() => navigate('/approvals')}>
+          {(approvalCount?.count ?? 0) === 0 ? <Empty>{t('dashboard.card.approvals_empty')}</Empty> : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0' }}>
               <div className="mono" style={{ fontSize: 40, color: 'var(--warn)' }}>{approvalCount?.count}</div>
-              <div style={{ color: 'var(--fg-2)', fontSize: 12 }}>komut onayı bekliyor</div>
-              <button className="nm-pill warn" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/approvals')}>İncele →</button>
+              <div style={{ color: 'var(--fg-2)', fontSize: 12 }}>{t('dashboard.card.approvals_caption')}</div>
+              <button className="nm-pill warn" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/approvals')}>{t('dashboard.card.approvals_button')}</button>
             </div>
           )}
         </Card>
       )
     case 'agents':
       return (
-        <Card title="Agent Filosu" pill={{ label: `${agents.filter((a: any) => a.status === 'online').length} online`, kind: 'ok' }} span="span-12" onTitle={() => navigate('/agents')}>
-          {!agents.length ? <Empty>Agent yok</Empty> :
+        <Card title={t('dashboard.card.agents_title')} pill={{ label: t('dashboard.card.agents_pill', { count: agents.filter((a: any) => a.status === 'online').length }), kind: 'ok' }} span="span-12" onTitle={() => navigate('/agents')}>
+          {!agents.length ? <Empty>{t('dashboard.card.agents_empty')}</Empty> :
             agents.slice(0, 5).map((a: any) => (
               <div key={a.name || a.id} className="nm-row" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
                 {/* Online status → pulse halo (canlı sinyal) */}
                 <span className={`nm-status-dot ${a.status === 'online' ? 'ok pulse' : 'crit'}`} />
                 <div style={{ minWidth: 0 }}>
                   <div className="host" style={{ fontSize: 12 }}>{a.name || a.hostname}</div>
-                  <div className="ip">{a.managed_device_count ?? a.device_count ?? 0} cihaz</div>
+                  <div className="ip">{t('dashboard.card.agents_device_count', { count: a.managed_device_count ?? a.device_count ?? 0 })}</div>
                 </div>
                 <span className={`nm-pill ${a.status === 'online' ? 'ok' : 'crit'}`}>{a.status}</span>
               </div>
@@ -530,15 +535,15 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'risk':
       return (
-        <Card title="Cihaz Risk Dağılımı" pill={{ label: `${risk?.summary?.total_devices ?? total} cihaz` }} span="span-12">
+        <Card title={t('dashboard.card.risk_title')} pill={{ label: t('dashboard.card.risk_pill', { count: risk?.summary?.total_devices ?? total }) }} span="span-12">
           <RiskDist summary={risk?.summary} />
         </Card>
       )
     case 'sla':
       return (
-        <Card title="SLA Compliance" pill={sla?.avg_uptime_pct >= 99 ? { label: 'hedef üstü', kind: 'ok' } : undefined} span="span-12" onTitle={() => navigate('/sla')}>
+        <Card title={t('dashboard.card.sla_title')} pill={sla?.avg_uptime_pct >= 99 ? { label: t('dashboard.card.sla_pill_good'), kind: 'ok' } : undefined} span="span-12" onTitle={() => navigate('/sla')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, alignItems: 'center' }}>
-            <Donut value={sla?.avg_uptime_pct ?? 0} label="Fleet SLA" color={(sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : (sla?.avg_uptime_pct ?? 0) >= 95 ? 'var(--warn)' : 'var(--crit)'} />
+            <Donut value={sla?.avg_uptime_pct ?? 0} label={t('dashboard.card.sla_donut_label')} color={(sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : (sla?.avg_uptime_pct ?? 0) >= 95 ? 'var(--warn)' : 'var(--crit)'} />
             <div style={{ fontSize: 11, color: 'var(--fg-2)', lineHeight: 2 }}>
               <div>≥99%: <span className="mono" style={{ color: 'var(--ok)' }}>{sla?.above_99 ?? 0}</span></div>
               <div>95–99%: <span className="mono" style={{ color: 'var(--warn)' }}>{sla?.above_95 ?? 0}</span></div>
@@ -557,7 +562,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
         kind: 'anomaly' as const,
         hostname: e.device_hostname || '—',
         device_id: e.device_id,
-        label: e.anomaly_type || e.type || 'anomali',
+        label: e.anomaly_type || e.type || t('dashboard.card.anomalies_fallback_label'),
         detail: e.description || e.detail || '',
         score: Math.round(e.score ?? e.risk_score ?? 0),
         ago: e.detected_at ? dayjs(e.detected_at).fromNow(true) : '',
@@ -566,7 +571,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
         kind: 'risk' as const,
         hostname: d.hostname,
         device_id: d.device_id ?? d.id,
-        label: d.top_reason || 'yüksek risk',
+        label: d.top_reason || t('dashboard.card.anomalies_fallback_risk'),
         detail: d.ip_address ? `${d.ip_address}${d.vendor ? ' · ' + d.vendor : ''}` : (d.vendor || ''),
         score: Math.round(d.risk_score ?? 0),
         ago: '',
@@ -574,11 +579,11 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       const items = fromAnom.length > 0 ? fromAnom : fromRisk
       const totalLabel = anom?.total ?? risk?.top_risky?.length ?? 0
       return (
-        <Card title="Anormal Davranış"
-          pill={totalLabel ? { label: `${totalLabel} ${fromAnom.length > 0 ? 'son 24sa' : 'risk'}`, kind: 'warn' } : undefined}
+        <Card title={t('dashboard.card.anomalies_title')}
+          pill={totalLabel ? { label: `${totalLabel} ${fromAnom.length > 0 ? t('dashboard.card.anomalies_pill_anom') : t('dashboard.card.anomalies_pill_risk')}`, kind: 'warn' } : undefined}
           span="span-12"
           onTitle={() => navigate('/intelligence')}>
-          {items.length === 0 ? <Empty>Anomali yok</Empty> :
+          {items.length === 0 ? <Empty>{t('dashboard.card.anomalies_empty')}</Empty> :
             items.slice(0, 5).map((it: any, i: number) => {
               const cls = it.score >= 80 ? 'crit' : it.score >= 60 ? 'warn' : it.score >= 40 ? 'info' : 'ok'
               return (
@@ -607,8 +612,8 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     }
     case 'drift':
       return (
-        <Card title="Config Drift" pill={driftReport?.drift_count ? { label: `${driftReport.drift_count} sapma`, kind: 'warn' } : { label: 'temiz', kind: 'ok' }} span="span-12" onTitle={() => navigate('/config-drift')}>
-          {!driftReport?.items?.length ? <Empty>Drift tespit edilmedi</Empty> :
+        <Card title={t('dashboard.card.drift_title')} pill={driftReport?.drift_count ? { label: t('dashboard.card.drift_pill_warn', { count: driftReport.drift_count }), kind: 'warn' } : { label: t('dashboard.card.drift_pill_ok'), kind: 'ok' }} span="span-12" onTitle={() => navigate('/config-drift')}>
+          {!driftReport?.items?.length ? <Empty>{t('dashboard.card.drift_empty')}</Empty> :
             driftReport.items.slice(0, 5).map((r: any) => (
               <div key={r.device_id} className="nm-row" style={{ gridTemplateColumns: '1fr auto' }}>
                 <div style={{ minWidth: 0 }}>
@@ -616,7 +621,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
                   <div className="ip">{r.ip || ''} {r.vendor ? `· ${r.vendor}` : ''}</div>
                 </div>
                 <span className={`nm-pill ${r.reason === 'no_backup' ? 'crit' : 'warn'}`}>
-                  {r.reason === 'no_backup' ? 'backup yok' : 'config değişti'}
+                  {r.reason === 'no_backup' ? t('dashboard.card.drift_no_backup') : t('dashboard.card.drift_changed')}
                 </span>
               </div>
             ))}
@@ -625,13 +630,13 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     case 'probes':
       // Probes endpoint yok; placeholder + sayfaya yönlendir
       return (
-        <Card title="Synthetic Probes" pill={{ label: 'her 60s' }} span="span-12" onTitle={() => navigate('/synthetic-probes')}>
+        <Card title={t('dashboard.card.probes_title')} pill={{ label: t('dashboard.card.probes_pill') }} span="span-12" onTitle={() => navigate('/synthetic-probes')}>
           <div style={{ padding: '14px 0', textAlign: 'center' }}>
             <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 8 }}>
-              Probe sonuçları için dedike sayfaya bak
+              {t('dashboard.card.probes_caption')}
             </div>
             <button className="nm-pill accent" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/synthetic-probes')}>
-              Probe'lara git →
+              {t('dashboard.card.probes_button')}
             </button>
           </div>
         </Card>
@@ -639,15 +644,15 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     case 'vendors': {
       const items = (devicesData?.items as any[]) || []
       const vendors = items.reduce<Record<string, number>>((acc, d) => {
-        const v = (d.vendor || 'bilinmeyen').toLowerCase()
+        const v = (d.vendor || t('dashboard.card.vendors_unknown')).toLowerCase()
         acc[v] = (acc[v] || 0) + 1
         return acc
       }, {})
       const sorted = Object.entries(vendors).sort((a, b) => b[1] - a[1]).slice(0, 6)
       const totalCount = items.length || 1
       return (
-        <Card title="Vendor Dağılımı" pill={{ label: `${items.length} cihaz` }} span="span-12" onTitle={() => navigate('/devices')}>
-          {sorted.length === 0 ? <Empty>Vendor verisi yok</Empty> :
+        <Card title={t('dashboard.card.vendors_title')} pill={{ label: t('dashboard.card.vendors_pill', { count: items.length }) }} span="span-12" onTitle={() => navigate('/devices')}>
+          {sorted.length === 0 ? <Empty>{t('dashboard.card.vendors_empty')}</Empty> :
             sorted.map(([vendor, count]) => {
               const pct = Math.round((count / totalCount) * 100)
               return (
@@ -686,6 +691,7 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
   devices?: any[]   // Device[] — varsa gerçek diagram; yoksa placeholder
   onSelectDevice?: (deviceId: number) => void  // T8.4 — node click → navigate
 }) {
+  const { t } = useTranslation()
   // T8.4 — eski 10x7 grid ("yeşil/kırmızı kutucuklar") yerine
   // network-topology-vari katmanlı SVG diagram:
   //   CORE  (2-3 node, üstte, kalın bağlantı)
@@ -702,7 +708,7 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
           <div style={{ textAlign: 'center' }}>
             <div className="mono" style={{ fontSize: 34, color: 'var(--accent)' }}>{total}</div>
             <div style={{ fontSize: 11, color: 'var(--fg-3)', letterSpacing: '0.06em' }}>
-              NODE · {online} online · {offline} down
+              {t('dashboard.topo.summary_short', { online, offline })}
             </div>
           </div>
         </div>
@@ -774,7 +780,7 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
         fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--fg-3)',
         background: 'rgba(15,23,42,0.7)', padding: '2px 8px', borderRadius: 4,
       }}>
-        {online} / {total} ONLINE · {offline} DOWN
+        {t('dashboard.topo.summary_long', { online, total, offline })}
       </div>
       {/* Sağ-üst layer count */}
       <div style={{
@@ -782,7 +788,7 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
         fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)',
         background: 'rgba(15,23,42,0.7)', padding: '2px 8px', borderRadius: 4,
       }}>
-        CORE {cores.length} · DIST {dists.length} · ACCESS {access.length}
+        {t('dashboard.topo.layers_count', { cores: cores.length, dists: dists.length, access: access.length })}
       </div>
 
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="xMidYMid meet"
@@ -793,9 +799,9 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
             stroke="var(--line-soft)" strokeWidth="0.5" strokeDasharray="2 4" opacity="0.5" />
         ))}
         {/* Tier labels */}
-        <text x={8} y={layerY.core - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">CORE</text>
-        <text x={8} y={layerY.dist - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">DIST</text>
-        <text x={8} y={layerY.access - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">ACCESS</text>
+        <text x={8} y={layerY.core - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">{t('dashboard.topo.layer_core')}</text>
+        <text x={8} y={layerY.dist - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">{t('dashboard.topo.layer_dist')}</text>
+        <text x={8} y={layerY.access - 12} fill="var(--fg-3)" fontSize="9" fontFamily="var(--font-mono)" letterSpacing="0.06em">{t('dashboard.topo.layer_access')}</text>
 
         {/* Links */}
         {links.map((l, i) => (
@@ -818,7 +824,7 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
             <g key={d.id ?? d.hostname}
               style={{ cursor: clickable ? 'pointer' : 'default' }}
               onClick={() => { if (clickable && d.id) onSelectDevice(d.id) }}>
-              <title>{`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}${clickable ? ' — tıkla' : ''}`}</title>
+              <title>{`${d.hostname || '—'} (${d.status || '?'})${d.ip_address ? ' · ' + d.ip_address : ''}${clickable ? ' — ' + t('dashboard.topo.click_hint') : ''}`}</title>
               {/* Outer glow ring (sadece online/down ışıltısı için) */}
               {down ? (
                 <circle cx={x} cy={y} r={r + 4} fill="none" stroke={color}
@@ -851,9 +857,9 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
       </svg>
 
       <div className="nm-legend" style={{ position: 'absolute', left: 12, bottom: 8 }}>
-        <span><span className="dot" style={{ background: 'var(--ok)' }} />online</span>
-        <span><span className="dot" style={{ background: 'var(--warn)' }} />unknown</span>
-        <span><span className="dot" style={{ background: 'var(--crit)' }} />offline</span>
+        <span><span className="dot" style={{ background: 'var(--ok)' }} />{t('dashboard.topo.legend_online')}</span>
+        <span><span className="dot" style={{ background: 'var(--warn)' }} />{t('dashboard.topo.legend_unknown')}</span>
+        <span><span className="dot" style={{ background: 'var(--crit)' }} />{t('dashboard.topo.legend_offline')}</span>
       </div>
     </div>
   )
@@ -864,6 +870,7 @@ function TopoMini({ online, offline, total, devices, onSelectDevice }: {
 // Severity ağırlık: critical=3, warning=2, info=1. Renk yoğunluğu intensity'ye
 // göre (sessiz=koyu mavi → ateşli=kırmızı). 'O an' kolonu pulse.
 function ActivityHeatStrip({ liveEvents, events24h }: { liveEvents: any[]; events24h: number }) {
+  const { t } = useTranslation()
   const now = dayjs()
   // 24 saat × 1 saatlik kova. liveEvents son ~30 dakika veriyor olabilir
   // (refetchInterval=10s, polling penceresi), o yüzden tam saat dağılımı
@@ -899,7 +906,7 @@ function ActivityHeatStrip({ liveEvents, events24h }: { liveEvents: any[]; event
           const isCrit = b.crit > 0 && isNow
           return (
             <div key={i}
-              title={`-${23 - i}sa · ${b.total} olay (crit=${b.crit} warn=${b.warn} info=${b.info})`}
+              title={t('dashboard.activity.cell_tooltip', { hours: 23 - i, total: b.total, crit: b.crit, warn: b.warn, info: b.info })}
               style={{
                 flex: 1,
                 background: cellColor(b),
@@ -917,28 +924,28 @@ function ActivityHeatStrip({ liveEvents, events24h }: { liveEvents: any[]; event
         fontFamily: 'var(--font-mono)', fontSize: 9, color: 'var(--fg-3)',
         marginTop: 6, letterSpacing: '0.06em',
       }}>
-        <span>-24SA</span>
-        <span>-18SA</span>
-        <span>-12SA</span>
-        <span>-6SA</span>
-        <span style={{ color: 'var(--accent)' }}>ŞİMDİ</span>
+        <span>{t('dashboard.activity.axis_24h')}</span>
+        <span>{t('dashboard.activity.axis_18h')}</span>
+        <span>{t('dashboard.activity.axis_12h')}</span>
+        <span>{t('dashboard.activity.axis_6h')}</span>
+        <span style={{ color: 'var(--accent)' }}>{t('dashboard.activity.axis_now')}</span>
       </div>
       <div style={{
         marginTop: 10, display: 'flex', gap: 18, fontSize: 11, color: 'var(--fg-2)',
         alignItems: 'center',
       }}>
-        <span><strong style={{ color: 'var(--fg-0)' }}>{events24h}</strong> olay (son 24sa)</span>
+        <span><Trans i18nKey="dashboard.activity.events_24h_summary" values={{ count: events24h }} components={{ s: <strong style={{ color: 'var(--fg-0)' }} /> }} /></span>
         <span>·</span>
-        <span>en yüksek saat: <strong style={{ color: 'var(--fg-1)' }}>{maxTotal}</strong> olay</span>
+        <span><Trans i18nKey="dashboard.activity.peak_hour" values={{ count: maxTotal }} components={{ s: <strong style={{ color: 'var(--fg-1)' }} /> }} /></span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, background: 'var(--info)', borderRadius: 2 }} /> bilgi
+            <span style={{ width: 8, height: 8, background: 'var(--info)', borderRadius: 2 }} /> {t('dashboard.activity.legend_info')}
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, background: 'var(--warn)', borderRadius: 2 }} /> uyarı
+            <span style={{ width: 8, height: 8, background: 'var(--warn)', borderRadius: 2 }} /> {t('dashboard.activity.legend_warn')}
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, background: 'var(--crit)', borderRadius: 2 }} /> kritik
+            <span style={{ width: 8, height: 8, background: 'var(--crit)', borderRadius: 2 }} /> {t('dashboard.activity.legend_crit')}
           </span>
         </span>
       </div>
@@ -947,20 +954,21 @@ function ActivityHeatStrip({ liveEvents, events24h }: { liveEvents: any[]; event
 }
 
 function RiskDist({ summary }: { summary?: any }) {
+  const { t } = useTranslation()
   const buckets = [
-    { label: 'KRİTİK', count: summary?.critical ?? 0, color: 'var(--crit)', range: '80-100' },
-    { label: 'YÜKSEK', count: summary?.high ?? 0, color: 'var(--warn)', range: '60-79' },
-    { label: 'ORTA', count: summary?.medium ?? 0, color: 'var(--info)', range: '40-59' },
-    { label: 'DÜŞÜK', count: summary?.low ?? 0, color: 'var(--ok)', range: '0-39' },
+    { key: 'critical', label: t('dashboard.risk_dist.critical'), count: summary?.critical ?? 0, color: 'var(--crit)', range: '80-100' },
+    { key: 'high', label: t('dashboard.risk_dist.high'), count: summary?.high ?? 0, color: 'var(--warn)', range: '60-79' },
+    { key: 'medium', label: t('dashboard.risk_dist.medium'), count: summary?.medium ?? 0, color: 'var(--info)', range: '40-59' },
+    { key: 'low', label: t('dashboard.risk_dist.low'), count: summary?.low ?? 0, color: 'var(--ok)', range: '0-39' },
   ]
   const tot = buckets.reduce((a, b) => a + b.count, 0)
   return (
     <div>
       <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', marginBottom: 12, background: 'var(--bg-3)' }}>
-        {buckets.map((b) => <div key={b.label} style={{ flex: b.count || 0.01, background: b.color }} />)}
+        {buckets.map((b) => <div key={b.key} style={{ flex: b.count || 0.01, background: b.color }} />)}
       </div>
       {buckets.map((b) => (
-        <div key={b.label} className="nm-row" style={{ gridTemplateColumns: 'auto 1fr auto auto' }}>
+        <div key={b.key} className="nm-row" style={{ gridTemplateColumns: 'auto 1fr auto auto' }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: b.color, display: 'inline-block' }} />
           <span style={{ fontSize: 12 }}>{b.label}</span>
           <span className="mono" style={{ color: 'var(--fg-3)', fontSize: 10 }}>{b.range}</span>
@@ -968,8 +976,8 @@ function RiskDist({ summary }: { summary?: any }) {
         </div>
       ))}
       <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--line-soft)', display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--fg-2)' }}>
-        <span>Toplam değerlendirilen</span>
-        <span className="mono" style={{ color: 'var(--fg-0)' }}>{tot} cihaz</span>
+        <span>{t('dashboard.risk_dist.total_label')}</span>
+        <span className="mono" style={{ color: 'var(--fg-0)' }}>{t('dashboard.risk_dist.total_value', { count: tot })}</span>
       </div>
     </div>
   )
@@ -979,7 +987,7 @@ function RiskDist({ summary }: { summary?: any }) {
 // Mockup VariantMission: sol vital signs + risk; orta strip + map + alt
 // widget şeridi; sağ event rail. Sayfa flush (border'sız, full-bleed).
 function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
-  const { online, offline, total, events24h, liveEvents, anom, risk, sla, impact } = ctx
+  const { online, offline, total, events24h, liveEvents, anom, risk, sla, impact, t } = ctx
   const unacked = anom?.unacked ?? 0
   const critIncidents = impact?.critical_count ?? 0
   return (
@@ -990,24 +998,24 @@ function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
         {/* SOL: Vital signs */}
         <div style={{ borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
           <div style={{ overflow: 'auto', flex: 1 }}>
-            <VitalSign label="ÇEVRİMİÇİ CİHAZ" value={online} unit={`/ ${total}`}
-              foot={<><span style={{ color: 'var(--ok)' }}>{online} aktif</span> · {offline} çevrimdışı</>}
+            <VitalSign label={t('dashboard.mission.vital_online')} value={online} unit={`/ ${total}`}
+              foot={<><span style={{ color: 'var(--ok)' }}>{t('dashboard.mission.vital_online_active', { count: online })}</span> · {t('dashboard.mission.vital_online_offline', { count: offline })}</>}
               kind="ok" />
-            <VitalSign label="AKTİF KRİTİK INCIDENT" value={critIncidents || 0}
-              foot={<>{critIncidents > 0 ? <><span style={{ color: 'var(--crit)' }}>{critIncidents} OPEN</span> · servis etkili</> : 'açık incident yok'}</>}
+            <VitalSign label={t('dashboard.mission.vital_incident')} value={critIncidents || 0}
+              foot={<>{critIncidents > 0 ? <><span style={{ color: 'var(--crit)' }}>{t('dashboard.mission.vital_incident_open', { count: critIncidents })}</span> · {t('dashboard.mission.vital_incident_service_affected')}</> : t('dashboard.mission.vital_incident_none')}</>}
               kind={critIncidents > 0 ? 'crit' : 'ok'} />
-            <VitalSign label="SON 24SA OLAY" value={events24h}
-              foot={<><span style={{ color: 'var(--fg-2)' }}>live</span> {liveEvents.length} new</>}
+            <VitalSign label={t('dashboard.mission.vital_events')} value={events24h}
+              foot={<><span style={{ color: 'var(--fg-2)' }}>{t('dashboard.mission.vital_events_live')}</span> {t('dashboard.mission.vital_events_new', { count: liveEvents.length })}</>}
               kind="info" />
-            <VitalSign label="FLEET AVAILABILITY" value={(sla?.avg_uptime_pct ?? 0).toFixed(1)} unit="%"
+            <VitalSign label={t('dashboard.mission.vital_avail')} value={(sla?.avg_uptime_pct ?? 0).toFixed(1)} unit="%"
               foot={<><span style={{ color: (sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : 'var(--warn)' }}>
-                hedef 99.0%</span> 30 günlük</>}
+                {t('dashboard.mission.vital_avail_target')}</span> {t('dashboard.mission.vital_avail_30d')}</>}
               kind={(sla?.avg_uptime_pct ?? 0) >= 99 ? 'ok' : 'warn'} />
             <div style={{ padding: '16px 18px', borderTop: '1px solid var(--line)' }}>
               <div style={{
                 fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)',
                 textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 12,
-              }}>RİSK DAĞILIMI · {risk?.summary?.total_devices ?? total} CİHAZ</div>
+              }}>{t('dashboard.mission.risk_section', { count: risk?.summary?.total_devices ?? total })}</div>
               <RiskDist summary={risk?.summary} />
             </div>
           </div>
@@ -1017,31 +1025,31 @@ function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
         <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
           <div className="nm-mc-strip">
             <div>
-              <div className="nm-mc-strip-label">EVENTS / 24SA</div>
+              <div className="nm-mc-strip-label">{t('dashboard.mission.strip_events')}</div>
               <div className="nm-mc-strip-val">{events24h}</div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>{liveEvents.length} live</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>{t('dashboard.mission.strip_events_live', { count: liveEvents.length })}</div>
             </div>
             <div>
-              <div className="nm-mc-strip-label">UNACKED</div>
+              <div className="nm-mc-strip-label">{t('dashboard.mission.strip_unacked')}</div>
               <div className="nm-mc-strip-val" style={{ color: unacked > 0 ? 'var(--crit)' : 'var(--ok)' }}>
                 {unacked}
               </div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>onay bekliyor</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>{t('dashboard.mission.strip_unacked_caption')}</div>
             </div>
             <div>
-              <div className="nm-mc-strip-label">SLA · 30G</div>
+              <div className="nm-mc-strip-label">{t('dashboard.mission.strip_sla')}</div>
               <div className="nm-mc-strip-val" style={{ color: (sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : 'var(--warn)' }}>
                 {(sla?.avg_uptime_pct ?? 0).toFixed(1)}<small style={{ fontSize: 11, color: 'var(--fg-3)' }}>%</small>
               </div>
-              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>HEDEF 99.0%</div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', marginTop: 4 }}>{t('dashboard.mission.strip_sla_target')}</div>
             </div>
             <div>
-              <div className="nm-mc-strip-label">SERVİS DURUMU</div>
+              <div className="nm-mc-strip-label">{t('dashboard.mission.strip_service')}</div>
               <div className="nm-mc-strip-val">
                 {impact ? `${(impact.total_services ?? 0) - (impact.critical_count ?? 0)}/${impact.total_services ?? 0}` : '—'}
               </div>
               <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: critIncidents > 0 ? 'var(--crit)' : 'var(--fg-3)', marginTop: 4 }}>
-                {critIncidents > 0 ? `${critIncidents} KESİNTİ` : 'stabil'}
+                {critIncidents > 0 ? t('dashboard.mission.strip_service_outage', { count: critIncidents }) : t('dashboard.mission.strip_service_stable')}
               </div>
             </div>
           </div>
@@ -1054,15 +1062,15 @@ function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
 
           {/* Alt widget şeridi: Drift / Approvals / Agents */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', borderTop: '1px solid var(--line)' }}>
-            <MiniWidget title="CONFIG DRIFT" value={ctx.driftReport?.drift_count ?? 0}
-              note={`${ctx.driftReport?.no_backup_count ?? 0} yedek yok`}
+            <MiniWidget title={t('dashboard.mission.mini_drift')} value={ctx.driftReport?.drift_count ?? 0}
+              note={t('dashboard.mission.mini_drift_no_backup', { count: ctx.driftReport?.no_backup_count ?? 0 })}
               kind={ctx.driftReport?.drift_count ? 'warn' : 'ok'} />
-            <MiniWidget title="ONAY BEKLEYEN" value={ctx.approvalCount?.count ?? 0}
-              note="komut onayı"
+            <MiniWidget title={t('dashboard.mission.mini_approvals')} value={ctx.approvalCount?.count ?? 0}
+              note={t('dashboard.mission.mini_approvals_caption')}
               kind={(ctx.approvalCount?.count ?? 0) > 0 ? 'warn' : 'ok'} />
-            <MiniWidget title="AGENT FİLOSU"
+            <MiniWidget title={t('dashboard.mission.mini_agents')}
               value={`${ctx.agents.filter((a: any) => a.status === 'online').length}/${ctx.agents.length}`}
-              note="online ajan" kind="ok" />
+              note={t('dashboard.mission.mini_agents_caption')} kind="ok" />
           </div>
         </div>
 
@@ -1071,13 +1079,13 @@ function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--line)' }}>
             <div style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-2)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
               <span className="nm-status-dot ok pulse" style={{ marginRight: 6 }} />
-              CANLI EVENT RAIL · {liveEvents.length}
+              {t('dashboard.mission.rail_label', { count: liveEvents.length })}
             </div>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '8px 6px' }}>
             {liveEvents.length === 0 ? (
               <div style={{ padding: 30, textAlign: 'center', color: 'var(--fg-3)', fontSize: 11 }}>
-                Son 30 dakikada olay yok
+                {t('dashboard.mission.rail_empty')}
               </div>
             ) : liveEvents.slice(0, 30).map((e, i) => (
               <div key={e.id || i} className="nm-fadein"
@@ -1134,7 +1142,7 @@ function MiniWidget({ title, value, note, kind }:
 // brief). Operasyonel özet metinleri gerçek veriden türetiliyor.
 function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
   const { online, offline, total, events24h, risk, sla, anom, impact, agents,
-    approvalCount, driftReport, now } = ctx
+    approvalCount, driftReport, now, t } = ctx
   const expPct = ctx.risk?.summary?.experience_score ?? null
   const criticalEvents = anom?.total ?? 0
   const offlinePct = total > 0 ? Math.round((offline / total) * 100 * 10) / 10 : 0
@@ -1146,35 +1154,35 @@ function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
       }}>
         {/* SOL: Operasyonel anlatı */}
         <div className="nm-edit-col">
-          <div className="nm-edit-kicker">OPERASYONEL DURUM · {now}</div>
+          <div className="nm-edit-kicker">{t('dashboard.editorial.kicker_status', { now })}</div>
           <div className="nm-edit-headline" style={{ fontSize: 26, fontWeight: 500, lineHeight: 1.2, margin: '12px 0 20px' }}>
             {offline === 0
-              ? 'Filo bugün stabil; tüm cihazlar çevrimiçi.'
+              ? t('dashboard.editorial.headline_stable')
               : offline <= 3
-              ? 'Filo büyük ölçüde stabil; az sayıda cihaz izlemede.'
-              : 'Filoda dikkat gerektiren çevrimdışı cihazlar var.'}
+              ? t('dashboard.editorial.headline_few')
+              : t('dashboard.editorial.headline_many')}
           </div>
           <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginTop: 14 }}>
-            ÇEVRİMDIŞI CİHAZ
+            {t('dashboard.editorial.deck_offline')}
           </div>
           <div className={`nm-edit-bigfig ${offline > 0 ? 'crit' : 'ok'}`}
             style={{ fontSize: 92, fontWeight: 500, color: offline > 0 ? 'var(--crit)' : 'var(--ok)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>
             {offline}<small style={{ fontSize: 18, color: 'var(--fg-3)' }}>/ {total}</small>
           </div>
           <div className="nm-edit-body" style={{ fontSize: 13, color: 'var(--fg-1)', lineHeight: 1.6, margin: '12px 0 20px' }}>
-            {online} cihaz aktif · filo doluluğu <strong>%{(100 - offlinePct).toFixed(1)}</strong>.
-            {(impact?.critical_count ?? 0) > 0 && <> Kritik etki altında <strong style={{ color: 'var(--crit)' }}>{impact.critical_count} servis</strong>.</>}
-            {' '}Son 24 saatte <strong>{events24h} olay</strong> kaydedildi.
+            <Trans i18nKey="dashboard.editorial.body_active" values={{ online, fill: (100 - offlinePct).toFixed(1) }} components={{ s: <strong /> }} />
+            {(impact?.critical_count ?? 0) > 0 && <> <Trans i18nKey="dashboard.editorial.body_critical" values={{ count: impact.critical_count }} components={{ s: <strong style={{ color: 'var(--crit)' }} /> }} /></>}
+            {' '}<Trans i18nKey="dashboard.editorial.body_events" values={{ count: events24h }} components={{ s: <strong /> }} />
           </div>
           <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em' }}>
-            SON 24 SAAT
+            {t('dashboard.editorial.deck_24h')}
           </div>
           <div className="nm-edit-bigfig" style={{ fontSize: 72, fontWeight: 500, color: 'var(--fg-0)', lineHeight: 1, fontFamily: 'var(--font-mono)' }}>
-            {events24h}<small style={{ fontSize: 14, color: 'var(--fg-3)' }}>olay</small>
+            {events24h}<small style={{ fontSize: 14, color: 'var(--fg-3)' }}>{t('dashboard.editorial.bigfig_olay')}</small>
           </div>
           <div className="nm-edit-meta" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: 'var(--fg-3)', marginTop: 20, fontFamily: 'var(--font-mono)' }}>
-            <span>Otomatik özet</span><span>·</span><span>Charon Intelligence</span>
-            <span style={{ marginLeft: 'auto' }}>▲ canlı</span>
+            <span>{t('dashboard.editorial.meta_summary')}</span><span>·</span><span>Charon Intelligence</span>
+            <span style={{ marginLeft: 'auto' }}>{t('dashboard.editorial.meta_live')}</span>
           </div>
         </div>
 
@@ -1182,33 +1190,33 @@ function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
 
         {/* ORTA: Rakamlar */}
         <div className="nm-edit-col">
-          <div className="nm-edit-kicker">RAKAMLAR</div>
-          <EditStat label="AKTİF INCIDENT" value={impact?.critical_count ?? 0}
+          <div className="nm-edit-kicker">{t('dashboard.editorial.kicker_numbers')}</div>
+          <EditStat label={t('dashboard.editorial.stat_incident')} value={impact?.critical_count ?? 0}
             note={(impact?.critical_count ?? 0) > 0
-              ? `${impact.critical_count} OPEN, servis etkili. En kritik servis: ${impact?.affected_services?.[0]?.service_name || '—'}.`
-              : 'Açık incident yok; tüm servisler stabil seyrediyor.'} />
-          <EditStat label="FLEET AVAILABILITY" value={(sla?.avg_uptime_pct ?? 0).toFixed(1)} unit="%"
-            note={`30 günlük pencerede ${(sla?.avg_uptime_pct ?? 0) >= 99 ? 'hedefin üstünde' : 'hedefin altında'} (99.0%). En kötü cihaz: ${sla?.worst_devices?.[0]?.hostname || '—'} · %${sla?.worst_devices?.[0]?.uptime_pct?.toFixed(1) || '—'}.`} />
-          <EditStat label="EXPERIENCE SCORE" value={expPct != null ? Math.round(expPct * 100) : '—'} unit={expPct != null ? '/100' : ''}
-            note="Synthetic probe + uptime + paket kaybı bileşeni." />
-          <EditStat label="RİSK · YÜKSEK VEYA ÜZERİ" value={(risk?.summary?.high ?? 0) + (risk?.summary?.critical ?? 0)}
-            note={`${risk?.summary?.critical ?? 0} kritik, ${risk?.summary?.high ?? 0} yüksek. En riskli cihaz: ${risk?.top_risky?.[0]?.hostname || '—'}.`} />
-          <EditStat label="ANORMAL DAVRANIŞ · 24SA" value={criticalEvents}
-            note={criticalEvents > 0 ? 'Behavior analytics anomali tespit etti.' : 'Anomali yok; filo davranışı normal.'} />
+              ? t('dashboard.editorial.stat_incident_open', { count: impact.critical_count, name: impact?.affected_services?.[0]?.service_name || '—' })
+              : t('dashboard.editorial.stat_incident_none')} />
+          <EditStat label={t('dashboard.editorial.stat_avail')} value={(sla?.avg_uptime_pct ?? 0).toFixed(1)} unit="%"
+            note={t('dashboard.editorial.stat_avail_note', { state: (sla?.avg_uptime_pct ?? 0) >= 99 ? t('dashboard.editorial.stat_avail_above') : t('dashboard.editorial.stat_avail_below'), hostname: sla?.worst_devices?.[0]?.hostname || '—', pct: sla?.worst_devices?.[0]?.uptime_pct?.toFixed(1) || '—' })} />
+          <EditStat label={t('dashboard.editorial.stat_experience')} value={expPct != null ? Math.round(expPct * 100) : '—'} unit={expPct != null ? '/100' : ''}
+            note={t('dashboard.editorial.stat_experience_note')} />
+          <EditStat label={t('dashboard.editorial.stat_risk')} value={(risk?.summary?.high ?? 0) + (risk?.summary?.critical ?? 0)}
+            note={t('dashboard.editorial.stat_risk_note', { critical: risk?.summary?.critical ?? 0, high: risk?.summary?.high ?? 0, hostname: risk?.top_risky?.[0]?.hostname || '—' })} />
+          <EditStat label={t('dashboard.editorial.stat_anomaly')} value={criticalEvents}
+            note={criticalEvents > 0 ? t('dashboard.editorial.stat_anomaly_with') : t('dashboard.editorial.stat_anomaly_none')} />
         </div>
 
         <div className="nm-edit-rule" style={{ background: 'var(--line)', height: '100%' }}></div>
 
         {/* SAĞ: Brief */}
         <div className="nm-edit-col">
-          <div className="nm-edit-kicker">BRIEF</div>
+          <div className="nm-edit-kicker">{t('dashboard.editorial.kicker_brief')}</div>
           <div style={{ marginBottom: 22 }}>
             <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
-              SERVİS DURUMU
+              {t('dashboard.editorial.brief_service_status')}
             </div>
             {!impact?.affected_services?.length ? (
               <div style={{ fontSize: 12, color: 'var(--fg-2)', padding: '14px 16px', border: '1px solid var(--line)', background: 'var(--bg-1)' }}>
-                Etkilenen servis yok — tüm servisler stabil.
+                {t('dashboard.editorial.brief_service_none')}
               </div>
             ) : (
               <div style={{ border: '1px solid var(--line)', background: 'var(--bg-1)' }}>
@@ -1217,7 +1225,7 @@ function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
                     <span className={`nm-status-dot ${svc.impact_pct > 0 ? 'crit pulse' : 'ok pulse'}`} />
                     <div style={{ flex: 1, fontSize: 12 }}>{svc.service_name}</div>
                     <span className="mono" style={{ fontSize: 11, color: svc.impact_pct > 0 ? 'var(--crit)' : 'var(--ok)' }}>
-                      {svc.impact_pct > 0 ? `${svc.impact_pct}% etki` : 'stabil'}
+                      {svc.impact_pct > 0 ? t('dashboard.editorial.brief_service_impact', { pct: svc.impact_pct }) : t('dashboard.editorial.brief_service_stable')}
                     </span>
                   </div>
                 ))}
@@ -1226,41 +1234,41 @@ function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
           </div>
           <div style={{ marginBottom: 22 }}>
             <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
-              DİKKAT EDİLECEKLER
+              {t('dashboard.editorial.brief_attention')}
             </div>
             <ol style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.7, color: 'var(--fg-1)' }}>
               {(risk?.top_risky?.[0]) && (
-                <li><strong style={{ color: 'var(--fg-0)' }}>{risk.top_risky[0].hostname}</strong> — risk skoru {Math.round(risk.top_risky[0].risk_score ?? 0)}, kontrol önerilir.</li>
+                <li><Trans i18nKey="dashboard.editorial.brief_attention_risk" values={{ hostname: risk.top_risky[0].hostname, score: Math.round(risk.top_risky[0].risk_score ?? 0) }} components={{ s: <strong style={{ color: 'var(--fg-0)' }} /> }} /></li>
               )}
               {(impact?.affected_services?.[0]) && impact.affected_services[0].impact_pct > 0 && (
-                <li><strong style={{ color: 'var(--fg-0)' }}>{impact.affected_services[0].service_name}</strong> servisi şu an %{impact.affected_services[0].impact_pct} etkide.</li>
+                <li><Trans i18nKey="dashboard.editorial.brief_attention_service" values={{ name: impact.affected_services[0].service_name, pct: impact.affected_services[0].impact_pct }} components={{ s: <strong style={{ color: 'var(--fg-0)' }} /> }} /></li>
               )}
               {(approvalCount?.count ?? 0) > 0 && (
-                <li><strong style={{ color: 'var(--fg-0)' }}>{approvalCount.count} onay</strong> operatörler tarafından bekletiliyor.</li>
+                <li><Trans i18nKey="dashboard.editorial.brief_attention_approvals" values={{ count: approvalCount.count }} components={{ s: <strong style={{ color: 'var(--fg-0)' }} /> }} /></li>
               )}
               {(driftReport?.drift_count ?? 0) > 0 && (
-                <li><strong style={{ color: 'var(--fg-0)' }}>{driftReport.drift_count} cihazda</strong> config drift tespit edildi.</li>
+                <li><Trans i18nKey="dashboard.editorial.brief_attention_drift" values={{ count: driftReport.drift_count }} components={{ s: <strong style={{ color: 'var(--fg-0)' }} /> }} /></li>
               )}
               {(agents.filter((a: any) => a.status !== 'online').length > 0) && (
-                <li><strong style={{ color: 'var(--fg-0)' }}>{agents.filter((a: any) => a.status !== 'online').length} ajan</strong> çevrimdışı.</li>
+                <li><Trans i18nKey="dashboard.editorial.brief_attention_agents" values={{ count: agents.filter((a: any) => a.status !== 'online').length }} components={{ s: <strong style={{ color: 'var(--fg-0)' }} /> }} /></li>
               )}
               {/* Hiçbir madde yoksa */}
               {(risk?.top_risky?.length ?? 0) === 0 &&
                 (impact?.affected_services?.[0]?.impact_pct ?? 0) === 0 &&
                 (approvalCount?.count ?? 0) === 0 &&
                 (driftReport?.drift_count ?? 0) === 0 && (
-                <li style={{ color: 'var(--fg-3)' }}>Bugün için kayda değer bir dikkat noktası yok.</li>
+                <li style={{ color: 'var(--fg-3)' }}>{t('dashboard.editorial.brief_attention_none')}</li>
               )}
             </ol>
           </div>
           <div>
             <div className="nm-edit-deck" style={{ fontFamily: 'var(--font-mono)', fontSize: 10, color: 'var(--fg-3)', textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>
-              FİLO ÖZETİ
+              {t('dashboard.editorial.brief_summary')}
             </div>
             <div style={{ display: 'flex', gap: 18, fontSize: 12, color: 'var(--fg-2)' }}>
-              <div><strong style={{ color: 'var(--ok)' }}>{online}</strong> online</div>
-              <div><strong style={{ color: offline > 0 ? 'var(--crit)' : 'var(--fg-0)' }}>{offline}</strong> çevrimdışı</div>
-              <div><strong style={{ color: 'var(--fg-0)' }}>{total}</strong> toplam</div>
+              <div><strong style={{ color: 'var(--ok)' }}>{online}</strong> {t('dashboard.editorial.summary_online')}</div>
+              <div><strong style={{ color: offline > 0 ? 'var(--crit)' : 'var(--fg-0)' }}>{offline}</strong> {t('dashboard.editorial.summary_offline')}</div>
+              <div><strong style={{ color: 'var(--fg-0)' }}>{total}</strong> {t('dashboard.editorial.summary_total')}</div>
             </div>
           </div>
         </div>
