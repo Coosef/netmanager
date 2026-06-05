@@ -4,13 +4,14 @@
 // KAYITLI LAYOUT'LAR (named, kullanıcı kaydedebilir) + MEVCUT DÜZENİ
 // KAYDET input + TEMA + YOĞUNLUK + AKSAN RENGİ + MENÜ POZİSYONU +
 // DÜZENLEME modu toggle + SESLİ ALARM + NOC DUVAR MODU + Varsayılana Sıfırla.
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Drawer, ColorPicker, Switch, Input, Popconfirm } from 'antd'
 import {
   SunOutlined, MoonOutlined, MenuOutlined, BgColorsOutlined, ReloadOutlined,
   SoundOutlined, MonitorOutlined, StopOutlined, AppstoreOutlined, EditOutlined,
   SaveOutlined, DeleteOutlined, CheckOutlined,
 } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useTheme } from '@/contexts/ThemeContext'
 import {
   useCustomize, ACCENT_PALETTES, PRESET_LAYOUTS, ALL_WIDGETS,
@@ -21,6 +22,7 @@ import { useNocWall } from '@/contexts/NocWallContext'
 interface Props { open: boolean; onClose: () => void }
 
 export default function CustomizePanel({ open, onClose }: Props) {
+  const { t } = useTranslation()
   const { isDark, toggle } = useTheme()
   const {
     density, setDensity, menuPosition, setMenuPosition,
@@ -33,15 +35,17 @@ export default function CustomizePanel({ open, onClose }: Props) {
   const wall = useNocWall()
   const [layoutName, setLayoutName] = useState('')
 
-  const DENSITIES: { id: Density; label: string; sub: string }[] = [
-    { id: 'compact',  label: 'Sıkı',   sub: 'Daha fazla içerik, dar boşluklar' },
-    { id: 'regular',  label: 'Normal', sub: 'Dengeli — varsayılan' },
-    { id: 'spacious', label: 'Geniş',  sub: 'Hava bol, daha okunaklı' },
-  ]
+  // LANG-FIX-W1: arrays moved into useMemo so labels follow the active language.
+  const DENSITIES: { id: Density; label: string; sub: string }[] = useMemo(() => [
+    { id: 'compact',  label: t('customize.density.compact_label'),  sub: t('customize.density.compact_sub') },
+    { id: 'regular',  label: t('customize.density.regular_label'),  sub: t('customize.density.regular_sub') },
+    { id: 'spacious', label: t('customize.density.spacious_label'), sub: t('customize.density.spacious_sub') },
+  ], [t])
 
-  const VIEWS: { id: ViewVariant; label: string; sub: string; thumb: React.ReactNode }[] = [
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const VIEWS: { id: ViewVariant; label: string; sub: string; thumb: React.ReactNode }[] = useMemo(() => [
     {
-      id: 'workspace', label: 'Workspace', sub: 'modüler',
+      id: 'workspace', label: t('customize.view.workspace_label'), sub: t('customize.view.workspace_sub'),
       thumb: (
         <svg viewBox="0 0 60 36" fill="none" style={{ width: '100%', height: 38 }}>
           <rect x="0" y="0" width="14" height="36" fill="currentColor" opacity="0.1" />
@@ -54,7 +58,7 @@ export default function CustomizePanel({ open, onClose }: Props) {
       ),
     },
     {
-      id: 'mission', label: 'Mission', sub: 'NOC duvarı',
+      id: 'mission', label: t('customize.view.mission_label'), sub: t('customize.view.mission_sub'),
       thumb: (
         <svg viewBox="0 0 60 36" fill="none" style={{ width: '100%', height: 38 }}>
           <line x1="20" y1="0" x2="20" y2="36" stroke="currentColor" strokeWidth="0.5" opacity="0.5" />
@@ -68,7 +72,7 @@ export default function CustomizePanel({ open, onClose }: Props) {
       ),
     },
     {
-      id: 'editorial', label: 'Editorial', sub: 'brief',
+      id: 'editorial', label: t('customize.view.editorial_label'), sub: t('customize.view.editorial_sub'),
       thumb: (
         <svg viewBox="0 0 60 36" fill="none" style={{ width: '100%', height: 38 }}>
           <line x1="22" y1="3" x2="22" y2="33" stroke="currentColor" strokeWidth="0.5" opacity="0.5" />
@@ -82,11 +86,12 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </svg>
       ),
     },
-  ]
+  ], [t])
+  /* eslint-enable react-hooks/exhaustive-deps */
 
-  const MENUS: { id: MenuPosition; label: string; sub: string; thumb: React.ReactNode }[] = [
+  const MENUS: { id: MenuPosition; label: string; sub: string; thumb: React.ReactNode }[] = useMemo(() => [
     {
-      id: 'side', label: 'Sol Sidebar', sub: 'Varsayılan',
+      id: 'side', label: t('customize.menu.side_label'), sub: t('customize.menu.side_sub'),
       thumb: (
         <svg viewBox="0 0 60 30" fill="none" style={{ width: '100%', height: 32 }}>
           <rect x="0" y="0" width="14" height="30" fill="currentColor" opacity="0.18" />
@@ -96,7 +101,7 @@ export default function CustomizePanel({ open, onClose }: Props) {
       ),
     },
     {
-      id: 'top', label: 'Üst Bar', sub: 'Yatay',
+      id: 'top', label: t('customize.menu.top_label'), sub: t('customize.menu.top_sub'),
       thumb: (
         <svg viewBox="0 0 60 30" fill="none" style={{ width: '100%', height: 32 }}>
           <rect x="0" y="0" width="60" height="6" fill="currentColor" opacity="0.18" />
@@ -105,18 +110,18 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </svg>
       ),
     },
-  ]
+  ], [t])
 
   return (
     <Drawer open={open} onClose={onClose} title={
       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        <BgColorsOutlined /> Özelleştir
+        <BgColorsOutlined /> {t('customize.panel_title')}
       </span>
     } width={460} closable styles={{ body: { padding: 0 } }}>
       <div style={{ padding: '18px 22px', display: 'flex', flexDirection: 'column', gap: 22 }}>
 
         {/* HAZIR LAYOUT'LAR */}
-        <Section title="Hazır Layout'lar" sub="Rol bazlı preset'ler — tek tıkla uygula">
+        <Section title={t('customize.presets.title')} sub={t('customize.presets.subtitle')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {PRESET_LAYOUTS.map((p) => {
               const palette = p.config.paletteName
@@ -132,10 +137,10 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </Section>
 
         {/* KAYITLI LAYOUT'LAR */}
-        <Section title="Kayıtlı Layout'lar" sub="Kendi düzenini kaydet, sonra geri yükle">
+        <Section title={t('customize.saved.title')} sub={t('customize.saved.subtitle')}>
           {savedLayouts.length === 0 ? (
             <div style={{ fontSize: 11.5, color: 'var(--fg-3)', padding: '6px 0' }}>
-              Henüz kaydedilmiş düzen yok.
+              {t('customize.saved.empty')}
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
@@ -154,9 +159,9 @@ export default function CustomizePanel({ open, onClose }: Props) {
                   </div>
                   <button className="nm-btn ghost" style={{ height: 24, fontSize: 11 }}
                     onClick={() => applyLayout(s.id)}>
-                    <CheckOutlined /> Uygula
+                    <CheckOutlined /> {t('common.apply')}
                   </button>
-                  <Popconfirm title="Silinsin mi?" okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
+                  <Popconfirm title={t('customize.saved.delete_confirm')} okText={t('common.delete')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }}
                     onConfirm={() => deleteLayout(s.id)}>
                     <button className="nm-btn ghost" style={{ height: 24, fontSize: 11, color: 'var(--crit)' }}>
                       <DeleteOutlined />
@@ -168,19 +173,19 @@ export default function CustomizePanel({ open, onClose }: Props) {
           )}
           {/* Mevcut Düzeni Kaydet */}
           <div style={{ display: 'flex', gap: 6 }}>
-            <Input placeholder="Düzene isim ver…" value={layoutName} size="small"
+            <Input placeholder={t('customize.saved.name_placeholder')} value={layoutName} size="small"
               onChange={(e) => setLayoutName(e.target.value)}
               onPressEnter={() => { if (layoutName.trim()) { saveLayout(layoutName); setLayoutName('') } }} />
             <button className="nm-btn primary" style={{ height: 28, fontSize: 11.5, padding: '0 12px' }}
               disabled={!layoutName.trim()}
               onClick={() => { saveLayout(layoutName); setLayoutName('') }}>
-              <SaveOutlined /> Kaydet
+              <SaveOutlined /> {t('common.save')}
             </button>
           </div>
         </Section>
 
         {/* GÖRÜNÜM */}
-        <Section title="Görünüm" sub="Dashboard yerleşim varyantı (yakında — Dashboard rewrite)">
+        <Section title={t('customize.view.title')} sub={t('customize.view.subtitle')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, color: 'var(--fg-2)' }}>
             {VIEWS.map((v) => (
               <ChoiceCard key={v.id} active={viewVariant === v.id} onClick={() => setViewVariant(v.id)}
@@ -190,7 +195,7 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </Section>
 
         {/* MENÜ POZİSYONU */}
-        <Section title="Menü Pozisyonu" sub="Navigasyonun yerleşimi" icon={<MenuOutlined />}>
+        <Section title={t('customize.menu.title')} sub={t('customize.menu.subtitle')} icon={<MenuOutlined />}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, color: 'var(--fg-2)' }}>
             {MENUS.map((m) => (
               <ChoiceCard key={m.id} active={menuPosition === m.id} onClick={() => setMenuPosition(m.id)}
@@ -200,17 +205,17 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </Section>
 
         {/* TEMA */}
-        <Section title="Tema" sub="Karanlık veya açık görünüm">
+        <Section title={t('customize.theme.title')} sub={t('customize.theme.subtitle')}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
             <ChoiceCard active={isDark} onClick={() => { if (!isDark) toggle() }}
-              icon={<MoonOutlined />} label="Karanlık" sub="NOC için ideal" />
+              icon={<MoonOutlined />} label={t('customize.theme.dark_label')} sub={t('customize.theme.dark_sub')} />
             <ChoiceCard active={!isDark} onClick={() => { if (isDark) toggle() }}
-              icon={<SunOutlined />} label="Aydınlık" sub="Gündüz / raporlar" />
+              icon={<SunOutlined />} label={t('customize.theme.light_label')} sub={t('customize.theme.light_sub')} />
           </div>
         </Section>
 
         {/* YOĞUNLUK */}
-        <Section title="Yoğunluk" sub="Boşluk ve padding ayarı">
+        <Section title={t('customize.density.title')} sub={t('customize.density.subtitle')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
             {DENSITIES.map((d) => (
               <ChoiceCard key={d.id} active={density === d.id} onClick={() => setDensity(d.id)}
@@ -220,7 +225,7 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </Section>
 
         {/* AKSAN RENGİ — 3-renkli paletler */}
-        <Section title="Aksan Rengi" sub="3-renkli paletler — primary / secondary / tertiary tüm UI'a uygulanır">
+        <Section title={t('customize.accent.title')} sub={t('customize.accent.subtitle')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginBottom: 10 }}>
             {ACCENT_PALETTES.map((p) => {
               const isActive = accentPalette.name === p.name
@@ -254,14 +259,14 @@ export default function CustomizePanel({ open, onClose }: Props) {
             })}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11.5, color: 'var(--fg-2)' }}>
-            <span>Özel primary:</span>
+            <span>{t('customize.accent.custom_primary')}</span>
             <ColorPicker value={accent} onChange={(c) => setAccent(c.toHexString())} size="small" />
             <span className="mono" style={{ color: 'var(--fg-3)' }}>{accent.toUpperCase()}</span>
           </div>
         </Section>
 
         {/* DÜZENLEME MODU */}
-        <Section title="Düzenleme Modu" sub="Dashboard kartlarını sürükle, × ile kaldır" icon={<EditOutlined />}>
+        <Section title={t('customize.edit_mode.title')} sub={t('customize.edit_mode.subtitle')} icon={<EditOutlined />}>
           <button onClick={() => setEditMode(!editMode)} style={{
             display: 'flex', alignItems: 'center', gap: 12,
             width: '100%', padding: '12px 14px',
@@ -279,17 +284,17 @@ export default function CustomizePanel({ open, onClose }: Props) {
             </span>
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: editMode ? 'var(--accent)' : 'var(--fg-0)' }}>
-                Düzenleme Modu {editMode ? 'AÇIK' : 'KAPALI'}
+                {editMode ? t('customize.edit_mode.on_label') : t('customize.edit_mode.off_label')}
               </div>
               <div style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                {editMode ? 'Kartları sürükleyerek yer değiştir, × ile kaldır' : 'Aç ve kartların yerini değiştir'}
+                {editMode ? t('customize.edit_mode.on_sub') : t('customize.edit_mode.off_sub')}
               </div>
             </div>
           </button>
         </Section>
 
         {/* WIDGET GÖRÜNÜRLÜĞÜ */}
-        <Section title="Widget Görünürlüğü" sub="Hangi widget'lar dashboard'da görünsün">
+        <Section title={t('customize.widgets.title')} sub={t('customize.widgets.subtitle')}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {ALL_WIDGETS.map((w) => {
               const visible = !widgetHidden.includes(w.id)
@@ -324,35 +329,35 @@ export default function CustomizePanel({ open, onClose }: Props) {
         </Section>
 
         {/* SESLİ ALARM */}
-        <Section title="Sesli Alarm" sub="Kritik olaylarda bildirim sesi (kısa ding)" icon={<SoundOutlined />}>
+        <Section title={t('customize.sound.title')} sub={t('customize.sound.subtitle')} icon={<SoundOutlined />}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0' }}>
             <div style={{ fontSize: 12, color: 'var(--fg-2)', maxWidth: '70%' }}>
-              {soundEnabled ? 'Açık — kritik olayda Web Audio beep' : 'Kapalı — sadece görsel bildirim'}
+              {soundEnabled ? t('customize.sound.on_desc') : t('customize.sound.off_desc')}
             </div>
             <Switch checked={soundEnabled} onChange={setSoundEnabled} />
           </div>
         </Section>
 
         {/* NOC DUVAR MODU */}
-        <Section title="NOC Duvar Modu" sub="Sayfalar arası otomatik dönüşüm (auto-rotation)" icon={<MonitorOutlined />}>
+        <Section title={t('customize.wall.title')} sub={t('customize.wall.subtitle')} icon={<MonitorOutlined />}>
           {wall.active ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ fontSize: 12, color: 'var(--accent)' }}>
-                Aktif: <strong>{wall.routes[wall.currentIdx]?.label || '?'}</strong> ({wall.currentIdx + 1}/{wall.routes.length}) · {wall.intervalSec}s/sayfa
+                {t('customize.wall.active_label')} <strong>{wall.routes[wall.currentIdx]?.label || '?'}</strong> ({wall.currentIdx + 1}/{wall.routes.length}) · {wall.intervalSec}{t('customize.wall.seconds_per_page')}
               </div>
               <button className="nm-btn ghost" style={{ width: '100%', height: 30, fontSize: 12 }}
                 onClick={() => { wall.stop(); onClose() }}>
-                <StopOutlined /> Durdur
+                <StopOutlined /> {t('customize.wall.stop')}
               </button>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <button className="nm-btn primary" style={{ width: '100%', height: 32, fontSize: 12 }}
                 onClick={() => { wall.start(); onClose() }}>
-                <MonitorOutlined /> Başlat ({wall.intervalSec}s/sayfa)
+                <MonitorOutlined /> {t('customize.wall.start')} ({wall.intervalSec}{t('customize.wall.seconds_per_page')})
               </button>
               <div style={{ fontSize: 10.5, color: 'var(--fg-3)' }}>
-                Default rota: {wall.routes.map((r) => r.label).join(' → ')}
+                {t('customize.wall.default_route')} {wall.routes.map((r) => r.label).join(' → ')}
               </div>
             </div>
           )}
@@ -361,10 +366,10 @@ export default function CustomizePanel({ open, onClose }: Props) {
         {/* Sıfırla */}
         <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}>
           <button className="nm-btn ghost" onClick={reset} style={{ width: '100%', height: 32, fontSize: 12 }}>
-            <ReloadOutlined /> Varsayılana Sıfırla
+            <ReloadOutlined /> {t('customize.reset')}
           </button>
           <div style={{ fontSize: 10.5, color: 'var(--fg-3)', marginTop: 8, textAlign: 'center' }}>
-            Bu seçimler bu tarayıcıda saklanır.
+            {t('customize.storage_note')}
           </div>
         </div>
       </div>

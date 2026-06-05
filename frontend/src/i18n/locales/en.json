@@ -72,7 +72,15 @@
     "password_changed": "Password changed successfully",
     "password_change_error": "Password could not be changed",
     "change_password_btn": "Change Password",
-    "password_min_length": "At least 8 characters"
+    "password_min_length": "At least 8 characters",
+    "profile": "My Profile",
+    "role_noc": "NOC",
+    "role_admin": "Admin",
+    "role_exec": "Executive",
+    "customize_btn": "Customize",
+    "sound_on": "Sound alarm on",
+    "sound_off": "Sound alarm off",
+    "fullscreen": "Fullscreen"
   },
   "common": {
     "add": "Add",
@@ -112,7 +120,9 @@
     "unknown": "Unknown",
     "last_seen": "Last Seen",
     "created_at": "Created",
-    "updated_at": "Updated"
+    "updated_at": "Updated",
+    "apply": "Apply",
+    "no_results": "No results found"
   },
   "login": {
     "subtitle": "Network Management Platform",
@@ -586,5 +596,198 @@
     "role_operator_desc": "Device, task and configuration management. Cannot create users.",
     "role_viewer_title": "Viewer",
     "role_viewer_desc": "Read-only access. Cannot make any changes."
+  },
+  "customize": {
+    "panel_title": "Customize",
+    "presets": {
+      "title": "PRESET LAYOUTS",
+      "subtitle": "Role-based ready views — apply with one click"
+    },
+    "saved": {
+      "title": "SAVED LAYOUTS",
+      "subtitle": "Save your current arrangement by name and switch back quickly",
+      "empty": "No saved layouts yet",
+      "name_placeholder": "Layout name (e.g. Morning Shift)",
+      "delete_confirm": "Delete this layout?"
+    },
+    "view": {
+      "title": "VIEW",
+      "subtitle": "Overall feel of the pages: dense work, control room or minimal reading",
+      "workspace_label": "Workspace",
+      "workspace_sub": "Dense, widget-rich working view",
+      "mission_label": "Mission",
+      "mission_sub": "Control room — big numbers, fewer details",
+      "editorial_label": "Editorial",
+      "editorial_sub": "Wide typography, calm and focused"
+    },
+    "menu": {
+      "title": "MENU POSITION",
+      "subtitle": "Should main navigation live in the side column or the top banner?",
+      "side_label": "Side",
+      "side_sub": "Left column, classic vertical menu",
+      "top_label": "Top",
+      "top_sub": "Horizontal top menu with dropdowns"
+    },
+    "theme": {
+      "title": "THEME",
+      "subtitle": "Dark is easy on the eyes, light is high contrast",
+      "dark_label": "Dark",
+      "dark_sub": "For dim NOC environments",
+      "light_label": "Light",
+      "light_sub": "For bright office conditions"
+    },
+    "density": {
+      "title": "DENSITY",
+      "subtitle": "Table row and button height",
+      "compact_label": "Compact",
+      "compact_sub": "More data on a single screen",
+      "regular_label": "Standard",
+      "regular_sub": "Recommended balanced view",
+      "spacious_label": "Spacious",
+      "spacious_sub": "Easier tapping, less density"
+    },
+    "accent": {
+      "title": "ACCENT COLOR",
+      "subtitle": "Main color palette used for highlights and active states",
+      "custom_primary": "Custom primary color"
+    },
+    "edit_mode": {
+      "title": "EDIT MODE",
+      "subtitle": "When on, you can drag and rearrange widgets",
+      "on_label": "Editing on",
+      "off_label": "Editing off",
+      "on_sub": "Widgets can be moved and hidden",
+      "off_sub": "Layout locked — no accidental changes"
+    },
+    "widgets": {
+      "title": "WIDGETS",
+      "subtitle": "Pick which cards appear on the dashboard"
+    },
+    "sound": {
+      "title": "SOUND ALARM",
+      "subtitle": "Should the browser play a sound on new critical events?",
+      "on_desc": "A browser warning sound plays on new critical events.",
+      "off_desc": "Silent — visual cue only (bell + counter)."
+    },
+    "wall": {
+      "title": "NOC WALL MODE",
+      "subtitle": "Fullscreen, pages auto-rotate — for big-screen control rooms",
+      "active_label": "Active route:",
+      "seconds_per_page": "s/page",
+      "start": "Start Wall Mode",
+      "stop": "Stop Wall Mode",
+      "default_route": "Default route:"
+    },
+    "reset": "Reset to defaults",
+    "storage_note": "All selections are saved locally in this browser — re-set them on a new device."
+  },
+  "search": {
+    "input_placeholder": "Search device, VLAN, page, event…",
+    "no_device_found": "No device found",
+    "see_all_results": "See all results for \"{{query}}\" →",
+    "footer_hint": "Enter to select · ↑↓ navigate · Esc to close",
+    "section": {
+      "pages": "PAGES",
+      "devices": "DEVICES",
+      "events": "EVENTS",
+      "recent_events_unacked": "RECENT EVENTS (unacknowledged)"
+    },
+    "pages": {
+      "devices": "Device List",
+      "ipam": "IPAM",
+      "vlans": "VLAN Management",
+      "backups": "Backup Center",
+      "compliance": "Compliance Check",
+      "sla": "SLA & Uptime Report",
+      "topology": "Topology Map",
+      "monitor": "Monitor & Events"
+    }
+  },
+  "command": {
+    "search_placeholder": "Search command, page or device…",
+    "no_results": "No results",
+    "group": {
+      "nav": "NAV",
+      "action": "ACTION",
+      "device": "DEVICE"
+    },
+    "foot": {
+      "navigate": "navigate",
+      "select": "select",
+      "close": "close"
+    },
+    "action": {
+      "theme_to_light": "Switch to light theme",
+      "theme_to_dark": "Switch to dark theme",
+      "open_customize": "Open Customize panel",
+      "sound_off": "Mute critical alarm sound",
+      "sound_on": "Unmute critical alarm sound",
+      "wall_stop": "Stop NOC Wall mode",
+      "wall_start": "Start NOC Wall mode (auto-rotation)"
+    },
+    "nav": {
+      "dashboard": "Dashboard",
+      "monitor": "Alerts & Events",
+      "topology": "Topology",
+      "topology_next": "Topology · Gold",
+      "devices": "Devices",
+      "discovery": "Discovery Inventory",
+      "ipam": "IPAM",
+      "vlan": "VLAN Management",
+      "backups": "Backup Center",
+      "config_drift": "Config Drift",
+      "compliance": "Compliance Check",
+      "racks": "Racks",
+      "floor_plan": "Floor Plan",
+      "intelligence": "Network Analytics",
+      "alert_rules": "Alert Rules",
+      "bandwidth": "Bandwidth",
+      "port_intelligence": "Port Intelligence",
+      "security_audit": "Security Audit",
+      "asset_lifecycle": "Asset Lifecycle",
+      "diagnostics": "Network Diagnostics",
+      "tasks": "Tasks",
+      "playbooks": "Playbooks",
+      "config_templates": "Config Templates",
+      "approvals": "Approvals",
+      "sla": "SLA & Uptime",
+      "synthetic_probes": "Synthetic Probes",
+      "incident_rca": "Incident RCA",
+      "escalation_rules": "Escalation Rules",
+      "service_impact": "Service Impact Map",
+      "network_twin": "Network Digital Twin",
+      "reports": "Reports",
+      "audit": "Audit Log",
+      "settings": "Settings"
+    }
+  },
+  "mobile_nav": {
+    "home": "Home",
+    "devices": "Devices",
+    "topology": "Topology",
+    "events": "Events",
+    "settings": "Settings"
+  },
+  "noc_wall": {
+    "seconds_per_page": "{{count}}s/page",
+    "resume": "Resume",
+    "pause": "Pause",
+    "next": "Next",
+    "exit": "Exit"
+  },
+  "location_gate": {
+    "resolving": "Resolving location context…",
+    "no_access_title": "No assigned location",
+    "no_access_desc": "Your account has no location assigned yet. Without a location, device, topology and monitoring data cannot be displayed. Please contact an administrator."
+  },
+  "location_selector": {
+    "no_access_tooltip": "Your account has no assigned location",
+    "no_access_tag": "No location",
+    "none_defined": "No location defined",
+    "all_locations": "All Locations"
+  },
+  "error_boundary": {
+    "title": "An unexpected error occurred",
+    "reload": "Reload page"
   }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Input, Modal, Tag, Typography, Spin, Empty } from 'antd'
 import {
   LaptopOutlined, CloseCircleOutlined, WarningOutlined, InfoCircleOutlined,
@@ -7,22 +7,16 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { devicesApi } from '@/api/devices'
 import { monitorApi } from '@/api/monitor'
 import { useTheme } from '@/contexts/ThemeContext'
 
 const { Text } = Typography
 
-const PAGES = [
-  { title: 'Cihaz Listesi', path: '/devices', icon: <LaptopOutlined />, keywords: ['cihaz', 'device', 'switch', 'router'] },
-  { title: 'IPAM', path: '/ipam', icon: <ClusterOutlined />, keywords: ['ipam', 'ip', 'subnet', 'adres', 'address'] },
-  { title: 'VLAN Yönetimi', path: '/vlans', icon: <ApiOutlined />, keywords: ['vlan', 'port', 'trunk', 'access', 'yönetim'] },
-  { title: 'Backup Merkezi', path: '/backups', icon: <DatabaseOutlined />, keywords: ['backup', 'yedek', 'merkezi'] },
-  { title: 'Uyumluluk Denetimi', path: '/compliance', icon: <SafetyOutlined />, keywords: ['compliance', 'uyum', 'denetim', 'politika', 'güvenlik'] },
-  { title: 'SLA & Uptime Raporu', path: '/sla', icon: <RiseOutlined />, keywords: ['sla', 'uptime', 'rapor', 'süre'] },
-  { title: 'Topoloji Haritası', path: '/topology', icon: <BranchesOutlined />, keywords: ['topoloji', 'topology', 'harita', 'map'] },
-  { title: 'Monitör & Olaylar', path: '/monitor', icon: <AppstoreOutlined />, keywords: ['monitor', 'olay', 'event', 'alarm', 'uyarı'] },
-]
+// LANG-FIX-W1: title alanları i18n key adı haline geldi; useMemo içinde
+// t() ile resolve edilir, dil değişiminde takip eder. keywords arrays
+// arama eşleşmesi için çevirisiz teknik token kalır (path mapping).
 
 interface GlobalSearchModalProps {
   open: boolean
@@ -31,9 +25,21 @@ interface GlobalSearchModalProps {
 
 export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalProps) {
   const { isDark } = useTheme()
+  const { t } = useTranslation()
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
   const inputRef = useRef<any>(null)
+
+  const PAGES = useMemo(() => [
+    { title: t('search.pages.devices'), path: '/devices', icon: <LaptopOutlined />, keywords: ['cihaz', 'device', 'switch', 'router', 'gerät'] },
+    { title: t('search.pages.ipam'), path: '/ipam', icon: <ClusterOutlined />, keywords: ['ipam', 'ip', 'subnet', 'adres', 'address', 'adresse'] },
+    { title: t('search.pages.vlans'), path: '/vlans', icon: <ApiOutlined />, keywords: ['vlan', 'port', 'trunk', 'access', 'yönetim'] },
+    { title: t('search.pages.backups'), path: '/backups', icon: <DatabaseOutlined />, keywords: ['backup', 'yedek', 'merkezi', 'sicherung'] },
+    { title: t('search.pages.compliance'), path: '/compliance', icon: <SafetyOutlined />, keywords: ['compliance', 'uyum', 'denetim', 'politika', 'güvenlik'] },
+    { title: t('search.pages.sla'), path: '/sla', icon: <RiseOutlined />, keywords: ['sla', 'uptime', 'rapor', 'süre', 'bericht'] },
+    { title: t('search.pages.topology'), path: '/topology', icon: <BranchesOutlined />, keywords: ['topoloji', 'topology', 'harita', 'map', 'karte'] },
+    { title: t('search.pages.monitor'), path: '/monitor', icon: <AppstoreOutlined />, keywords: ['monitor', 'olay', 'event', 'alarm', 'uyarı', 'ereignis'] },
+  ], [t])
 
   const C = isDark
     ? { bg: '#1e293b', border: '#334155', text: '#f1f5f9', muted: '#64748b', hover: '#0f172a', section: '#263148' }
@@ -150,7 +156,7 @@ export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalPr
           ref={inputRef}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Cihaz, VLAN, sayfa, olay ara…"
+          placeholder={t('search.input_placeholder')}
           variant="borderless"
           style={{ fontSize: 15, color: C.text, background: 'transparent', padding: 0 }}
           onKeyDown={(e) => e.key === 'Escape' && onClose()}
@@ -166,7 +172,7 @@ export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalPr
         {/* Pages */}
         {filteredPages.length > 0 && (
           <>
-            <SectionHeader label="SAYFALAR" />
+            <SectionHeader label={t('search.section.pages')} />
             {filteredPages.map((p) => (
               <ResultRow
                 key={p.path}
@@ -182,11 +188,11 @@ export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalPr
         {/* Devices */}
         {showDevices && (
           <>
-            <SectionHeader label="CİHAZLAR" />
+            <SectionHeader label={t('search.section.devices')} />
             {devFetching ? (
               <div style={{ padding: '12px 16px', textAlign: 'center' }}><Spin size="small" /></div>
             ) : !hasDeviceResults ? (
-              <div style={{ padding: '10px 16px', color: C.muted, fontSize: 13 }}>Cihaz bulunamadı</div>
+              <div style={{ padding: '10px 16px', color: C.muted, fontSize: 13 }}>{t('search.no_device_found')}</div>
             ) : (
               <>
                 {(deviceResults?.items ?? []).map((d) => (
@@ -216,7 +222,7 @@ export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalPr
                   onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = C.hover }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
                 >
-                  "{query.trim()}" için tüm sonuçları gör →
+                  {t('search.see_all_results', { query: query.trim() })}
                 </div>
               </>
             )}
@@ -226,7 +232,7 @@ export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalPr
         {/* Events */}
         {hasEvents && (
           <>
-            <SectionHeader label={query.trim() ? 'OLAYLAR' : 'SON OLAYLAR (onaylanmamış)'} />
+            <SectionHeader label={query.trim() ? t('search.section.events') : t('search.section.recent_events_unacked')} />
             {filteredEvents.slice(0, 5).map((ev) => (
               <ResultRow
                 key={ev.id}
@@ -240,11 +246,11 @@ export default function GlobalSearchModal({ open, onClose }: GlobalSearchModalPr
         )}
 
         {!hasResults && query.trim().length >= 2 && !devFetching && (
-          <Empty description="Sonuç bulunamadı" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '28px 0' }} />
+          <Empty description={t('common.no_results')} image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ padding: '28px 0' }} />
         )}
 
         <div style={{ padding: '8px 16px', borderTop: `1px solid ${C.border}` }}>
-          <Text type="secondary" style={{ fontSize: 11 }}>Enter ile seç · ↑↓ gezin · Esc kapat</Text>
+          <Text type="secondary" style={{ fontSize: 11 }}>{t('search.footer_hint')}</Text>
         </div>
       </div>
     </Modal>

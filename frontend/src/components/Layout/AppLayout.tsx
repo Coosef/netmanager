@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import AppHeader from './Header'
@@ -24,14 +25,6 @@ const LAYOUT_CSS = `
   }
 `
 
-const BOTTOM_NAV_ITEMS = [
-  { key: '/',        icon: <DashboardOutlined />,  label: 'Ana Sayfa' },
-  { key: '/devices', icon: <LaptopOutlined />,      label: 'Cihazlar' },
-  { key: '/topology',icon: <ApartmentOutlined />,   label: 'Topoloji' },
-  { key: '/monitor', icon: <AlertOutlined />,        label: 'Olaylar' },
-  { key: '/settings',icon: <SettingOutlined />,      label: 'Ayarlar' },
-]
-
 // AppLayout — NocWallProvider ile sarmalı (useNavigate gerekiyor; provider
 // BrowserRouter altında olmalı). Tüm gerçek layout AppLayoutInner'da.
 export default function AppLayout() {
@@ -49,9 +42,18 @@ function AppLayoutInner() {
   const location = useLocation()
   const navigate = useNavigate()
   const isMobile = useIsMobile()
+  const { t } = useTranslation()
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+
+  const BOTTOM_NAV_ITEMS = useMemo(() => [
+    { key: '/',         icon: <DashboardOutlined />,  label: t('mobile_nav.home') },
+    { key: '/devices',  icon: <LaptopOutlined />,     label: t('mobile_nav.devices') },
+    { key: '/topology', icon: <ApartmentOutlined />,  label: t('mobile_nav.topology') },
+    { key: '/monitor',  icon: <AlertOutlined />,      label: t('mobile_nav.events') },
+    { key: '/settings', icon: <SettingOutlined />,    label: t('mobile_nav.settings') },
+  ], [t])
 
   useAlarmWatcher()
 

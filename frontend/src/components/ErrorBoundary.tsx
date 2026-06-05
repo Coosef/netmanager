@@ -1,5 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { Button, Result } from 'antd'
+import i18n from '@/i18n'
 
 interface Props {
   children: ReactNode
@@ -9,6 +10,10 @@ interface State {
   error: Error | null
 }
 
+// LANG-FIX-W1: Class component — useTranslation hook kullanılamaz; i18n
+// instance'ın .t() metodu doğrudan çağrılır. Dil değişiminde re-render
+// olmaz, ancak ErrorBoundary yalnızca hata anında render edilir; pratikte
+// yeterli (kullanıcı sayfayı yenileyince doğru dilde yeniden gelir).
 export class ErrorBoundary extends Component<Props, State> {
   state: State = { error: null }
 
@@ -25,11 +30,11 @@ export class ErrorBoundary extends Component<Props, State> {
       return (
         <Result
           status="error"
-          title="Beklenmeyen bir hata oluştu"
+          title={i18n.t('error_boundary.title')}
           subTitle={this.state.error.message}
           extra={
             <Button type="primary" onClick={() => { this.setState({ error: null }); window.location.reload() }}>
-              Sayfayı Yenile
+              {i18n.t('error_boundary.reload')}
             </Button>
           }
         />

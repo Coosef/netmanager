@@ -1,5 +1,6 @@
 import { Select, Space, Spin, Tag, Tooltip } from 'antd'
 import { EnvironmentOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useSite } from '@/contexts/SiteContext'
 import { useTheme } from '@/contexts/ThemeContext'
 
@@ -30,6 +31,7 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
     sitesLoading, hasLocationAccess, isOrgWide,
   } = useSite()
   const { isDark } = useTheme()
+  const { t } = useTranslation()
 
   if (sitesLoading) {
     return <Spin size="small" />
@@ -37,9 +39,9 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
 
   if (!hasLocationAccess) {
     return (
-      <Tooltip title="Hesabınıza atanmış bir lokasyon yok">
+      <Tooltip title={t('location_selector.no_access_tooltip')}>
         <Tag icon={<EnvironmentOutlined />} color="warning" style={{ margin: 0 }}>
-          Lokasyon yok
+          {t('location_selector.no_access_tag')}
         </Tag>
       </Tooltip>
     )
@@ -73,7 +75,7 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   if (locations.length === 0) {
     return (
       <Tag color="default" style={{ margin: 0 }}>
-        Lokasyon tanımlı değil
+        {t('location_selector.none_defined')}
       </Tag>
     )
   }
@@ -81,7 +83,7 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   const options = [
     // "All locations" is offered ONLY to org-wide roles; a location-scoped
     // user always operates inside exactly one location.
-    ...(isOrgWide ? [{ value: ALL, label: 'Tüm Lokasyonlar' }] : []),
+    ...(isOrgWide ? [{ value: ALL, label: t('location_selector.all_locations') }] : []),
     ...locations.map((loc) => ({
       value: String(loc.id),
       label: (
