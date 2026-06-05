@@ -1452,6 +1452,90 @@
     "col_detail": "Detay",
     "col_ip": "IP"
   },
+  "terminal_sessions": {
+    "crumb_security": "Güvenlik",
+    "crumb_audit": "SSH Oturum Audit",
+    "page_title": "SSH Oturum Audit",
+    "page_subtitle": "Browser üzerinden açılan interaktif SSH terminal session'ları · çıkartılan komutlar, IO bytes, çıktı özeti · forensik audit.",
+    "records_count": "{{count}} kayıt",
+    "stat": {
+      "sessions_24h": "SON 24SA OTURUM",
+      "commands_24h": "SON 24SA KOMUT",
+      "avg_duration": "ORT. SÜRE",
+      "active_now": "ŞU AN AKTİF"
+    },
+    "alert": {
+      "ai_coming_title": "AI özet özelliği yakında (T9 Tur 3B)",
+      "ai_coming_desc": "Şu an her session'ın komut listesi + IO bytes + son ~10KB çıktısı kaydediliyor. AI ile session özetleme (Claude API) bir sonraki increment'te aktif olacak."
+    },
+    "toolbar": {
+      "search_placeholder": "Kullanıcı veya cihaz ara…",
+      "status_all": "Tüm durumlar",
+      "status_active_only": "Sadece aktif",
+      "status_closed_only": "Sadece kapalı"
+    },
+    "col": {
+      "started_at": "BAŞLANGIÇ",
+      "username": "KULLANICI",
+      "device": "CİHAZ",
+      "connection_path": "YOL",
+      "commands": "KOMUT",
+      "duration": "SÜRE",
+      "io": "I/O",
+      "status": "DURUM",
+      "client_ip": "IP"
+    },
+    "status": {
+      "in_progress": "Devam ediyor",
+      "user_closed": "Kullanıcı kapattı",
+      "idle_timeout": "Boşta zaman aşımı",
+      "agent_disconnected": "Agent bağlantısı koptu",
+      "paramiko_error": "Paramiko hatası",
+      "ws_error": "WebSocket hatası",
+      "stale_cleanup": "Otomatik temizlik"
+    },
+    "path": {
+      "agent_relay": "Agent",
+      "direct_paramiko": "Direkt"
+    },
+    "drawer": {
+      "title": "Oturum Detayı"
+    },
+    "general": {
+      "title": "Genel",
+      "label_user": "Kullanıcı",
+      "label_device": "Cihaz",
+      "label_path": "Yol",
+      "label_agent": "Agent",
+      "label_started": "Başlangıç",
+      "label_ended": "Bitiş",
+      "label_duration": "Süre",
+      "label_exit_reason": "Çıkış Nedeni",
+      "label_client_ip": "Client IP",
+      "label_io": "I/O"
+    },
+    "ai": {
+      "card_title": "AI Özet",
+      "btn_regenerate": "Yeniden Üret",
+      "btn_generate": "Özet Üret",
+      "status_running_text": "AI özet üretiliyor… (3-8 saniye)",
+      "empty_title": "Bu session için henüz AI özet üretilmedi.",
+      "empty_provider_hint": "AI Asistanı aktif provider'ı kullanır (Settings → AI Asistanı). Provider configure değilse hata alırsınız."
+    },
+    "commands": {
+      "card_title": "Çıkartılan Komutlar",
+      "empty": "Komut çıkarılmadı (boş input veya devam eden session)"
+    },
+    "output": {
+      "card_title": "Çıktı Özeti (son ~10KB)",
+      "empty": "Çıktı kaydedilmedi"
+    },
+    "toast": {
+      "ai_ready": "AI özet hazırlandı ({{provider}} / {{tokens}} token)",
+      "ai_status_other": "Durum: {{status}}",
+      "ai_failed": "AI özet üretilemedi"
+    }
+  },
   "settings": {
     "title": "Ayarlar",
     "language": "Dil",

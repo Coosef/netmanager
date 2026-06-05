@@ -8,7 +8,7 @@
  * 3B (AI özet) sonraki increment'te eklenecek — ai_summary alanı
  * şu an çoğunlukla null/pending; göstergesi var.
  */
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   Alert, Badge, Button, Card, Drawer, Input, message, Select, Space, Table,
   Tag, Typography,
@@ -18,11 +18,15 @@ import {
   ReloadOutlined, SafetyOutlined, UserOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { terminalSessionsApi, TerminalSessionListItem } from '@/api/terminalSessions'
 import dayjs from 'dayjs'
 
 const { Text, Paragraph } = Typography
 
+// formatDuration / formatBytes: SI/IEC tabanlı teknik birim (B/KB/MB/ms/s/dk/sa)
+// — KURAL-E3 backend numeric helpers, kullanıcı bu unit'leri çevirmedi (uluslararası
+// kısaltma). Eğer ileride dk/sa → min/hr istenirse ayrı bir issue açılır.
 function formatDuration(ms: number | null): string {
   if (!ms) return '—'
   if (ms < 1000) return `${ms}ms`
@@ -37,25 +41,54 @@ function formatBytes(b: number): string {
   return `${(b / 1024 / 1024).toFixed(1)}MB`
 }
 
-function ExitTag({ reason }: { reason: string | null }) {
-  if (!reason) return <Tag color="orange">Devam ediyor</Tag>
-  const colorMap: Record<string, string> = {
-    user_closed: 'default',
-    idle_timeout: 'warning',
-    agent_disconnected: 'error',
-    paramiko_error: 'error',
-    ws_error: 'error',
-  }
-  return <Tag color={colorMap[reason] || 'default'}>{reason}</Tag>
+// KURAL-E1 + E3: exit_reason backend enum sabit kalır; renkler de teknik
+// (AntD enum) module-level sözlük. UI label hook scope'unda useMemo + t()
+// ile çözülür (TerminalSessionsPage içinde EXIT_LABEL).
+const EXIT_COLOR: Record<string, string> = {
+  user_closed: 'default',
+  idle_timeout: 'warning',
+  agent_disconnected: 'error',
+  paramiko_error: 'error',
+  ws_error: 'error',
+  stale_cleanup: 'warning',
+}
+
+// connection_path için aynı pattern: backend enum sabit, renk teknik,
+// label i18n.
+const PATH_COLOR: Record<string, string> = {
+  agent_relay: 'cyan',
+  direct_paramiko: 'purple',
 }
 
 export default function TerminalSessionsPage() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'closed'>('all')
   const [page, setPage] = useState(0)
   const [pageSize] = useState(50)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+
+  // KURAL-E1 — exit_reason label ve connection_path label hook scope'unda
+  // useMemo. Backend enum sabit kalır (EXIT_COLOR / PATH_COLOR module-level).
+  const EXIT_LABEL = useMemo<Record<string, string>>(() => ({
+    user_closed:        t('terminal_sessions.status.user_closed'),
+    idle_timeout:       t('terminal_sessions.status.idle_timeout'),
+    agent_disconnected: t('terminal_sessions.status.agent_disconnected'),
+    paramiko_error:     t('terminal_sessions.status.paramiko_error'),
+    ws_error:           t('terminal_sessions.status.ws_error'),
+    stale_cleanup:      t('terminal_sessions.status.stale_cleanup'),
+  }), [t])
+
+  const PATH_LABEL = useMemo<Record<string, string>>(() => ({
+    agent_relay:     t('terminal_sessions.path.agent_relay'),
+    direct_paramiko: t('terminal_sessions.path.direct_paramiko'),
+  }), [t])
+
+  const renderExitTag = (reason: string | null) => {
+    if (!reason) return <Tag color="orange">{t('terminal_sessions.status.in_progress')}</Tag>
+    return <Tag color={EXIT_COLOR[reason] || 'default'}>{EXIT_LABEL[reason] || reason}</Tag>
+  }
 
   // T9 Tur 3B — AI özet trigger
   const summarizeMut = useMutation({
@@ -63,15 +96,15 @@ export default function TerminalSessionsPage() {
     onSuccess: (data) => {
       message.success(
         data.status === 'completed'
-          ? `AI özet hazırlandı (${data.provider || '?'} / ${data.tokens_used || 0} token)`
-          : `Status: ${data.status}`,
+          ? t('terminal_sessions.toast.ai_ready', { provider: data.provider || '?', tokens: data.tokens_used || 0 })
+          : t('terminal_sessions.toast.ai_status_other', { status: data.status }),
       )
       // Re-fetch detail to pick up ai_summary
       qc.invalidateQueries({ queryKey: ['terminal-session-detail', selectedId] })
       qc.invalidateQueries({ queryKey: ['terminal-sessions-list'] })
     },
     onError: (e: any) => message.error(
-      e?.response?.data?.detail || 'AI özet üretilemedi',
+      e?.response?.data?.detail || t('terminal_sessions.toast.ai_failed'),
     ),
   })
 
@@ -100,13 +133,13 @@ export default function TerminalSessionsPage() {
 
   const columns = [
     {
-      title: 'BAŞLANGIÇ',
+      title: t('terminal_sessions.col.started_at'),
       dataIndex: 'started_at',
       width: 150,
       render: (v: string) => v ? dayjs(v).format('DD.MM.YY HH:mm:ss') : '—',
     },
     {
-      title: 'KULLANICI',
+      title: t('terminal_sessions.col.username'),
       dataIndex: 'username',
       width: 130,
       render: (v: string | null, r: TerminalSessionListItem) => (
@@ -117,7 +150,7 @@ export default function TerminalSessionsPage() {
       ),
     },
     {
-      title: 'CİHAZ',
+      title: t('terminal_sessions.col.device'),
       dataIndex: 'device_hostname',
       width: 180,
       render: (v: string | null, r: TerminalSessionListItem) => (
@@ -132,17 +165,15 @@ export default function TerminalSessionsPage() {
       ),
     },
     {
-      title: 'YOL',
+      title: t('terminal_sessions.col.connection_path'),
       dataIndex: 'connection_path',
       width: 110,
-      render: (v: string | null) => v === 'agent_relay'
-        ? <Tag color="cyan">Agent</Tag>
-        : v === 'direct_paramiko'
-          ? <Tag color="purple">Direkt</Tag>
-          : <Tag>—</Tag>,
+      render: (v: string | null) => v && PATH_LABEL[v]
+        ? <Tag color={PATH_COLOR[v] || 'default'}>{PATH_LABEL[v]}</Tag>
+        : <Tag>—</Tag>,
     },
     {
-      title: 'KOMUT',
+      title: t('terminal_sessions.col.commands'),
       dataIndex: 'commands_count',
       width: 75,
       align: 'right' as const,
@@ -151,13 +182,13 @@ export default function TerminalSessionsPage() {
       ),
     },
     {
-      title: 'SÜRE',
+      title: t('terminal_sessions.col.duration'),
       dataIndex: 'duration_ms',
       width: 90,
       render: (v: number | null) => formatDuration(v),
     },
     {
-      title: 'I/O',
+      title: t('terminal_sessions.col.io'),
       width: 130,
       render: (_: any, r: TerminalSessionListItem) => (
         <Text style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--fg-3)' }}>
@@ -166,13 +197,13 @@ export default function TerminalSessionsPage() {
       ),
     },
     {
-      title: 'DURUM',
+      title: t('terminal_sessions.col.status'),
       dataIndex: 'exit_reason',
       width: 140,
-      render: (v: string | null) => <ExitTag reason={v} />,
+      render: (v: string | null) => renderExitTag(v),
     },
     {
-      title: 'IP',
+      title: t('terminal_sessions.col.client_ip'),
       dataIndex: 'client_ip',
       width: 120,
       render: (v: string | null) => v
@@ -188,34 +219,33 @@ export default function TerminalSessionsPage() {
     <div className="nm-page" style={{ padding: '4px 2px' }}>
       <div className="nm-page-hd">
         <div className="title-block">
-          <div className="nm-crumbs"><span>Güvenlik</span><span>SSH Oturum Audit</span></div>
+          <div className="nm-crumbs"><span>{t('terminal_sessions.crumb_security')}</span><span>{t('terminal_sessions.crumb_audit')}</span></div>
           <h1 className="nm-page-title">
             <CodeOutlined style={{ marginRight: 8 }} />
-            SSH Oturum Audit
-            <span className="nm-pill mono">{total} kayıt</span>
+            {t('terminal_sessions.page_title')}
+            <span className="nm-pill mono">{t('terminal_sessions.records_count', { count: total })}</span>
           </h1>
           <div className="nm-page-sub">
-            Browser üzerinden açılan interaktif SSH terminal session'ları ·
-            çıkartılan komutlar, IO bytes, çıktı özeti · forensik audit.
+            {t('terminal_sessions.page_subtitle')}
           </div>
         </div>
       </div>
 
       <div className="nm-statbar">
         <div className="nm-stat">
-          <div className="nm-stat-label">SON 24SA OTURUM</div>
+          <div className="nm-stat-label">{t('terminal_sessions.stat.sessions_24h')}</div>
           <div className="nm-stat-val">{statsQ.data?.sessions_24h ?? '—'}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">SON 24SA KOMUT</div>
+          <div className="nm-stat-label">{t('terminal_sessions.stat.commands_24h')}</div>
           <div className="nm-stat-val">{statsQ.data?.commands_24h ?? '—'}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">ORT. SÜRE</div>
+          <div className="nm-stat-label">{t('terminal_sessions.stat.avg_duration')}</div>
           <div className="nm-stat-val">{formatDuration(statsQ.data?.avg_duration_ms ?? null)}</div>
         </div>
         <div className={`nm-stat ${statsQ.data?.active_now ? 'warn' : 'ok'}`}>
-          <div className="nm-stat-label">ŞU AN AKTİF</div>
+          <div className="nm-stat-label">{t('terminal_sessions.stat.active_now')}</div>
           <div className="nm-stat-val">{statsQ.data?.active_now ?? '—'}</div>
         </div>
       </div>
@@ -223,11 +253,10 @@ export default function TerminalSessionsPage() {
       <Alert
         type="info" showIcon
         icon={<SafetyOutlined />}
-        message="AI özet özelliği yakında (T9 Tur 3B)"
+        message={t('terminal_sessions.alert.ai_coming_title')}
         description={
           <span style={{ fontSize: 12 }}>
-            Şu an her session'ın komut listesi + IO bytes + son ~10KB çıktısı kaydediliyor.
-            AI ile session özetleme (Claude API) bir sonraki increment'te aktif olacak.
+            {t('terminal_sessions.alert.ai_coming_desc')}
           </span>
         }
         style={{ marginBottom: 12 }}
@@ -239,7 +268,7 @@ export default function TerminalSessionsPage() {
         title={
           <Space>
             <Input
-              placeholder="Kullanıcı veya cihaz ara…"
+              placeholder={t('terminal_sessions.toolbar.search_placeholder')}
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0) }}
               style={{ width: 280 }}
@@ -249,13 +278,13 @@ export default function TerminalSessionsPage() {
               value={statusFilter}
               onChange={(v) => { setStatusFilter(v); setPage(0) }}
               options={[
-                { label: 'Tüm durumlar', value: 'all' },
-                { label: 'Sadece aktif', value: 'active' },
-                { label: 'Sadece kapalı', value: 'closed' },
+                { label: t('terminal_sessions.toolbar.status_all'), value: 'all' },
+                { label: t('terminal_sessions.toolbar.status_active_only'), value: 'active' },
+                { label: t('terminal_sessions.toolbar.status_closed_only'), value: 'closed' },
               ]}
               style={{ width: 160 }}
             />
-            <Button icon={<ReloadOutlined />} onClick={() => listQ.refetch()}>Yenile</Button>
+            <Button icon={<ReloadOutlined />} onClick={() => listQ.refetch()}>{t('common.refresh')}</Button>
           </Space>
         }
       >
@@ -286,7 +315,7 @@ export default function TerminalSessionsPage() {
         title={
           <Space>
             <DesktopOutlined />
-            Oturum Detayı
+            {t('terminal_sessions.drawer.title')}
             {detailQ.data?.session_id && (
               <Tag style={{ fontFamily: 'monospace', fontSize: 10 }}>
                 {detailQ.data.session_id.slice(0, 12)}…
@@ -299,11 +328,11 @@ export default function TerminalSessionsPage() {
         {detailQ.data && (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
             {/* Meta */}
-            <Card size="small" title="Genel">
+            <Card size="small" title={t('terminal_sessions.general.title')}>
               <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: 8, fontSize: 12 }}>
-                <Text strong>Kullanıcı</Text>
+                <Text strong>{t('terminal_sessions.general.label_user')}</Text>
                 <Text>{detailQ.data.username || `#${detailQ.data.user_id}`}</Text>
-                <Text strong>Cihaz</Text>
+                <Text strong>{t('terminal_sessions.general.label_device')}</Text>
                 <Text>
                   {detailQ.data.device_hostname || `#${detailQ.data.device_id}`}
                   {detailQ.data.device_ip && (
@@ -312,23 +341,27 @@ export default function TerminalSessionsPage() {
                     </Text>
                   )}
                 </Text>
-                <Text strong>Yol</Text>
-                <Text>{detailQ.data.connection_path || '—'}</Text>
+                <Text strong>{t('terminal_sessions.general.label_path')}</Text>
+                <Text>
+                  {detailQ.data.connection_path && PATH_LABEL[detailQ.data.connection_path]
+                    ? PATH_LABEL[detailQ.data.connection_path]
+                    : (detailQ.data.connection_path || '—')}
+                </Text>
                 {detailQ.data.agent_id && (<>
-                  <Text strong>Agent</Text>
+                  <Text strong>{t('terminal_sessions.general.label_agent')}</Text>
                   <Text style={{ fontFamily: 'monospace' }}>{detailQ.data.agent_id}</Text>
                 </>)}
-                <Text strong>Başlangıç</Text>
+                <Text strong>{t('terminal_sessions.general.label_started')}</Text>
                 <Text>{detailQ.data.started_at ? dayjs(detailQ.data.started_at).format('DD.MM.YYYY HH:mm:ss') : '—'}</Text>
-                <Text strong>Bitiş</Text>
+                <Text strong>{t('terminal_sessions.general.label_ended')}</Text>
                 <Text>{detailQ.data.ended_at ? dayjs(detailQ.data.ended_at).format('DD.MM.YYYY HH:mm:ss') : '—'}</Text>
-                <Text strong>Süre</Text>
+                <Text strong>{t('terminal_sessions.general.label_duration')}</Text>
                 <Text>{formatDuration(detailQ.data.duration_ms)}</Text>
-                <Text strong>Çıkış Nedeni</Text>
-                <ExitTag reason={detailQ.data.exit_reason} />
-                <Text strong>Client IP</Text>
+                <Text strong>{t('terminal_sessions.general.label_exit_reason')}</Text>
+                {renderExitTag(detailQ.data.exit_reason)}
+                <Text strong>{t('terminal_sessions.general.label_client_ip')}</Text>
                 <Text style={{ fontFamily: 'monospace' }}>{detailQ.data.client_ip || '—'}</Text>
-                <Text strong>I/O</Text>
+                <Text strong>{t('terminal_sessions.general.label_io')}</Text>
                 <Text style={{ fontFamily: 'monospace' }}>
                   ↑{formatBytes(detailQ.data.input_bytes)} · ↓{formatBytes(detailQ.data.output_bytes)}
                 </Text>
@@ -341,7 +374,7 @@ export default function TerminalSessionsPage() {
               title={
                 <Space>
                   <RobotOutlined style={{ color: 'var(--accent)' }} />
-                  AI Özet
+                  {t('terminal_sessions.ai.card_title')}
                   {detailQ.data.ai_summary_status && (
                     <Tag color={
                       detailQ.data.ai_summary_status === 'completed' ? 'green' :
@@ -362,7 +395,7 @@ export default function TerminalSessionsPage() {
                     disabled={detailQ.data.ai_summary_status === 'running'}
                     onClick={() => summarizeMut.mutate(detailQ.data.session_id)}
                   >
-                    {detailQ.data.ai_summary ? 'Yeniden Üret' : 'Özet Üret'}
+                    {detailQ.data.ai_summary ? t('terminal_sessions.ai.btn_regenerate') : t('terminal_sessions.ai.btn_generate')}
                   </Button>
                 )
               }
@@ -373,16 +406,15 @@ export default function TerminalSessionsPage() {
                 </Paragraph>
               ) : detailQ.data.ai_summary_status === 'running' ? (
                 <Text style={{ color: 'var(--fg-3)' }}>
-                  AI özet üretiliyor… (3-8 saniye)
+                  {t('terminal_sessions.ai.status_running_text')}
                 </Text>
               ) : (
                 <Space direction="vertical" size={6}>
                   <Text style={{ color: 'var(--fg-3)' }}>
-                    Bu session için henüz AI özet üretilmedi.
+                    {t('terminal_sessions.ai.empty_title')}
                   </Text>
                   <Text style={{ fontSize: 11, color: 'var(--fg-3)' }}>
-                    AI Asistanı aktif provider'ı kullanır (Settings → AI Asistanı).
-                    Provider configure değilse hata alırsınız.
+                    {t('terminal_sessions.ai.empty_provider_hint')}
                   </Text>
                 </Space>
               )}
@@ -392,13 +424,14 @@ export default function TerminalSessionsPage() {
             <Card size="small" title={
               <Space>
                 <CodeOutlined />
-                Çıkartılan Komutlar
+                {t('terminal_sessions.commands.card_title')}
                 <Badge count={detailQ.data.commands_extracted.length} showZero />
               </Space>
             }>
               {detailQ.data.commands_extracted.length === 0 ? (
-                <Text style={{ color: 'var(--fg-3)' }}>Komut çıkarılmadı (boş input veya devam eden session)</Text>
+                <Text style={{ color: 'var(--fg-3)' }}>{t('terminal_sessions.commands.empty')}</Text>
               ) : (
+                // KURAL-E2: Terminal komutları (c.cmd) çevrilmez — CLI literal.
                 <div style={{
                   maxHeight: 280, overflow: 'auto',
                   fontFamily: 'monospace', fontSize: 12,
@@ -417,8 +450,8 @@ export default function TerminalSessionsPage() {
               )}
             </Card>
 
-            {/* Output excerpt */}
-            <Card size="small" title="Çıktı Özeti (son ~10KB)">
+            {/* Output excerpt — KURAL-E2: ham terminal output çevrilmez */}
+            <Card size="small" title={t('terminal_sessions.output.card_title')}>
               {detailQ.data.output_excerpt ? (
                 <pre style={{
                   maxHeight: 300, overflow: 'auto', fontSize: 11,
@@ -427,7 +460,7 @@ export default function TerminalSessionsPage() {
                   whiteSpace: 'pre-wrap',
                 }}>{detailQ.data.output_excerpt}</pre>
               ) : (
-                <Text style={{ color: 'var(--fg-3)' }}>Çıktı kaydedilmedi</Text>
+                <Text style={{ color: 'var(--fg-3)' }}>{t('terminal_sessions.output.empty')}</Text>
               )}
             </Card>
           </Space>

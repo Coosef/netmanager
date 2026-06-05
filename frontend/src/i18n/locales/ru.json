@@ -1445,6 +1445,90 @@
     "col_detail": "Детали",
     "col_ip": "IP"
   },
+  "terminal_sessions": {
+    "crumb_security": "Безопасность",
+    "crumb_audit": "Аудит SSH-сессий",
+    "page_title": "Аудит SSH-сессий",
+    "page_subtitle": "Интерактивные SSH-сессии, открытые из браузера · извлечённые команды, IO-байты, выдержка вывода · криминалистический аудит.",
+    "records_count": "{{count}} записей",
+    "stat": {
+      "sessions_24h": "СЕССИЙ (24Ч)",
+      "commands_24h": "КОМАНД (24Ч)",
+      "avg_duration": "СР. ДЛИТ.",
+      "active_now": "АКТИВНЫЕ СЕЙЧАС"
+    },
+    "alert": {
+      "ai_coming_title": "AI-сводка скоро (T9 Tur 3B)",
+      "ai_coming_desc": "В настоящее время записывается список команд + IO-байты + последние ~10 КБ вывода каждой сессии. AI-сводка сессии (Claude API) будет включена в следующем инкременте."
+    },
+    "toolbar": {
+      "search_placeholder": "Поиск пользователя или устройства…",
+      "status_all": "Все статусы",
+      "status_active_only": "Только активные",
+      "status_closed_only": "Только закрытые"
+    },
+    "col": {
+      "started_at": "НАЧАЛО",
+      "username": "ПОЛЬЗОВАТЕЛЬ",
+      "device": "УСТРОЙСТВО",
+      "connection_path": "ПУТЬ",
+      "commands": "КОМАНДЫ",
+      "duration": "ДЛИТ.",
+      "io": "I/O",
+      "status": "СТАТУС",
+      "client_ip": "IP"
+    },
+    "status": {
+      "in_progress": "Выполняется",
+      "user_closed": "Закрыто пользователем",
+      "idle_timeout": "Таймаут простоя",
+      "agent_disconnected": "Агент отключён",
+      "paramiko_error": "Ошибка Paramiko",
+      "ws_error": "Ошибка WebSocket",
+      "stale_cleanup": "Автоочистка"
+    },
+    "path": {
+      "agent_relay": "Агент",
+      "direct_paramiko": "Прямое"
+    },
+    "drawer": {
+      "title": "Детали сессии"
+    },
+    "general": {
+      "title": "Общее",
+      "label_user": "Пользователь",
+      "label_device": "Устройство",
+      "label_path": "Путь",
+      "label_agent": "Агент",
+      "label_started": "Начало",
+      "label_ended": "Конец",
+      "label_duration": "Длительность",
+      "label_exit_reason": "Причина выхода",
+      "label_client_ip": "IP клиента",
+      "label_io": "I/O"
+    },
+    "ai": {
+      "card_title": "AI-сводка",
+      "btn_regenerate": "Сгенерировать заново",
+      "btn_generate": "Сгенерировать сводку",
+      "status_running_text": "Генерация AI-сводки… (3-8 секунд)",
+      "empty_title": "Для этой сессии ещё не сгенерирована AI-сводка.",
+      "empty_provider_hint": "AI-ассистент использует активного провайдера (Настройки → AI-ассистент). При отсутствии настроенного провайдера будет ошибка."
+    },
+    "commands": {
+      "card_title": "Извлечённые команды",
+      "empty": "Команды не извлечены (пустой ввод или продолжающаяся сессия)"
+    },
+    "output": {
+      "card_title": "Выдержка вывода (последние ~10 КБ)",
+      "empty": "Вывод не записан"
+    },
+    "toast": {
+      "ai_ready": "AI-сводка готова ({{provider}} / {{tokens}} токенов)",
+      "ai_status_other": "Статус: {{status}}",
+      "ai_failed": "Не удалось сгенерировать AI-сводку"
+    }
+  },
   "settings": {
     "title": "Настройки",
     "language": "Язык",
