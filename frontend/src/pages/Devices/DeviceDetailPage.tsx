@@ -13,6 +13,7 @@ import { useMemo } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { Spin, Result, Tabs, App } from 'antd'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
 import { DETAIL_TABS, normalizeTab, type TabKey } from './detail/_tabs'
@@ -28,20 +29,19 @@ import ActionsTab from './detail/ActionsTab'
 import TerminalTab from './detail/TerminalTab'
 import dayjs from 'dayjs'
 
-/** Wave 2 #2 F1: status → .nm-status-dot class ve Türkçe etiket. */
-const STATUS_MAP: Record<string, { cls: 'ok' | 'crit' | 'warn' | ''; label: string }> = {
-  online:      { cls: 'ok',   label: 'Çevrimiçi' },
-  offline:     { cls: 'crit', label: 'Çevrimdışı' },
-  unreachable: { cls: 'warn', label: 'Ulaşılamıyor' },
-  unknown:     { cls: '',     label: 'Bilinmiyor' },
+/** Wave 2 #2 F1: status → .nm-status-dot class. KURAL-E1: TR etiketler
+ *  component içinde useMemo + t() ile çözülür; module-level literal yok. */
+const STATUS_CLS: Record<string, 'ok' | 'crit' | 'warn' | ''> = {
+  online: 'ok', offline: 'crit', unreachable: 'warn', unknown: '',
 }
 
-/** Wave 2 #2 F1: getHealthScores score → risk pill rengi + etiket. */
-function riskFromScore(score: number | null): { cls: 'ok' | 'warn' | 'crit'; label: string } | null {
+/** Wave 2 #2 F1: getHealthScores score → risk pill class + i18n key.
+ *  KURAL-E1: etiket TR literal değil; render-time t() ile çevrilir. */
+function riskFromScore(score: number | null): { cls: 'ok' | 'warn' | 'crit'; labelKey: string } | null {
   if (score === null || score === undefined) return null
-  if (score >= 80) return { cls: 'ok',   label: 'SAĞLIKLI' }
-  if (score >= 50) return { cls: 'warn', label: 'İZLENMELİ' }
-  return { cls: 'crit', label: 'KRİTİK' }
+  if (score >= 80) return { cls: 'ok',   labelKey: 'devices.detail.risk.healthy' }
+  if (score >= 50) return { cls: 'warn', labelKey: 'devices.detail.risk.watch' }
+  return { cls: 'crit', labelKey: 'devices.detail.risk.critical' }
 }
 
 export default function DeviceDetailPage() {
@@ -49,8 +49,17 @@ export default function DeviceDetailPage() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const [search, setSearch] = useSearchParams()
   const id = Number(deviceId)
+
+  // KURAL-E1: status label haritası hook scope'unda useMemo ile.
+  const STATUS_LABEL = useMemo<Record<string, string>>(() => ({
+    online:      t('devices.status.online'),
+    offline:     t('devices.status.offline'),
+    unreachable: t('devices.status.unreachable'),
+    unknown:     t('common.unknown'),
+  }), [t])
 
   const { data: device, isLoading, error } = useQuery({
     queryKey: ['device', id],
@@ -75,14 +84,14 @@ export default function DeviceDetailPage() {
   const takeBackupMut = useMutation({
     mutationFn: () => devicesApi.takeBackup(id),
     onSuccess: () => {
-      message.success('Backup tetiklendi')
+      message.success(t('devices.detail.toast.backup_triggered'))
       qc.invalidateQueries({ queryKey: ['device-backups', id] })
       qc.invalidateQueries({ queryKey: ['device', id] })
     },
     onError: (e: any) => {
-      const detail = e?.response?.data?.detail || 'Backup başarısız'
+      const detail = e?.response?.data?.detail || t('devices.detail.toast.backup_failed')
       if (typeof detail === 'string' && detail.includes("hasn't changed")) {
-        message.info('Config değişmemiş, yeni yedek alınmadı')
+        message.info(t('devices.detail.toast.backup_no_change'))
       } else {
         message.error(detail)
       }
@@ -96,7 +105,7 @@ export default function DeviceDetailPage() {
     qc.invalidateQueries({ queryKey: ['device-vlans', id] })
     qc.invalidateQueries({ queryKey: ['device-backups', id] })
     qc.invalidateQueries({ queryKey: ['device-events', id] })
-    message.success('Veriler yenilendi')
+    message.success(t('devices.detail.toast.data_refreshed'))
   }
 
   // Feature gate: security_policy explicit false ise Güvenlik Politikası sekmesi gizlenir.
@@ -121,40 +130,43 @@ export default function DeviceDetailPage() {
   if (!Number.isFinite(id) || id <= 0) {
     return (
       <div style={{ padding: 24 }}>
-        <Result status="404" title="Geçersiz cihaz ID" extra={
-          <button className="nm-btn" onClick={() => navigate('/devices')}>← Cihazlar</button>
+        <Result status="404" title={t('devices.detail.invalid_id')} extra={
+          <button className="nm-btn" onClick={() => navigate('/devices')}>{t('devices.detail.back_to_list')}</button>
         } />
       </div>
     )
   }
-  if (isLoading) return <div style={{ padding: 24 }}><Spin /> Cihaz yükleniyor…</div>
+  if (isLoading) return <div style={{ padding: 24 }}><Spin /> {t('devices.detail.loading')}</div>
   if (error || !device) {
     return (
       <div style={{ padding: 24 }}>
-        <Result status="404" title="Cihaz bulunamadı"
-          subTitle="Cihaz silinmiş, başka bir org'a aitmiş ya da erişim yok."
-          extra={<button className="nm-btn" onClick={() => navigate('/devices')}>← Cihazlar</button>} />
+        <Result status="404" title={t('devices.detail.not_found_title')}
+          subTitle={t('devices.detail.not_found_desc')}
+          extra={<button className="nm-btn" onClick={() => navigate('/devices')}>{t('devices.detail.back_to_list')}</button>} />
       </div>
     )
   }
 
-  const status = STATUS_MAP[device.status] ?? STATUS_MAP.unknown
+  const statusCls = STATUS_CLS[device.status] ?? ''
+  const statusLabel = STATUS_LABEL[device.status] ?? STATUS_LABEL.unknown
   const vendorClass = (device.vendor || 'generic').toLowerCase().replace(/[^a-z]/g, '')
 
-  const tabItems = visibleTabs.map((t) => ({
-    key: t.key,
-    label: t.label + (t.placeholder ? ' ·' : ''),
+  // KURAL-E1: tab item üretimi render-time t() ile. Iç içe yerel `t` değişkeni
+  // kullanırken outer useTranslation `t`'ini gölgelemesin diye `tab` adıyla.
+  const tabItems = visibleTabs.map((tab) => ({
+    key: tab.key,
+    label: t(tab.labelKey) + (tab.placeholder ? ' ·' : ''),
     children: (() => {
-      if (t.key === 'overview') return <OverviewTab device={device} />
-      if (t.key === 'security') return <SecurityPoliciesTab device={device} />
-      if (t.key === 'ports') return <PortsTab device={device} />
-      if (t.key === 'vlan') return <VlanTab device={device} />
-      if (t.key === 'mac') return <MacTab device={device} />
-      if (t.key === 'poe') return <PoeTab device={device} />
-      if (t.key === 'events') return <EventsTab device={device} />
-      if (t.key === 'backup') return <BackupTab device={device} />
-      if (t.key === 'actions') return <ActionsTab device={device} />
-      if (t.key === 'terminal') return <TerminalTab device={device} />
+      if (tab.key === 'overview') return <OverviewTab device={device} />
+      if (tab.key === 'security') return <SecurityPoliciesTab device={device} />
+      if (tab.key === 'ports') return <PortsTab device={device} />
+      if (tab.key === 'vlan') return <VlanTab device={device} />
+      if (tab.key === 'mac') return <MacTab device={device} />
+      if (tab.key === 'poe') return <PoeTab device={device} />
+      if (tab.key === 'events') return <EventsTab device={device} />
+      if (tab.key === 'backup') return <BackupTab device={device} />
+      if (tab.key === 'actions') return <ActionsTab device={device} />
+      if (tab.key === 'terminal') return <TerminalTab device={device} />
       return null  // tüm sekmeler artık live; placeholder yok
     })(),
   }))
@@ -168,13 +180,13 @@ export default function DeviceDetailPage() {
             <span
               onClick={() => navigate('/devices')}
               style={{ cursor: 'pointer' }}
-            >Cihazlar</span>
+            >{t('devices.crumb_devices')}</span>
             {' › '}
             <span>{device.hostname || device.ip_address}</span>
           </div>
           <h1 className="nm-page-title">
             {device.hostname || device.ip_address}
-            {risk && <span className={`nm-risk-pill ${risk.cls}`}>{risk.label}</span>}
+            {risk && <span className={`nm-risk-pill ${risk.cls}`}>{t(risk.labelKey)}</span>}
             {device.lifecycle_status && device.lifecycle_status !== 'production' && (
               <span className="nm-pill">{device.lifecycle_status}</span>
             )}
@@ -184,8 +196,8 @@ export default function DeviceDetailPage() {
             display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
             marginTop: 6,
           }}>
-            <span className={`nm-status-dot ${status.cls}${status.cls === 'ok' || status.cls === 'crit' ? ' pulse' : ''}`}></span>
-            <span>{status.label}</span>
+            <span className={`nm-status-dot ${statusCls}${statusCls === 'ok' || statusCls === 'crit' ? ' pulse' : ''}`}></span>
+            <span>{statusLabel}</span>
             <span style={{ color: 'var(--fg-3)' }}>·</span>
             <code style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{device.ip_address}</code>
             {device.vendor && (
@@ -219,23 +231,23 @@ export default function DeviceDetailPage() {
             className="nm-btn ghost"
             onClick={() => takeBackupMut.mutate()}
             disabled={takeBackupMut.isPending}
-            title="Cihazdan SSH ile config backup al"
+            title={t('devices.detail.actions.backup_tooltip')}
           >
-            {takeBackupMut.isPending ? 'Alınıyor…' : 'Yedek Al'}
+            {takeBackupMut.isPending ? t('devices.detail.actions.backup_loading') : t('devices.detail.actions.backup_btn')}
           </button>
           <button
             className="nm-btn ghost"
             onClick={() => setTab('terminal')}
-            title="Terminal sekmesine geç (Canlı SSH için Canlı SSH modunu seçin)"
+            title={t('devices.detail.actions.ssh_tooltip')}
           >
-            SSH Aç
+            {t('devices.detail.actions.ssh_btn')}
           </button>
           <button
             className="nm-btn"
             onClick={handleRefresh}
-            title="Bu cihazın tüm verilerini yeniden çek"
+            title={t('devices.detail.actions.refresh_tooltip')}
           >
-            Yenile
+            {t('devices.detail.actions.refresh_btn')}
           </button>
         </div>
       </div>

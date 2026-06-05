@@ -15,6 +15,7 @@ import { Select, Button, Card, Tag, Typography, message } from 'antd'
 import { SafetyOutlined, ArrowRightOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import type { Device } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { securityPoliciesApi } from '@/api/securityPolicies'
@@ -26,6 +27,7 @@ const { Text, Paragraph } = Typography
 export default function SecurityPoliciesTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const { t } = useTranslation()
   const { isOrgAdmin } = useAuthStore()
   const canWrite = isOrgAdmin()
 
@@ -65,10 +67,10 @@ export default function SecurityPoliciesTab({ device }: { device: Device }) {
   const saveMut = useMutation({
     mutationFn: (payload: Record<string, any>) => devicesApi.update(device.id, payload),
     onSuccess: () => {
-      message.success('Politika ataması kaydedildi')
+      message.success(t('devices.detail.security.toast.saved'))
       qc.invalidateQueries({ queryKey: ['device', device.id] })
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Kaydedilemedi'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.detail.ports.toast.save_failed')),
   })
 
   const dirty =
@@ -86,87 +88,90 @@ export default function SecurityPoliciesTab({ device }: { device: Device }) {
 
   return (
     <div style={{ padding: '8px 0 16px', maxWidth: 880 }}>
-      <Card size="small" title={<><SafetyOutlined /> Cihaz Seviyesi Atamalar</>}>
+      <Card size="small" title={<><SafetyOutlined /> {t('devices.detail.security.device_level_title')}</>}>
         <div style={{ marginBottom: 16 }}>
-          <Text strong>Switch Politikası</Text>
+          <Text strong>{t('devices.detail.security.switch_policy_label')}</Text>
           <div style={{ color: 'var(--fg-3, #64748b)', fontSize: 12, marginBottom: 6 }}>
-            Bu cihazın CPU/bellek/PoE eşikleri vb. — boş = atanmamış → org varsayılanı.
+            {t('devices.detail.security.switch_policy_desc')}
           </div>
           <Select
             allowClear
-            placeholder={`— Atanmamış (org varsayılanı${orgDefaultSwitch ? `: ${orgDefaultSwitch.name}` : ''}) —`}
+            placeholder={orgDefaultSwitch
+              ? t('devices.detail.security.unassigned_with_default', { name: orgDefaultSwitch.name })
+              : t('devices.detail.security.unassigned')}
             value={switchPid}
             disabled={!canWrite}
             onChange={(v) => setSwitchPid(v ?? undefined)}
             style={{ width: '100%' }}
             options={switchPolicies.map((p: any) => ({
-              label: p.is_default ? `${p.name} (varsayılan)` : p.name,
+              label: p.is_default ? t('devices.detail.security.option_default', { name: p.name }) : p.name,
               value: p.id,
             }))}
           />
         </div>
 
         <div>
-          <Text strong>Port Politikası (cihaz geneli default)</Text>
+          <Text strong>{t('devices.detail.security.port_policy_label')}</Text>
           <div style={{ color: 'var(--fg-3, #64748b)', fontSize: 12, marginBottom: 6 }}>
-            Cihazın tüm portları için varsayılan. Port-bazlı override = Portlar sekmesi.
+            {t('devices.detail.security.port_policy_desc')}
           </div>
           <Select
             allowClear
-            placeholder={`— Atanmamış (org varsayılanı${orgDefaultPort ? `: ${orgDefaultPort.name}` : ''}) —`}
+            placeholder={orgDefaultPort
+              ? t('devices.detail.security.unassigned_with_default', { name: orgDefaultPort.name })
+              : t('devices.detail.security.unassigned')}
             value={portPid}
             disabled={!canWrite}
             onChange={(v) => setPortPid(v ?? undefined)}
             style={{ width: '100%' }}
             options={portPolicies.map((p: any) => ({
-              label: p.is_default ? `${p.name} (varsayılan)` : p.name,
+              label: p.is_default ? t('devices.detail.security.option_default', { name: p.name }) : p.name,
               value: p.id,
             }))}
           />
         </div>
 
         <div style={{ marginTop: 16, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {!canWrite && <Tag>Salt-okunur (org_admin+ kaydedebilir)</Tag>}
+          {!canWrite && <Tag>{t('devices.detail.security.readonly_tag')}</Tag>}
           {canWrite && (
             <Button type="primary" loading={saveMut.isPending} disabled={!dirty} onClick={handleSave}>
-              Kaydet
+              {t('common.save')}
             </Button>
           )}
         </div>
       </Card>
 
-      <Card size="small" title="Etkin Resolver Zinciri" style={{ marginTop: 16 }}>
+      <Card size="small" title={t('devices.detail.security.resolver_title')} style={{ marginTop: 16 }}>
         <Paragraph type="secondary" style={{ fontSize: 12, marginBottom: 12 }}>
-          Cihaz/port için **uygulanan** politika nereden geliyor:
-          <em> atanan → cihaz default → org default → hardcoded fallback.</em>
+          {t('devices.detail.security.resolver_desc')}
         </Paragraph>
         <div style={{ marginBottom: 10 }}>
-          <Text strong>Switch:</Text>{' '}
+          <Text strong>{t('devices.detail.security.switch_label')}</Text>{' '}
           {assignedSwitch
-            ? <><Tag color="blue">atanan</Tag> {assignedSwitch.name}</>
+            ? <><Tag color="blue">{t('devices.detail.security.tag_assigned')}</Tag> {assignedSwitch.name}</>
             : orgDefaultSwitch
-              ? <><Tag>org default</Tag> {orgDefaultSwitch.name}</>
-              : <><Tag color="red">fallback</Tag> hardcoded baseline</>}
+              ? <><Tag>{t('devices.detail.security.tag_org_default')}</Tag> {orgDefaultSwitch.name}</>
+              : <><Tag color="red">{t('devices.detail.security.tag_fallback')}</Tag> {t('devices.detail.security.fallback_text')}</>}
         </div>
         <div>
-          <Text strong>Portlar:</Text>{' '}
+          <Text strong>{t('devices.detail.security.ports_label')}</Text>{' '}
           {overrideCount > 0 && (
             <>
-              <Tag color="green">{overrideCount} port override</Tag>{' '}
+              <Tag color="green">{t('devices.detail.security.port_override_count', { count: overrideCount })}</Tag>{' '}
               <Button size="small" type="link" onClick={() => navigate(`?tab=ports`)}>
-                Portlar sekmesi <ArrowRightOutlined />
+                {t('devices.detail.security.ports_tab_link')} <ArrowRightOutlined />
               </Button>
               <br />
               <span style={{ color: 'var(--fg-3,#64748b)', fontSize: 12 }}>
-                Override olmayan portlar şu zincire düşer:
+                {t('devices.detail.security.non_override_chain')}
               </span>{' '}
             </>
           )}
           {assignedPort
-            ? <><Tag color="blue">cihaz default</Tag> {assignedPort.name}</>
+            ? <><Tag color="blue">{t('devices.detail.security.tag_device_default')}</Tag> {assignedPort.name}</>
             : orgDefaultPort
-              ? <><Tag>org default</Tag> {orgDefaultPort.name}</>
-              : <><Tag color="red">fallback</Tag> hardcoded baseline</>}
+              ? <><Tag>{t('devices.detail.security.tag_org_default')}</Tag> {orgDefaultPort.name}</>
+              : <><Tag color="red">{t('devices.detail.security.tag_fallback')}</Tag> {t('devices.detail.security.fallback_text')}</>}
         </div>
       </Card>
     </div>

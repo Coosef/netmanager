@@ -16,6 +16,7 @@ import {
   ReloadOutlined, CopyOutlined, SafetyCertificateOutlined, WarningOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import type { Device } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { useAuthStore } from '@/store/auth'
@@ -26,6 +27,7 @@ const { Text } = Typography
 export default function LiveConfigTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const canConnect = useAuthStore((s) => s.can('devices', 'connect'))
   const [policyOpen, setPolicyOpen] = useState(false)
 
@@ -39,7 +41,7 @@ export default function LiveConfigTab({ device }: { device: Device }) {
   const checkPolicyMut = useMutation({
     mutationFn: () => devicesApi.checkConfigPolicy(device.id),
     onSuccess: () => setPolicyOpen(true),
-    onError: (e: any) => message.error(apiErr(e, 'Politika kontrolü başarısız')),
+    onError: (e: any) => message.error(apiErr(e, t('devices.detail.backup.toast.policy_failed'))),
   })
 
   const success = q.data?.success !== false
@@ -49,9 +51,9 @@ export default function LiveConfigTab({ device }: { device: Device }) {
     if (!config) return
     try {
       await navigator.clipboard.writeText(config)
-      message.success('Config panoya kopyalandı')
+      message.success(t('devices.detail.live_config.toast.copied'))
     } catch {
-      message.error('Kopyalama başarısız (tarayıcı izni?)')
+      message.error(t('devices.detail.live_config.toast.copy_failed'))
     }
   }
 
@@ -60,28 +62,32 @@ export default function LiveConfigTab({ device }: { device: Device }) {
   return (
     <div style={{ padding: '8px 0 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-        <Text strong>Canlı running-config</Text>
+        <Text strong>{t('devices.detail.live_config.title')}</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {q.isFetching ? 'çekiliyor…' : success && config ? `${config.split('\n').length} satır` : ''}
+          {q.isFetching
+            ? t('devices.detail.live_config.fetching')
+            : success && config
+              ? t('devices.detail.live_config.lines_count', { count: config.split('\n').length })
+              : ''}
         </Text>
         <Space style={{ marginLeft: 'auto' }}>
           <Button icon={<ReloadOutlined />} onClick={refresh} loading={q.isLoading || q.isFetching}>
-            Yenile
+            {t('common.refresh')}
           </Button>
           <Button icon={<CopyOutlined />} onClick={copyConfig} disabled={!config}>
-            Kopyala
+            {t('common.copy')}
           </Button>
           {canConnect && (
             <Tooltip title={!config && !q.isLoading
-              ? 'Cihaz canlı config çekemedi; yine de tetiklerseniz backend SSH ile yeniden dener.'
-              : 'Politika kurallarına göre running-config taraması yapar.'}>
+              ? t('devices.detail.live_config.scan_tooltip_no_config')
+              : t('devices.detail.live_config.scan_tooltip_default')}>
               <Button
                 type="primary"
                 icon={<SafetyCertificateOutlined />}
                 loading={checkPolicyMut.isPending}
                 onClick={() => checkPolicyMut.mutate()}
               >
-                Güvenlik Tarama
+                {t('devices.detail.backup.security_scan')}
               </Button>
             </Tooltip>
           )}
@@ -91,13 +97,14 @@ export default function LiveConfigTab({ device }: { device: Device }) {
       {!q.isLoading && !success && (
         <Alert
           type="warning" showIcon style={{ marginBottom: 12 }}
-          message="Cihaz erişilemez (running-config çekilemedi)"
-          description={q.data?.error || 'SSH yanıt vermedi.'}
+          message={t('devices.detail.live_config.unreachable_title')}
+          description={q.data?.error || t('devices.detail.live_config.unreachable_default')}
         />
       )}
 
       <Spin spinning={q.isLoading}>
         {config ? (
+          // KURAL-E2: Terminal/Config çıktısı (CLI komutları) çevrilmez.
           <pre style={{
             background: 'var(--bg-1, #0d1117)',
             color: 'var(--fg-0, #c9d1d9)',
@@ -112,16 +119,16 @@ export default function LiveConfigTab({ device }: { device: Device }) {
             whiteSpace: 'pre',
           }}>{config}</pre>
         ) : !q.isLoading && success ? (
-          <Text type="secondary">Boş config döndü.</Text>
+          <Text type="secondary">{t('devices.detail.live_config.empty_config')}</Text>
         ) : null}
       </Spin>
 
-      {/* Security Policy Check Modal — eski DeviceDetail.tsx:1812-1865 port */}
+      {/* Security Policy Check Modal */}
       <Modal
-        title={<Space><SafetyCertificateOutlined /> Güvenlik Politika Kontrolü — {device.hostname}</Space>}
+        title={<Space><SafetyCertificateOutlined /> {t('devices.detail.live_config.policy_modal_title', { hostname: device.hostname })}</Space>}
         open={policyOpen}
         onCancel={() => setPolicyOpen(false)}
-        footer={<Button onClick={() => setPolicyOpen(false)}>Kapat</Button>}
+        footer={<Button onClick={() => setPolicyOpen(false)}>{t('common.close')}</Button>}
         width={640}
       >
         {checkPolicyMut.data && (() => {
@@ -133,7 +140,7 @@ export default function LiveConfigTab({ device }: { device: Device }) {
                 <div style={{ fontSize: 48, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>
                   {d.policy_score}
                 </div>
-                <div style={{ color: '#888', marginBottom: 8 }}>Politika Puanı / 100</div>
+                <div style={{ color: '#888', marginBottom: 8 }}>{t('devices.detail.backup.policy_score_label')}</div>
                 <Progress
                   percent={d.policy_score}
                   strokeColor={scoreColor}
@@ -141,9 +148,9 @@ export default function LiveConfigTab({ device }: { device: Device }) {
                   style={{ maxWidth: 300, margin: '0 auto' }}
                 />
                 <Space style={{ marginTop: 8 }}>
-                  {d.critical_count > 0 && <Tag color="red">{d.critical_count} Kritik</Tag>}
-                  {d.violation_count > 0 && <Tag color="orange">{d.violation_count} İhlal</Tag>}
-                  {d.violation_count === 0 && <Tag color="green">Tüm kurallar geçti</Tag>}
+                  {d.critical_count > 0 && <Tag color="red">{t('devices.detail.backup.critical_count', { count: d.critical_count })}</Tag>}
+                  {d.violation_count > 0 && <Tag color="orange">{t('devices.detail.backup.violation_count', { count: d.violation_count })}</Tag>}
+                  {d.violation_count === 0 && <Tag color="green">{t('devices.detail.backup.all_rules_passed')}</Tag>}
                 </Space>
               </div>
               {d.violations.length > 0 && (
@@ -154,15 +161,15 @@ export default function LiveConfigTab({ device }: { device: Device }) {
                   pagination={false}
                   columns={[
                     {
-                      title: 'Önem', dataIndex: 'severity', width: 90,
+                      title: t('devices.detail.backup.col_severity'), dataIndex: 'severity', width: 90,
                       render: (v: string) => (
                         <Tag color={v === 'critical' ? 'red' : v === 'high' ? 'orange' : 'default'} icon={<WarningOutlined />}>
                           {v}
                         </Tag>
                       ),
                     },
-                    { title: 'Kural', dataIndex: 'rule_id', width: 160 },
-                    { title: 'Açıklama', dataIndex: 'description' },
+                    { title: t('devices.detail.backup.col_rule'), dataIndex: 'rule_id', width: 160 },
+                    { title: t('devices.form.description'), dataIndex: 'description' },
                   ]}
                 />
               )}

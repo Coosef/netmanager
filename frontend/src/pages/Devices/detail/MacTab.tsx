@@ -8,6 +8,7 @@ import { useMemo, useState } from 'react'
 import { Table, Tag, Input, Button, Typography, Space } from 'antd'
 import { ReloadOutlined, SearchOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import type { Device } from '@/types'
 import { macArpApi } from '@/api/macarp'
 import dayjs from 'dayjs'
@@ -17,6 +18,7 @@ const PAGE_LIMIT = 500
 
 export default function MacTab({ device }: { device: Device }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [search, setSearch] = useState('')
 
   const q = useQuery({
@@ -40,34 +42,38 @@ export default function MacTab({ device }: { device: Device }) {
   const total = q.data?.total ?? 0
   const capped = (q.data?.items?.length ?? 0) >= PAGE_LIMIT
 
+  // KURAL-E3: MAC / ARP verileri (mac_address, port, vlan_id, entry_type) cihaz
+  // verileri olup çevrilmiyor; sadece tablo başlıkları + UI etiketleri çevrilir.
   const columns = [
     { title: 'MAC', dataIndex: 'mac_address', key: 'mac', width: 180,
       render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code> },
-    { title: 'Port', dataIndex: 'port', key: 'port', width: 150,
+    { title: t('devices.detail.ports.col.port'), dataIndex: 'port', key: 'port', width: 150,
       render: (v: string) => v ? <code style={{ fontSize: 12 }}>{v}</code> : '—' },
     { title: 'VLAN', dataIndex: 'vlan_id', key: 'vlan', width: 80,
       render: (v?: number) => v ?? '—' },
-    { title: 'Tip', dataIndex: 'entry_type', key: 'type', width: 100,
+    { title: t('devices.detail.mac.col_type'), dataIndex: 'entry_type', key: 'type', width: 100,
       render: (v: string) => <Tag style={{ fontSize: 10 }}>{v || 'dynamic'}</Tag> },
-    { title: 'Son Görülme', dataIndex: 'last_seen', key: 'ls',
+    { title: t('common.last_seen'), dataIndex: 'last_seen', key: 'ls',
       render: (v: string) => v ? dayjs(v).format('YYYY-MM-DD HH:mm') : '—' },
   ]
 
   return (
     <div style={{ padding: '8px 0 16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Text strong>MAC Tablosu</Text>
+        <Text strong>{t('devices.detail.mac.title')}</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {total} kayıt{capped ? ` (ilk ${PAGE_LIMIT})` : ''}
+          {capped
+            ? t('devices.detail.mac.total_capped', { count: total, limit: PAGE_LIMIT })
+            : t('devices.detail.mac.total_records', { count: total })}
         </Text>
         <Space style={{ marginLeft: 'auto' }}>
           <Input
-            allowClear placeholder="MAC / port / VLAN ara…"
+            allowClear placeholder={t('devices.detail.mac.search_placeholder')}
             prefix={<SearchOutlined />} value={search}
             onChange={(e) => setSearch(e.target.value)} style={{ width: 240 }}
           />
           <Button icon={<ReloadOutlined />} onClick={() => qc.invalidateQueries({ queryKey: ['mac-table-device-tab', device.id] })} loading={q.isLoading}>
-            Yenile
+            {t('common.refresh')}
           </Button>
         </Space>
       </div>
@@ -76,7 +82,7 @@ export default function MacTab({ device }: { device: Device }) {
         size="small" rowKey="id" columns={columns as any} dataSource={filtered}
         loading={q.isLoading}
         pagination={{ pageSize: 50, showSizeChanger: false, hideOnSinglePage: true }}
-        locale={{ emptyText: total === 0 ? 'MAC kaydı yok' : 'Aramaya uyan kayıt yok' }}
+        locale={{ emptyText: total === 0 ? t('devices.detail.mac.empty_no_records') : t('devices.detail.mac.empty_no_matches') }}
       />
     </div>
   )

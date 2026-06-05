@@ -20,6 +20,7 @@ import {
   ReloadOutlined as RestartOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import type { Device, NetworkInterface } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { macArpApi } from '@/api/macarp'
@@ -46,11 +47,14 @@ const SOURCE_COLOR: Record<EffectiveSource, string> = {
   'fallback': 'red',
 }
 
-const SOURCE_LABEL: Record<EffectiveSource, string> = {
-  'override': 'override',
-  'cihaz-default': 'cihaz-default',
-  'org-default': 'org-default',
-  'fallback': 'fallback',
+// KURAL-E1: SOURCE_COLOR teknik (CSS), SOURCE_LABEL ise UI etiketi.
+// Etiketler hook scope'unda useMemo + t() ile çözülür; module-level literal
+// olarak çevrilmez (PortsTab'da useMemo'lu SOURCE_LABEL).
+const SOURCE_LABEL_KEY: Record<EffectiveSource, string> = {
+  'override':      'devices.detail.ports.source_override',
+  'cihaz-default': 'devices.detail.ports.source_device_default',
+  'org-default':   'devices.detail.ports.source_org_default',
+  'fallback':      'devices.detail.ports.source_fallback',
 }
 
 interface Row {
@@ -69,6 +73,7 @@ interface Row {
 
 export default function PortsTab({ device }: { device: Device }) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const dev = device as any
   const { isOrgAdmin } = useAuthStore()
   const canWrite = isOrgAdmin()
@@ -206,19 +211,19 @@ export default function PortsTab({ device }: { device: Device }) {
     res: BulkPoeResult, actionLabel: string,
   ) => {
     const lines: string[] = []
-    if (res.ok > 0) lines.push(`${res.ok} port ${actionLabel}`)
-    if (res.skipped > 0) lines.push(`${res.skipped} port PoE desteklemediği için atlandı`)
-    if (res.failed > 0) lines.push(`${res.failed} port başarısız`)
-    const desc = lines.length ? lines.join(' · ') : `${actionLabel} tamamlandı`
+    if (res.ok > 0) lines.push(t('devices.detail.ports.bulk_poe.ok_line', { count: res.ok, action: actionLabel }))
+    if (res.skipped > 0) lines.push(t('devices.detail.ports.bulk_poe.skipped_line', { count: res.skipped }))
+    if (res.failed > 0) lines.push(t('devices.detail.ports.bulk_poe.failed_line', { count: res.failed }))
+    const desc = lines.length ? lines.join(' · ') : t('devices.detail.ports.bulk_poe.completed', { action: actionLabel })
     if (res.failed > 0 || res.skipped > 0) {
       notification.warning({
-        message: `Toplu PoE ${actionLabel} — sonuç`,
+        message: t('devices.detail.ports.bulk_poe.result_title', { action: actionLabel }),
         description: desc,
         duration: 6,
       })
     } else {
       notification.success({
-        message: `Toplu PoE ${actionLabel} başarılı`,
+        message: t('devices.detail.ports.bulk_poe.success_title', { action: actionLabel }),
         description: desc,
         duration: 4,
       })
@@ -231,15 +236,19 @@ export default function PortsTab({ device }: { device: Device }) {
       portControlApi.setPoe(device.id, iface, enable),
     onSuccess: (_data, vars) => {
       notification.success({
-        message: `${vars.iface} → PoE ${vars.enable ? 'açıldı' : 'kapatıldı'}`,
-        description: 'İşlem kalıcıdır. Geri almak için aksi yönde aksiyon uygula.',
+        message: vars.enable
+          ? t('devices.detail.ports.toast.poe_on', { iface: vars.iface })
+          : t('devices.detail.ports.toast.poe_off', { iface: vars.iface }),
+        description: t('devices.detail.ports.toast.poe_permanent'),
         duration: 4,
       })
       invalidatePoeCaches()
     },
     onError: (e: any, vars) => notification.error({
-      message: `${vars.iface} PoE ${vars.enable ? 'açılamadı' : 'kapatılamadı'}`,
-      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+      message: vars.enable
+        ? t('devices.detail.ports.toast.poe_on_failed', { iface: vars.iface })
+        : t('devices.detail.ports.toast.poe_off_failed', { iface: vars.iface }),
+      description: e?.response?.data?.detail || t('common.error'),
     }),
   })
 
@@ -251,15 +260,15 @@ export default function PortsTab({ device }: { device: Device }) {
     },
     onSuccess: (_data, iface) => {
       notification.success({
-        message: `${iface} → PoE restart başarılı`,
-        description: 'disable → bekle → enable akışı tamamlandı.',
+        message: t('devices.detail.ports.toast.poe_restart_ok', { iface }),
+        description: t('devices.detail.ports.toast.poe_restart_desc'),
         duration: 4,
       })
       invalidatePoeCaches()
     },
     onError: (e: any, iface) => notification.error({
-      message: `${iface} PoE restart başarısız`,
-      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+      message: t('devices.detail.ports.toast.poe_restart_failed', { iface }),
+      description: e?.response?.data?.detail || t('common.error'),
     }),
     onSettled: (_d, _e, iface) => {
       setPoePending((prev) => {
@@ -275,13 +284,13 @@ export default function PortsTab({ device }: { device: Device }) {
     mutationFn: ({ action }: { action: 'on' | 'off' }) =>
       portControlApi.bulkPoe(device.id, selected, action),
     onSuccess: (res, vars) => {
-      reportBulkPoeResult(res, vars.action === 'on' ? 'açma' : 'kapatma')
+      reportBulkPoeResult(res, vars.action === 'on' ? t('devices.detail.ports.bulk_poe.action_on') : t('devices.detail.ports.bulk_poe.action_off'))
       setSelected([])
       invalidatePoeCaches()
     },
     onError: (e: any) => notification.error({
-      message: 'Toplu PoE işlemi başarısız',
-      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+      message: t('devices.detail.ports.bulk_poe.bulk_failed'),
+      description: e?.response?.data?.detail || t('common.error'),
     }),
   })
 
@@ -293,14 +302,14 @@ export default function PortsTab({ device }: { device: Device }) {
       return portControlApi.bulkPoe(device.id, selected, 'restart', opts)
     },
     onSuccess: (res) => {
-      reportBulkPoeResult(res, 'restart')
+      reportBulkPoeResult(res, t('devices.detail.ports.bulk_poe.action_restart'))
       setBulkPoeRestartOpen(false)
       setSelected([])
       invalidatePoeCaches()
     },
     onError: (e: any) => notification.error({
-      message: 'Toplu PoE restart başarısız',
-      description: e?.response?.data?.detail || 'Bilinmeyen hata',
+      message: t('devices.detail.ports.bulk_poe.bulk_restart_failed'),
+      description: e?.response?.data?.detail || t('common.error'),
     }),
     onSettled: () => setPoePending(new Set()),
   })
@@ -312,17 +321,16 @@ export default function PortsTab({ device }: { device: Device }) {
         selected.map((p) => ({ port_name: p, port_security_policy_id: policyId })),
       ),
     onSuccess: () => {
-      message.success(`${selected.length} port güncellendi`)
+      message.success(t('devices.detail.ports.toast.ports_updated', { count: selected.length }))
       setBulkOpen(false)
       setSelected([])
       qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Kaydedilemedi'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.detail.ports.toast.save_failed')),
   })
 
   const removeOverrideMut = useMutation({
     mutationFn: async () => {
-      // Yalnız override'ı OLAN portları DELETE; atanmamışları atla. Paralel; 404'leri yut.
       const results = await Promise.allSettled(
         selectedWithOverride.map((p) =>
           portPolicyAssignmentsApi.remove(device.id, p),
@@ -333,12 +341,12 @@ export default function PortsTab({ device }: { device: Device }) {
       return { ok, fail }
     },
     onSuccess: ({ ok, fail }) => {
-      if (fail > 0) message.warning(`${ok} override kaldırıldı, ${fail} başarısız`)
-      else message.success(`${ok} override kaldırıldı`)
+      if (fail > 0) message.warning(t('devices.detail.ports.toast.override_partial', { ok, fail }))
+      else message.success(t('devices.detail.ports.toast.override_removed', { count: ok }))
       setSelected([])
       qc.invalidateQueries({ queryKey: ['port-policy-assignments', device.id] })
     },
-    onError: () => message.error('Override kaldırma başarısız'),
+    onError: () => message.error(t('devices.detail.ports.toast.override_remove_failed')),
   })
 
   // Tek port VLAN ata (row aksiyon — hızlı yol). assignVlanIface state ile drive.
@@ -355,15 +363,15 @@ export default function PortsTab({ device }: { device: Device }) {
       ),
     onSuccess: (res) => {
       if (res.success) {
-        message.success(`${assignVlanIface!.name} → VLAN ataması yapıldı`)
+        message.success(t('devices.detail.ports.toast.vlan_assigned', { iface: assignVlanIface!.name }))
         setAssignVlanIface(null)
         assignVlanForm.resetFields()
         qc.invalidateQueries({ queryKey: ['device-interfaces', device.id] })
       } else {
-        message.error(res.error || 'VLAN atanamadı')
+        message.error(res.error || t('devices.detail.ports.toast.vlan_assign_failed'))
       }
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'VLAN atanamadı'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.detail.ports.toast.vlan_assign_failed')),
   })
 
   // Çoklu port toplu VLAN ata — Promise.allSettled (backend bulk endpoint yok).
@@ -388,13 +396,13 @@ export default function PortsTab({ device }: { device: Device }) {
       return { ok, fail }
     },
     onSuccess: ({ ok, fail }) => {
-      if (fail > 0) message.warning(`${ok} port güncellendi, ${fail} başarısız`)
-      else message.success(`${ok} port güncellendi`)
+      if (fail > 0) message.warning(t('devices.detail.ports.toast.bulk_vlan_partial', { ok, fail }))
+      else message.success(t('devices.detail.ports.toast.bulk_vlan_ok', { count: ok }))
       setBulkVlanOpen(false)
       setSelected([])
       qc.invalidateQueries({ queryKey: ['device-interfaces', device.id] })
     },
-    onError: () => message.error('Toplu VLAN ataması başarısız'),
+    onError: () => message.error(t('devices.detail.ports.toast.bulk_vlan_failed')),
   })
 
   /** Form'dan modal submit'i payload'a çevirir. parseVlanList hata atarsa Form
@@ -420,7 +428,7 @@ export default function PortsTab({ device }: { device: Device }) {
         ...(vals.native_vlan_id ? { native_vlan_id: vals.native_vlan_id } : {}),
       }
     } catch (e: any) {
-      const msg = e instanceof VlanListError ? e.message : 'Allowed VLANs geçersiz'
+      const msg = e instanceof VlanListError ? e.message : t('devices.detail.ports.vlan_modal.allowed_invalid')
       form.setFields([{ name: 'allowed_vlans', errors: [msg] }])
       return null
     }
@@ -428,12 +436,12 @@ export default function PortsTab({ device }: { device: Device }) {
 
   const columns = [
     {
-      title: 'Port', dataIndex: 'name', key: 'name', width: 180,
+      title: t('devices.detail.ports.col.port'), dataIndex: 'name', key: 'name', width: 180,
       render: (v: string) => <code style={{ fontSize: 12 }}>{v}</code>,
     },
-    { title: 'Açıklama', dataIndex: 'description', key: 'description', ellipsis: true },
+    { title: t('devices.detail.ports.col.description'), dataIndex: 'description', key: 'description', ellipsis: true },
     {
-      title: 'Status', dataIndex: 'status', key: 'status', width: 120,
+      title: t('common.status'), dataIndex: 'status', key: 'status', width: 120,
       render: (s: string) => {
         const up = /up|connected|forwarding/i.test(s)
         const down = /down|notconnect/i.test(s)
@@ -446,7 +454,7 @@ export default function PortsTab({ device }: { device: Device }) {
       render: (_: any, r: Row) => {
         if (r.macCount === 0) return <span style={{ color: 'var(--fg-3,#64748b)' }}>0</span>
         const label = r.macCapped ? `${r.macCount}+` : `${r.macCount}`
-        return <Tooltip title={`Bu portta ${label} MAC kaydı`}><span>{label}</span></Tooltip>
+        return <Tooltip title={t('devices.detail.ports.mac_tooltip', { label })}><span>{label}</span></Tooltip>
       },
     },
     {
@@ -454,22 +462,22 @@ export default function PortsTab({ device }: { device: Device }) {
       title: 'PoE', key: 'poe', width: 90,
       render: (_: any, r: Row) => {
         if (poePending.has(r.key)) {
-          return <Tag color="processing" style={{ fontSize: 11 }}>İşlemde…</Tag>
+          return <Tag color="processing" style={{ fontSize: 11 }}>{t('devices.detail.ports.poe_processing')}</Tag>
         }
         const st = poeStatusByPort.get(r.key)
         if (!st) return <span style={{ color: 'var(--fg-3,#64748b)' }}>—</span>
-        if (st === 'on') return <Tag color="green" style={{ fontSize: 11 }}>Açık</Tag>
-        if (st === 'off') return <Tag color="default" style={{ fontSize: 11 }}>Kapalı</Tag>
+        if (st === 'on') return <Tag color="green" style={{ fontSize: 11 }}>{t('devices.detail.ports.poe_on_tag')}</Tag>
+        if (st === 'off') return <Tag color="default" style={{ fontSize: 11 }}>{t('devices.detail.ports.poe_off_tag')}</Tag>
         return <Tag color="orange" style={{ fontSize: 11 }}>{st}</Tag>
       },
     },
     {
-      title: 'Policy', key: 'policy', width: 220,
+      title: t('devices.detail.ports.col.policy'), key: 'policy', width: 220,
       render: (_: any, r: Row) => (
         <span>
           <span style={{ fontWeight: 500, marginRight: 6 }}>{r.effective.name}</span>
           <Tag color={SOURCE_COLOR[r.effective.source]} style={{ fontSize: 10 }}>
-            {SOURCE_LABEL[r.effective.source]}
+            {t(SOURCE_LABEL_KEY[r.effective.source])}
           </Tag>
         </span>
       ),
@@ -483,7 +491,7 @@ export default function PortsTab({ device }: { device: Device }) {
         const policy = typeof det.policy === 'string' ? det.policy : '?'
         const trans = typeof det.transitions === 'number' ? det.transitions : '?'
         return (
-          <Tooltip title={`DRY-RUN öneri [policy=${policy}] · ${r.flapEvents.length} flap olayı (24sa), son: ${trans} port değişimi. Gerçek aksiyon UYGULANMADI (shutdown C5 ile gelecek).`}>
+          <Tooltip title={t('devices.detail.ports.dry_run_tooltip', { policy, count: r.flapEvents.length, trans })}>
             <Tag color="orange" style={{ fontSize: 10 }}>
               DRY-RUN ({r.flapEvents.length})
             </Tag>
@@ -493,7 +501,7 @@ export default function PortsTab({ device }: { device: Device }) {
     },
     // RBAC: canConnect gerekir; yoksa kolon hiç render edilmez (rows ekleme yok).
     ...(canWrite ? [{
-      title: 'Aksiyon', key: 'rowAction', width: 280,
+      title: t('common.actions'), key: 'rowAction', width: 280,
       render: (_: any, r: Row) => {
         const iface = (ifaceQ.data?.interfaces ?? []).find((i) => i.name === r.key)
         if (!iface) return null
@@ -502,7 +510,7 @@ export default function PortsTab({ device }: { device: Device }) {
         const isPending = poePending.has(r.key)
         return (
           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-            <Tooltip title="Bu porta VLAN ata (tek port hızlı yol)">
+            <Tooltip title={t('devices.detail.ports.row.vlan_tooltip')}>
               <Button
                 size="small" type="link"
                 icon={<ApartmentOutlined />}
@@ -514,9 +522,9 @@ export default function PortsTab({ device }: { device: Device }) {
             {poeCapable && (
               <>
                 <Popconfirm
-                  title={`${r.key} → PoE Aç?`}
-                  description="İşlem kalıcıdır."
-                  okText="Aç" cancelText="Vazgeç"
+                  title={t('devices.detail.ports.row.poe_on_title', { iface: r.key })}
+                  description={t('devices.detail.ports.row.poe_on_desc')}
+                  okText={t('devices.detail.ports.row.poe_on_ok')} cancelText={t('devices.detail.ports.row.poe_cancel')}
                   onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: true })}
                   disabled={poeSt === 'on' || isPending}
                 >
@@ -525,12 +533,12 @@ export default function PortsTab({ device }: { device: Device }) {
                     icon={<ThunderboltOutlined />}
                     disabled={poeSt === 'on' || isPending}
                     loading={setPoeMut.isPending && setPoeMut.variables?.iface === r.key && setPoeMut.variables?.enable}
-                  >Aç</Button>
+                  >{t('devices.detail.ports.row.poe_on_ok')}</Button>
                 </Popconfirm>
                 <Popconfirm
-                  title={`${r.key} → PoE Kapat?`}
-                  description="Bu port üzerindeki cihaz güç kaybeder. İşlem kalıcıdır."
-                  okText="Kapat" okButtonProps={{ danger: true }} cancelText="Vazgeç"
+                  title={t('devices.detail.ports.row.poe_off_title', { iface: r.key })}
+                  description={t('devices.detail.ports.row.poe_off_desc')}
+                  okText={t('devices.detail.ports.row.poe_off_ok')} okButtonProps={{ danger: true }} cancelText={t('devices.detail.ports.row.poe_cancel')}
                   onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: false })}
                   disabled={poeSt === 'off' || isPending}
                 >
@@ -539,12 +547,12 @@ export default function PortsTab({ device }: { device: Device }) {
                     icon={<PoweroffOutlined />}
                     disabled={poeSt === 'off' || isPending}
                     loading={setPoeMut.isPending && setPoeMut.variables?.iface === r.key && !setPoeMut.variables?.enable}
-                  >Kapat</Button>
+                  >{t('devices.detail.ports.row.poe_off_ok')}</Button>
                 </Popconfirm>
                 <Popconfirm
-                  title={`${r.key} → PoE Restart?`}
-                  description="disable → bekle → enable. ~10sn sürer."
-                  okText="Restart" cancelText="Vazgeç"
+                  title={t('devices.detail.ports.row.poe_restart_title', { iface: r.key })}
+                  description={t('devices.detail.ports.row.poe_restart_desc')}
+                  okText={t('devices.detail.ports.row.poe_restart_ok')} cancelText={t('devices.detail.ports.row.poe_cancel')}
                   onConfirm={() => restartPoeMut.mutate(r.key)}
                   disabled={isPending}
                 >
@@ -553,7 +561,7 @@ export default function PortsTab({ device }: { device: Device }) {
                     icon={<RestartOutlined />}
                     disabled={isPending}
                     loading={restartPoeMut.isPending && restartPoeMut.variables === r.key}
-                  >Restart</Button>
+                  >{t('devices.detail.ports.row.poe_restart_ok')}</Button>
                 </Popconfirm>
               </>
             )}
@@ -587,51 +595,50 @@ export default function PortsTab({ device }: { device: Device }) {
       {/* Wave 2 #2 F2 — Port Statistics statbar (5 KPI) */}
       <div className="nm-statbar" style={{ marginBottom: 12 }}>
         <div className={`nm-stat ${portStats.up > 0 ? 'ok' : ''}`}>
-          <div className="nm-stat-label">Aktif Port</div>
+          <div className="nm-stat-label">{t('devices.detail.overview.active_port')}</div>
           <div className="nm-stat-val">
             {portStats.up}
             {portStats.total > 0 && <small> / {portStats.total}</small>}
           </div>
         </div>
         <div className={`nm-stat ${portStats.err > 0 ? 'crit' : ''}`}>
-          <div className="nm-stat-label">Err / Down</div>
+          <div className="nm-stat-label">{t('devices.detail.overview.err_down')}</div>
           <div className="nm-stat-val">{portStats.err}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">VLAN (port-bazlı)</div>
+          <div className="nm-stat-label">{t('devices.detail.ports.stat.vlan_by_port')}</div>
           <div className="nm-stat-val">{portStats.vlans}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">MAC Tablosu</div>
+          <div className="nm-stat-label">{t('devices.detail.ports.stat.mac_table')}</div>
           <div className="nm-stat-val">{portStats.macTotal}</div>
-          <div className="nm-stat-delta">öğrenilmiş MAC</div>
+          <div className="nm-stat-delta">{t('devices.detail.ports.stat.mac_learned')}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">Override</div>
+          <div className="nm-stat-label">{t('devices.detail.ports.stat.override')}</div>
           <div className="nm-stat-val">{overrideSet.size}</div>
-          <div className="nm-stat-delta">port policy override</div>
+          <div className="nm-stat-delta">{t('devices.detail.ports.stat.override_caption')}</div>
         </div>
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Text strong>Port listesi</Text>
+        <Text strong>{t('devices.detail.ports.list_title')}</Text>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          {ifaceQ.data?.cached ? 'cache (≤30s)' : ifaceQ.data?.fetched_at ? 'canlı' : ''}
+          {ifaceQ.data?.cached ? t('devices.detail.ports.cache_label') : ifaceQ.data?.fetched_at ? t('devices.detail.overview.live') : ''}
         </Text>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <Button icon={<ReloadOutlined />} onClick={refresh} loading={isLoading}>Yenile</Button>
+          <Button icon={<ReloadOutlined />} onClick={refresh} loading={isLoading}>{t('common.refresh')}</Button>
         </div>
       </div>
 
       {!isLoading && !fetchSuccess && (
         <Alert
           type="warning" showIcon style={{ marginBottom: 12 }}
-          message="Cihaz erişilemez (port listesi gelmedi)"
+          message={t('devices.detail.ports.unreachable_title')}
           description={
             <div style={{ fontSize: 12 }}>
-              {fetchError || 'SSH/SNMP yanıt vermedi.'}{' '}
-              Politika override'ları yine kaydedilebilir; cihaz erişilince effective değer
-              uygulanır. Toplu işlemler (C7.C commit 3-4) yine açık olacak.
+              {fetchError || t('devices.detail.ports.unreachable_default')}{' '}
+              {t('devices.detail.ports.unreachable_desc')}
             </div>
           }
         />
@@ -644,7 +651,7 @@ export default function PortsTab({ device }: { device: Device }) {
           columns={columns as any}
           dataSource={rows}
           pagination={{ pageSize: 50, showSizeChanger: false, hideOnSinglePage: true }}
-          locale={{ emptyText: fetchSuccess ? 'Port bulunamadı' : '—' }}
+          locale={{ emptyText: fetchSuccess ? t('devices.detail.ports.empty_no_ports') : '—' }}
           rowSelection={canWrite ? {
             selectedRowKeys: selected,
             onChange: (keys) => setSelected(keys as string[]),
@@ -662,18 +669,18 @@ export default function PortsTab({ device }: { device: Device }) {
           display: 'flex', alignItems: 'center', gap: 12,
           boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
         }}>
-          <Text strong>Seçili {selected.length} port</Text>
-          <Button type="primary" onClick={() => setBulkOpen(true)}>Policy ata ▾</Button>
+          <Text strong>{t('devices.detail.ports.toolbar.selected', { count: selected.length })}</Text>
+          <Button type="primary" onClick={() => setBulkOpen(true)}>{t('devices.detail.ports.toolbar.policy_assign')}</Button>
           <Button
             icon={<ApartmentOutlined />}
             onClick={() => setBulkVlanOpen(true)}
           >
-            VLAN ata ▾
+            {t('devices.detail.ports.toolbar.vlan_assign')}
           </Button>
           <Tooltip title={
             selectedWithOverride.length === 0
-              ? 'Seçili portların hiçbirinde override yok'
-              : `${selectedWithOverride.length} portta override kaldırılacak (atanmamışlar atlanır)`
+              ? t('devices.detail.ports.toolbar.no_override_selected')
+              : t('devices.detail.ports.toolbar.override_remove_count', { count: selectedWithOverride.length })
           }>
             <Button
               danger
@@ -681,48 +688,45 @@ export default function PortsTab({ device }: { device: Device }) {
               loading={removeOverrideMut.isPending}
               onClick={() => removeOverrideMut.mutate()}
             >
-              Override kaldır
+              {t('devices.detail.ports.toolbar.override_remove_btn')}
               {selectedWithOverride.length > 0 && ` (${selectedWithOverride.length})`}
             </Button>
           </Tooltip>
-          {/* W3.3 — Toplu PoE Aç/Kapat (Popconfirm) + Restart (Drawer)
-              W3.3 hotfix (2026-06-01): disabled "Shutdown" placeholder kaldırıldı —
-              gerçek Port Aç/Kapat W3.4'te gelecek. */}
           <Popconfirm
-            title={`Seçili ${selected.length} portta PoE Aç?`}
-            description="İşlem kalıcıdır. PoE-uyumsuz portlar atlanır."
-            okText="Aç" cancelText="Vazgeç"
+            title={t('devices.detail.ports.bulk_poe.on_title', { count: selected.length })}
+            description={t('devices.detail.ports.bulk_poe.on_desc')}
+            okText={t('devices.detail.ports.row.poe_on_ok')} cancelText={t('devices.detail.ports.row.poe_cancel')}
             onConfirm={() => bulkPoeMut.mutate({ action: 'on' })}
           >
             <Button
               icon={<ThunderboltOutlined />}
               loading={bulkPoeMut.isPending && bulkPoeMut.variables?.action === 'on'}
-            >PoE Aç</Button>
+            >{t('devices.detail.ports.bulk_poe.btn_on')}</Button>
           </Popconfirm>
           <Popconfirm
-            title={`Seçili ${selected.length} portta PoE Kapat?`}
-            description="Bu portlardaki cihazlar güç kaybeder. İşlem kalıcıdır."
-            okText="Kapat" okButtonProps={{ danger: true }} cancelText="Vazgeç"
+            title={t('devices.detail.ports.bulk_poe.off_title', { count: selected.length })}
+            description={t('devices.detail.ports.bulk_poe.off_desc')}
+            okText={t('devices.detail.ports.row.poe_off_ok')} okButtonProps={{ danger: true }} cancelText={t('devices.detail.ports.row.poe_cancel')}
             onConfirm={() => bulkPoeMut.mutate({ action: 'off' })}
           >
             <Button
               icon={<PoweroffOutlined />}
               danger
               loading={bulkPoeMut.isPending && bulkPoeMut.variables?.action === 'off'}
-            >PoE Kapat</Button>
+            >{t('devices.detail.ports.bulk_poe.btn_off')}</Button>
           </Popconfirm>
           <Button
             icon={<RestartOutlined />}
             onClick={() => setBulkPoeRestartOpen(true)}
-          >PoE Restart ▾</Button>
-          <Button type="text" onClick={() => setSelected([])} style={{ marginLeft: 'auto' }}>Seçimi temizle</Button>
+          >{t('devices.detail.ports.bulk_poe.btn_restart')}</Button>
+          <Button type="text" onClick={() => setSelected([])} style={{ marginLeft: 'auto' }}>{t('devices.table.clear_selection')}</Button>
         </div>
       )}
 
       {!canWrite && (
         <Alert
           type="info" showIcon style={{ marginTop: 12, fontSize: 12 }}
-          message="Salt-okunur görünüm. Toplu atama ve override kaldırma için org_admin+ rolü gerekir."
+          message={t('devices.detail.ports.readonly_alert')}
         />
       )}
 
@@ -756,11 +760,11 @@ export default function PortsTab({ device }: { device: Device }) {
       {/* Tek port VLAN ata (hızlı yol — row aksiyonundan açılır) */}
       <Modal
         open={!!assignVlanIface}
-        title={assignVlanIface ? `${assignVlanIface.name} → VLAN ata` : ''}
+        title={assignVlanIface ? t('devices.detail.ports.vlan_modal.title', { iface: assignVlanIface.name }) : ''}
         onCancel={() => { setAssignVlanIface(null); assignVlanForm.resetFields() }}
         onOk={() => assignVlanForm.submit()}
         confirmLoading={assignVlanMut.isPending}
-        okText="Ata" cancelText="İptal"
+        okText={t('devices.detail.ports.vlan_modal.assign')} cancelText={t('common.cancel')}
         destroyOnHidden
         width={520}
       >
@@ -773,13 +777,13 @@ export default function PortsTab({ device }: { device: Device }) {
           }}
         >
           <Form.Item
-            name="mode" label="Mod"
-            rules={[{ required: true, message: 'Mod seçin' }]}
+            name="mode" label={t('devices.detail.ports.vlan_modal.mode_label')}
+            rules={[{ required: true, message: t('devices.detail.ports.vlan_modal.mode_required') }]}
           >
             <Select
               options={[
-                { label: 'Access (tek VLAN üyesi)', value: 'access' },
-                { label: 'Trunk (çoklu VLAN taşır)', value: 'trunk' },
+                { label: t('devices.detail.ports.vlan_modal.mode_access'), value: 'access' },
+                { label: t('devices.detail.ports.vlan_modal.mode_trunk'), value: 'trunk' },
               ]}
             />
           </Form.Item>
@@ -791,13 +795,13 @@ export default function PortsTab({ device }: { device: Device }) {
               if (mode === 'access') {
                 return (
                   <Form.Item
-                    name="access_vlan_id" label="Access VLAN ID"
+                    name="access_vlan_id" label={t('devices.detail.ports.vlan_modal.access_vlan_label')}
                     rules={[
-                      { required: true, message: 'Access VLAN ID zorunlu' },
-                      { type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' },
+                      { required: true, message: t('devices.detail.ports.vlan_modal.access_vlan_required') },
+                      { type: 'number', min: 1, max: 4094, message: t('devices.detail.ports.vlan_modal.range') },
                     ]}
                   >
-                    <InputNumber style={{ width: '100%' }} placeholder="ör. 100" min={1} max={4094} />
+                    <InputNumber style={{ width: '100%' }} placeholder={t('devices.detail.ports.vlan_modal.access_placeholder')} min={1} max={4094} />
                   </Form.Item>
                 )
               }
@@ -805,18 +809,18 @@ export default function PortsTab({ device }: { device: Device }) {
               return (
                 <>
                   <Form.Item
-                    name="native_vlan_id" label="Native VLAN ID (opsiyonel)"
-                    rules={[{ type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' }]}
-                    extra="Boş bırakılırsa vendor varsayılanı uygulanır (Cisco/Ruijie: 1)."
+                    name="native_vlan_id" label={t('devices.detail.ports.vlan_modal.native_label')}
+                    rules={[{ type: 'number', min: 1, max: 4094, message: t('devices.detail.ports.vlan_modal.range') }]}
+                    extra={t('devices.detail.ports.vlan_modal.native_extra')}
                   >
-                    <InputNumber style={{ width: '100%' }} placeholder="ör. 1" min={1} max={4094} />
+                    <InputNumber style={{ width: '100%' }} placeholder={t('devices.detail.ports.vlan_modal.native_placeholder')} min={1} max={4094} />
                   </Form.Item>
                   <Form.Item
                     name="allowed_vlans" label="Allowed VLANs"
-                    rules={[{ required: true, message: 'Allowed VLANs zorunlu (trunk için)' }]}
-                    extra="Örn: 1,10,20-30,100,200-220 — virgül + tire range."
+                    rules={[{ required: true, message: t('devices.detail.ports.vlan_modal.allowed_required') }]}
+                    extra={t('devices.detail.ports.vlan_modal.allowed_extra')}
                   >
-                    <Input placeholder="ör. 1,10,20-30,2400,2460" />
+                    <Input placeholder="1,10,20-30,2400,2460" />
                   </Form.Item>
                 </>
               )
