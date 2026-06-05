@@ -51,7 +51,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // Bu Drawer "hızlı düzenle" + "yeni cihaz" olarak kalır.
 
   const agentOptions = [
-    { label: '— Yok (direkt SSH) —', value: '' },
+    { label: t('devices.form.agent_none'), value: '' },
     ...agents.map((a) => ({
       label: (
         <span>
@@ -211,40 +211,40 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       }}
       onFinish={(values) => mutation.mutate(values)}
     >
-      <Form.Item label="Cihaz Tipi" name="device_type" rules={[{ required: true }]}>
+      <Form.Item label={t('devices.form.device_type')} name="device_type" rules={[{ required: true }]}>
         <Select options={DEVICE_TYPE_OPTIONS} />
       </Form.Item>
 
       <Form.Item
-        label="Hostname"
+        label={t('devices.form.hostname')}
         name="hostname"
-        tooltip="Boş bırakırsanız IP adresi kullanılır. 'Bilgi Çek' butonu ile cihazdan otomatik alınabilir."
+        tooltip={t('devices.form.hostname_tooltip')}
       >
-        <Input placeholder="sw-core-01 (opsiyonel, otomatik çekilebilir)" />
+        <Input placeholder={t('devices.form.hostname_placeholder')} />
       </Form.Item>
 
-      <Form.Item label="Alias (Takma Ad)" name="alias" tooltip="Kişisel takma ad — aramada ve listede gösterilir">
-        <Input placeholder="Örn: Bina-A Ana Switch" />
+      <Form.Item label={t('devices.form.alias')} name="alias" tooltip={t('devices.form.alias_tooltip')}>
+        <Input placeholder={t('devices.form.alias_placeholder')} />
       </Form.Item>
 
-      <Form.Item label="IP Adresi" name="ip_address" rules={[{ required: !device }]}>
+      <Form.Item label={t('devices.form.ip_address')} name="ip_address" rules={[{ required: !device, message: t('common.validation.required') }]}>
         <Input placeholder="192.168.1.1" disabled={!!device} />
       </Form.Item>
 
-      <Form.Item label="Vendor" name="vendor" rules={[{ required: true }]}>
+      <Form.Item label={t('devices.form.vendor')} name="vendor" rules={[{ required: true }]}>
         <Select options={VENDOR_OPTIONS} />
       </Form.Item>
 
-      <Form.Item label="OS Tipi" name="os_type" rules={[{ required: true }]}>
+      <Form.Item label={t('devices.form.os_type')} name="os_type" rules={[{ required: true }]}>
         <Select options={filteredOsOptions} showSearch />
       </Form.Item>
 
-      <Form.Item label="Model" name="model">
+      <Form.Item label={t('devices.form.model')} name="model">
         <Input placeholder="Catalyst 2960" />
       </Form.Item>
 
-      <Form.Item label="Ağ Katmanı" name="layer" tooltip="Topoloji görünümünde katman bazlı filtreleme için kullanılır">
-        <Select allowClear placeholder="— Seçin (opsiyonel) —" options={[
+      <Form.Item label={t('devices.form.layer')} name="layer" tooltip={t('devices.form.layer_tooltip')}>
+        <Select allowClear placeholder={t('devices.form.layer_placeholder')} options={[
           { label: 'Core', value: 'core' },
           { label: 'Distribution', value: 'distribution' },
           { label: 'Access', value: 'access' },
@@ -253,8 +253,8 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         ]} />
       </Form.Item>
 
-      <Form.Item label="Konum" name="location">
-        <Input placeholder="DC-A / Raf-3" />
+      <Form.Item label={t('devices.form.location')} name="location">
+        <Input placeholder={t('devices.form.location_placeholder')} />
       </Form.Item>
 
       {/* Faz 8 Phase G — device location ownership is immutable through
@@ -267,16 +267,16 @@ export default function DeviceForm({ device, onSuccess }: Props) {
           mutationFn doğrudan id'den X-Location-Id türetir + body'ye `site` label
           olarak gönderir (DeviceCreate schema `site: Optional[str]`). */}
       <Form.Item
-        label="Lokasyon"
+        label={t('devices.form.org_location')}
         name="location_id"
         tooltip={device
-          ? 'Lokasyon değiştirmek için cihaz listesindeki "Lokasyona Taşı" işlemini kullanın'
-          : 'Cihaz, seçilen lokasyona oluşturulur. Kayıt başarılı olduğunda liste o lokasyona filtrelenir.'}
+          ? t('devices.form.org_location_tooltip_edit')
+          : t('devices.form.org_location_tooltip_new')}
       >
         <Select
           allowClear
           disabled={!!device}
-          placeholder="Lokasyon seçin"
+          placeholder={t('devices.form.org_location_placeholder')}
           options={[
             ...(locationsData?.items ?? []).map((l) => ({
               value: l.id,
@@ -291,61 +291,61 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         />
       </Form.Item>
 
-      <Form.Item label="Bina" name="building">
-        <Input placeholder="A Binası" />
+      <Form.Item label={t('devices.form.building')} name="building">
+        <Input placeholder={t('devices.form.building_placeholder')} />
       </Form.Item>
 
-      <Form.Item label="Kat" name="floor">
-        <Input placeholder="3. Kat" />
+      <Form.Item label={t('devices.form.floor')} name="floor">
+        <Input placeholder={t('devices.form.floor_placeholder')} />
       </Form.Item>
 
-      <Form.Item label="Etiketler" name="tags">
+      <Form.Item label={t('devices.form.tags')} name="tags">
         <Input placeholder="core,vlan10,building-a" />
       </Form.Item>
 
       <Form.Item
         label={
-          <Tooltip title="Aktifken sadece show/ping komutlarına izin verilir. Kapatınca config komutları çalışabilir (denylist hariç).">
-            CLI Güvenlik Modu
+          <Tooltip title={t('devices.form.readonly_tooltip')}>
+            {t('devices.form.readonly_label')}
           </Tooltip>
         }
         name="is_readonly"
         valuePropName="checked"
       >
         <Switch
-          checkedChildren={<><SafetyCertificateOutlined /> Salt-okunur</>}
-          unCheckedChildren={<><WarningOutlined /> Yazma İzni</>}
+          checkedChildren={<><SafetyCertificateOutlined /> {t('devices.form.readonly_on')}</>}
+          unCheckedChildren={<><WarningOutlined /> {t('devices.form.readonly_off')}</>}
         />
       </Form.Item>
 
       <Form.Item
         label={
-          <Tooltip title="Aktifken config komutları (medium/high risk) admin onayına gider — 4-gözlü prensip.">
-            Admin Onay Akışı
+          <Tooltip title={t('devices.form.approval_tooltip')}>
+            {t('devices.form.approval_label')}
           </Tooltip>
         }
         name="approval_required"
         valuePropName="checked"
       >
         <Switch
-          checkedChildren="Onay Zorunlu"
-          unCheckedChildren="Serbest"
+          checkedChildren={t('devices.form.approval_on')}
+          unCheckedChildren={t('devices.form.approval_off')}
         />
       </Form.Item>
 
       {/* T10 C7.B — Güvenlik politikası bölümü buradan çıkarıldı; yeni evi:
           Device Detail > Güvenlik Politikası sekmesi (/devices/:id?tab=security). */}
 
-      <Divider style={{ margin: '12px 0', fontSize: 12 }}>SSH Bağlantısı</Divider>
+      <Divider style={{ margin: '12px 0', fontSize: 12 }}>{t('devices.form.ssh_divider')}</Divider>
 
       <Form.Item
-        label={<span><SafetyOutlined style={{ marginRight: 4 }} />Kimlik Profili</span>}
+        label={<span><SafetyOutlined style={{ marginRight: 4 }} />{t('devices.form.cred_profile_label')}</span>}
         name="credential_profile_id"
-        tooltip="Profil seçilirse SSH/SNMP bağlantılarında bu profil kullanılır; cihaza özel alanlar ikincil kalır."
+        tooltip={t('devices.form.cred_profile_tooltip')}
       >
         <Select
           allowClear
-          placeholder="— Cihaza özel credential (profil yok) —"
+          placeholder={t('devices.form.cred_profile_placeholder')}
           options={[
             ...credProfiles.map((p) => ({
               label: `${p.name}${p.description ? ` — ${p.description}` : ''}`,
@@ -364,28 +364,28 @@ export default function DeviceForm({ device, onSuccess }: Props) {
             type="info"
             showIcon
             style={{ marginBottom: 12, fontSize: 12 }}
-            message="Kimlik profili aktif — aşağıdaki SSH/SNMP alanları sadece profil eksik alanlar için yedek olarak kullanılır."
+            message={t('devices.form.cred_profile_alert')}
           />
         )}
       </Form.Item>
 
       <Form.Item
-        label="Proxy Agent"
+        label={t('devices.form.agent_label')}
         name="agent_id"
-        tooltip="Agent seçilirse SSH komutları direkt değil, bu agent üzerinden gönderilir."
+        tooltip={t('devices.form.agent_tooltip')}
       >
         <Select options={agentOptions} />
       </Form.Item>
 
       <Form.Item
-        label="Yedek Agent'lar"
+        label={t('devices.form.fallback_agents_label')}
         name="fallback_agent_ids"
-        tooltip="Birincil agent çevrimdışıysa sırayla denenir. Boş bırakılabilir."
+        tooltip={t('devices.form.fallback_agents_tooltip')}
       >
         <Select
           mode="multiple"
           allowClear
-          placeholder="— Yedek agent seçin (opsiyonel) —"
+          placeholder={t('devices.form.fallback_agents_placeholder')}
           options={fallbackAgentOptions}
         />
       </Form.Item>
@@ -393,36 +393,36 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       {/* HF#8 — Kimlik profili seçiliyse required kalkar; alan opsiyonel
           override olarak kullanılır. Label'a "(opsiyonel)" + placeholder net. */}
       <Form.Item
-        label={<span>SSH Kullanıcısı {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+        label={<span>{t('devices.form.ssh_username')} {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>{t('devices.form.optional_profile_used')}</span>}</span>}
         name="ssh_username"
-        rules={[{ required: !hasCredentialProfile, message: 'SSH Kullanıcısı gerekli' }]}
+        rules={[{ required: !hasCredentialProfile, message: t('common.validation.ssh_username_required') }]}
       >
-        <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'admin'} />
+        <Input placeholder={hasCredentialProfile ? t('devices.form.placeholder_profile_override') : 'admin'} />
       </Form.Item>
 
       <Form.Item
-        label={<span>SSH Şifre {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+        label={<span>{t('devices.form.ssh_password')} {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>{t('devices.form.optional_profile_used')}</span>}</span>}
         name="ssh_password"
-        rules={[{ required: !device && !hasCredentialProfile, message: 'Şifre gerekli' }]}
+        rules={[{ required: !device && !hasCredentialProfile, message: t('common.validation.password_required') }]}
       >
         <Input.Password placeholder={
           hasCredentialProfile
-            ? '(profil değeri kullanılır; gerekirse override girin)'
-            : (device ? '(değiştirmek için girin)' : '')
+            ? t('devices.form.placeholder_profile_override')
+            : (device ? t('devices.form.placeholder_change_password') : '')
         } />
       </Form.Item>
 
-      <Form.Item label="Enable Secret" name="enable_secret">
-        <Input.Password placeholder={hasCredentialProfile ? '(profil değeri kullanılır; opsiyonel override)' : '(opsiyonel)'} />
+      <Form.Item label={t('devices.form.enable_secret')} name="enable_secret">
+        <Input.Password placeholder={hasCredentialProfile ? t('devices.form.placeholder_profile_override_optional') : t('devices.form.placeholder_optional')} />
       </Form.Item>
 
-      <Form.Item label="SSH Port" name="ssh_port">
+      <Form.Item label={t('devices.form.ssh_port')} name="ssh_port">
         <InputNumber min={1} max={65535} style={{ width: '100%' }} />
       </Form.Item>
 
       <Divider orientation="left" plain style={{ fontSize: 12, opacity: 0.6 }}>SNMP</Divider>
 
-      <Form.Item label="SNMP Aktif" name="snmp_enabled" valuePropName="checked">
+      <Form.Item label={t('devices.form.snmp_enabled')} name="snmp_enabled" valuePropName="checked">
         <Switch />
       </Form.Item>
 
@@ -432,25 +432,25 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       >
         {({ getFieldValue }) => getFieldValue('snmp_enabled') && (
           <>
-            <Form.Item label="Versiyon" name="snmp_version">
+            <Form.Item label={t('devices.form.snmp_version')} name="snmp_version">
               <Select options={[
                 { value: 'v1', label: 'SNMPv1' },
                 { value: 'v2c', label: 'SNMPv2c' },
                 { value: 'v3', label: 'SNMPv3 (USM)' },
               ]} />
             </Form.Item>
-            <Form.Item label="SNMP Port" name="snmp_port">
+            <Form.Item label={t('devices.form.snmp_port')} name="snmp_port">
               <InputNumber min={1} max={65535} style={{ width: '100%' }} />
             </Form.Item>
 
             {/* v1/v2c: community string — HF#8: profil seçiliyse opsiyonel */}
             {getFieldValue('snmp_version') !== 'v3' && (
               <Form.Item
-                label={<span>Community {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+                label={<span>{t('devices.form.community')} {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>{t('devices.form.optional_profile_used')}</span>}</span>}
                 name="snmp_community"
-                rules={[{ required: !hasCredentialProfile && getFieldValue('snmp_version') !== 'v3', message: 'Community gerekli' }]}
+                rules={[{ required: !hasCredentialProfile && getFieldValue('snmp_version') !== 'v3', message: t('common.validation.community_required') }]}
               >
-                <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'public'} />
+                <Input placeholder={hasCredentialProfile ? t('devices.form.placeholder_profile_override') : 'public'} />
               </Form.Item>
             )}
 
@@ -458,15 +458,15 @@ export default function DeviceForm({ device, onSuccess }: Props) {
             {getFieldValue('snmp_version') === 'v3' && (
               <>
                 <Form.Item
-                  label={<span>v3 Username {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>(opsiyonel — profil değeri kullanılır)</span>}</span>}
+                  label={<span>{t('devices.form.snmp_v3_username')} {hasCredentialProfile && <span style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11, fontWeight: 400 }}>{t('devices.form.optional_profile_used')}</span>}</span>}
                   name="snmp_v3_username"
-                  rules={[{ required: !hasCredentialProfile, message: 'Username gerekli' }]}
+                  rules={[{ required: !hasCredentialProfile, message: t('common.validation.username_required') }]}
                 >
-                  <Input placeholder={hasCredentialProfile ? '(profil değeri kullanılır; gerekirse override girin)' : 'snmpv3user'} />
+                  <Input placeholder={hasCredentialProfile ? t('devices.form.placeholder_profile_override') : 'snmpv3user'} />
                 </Form.Item>
-                <Form.Item label="Auth Protokol" name="snmp_v3_auth_protocol">
+                <Form.Item label={t('devices.form.snmp_v3_auth_protocol')} name="snmp_v3_auth_protocol">
                   <Select
-                    placeholder="Yok (noAuth)"
+                    placeholder={t('devices.form.snmp_v3_auth_none')}
                     allowClear
                     options={[
                       { value: 'md5', label: 'MD5' },
@@ -479,14 +479,14 @@ export default function DeviceForm({ device, onSuccess }: Props) {
                   shouldUpdate={(prev, cur) => prev.snmp_v3_auth_protocol !== cur.snmp_v3_auth_protocol}
                 >
                   {({ getFieldValue: gfv }) => gfv('snmp_v3_auth_protocol') && (
-                    <Form.Item label="Auth Parola" name="snmp_v3_auth_passphrase" rules={[{ min: 8, message: 'En az 8 karakter' }]}>
-                      <Input.Password placeholder="min. 8 karakter" />
+                    <Form.Item label={t('devices.form.snmp_v3_auth_passphrase')} name="snmp_v3_auth_passphrase" rules={[{ min: 8, message: t('common.validation.min8') }]}>
+                      <Input.Password placeholder={t('devices.form.placeholder_min8')} />
                     </Form.Item>
                   )}
                 </Form.Item>
-                <Form.Item label="Priv Protokol" name="snmp_v3_priv_protocol">
+                <Form.Item label={t('devices.form.snmp_v3_priv_protocol')} name="snmp_v3_priv_protocol">
                   <Select
-                    placeholder="Yok (noPriv)"
+                    placeholder={t('devices.form.snmp_v3_priv_none')}
                     allowClear
                     options={[
                       { value: 'des', label: 'DES' },
@@ -499,8 +499,8 @@ export default function DeviceForm({ device, onSuccess }: Props) {
                   shouldUpdate={(prev, cur) => prev.snmp_v3_priv_protocol !== cur.snmp_v3_priv_protocol}
                 >
                   {({ getFieldValue: gfv }) => gfv('snmp_v3_priv_protocol') && (
-                    <Form.Item label="Priv Parola" name="snmp_v3_priv_passphrase" rules={[{ min: 8, message: 'En az 8 karakter' }]}>
-                      <Input.Password placeholder="min. 8 karakter" />
+                    <Form.Item label={t('devices.form.snmp_v3_priv_passphrase')} name="snmp_v3_priv_passphrase" rules={[{ min: 8, message: t('common.validation.min8') }]}>
+                      <Input.Password placeholder={t('devices.form.placeholder_min8')} />
                     </Form.Item>
                   )}
                 </Form.Item>
@@ -510,13 +510,13 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         )}
       </Form.Item>
 
-      <Form.Item label="Açıklama" name="description">
+      <Form.Item label={t('devices.form.description')} name="description">
         <Input.TextArea rows={2} />
       </Form.Item>
 
       <Form.Item>
         <Button type="primary" htmlType="submit" loading={mutation.isPending} block>
-          {device ? 'Güncelle' : 'Ekle'}
+          {device ? t('devices.form.submit_update') : t('devices.form.submit_add')}
         </Button>
       </Form.Item>
     </Form>

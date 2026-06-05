@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useMemo, useState } from 'react'
 import {
   Modal, Button, Card, Checkbox, Space, Tag, Typography, Spin, Alert,
   Row, Col, Statistic, Tooltip, Empty,
@@ -8,14 +8,16 @@ import {
   CheckOutlined, TeamOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { devicesApi, type GroupSuggestion } from '@/api/devices'
 
 const { Text } = Typography
 
-const TYPE_CONFIG: Record<GroupSuggestion['suggestion_type'], { icon: React.ReactNode; color: string; label: string }> = {
-  site_based:       { icon: <EnvironmentOutlined />, color: 'blue',   label: 'Lokasyon' },
-  layer_based:      { icon: <ApartmentOutlined />,   color: 'purple', label: 'Katman' },
-  topology_cluster: { icon: <ShareAltOutlined />,    color: 'orange', label: 'Topoloji Kümesi' },
+// Icon + color sabit kalır (theme); etiket i18n key adı dönüştürülür.
+const TYPE_BASE: Record<GroupSuggestion['suggestion_type'], { icon: React.ReactNode; color: string; labelKey: string }> = {
+  site_based:       { icon: <EnvironmentOutlined />, color: 'blue',   labelKey: 'devices.auto_group.type_site' },
+  layer_based:      { icon: <ApartmentOutlined />,   color: 'purple', labelKey: 'devices.auto_group.type_layer' },
+  topology_cluster: { icon: <ShareAltOutlined />,    color: 'orange', labelKey: 'devices.auto_group.type_topology' },
 }
 
 interface Props {
@@ -25,9 +27,16 @@ interface Props {
 
 export default function AutoGroupingModal({ open, onClose }: Props) {
   const queryClient = useQueryClient()
+  const { t } = useTranslation()
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [applied, setApplied] = useState(false)
   const [applyResult, setApplyResult] = useState<{ id: number; name: string; device_count: number }[]>([])
+
+  const TYPE_CONFIG = useMemo(() => ({
+    site_based:       { ...TYPE_BASE.site_based, label: t(TYPE_BASE.site_based.labelKey) },
+    layer_based:      { ...TYPE_BASE.layer_based, label: t(TYPE_BASE.layer_based.labelKey) },
+    topology_cluster: { ...TYPE_BASE.topology_cluster, label: t(TYPE_BASE.topology_cluster.labelKey) },
+  }) as Record<GroupSuggestion['suggestion_type'], { icon: React.ReactNode; color: string; label: string }>, [t])
 
   const { data, isLoading } = useQuery({
     queryKey: ['group-suggestions'],
@@ -79,7 +88,7 @@ export default function AutoGroupingModal({ open, onClose }: Props) {
       title={
         <Space>
           <TeamOutlined />
-          <span>Otomatik Gruplama Önerileri</span>
+          <span>{t('devices.auto_group.title')}</span>
         </Space>
       }
       open={open}
@@ -87,12 +96,12 @@ export default function AutoGroupingModal({ open, onClose }: Props) {
       width={760}
       footer={
         applied ? (
-          <Button type="primary" onClick={handleClose}>Kapat</Button>
+          <Button type="primary" onClick={handleClose}>{t('common.close')}</Button>
         ) : (
           <Space>
-            <Button onClick={handleClose}>İptal</Button>
+            <Button onClick={handleClose}>{t('common.cancel')}</Button>
             <Button onClick={toggleAll}>
-              {selected.size === suggestions.length ? 'Seçimi Kaldır' : 'Tümünü Seç'}
+              {selected.size === suggestions.length ? t('devices.auto_group.deselect_all') : t('devices.auto_group.select_all')}
             </Button>
             <Button
               type="primary"
@@ -101,7 +110,7 @@ export default function AutoGroupingModal({ open, onClose }: Props) {
               loading={applyMutation.isPending}
               onClick={handleApply}
             >
-              {selected.size > 0 ? `${selected.size} Grubu Oluştur` : 'Grup Seç'}
+              {selected.size > 0 ? t('devices.auto_group.create_btn', { count: selected.size }) : t('devices.auto_group.pick_group')}
             </Button>
           </Space>
         )
@@ -114,7 +123,7 @@ export default function AutoGroupingModal({ open, onClose }: Props) {
           <Alert
             type="success"
             showIcon
-            message={`${applyResult.length} grup başarıyla oluşturuldu`}
+            message={t('devices.auto_group.applied_alert', { count: applyResult.length })}
             style={{ marginBottom: 16 }}
           />
           {applyResult.map((g) => (
@@ -122,27 +131,27 @@ export default function AutoGroupingModal({ open, onClose }: Props) {
               <Space>
                 <CheckOutlined style={{ color: '#52c41a' }} />
                 <Text strong>{g.name}</Text>
-                <Text type="secondary">— {g.device_count} cihaz atandı</Text>
+                <Text type="secondary">{t('devices.auto_group.assigned_count', { count: g.device_count })}</Text>
               </Space>
             </Card>
           ))}
         </div>
       ) : suggestions.length === 0 ? (
-        <Empty description="Gruplama için yeterli ortak özellik bulunamadı. Cihazlara site, katman veya topoloji bağlantıları tanımlayın." />
+        <Empty description={t('devices.auto_group.empty')} />
       ) : (
         <div>
           <Row gutter={16} style={{ marginBottom: 16 }}>
             <Col span={8}>
-              <Statistic title="Toplam Öneri" value={suggestions.length} prefix={<TeamOutlined />} />
+              <Statistic title={t('devices.auto_group.stat_total')} value={suggestions.length} prefix={<TeamOutlined />} />
             </Col>
             <Col span={8}>
               <Statistic
-                title="Kapsanan Cihaz"
+                title={t('devices.auto_group.stat_covered')}
                 value={new Set(suggestions.flatMap((s) => s.device_ids)).size}
               />
             </Col>
             <Col span={8}>
-              <Statistic title="Seçili" value={selected.size} suffix={`/ ${suggestions.length}`} />
+              <Statistic title={t('devices.auto_group.stat_selected')} value={selected.size} suffix={`/ ${suggestions.length}`} />
             </Col>
           </Row>
 
@@ -189,14 +198,14 @@ export default function AutoGroupingModal({ open, onClose }: Props) {
                         ))}
                         {s.device_names.length > 5 && (
                           <Tooltip title={s.device_names.slice(5).join(', ')}>
-                            <Tag style={{ fontSize: 11 }}>+{s.device_names.length - 5} daha</Tag>
+                            <Tag style={{ fontSize: 11 }}>{t('devices.auto_group.more', { count: s.device_names.length - 5 })}</Tag>
                           </Tooltip>
                         )}
                       </div>
                     </Col>
                     <Col flex="none">
                       <Text strong style={{ fontSize: 20 }}>{s.device_count}</Text>
-                      <div><Text type="secondary" style={{ fontSize: 11 }}>cihaz</Text></div>
+                      <div><Text type="secondary" style={{ fontSize: 11 }}>{t('devices.auto_group.devices_word')}</Text></div>
                     </Col>
                   </Row>
                 </Card>
