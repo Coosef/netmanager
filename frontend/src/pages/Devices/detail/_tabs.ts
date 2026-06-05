@@ -10,22 +10,24 @@ export type TabKey =
 
 export interface TabSpec {
   key: TabKey
-  label: string
+  /** i18n key — UI'da t(labelKey) ile çevrilir. Module-level literal
+   *  bırakılmaz (KURAL-E1 — render-time çözümleme). */
+  labelKey: string
   /** Bu sekme henüz placeholder mı (içerik C7.C/D'de gelecek). */
   placeholder?: boolean
 }
 
 export const DETAIL_TABS: TabSpec[] = [
-  { key: 'overview', label: 'Genel' },
-  { key: 'ports',    label: 'Portlar' }, // C7.C live
-  { key: 'security', label: 'Güvenlik Politikası' },
-  { key: 'vlan',     label: 'VLAN' }, // C7.D live
-  { key: 'mac',      label: 'MAC Tablosu' }, // C7.D live
-  { key: 'poe',      label: 'PoE' }, // C7.D live
-  { key: 'events',   label: 'Olaylar' }, // C7.D live
-  { key: 'backup',   label: 'Config Backup' }, // C7.D live
-  { key: 'actions',  label: 'Aksiyonlar' }, // C7.D live
-  { key: 'terminal', label: 'Terminal' }, // Dalga 1 — REPL + canlı SSH hibrit
+  { key: 'overview', labelKey: 'devices.detail.tabs.overview' },
+  { key: 'ports',    labelKey: 'devices.detail.tabs.ports' },
+  { key: 'security', labelKey: 'devices.detail.tabs.security' },
+  { key: 'vlan',     labelKey: 'devices.detail.tabs.vlan' },
+  { key: 'mac',      labelKey: 'devices.detail.tabs.mac' },
+  { key: 'poe',      labelKey: 'devices.detail.tabs.poe' },
+  { key: 'events',   labelKey: 'devices.detail.tabs.events' },
+  { key: 'backup',   labelKey: 'devices.detail.tabs.backup' },
+  { key: 'actions',  labelKey: 'devices.detail.tabs.actions' },
+  { key: 'terminal', labelKey: 'devices.detail.tabs.terminal' },
 ]
 
 export const DEFAULT_TAB: TabKey = 'overview'

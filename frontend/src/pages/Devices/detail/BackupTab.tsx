@@ -27,6 +27,7 @@ import {
   SafetyCertificateOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import type { Device, ConfigBackup } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { useAuthStore } from '@/store/auth'
@@ -48,6 +49,7 @@ function fmtSize(b: number) {
 export default function BackupTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const { isOrgAdmin } = useAuthStore()
   const canWrite = isOrgAdmin()
   const [activeMode, setActiveMode] = useState<'live' | 'backups'>('backups')
@@ -89,26 +91,26 @@ export default function BackupTab({ device }: { device: Device }) {
   const takeMut = useMutation({
     mutationFn: () => devicesApi.takeBackup(device.id),
     onSuccess: () => {
-      message.success('Backup alındı')
+      message.success(t('devices.detail.backup.toast.taken'))
       invalidate()
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Backup başarısız'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.detail.toast.backup_failed')),
   })
 
   const goldenMut = useMutation({
     mutationFn: (backupId: number) => devicesApi.setGoldenBackup(device.id, backupId),
     onSuccess: () => {
-      message.success('Altın backup işaretlendi')
+      message.success(t('devices.detail.backup.toast.golden_set'))
       invalidate()
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'İşaretleme başarısız'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.detail.backup.toast.golden_failed')),
   })
 
   // Backup snapshot üzerinde policy check — backend backup_id paramini destekliyor.
   const checkBackupPolicyMut = useMutation({
     mutationFn: (backupId: number) => devicesApi.checkConfigPolicy(device.id, backupId),
     onSuccess: () => setPolicyOpen(true),
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Politika kontrolü başarısız'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.detail.backup.toast.policy_failed')),
   })
 
   const triggerPolicyCheck = (b: ConfigBackup) => {
@@ -133,29 +135,29 @@ export default function BackupTab({ device }: { device: Device }) {
   const columns = [
     { title: '', key: 'g', width: 36,
       render: (_: any, r: ConfigBackup) => r.is_golden
-        ? <StarFilled style={{ color: '#faad14' }} title="Altın backup" />
+        ? <StarFilled style={{ color: '#faad14' }} title={t('devices.detail.backup.golden_title')} />
         : null },
-    { title: 'Tarih', dataIndex: 'created_at', key: 'd', width: 170,
+    { title: t('devices.detail.backup.col_date'), dataIndex: 'created_at', key: 'd', width: 170,
       render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm') },
-    { title: 'Boyut', dataIndex: 'size_bytes', key: 's', width: 90,
+    { title: t('devices.detail.backup.col_size'), dataIndex: 'size_bytes', key: 's', width: 90,
       render: (b: number) => fmtSize(b) },
     { title: 'Hash', dataIndex: 'config_hash', key: 'h', width: 180,
       render: (v: string) => <code style={{ fontSize: 11 }}>{v?.slice(0, 12) || '—'}</code> },
-    { title: 'Notlar', dataIndex: 'notes', key: 'n', ellipsis: true,
+    { title: t('devices.detail.backup.col_notes'), dataIndex: 'notes', key: 'n', ellipsis: true,
       render: (v?: string) => v || '—' },
-    { title: 'Aksiyon', key: 'a', width: 280,
+    { title: t('common.actions'), key: 'a', width: 280,
       render: (_: any, r: ConfigBackup) => (
         <Space size="small" onClick={(e) => e.stopPropagation()}>
           <Button size="small" icon={<FileTextOutlined />} onClick={() => setPreviewBackup(r)}>
-            İçerik
+            {t('devices.detail.backup.action_content')}
           </Button>
           <Button size="small" icon={<DownloadOutlined />} onClick={() => devicesApi.downloadBackup(device.id, r.id)}>
-            İndir
+            {t('common.download')}
           </Button>
           {canWrite && !r.is_golden && (
             <Button size="small" icon={<StarOutlined />} loading={goldenMut.isPending}
               onClick={() => goldenMut.mutate(r.id)}>
-              Altın yap
+              {t('devices.detail.backup.action_make_golden')}
             </Button>
           )}
         </Space>
@@ -170,12 +172,12 @@ export default function BackupTab({ device }: { device: Device }) {
         items={[
           {
             key: 'live',
-            label: <span><ThunderboltOutlined /> Canlı</span>,
+            label: <span><ThunderboltOutlined /> {t('devices.detail.backup.subtab_live')}</span>,
             children: <LiveConfigTab device={device} />,
           },
           {
             key: 'backups',
-            label: <span><SaveOutlined /> Yedekler ({items.length})</span>,
+            label: <span><SaveOutlined /> {t('devices.detail.backup.subtab_backups', { count: items.length })}</span>,
             children: (
               <div>
                 {/* Wave 2 #2 F4 — Drift alert mockup pages-devices.jsx:435-460 paterni
@@ -190,50 +192,50 @@ export default function BackupTab({ device }: { device: Device }) {
                     display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
                   }}>
                     <WarningOutlined style={{ color: 'var(--warn)', fontSize: 18 }} />
-                    <strong style={{ color: 'var(--warn)' }}>Config drift tespit edildi</strong>
+                    <strong style={{ color: 'var(--warn)' }}>{t('devices.detail.backup.drift_title')}</strong>
                     <span style={{ fontSize: 12.5, color: 'var(--fg-2)' }}>
-                      Cihazın güncel konfigürasyonu altın baseline'dan farklı:
+                      {t('devices.detail.backup.drift_desc')}
                     </span>
-                    <span className="nm-pill ok">+{driftQ.data.lines_added ?? 0} satır</span>
-                    <span className="nm-pill crit">−{driftQ.data.lines_removed ?? 0} satır</span>
+                    <span className="nm-pill ok">{t('devices.detail.backup.lines_added', { count: driftQ.data.lines_added ?? 0 })}</span>
+                    <span className="nm-pill crit">{t('devices.detail.backup.lines_removed', { count: driftQ.data.lines_removed ?? 0 })}</span>
                     {driftQ.data.golden_created_at && (
                       <span style={{ fontSize: 11.5, color: 'var(--fg-3)', marginLeft: 'auto' }}>
-                        Altın: {dayjs(driftQ.data.golden_created_at).format('YYYY-MM-DD HH:mm')}
+                        {t('devices.detail.backup.golden_label')} {dayjs(driftQ.data.golden_created_at).format('YYYY-MM-DD HH:mm')}
                       </span>
                     )}
                   </div>
                 )}
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
-                  <Text strong>Config Backup tarihçesi</Text>
-                  <Text type="secondary" style={{ fontSize: 12 }}>{items.length} kayıt</Text>
+                  <Text strong>{t('devices.detail.backup.history_title')}</Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>{t('devices.detail.backup.records', { count: items.length })}</Text>
                   {selectedKeys.length > 0 && (
-                    <Tag color="blue">{selectedKeys.length} seçili</Tag>
+                    <Tag color="blue">{t('devices.detail.backup.selected_count', { count: selectedKeys.length })}</Tag>
                   )}
                   <Space style={{ marginLeft: 'auto' }} wrap>
                     {selectedKeys.length === 2 && (
                       <Button type="primary" icon={<DiffOutlined />} onClick={openDiff}>
-                        Diff Görüntüle
+                        {t('devices.detail.backup.diff_btn')}
                       </Button>
                     )}
                     {selectedKeys.length > 0 && selectedKeys.length !== 2 && (
                       <Text type="secondary" style={{ fontSize: 11 }}>
-                        Diff için tam 2 backup seçin
+                        {t('devices.detail.backup.diff_pick_two')}
                       </Text>
                     )}
                     {canWrite && (
                       <Popconfirm
-                        title="Yeni backup al?"
-                        description={<span><Tag>{device.hostname}</Tag> üzerinde çalışır.</span>}
-                        okText="Al" onConfirm={() => takeMut.mutate()}
+                        title={t('devices.detail.backup.take_confirm_title')}
+                        description={<span><Tag>{device.hostname}</Tag> {t('devices.detail.backup.take_confirm_desc')}</span>}
+                        okText={t('devices.detail.backup.take_ok')} onConfirm={() => takeMut.mutate()}
                       >
                         <Button type="primary" icon={<SaveOutlined />} loading={takeMut.isPending}>
-                          Şimdi Backup Al
+                          {t('devices.detail.backup.take_btn')}
                         </Button>
                       </Popconfirm>
                     )}
                     <Button icon={<ReloadOutlined />} onClick={invalidate} loading={q.isLoading}>
-                      Yenile
+                      {t('common.refresh')}
                     </Button>
                   </Space>
                 </div>
@@ -242,7 +244,7 @@ export default function BackupTab({ device }: { device: Device }) {
                   size="small" rowKey="id" columns={columns as any} dataSource={items}
                   loading={q.isLoading}
                   pagination={{ pageSize: 25, showSizeChanger: false, hideOnSinglePage: true }}
-                  locale={{ emptyText: 'Backup yok' }}
+                  locale={{ emptyText: t('devices.detail.backup.empty') }}
                   rowSelection={{
                     selectedRowKeys: selectedKeys,
                     onChange: (keys) => setSelectedKeys(keys as number[]),
@@ -258,7 +260,7 @@ export default function BackupTab({ device }: { device: Device }) {
 
                 {!canWrite && (
                   <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
-                    Backup alma ve altın işaretleme için org_admin+ rolü gerekir; indirme + içerik görüntüleme + diff herkese açık.
+                    {t('devices.detail.backup.readonly_hint')}
                   </Text>
                 )}
               </div>
@@ -271,11 +273,11 @@ export default function BackupTab({ device }: { device: Device }) {
       <Drawer
         title={previewBackup
           ? <Space size={8}>
-              <span>Backup #{previewBackup.id}</span>
+              <span>{t('devices.detail.backup.backup_label', { id: previewBackup.id })}</span>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {dayjs(previewBackup.created_at).format('YYYY-MM-DD HH:mm')}
               </Text>
-              {previewBackup.is_golden && <Tag color="gold"><StarFilled /> Altın</Tag>}
+              {previewBackup.is_golden && <Tag color="gold"><StarFilled /> {t('devices.detail.backup.golden_tag')}</Tag>}
             </Space>
           : ''}
         open={!!previewBackup}
@@ -289,17 +291,18 @@ export default function BackupTab({ device }: { device: Device }) {
               onClick={() => triggerPolicyCheck(previewBackup)}
               disabled={!previewQ.data?.config}
             >
-              Güvenlik Tarama
+              {t('devices.detail.backup.security_scan')}
             </Button>
             <Button icon={<DownloadOutlined />}
               onClick={() => devicesApi.downloadBackup(device.id, previewBackup.id)}>
-              İndir
+              {t('common.download')}
             </Button>
           </Space>
         )}
       >
         <Spin spinning={previewQ.isLoading}>
           {previewQ.data?.config ? (
+            // KURAL-E2: Terminal/Config çıktısı (CLI komutları) çevrilmez.
             <pre style={{
               background: 'var(--bg-1, #0d1117)',
               color: 'var(--fg-0, #c9d1d9)',
@@ -314,7 +317,7 @@ export default function BackupTab({ device }: { device: Device }) {
               whiteSpace: 'pre',
             }}>{previewQ.data.config}</pre>
           ) : !previewQ.isLoading ? (
-            <Text type="secondary">İçerik boş veya alınamadı.</Text>
+            <Text type="secondary">{t('devices.detail.backup.preview_empty')}</Text>
           ) : null}
         </Spin>
       </Drawer>
@@ -336,17 +339,17 @@ export default function BackupTab({ device }: { device: Device }) {
       <Modal
         title={
           <Space>
-            <SafetyCertificateOutlined /> Güvenlik Politika Kontrolü
+            <SafetyCertificateOutlined /> {t('devices.detail.backup.policy_modal_title')}
             {policyBackup && (
               <Text type="secondary" style={{ fontSize: 13 }}>
-                — Backup #{policyBackup.id} ({dayjs(policyBackup.created_at).format('YYYY-MM-DD HH:mm')})
+                {t('devices.detail.backup.policy_modal_subtitle', { id: policyBackup.id, date: dayjs(policyBackup.created_at).format('YYYY-MM-DD HH:mm') })}
               </Text>
             )}
           </Space>
         }
         open={policyOpen}
         onCancel={() => setPolicyOpen(false)}
-        footer={<Button onClick={() => setPolicyOpen(false)}>Kapat</Button>}
+        footer={<Button onClick={() => setPolicyOpen(false)}>{t('common.close')}</Button>}
         width={640}
       >
         {checkBackupPolicyMut.data && (() => {
@@ -356,14 +359,14 @@ export default function BackupTab({ device }: { device: Device }) {
             <>
               <Alert
                 type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
-                message={`Tarama kaynağı: ${d.source}`}
-                description="Bu backup snapshot'ı üzerinde yapılan offline policy taraması — canlı cihaz erişimi gerekmez."
+                message={t('devices.detail.backup.policy_source', { source: d.source })}
+                description={t('devices.detail.backup.policy_desc')}
               />
               <div style={{ textAlign: 'center', marginBottom: 20 }}>
                 <div style={{ fontSize: 48, fontWeight: 700, color: scoreColor, lineHeight: 1 }}>
                   {d.policy_score}
                 </div>
-                <div style={{ color: '#888', marginBottom: 8 }}>Politika Puanı / 100</div>
+                <div style={{ color: '#888', marginBottom: 8 }}>{t('devices.detail.backup.policy_score_label')}</div>
                 <Progress
                   percent={d.policy_score}
                   strokeColor={scoreColor}
@@ -371,9 +374,9 @@ export default function BackupTab({ device }: { device: Device }) {
                   style={{ maxWidth: 300, margin: '0 auto' }}
                 />
                 <Space style={{ marginTop: 8 }}>
-                  {d.critical_count > 0 && <Tag color="red">{d.critical_count} Kritik</Tag>}
-                  {d.violation_count > 0 && <Tag color="orange">{d.violation_count} İhlal</Tag>}
-                  {d.violation_count === 0 && <Tag color="green">Tüm kurallar geçti</Tag>}
+                  {d.critical_count > 0 && <Tag color="red">{t('devices.detail.backup.critical_count', { count: d.critical_count })}</Tag>}
+                  {d.violation_count > 0 && <Tag color="orange">{t('devices.detail.backup.violation_count', { count: d.violation_count })}</Tag>}
+                  {d.violation_count === 0 && <Tag color="green">{t('devices.detail.backup.all_rules_passed')}</Tag>}
                 </Space>
               </div>
               {d.violations.length > 0 && (
@@ -384,15 +387,15 @@ export default function BackupTab({ device }: { device: Device }) {
                   pagination={false}
                   columns={[
                     {
-                      title: 'Önem', dataIndex: 'severity', width: 90,
+                      title: t('devices.detail.backup.col_severity'), dataIndex: 'severity', width: 90,
                       render: (v: string) => (
                         <Tag color={v === 'critical' ? 'red' : v === 'warning' ? 'orange' : 'default'} icon={<WarningOutlined />}>
                           {v}
                         </Tag>
                       ),
                     },
-                    { title: 'Kural', dataIndex: 'rule_id', width: 160 },
-                    { title: 'Açıklama', dataIndex: 'description' },
+                    { title: t('devices.detail.backup.col_rule'), dataIndex: 'rule_id', width: 160 },
+                    { title: t('devices.form.description'), dataIndex: 'description' },
                   ]}
                 />
               )}

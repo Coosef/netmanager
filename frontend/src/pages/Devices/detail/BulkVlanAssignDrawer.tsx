@@ -13,6 +13,7 @@
 import {
   Drawer, Form, Select, InputNumber, Input, Button, Alert, Typography, Space, Tag,
 } from 'antd'
+import { useTranslation } from 'react-i18next'
 import { parseVlanList, VlanListError } from './_vlanHelper'
 
 const { Text } = Typography
@@ -32,6 +33,7 @@ interface Props {
 export default function BulkVlanAssignDrawer({
   open, onClose, selectedPorts, saving, onSubmit,
 }: Props) {
+  const { t } = useTranslation()
   const [form] = Form.useForm()
 
   const handleFinish = (vals: {
@@ -49,14 +51,14 @@ export default function BulkVlanAssignDrawer({
       const allowed = parseVlanList(vals.allowed_vlans || '')
       onSubmit(allowed, 'trunk', vals.native_vlan_id || undefined)
     } catch (e: any) {
-      const msg = e instanceof VlanListError ? e.message : 'Allowed VLANs geçersiz'
+      const msg = e instanceof VlanListError ? e.message : t('devices.detail.ports.vlan_modal.allowed_invalid')
       form.setFields([{ name: 'allowed_vlans', errors: [msg] }])
     }
   }
 
   return (
     <Drawer
-      title={`Toplu VLAN ata · ${selectedPorts.length} port`}
+      title={t('devices.detail.bulk_vlan.title', { count: selectedPorts.length })}
       open={open}
       onClose={onClose}
       width={480}
@@ -67,30 +69,25 @@ export default function BulkVlanAssignDrawer({
           onClick={() => form.submit()}
           disabled={selectedPorts.length === 0}
         >
-          Uygula
+          {t('common.apply')}
         </Button>
       }
     >
       <Alert
         type="info" showIcon style={{ marginBottom: 16, fontSize: 12 }}
-        message={`Seçili ${selectedPorts.length} porta belirtilen VLAN ataması yapılır.`}
-        description={
-          <span>
-            <strong>Atomik DEĞİL:</strong> her port için ayrı SSH komutu gider; biri
-            hata verirse diğerleri yine yazılır. Hata raporu mesaj olarak gösterilir.
-          </span>
-        }
+        message={t('devices.detail.bulk_vlan.alert_msg', { count: selectedPorts.length })}
+        description={t('devices.detail.bulk_vlan.alert_desc')}
       />
 
       <div style={{ marginBottom: 16 }}>
-        <Text strong>Seçili portlar</Text>
+        <Text strong>{t('devices.detail.bulk_policy.selected_ports')}</Text>
         <div style={{
           marginTop: 6, padding: 10, background: 'var(--bg-1, #f8fafc)',
           border: '1px solid var(--line-soft, #e2e8f0)', borderRadius: 6,
           maxHeight: 120, overflow: 'auto',
         }}>
           {selectedPorts.length === 0
-            ? <Text type="secondary" style={{ fontSize: 12 }}>port seçilmedi</Text>
+            ? <Text type="secondary" style={{ fontSize: 12 }}>{t('devices.detail.bulk_policy.no_ports')}</Text>
             : <Space size={[6, 6]} wrap>
                 {selectedPorts.map((p) => (
                   <Tag key={p} style={{ fontFamily: 'var(--font-mono, monospace)' }}>{p}</Tag>
@@ -106,13 +103,13 @@ export default function BulkVlanAssignDrawer({
       >
         <Form.Item
           name="mode"
-          label="Mod"
-          rules={[{ required: true, message: 'Mod seçin' }]}
+          label={t('devices.detail.ports.vlan_modal.mode_label')}
+          rules={[{ required: true, message: t('devices.detail.ports.vlan_modal.mode_required') }]}
         >
           <Select
             options={[
-              { label: 'Access (tek VLAN üyesi)', value: 'access' },
-              { label: 'Trunk (çoklu VLAN taşır)', value: 'trunk' },
+              { label: t('devices.detail.ports.vlan_modal.mode_access'), value: 'access' },
+              { label: t('devices.detail.ports.vlan_modal.mode_trunk'), value: 'trunk' },
             ]}
           />
         </Form.Item>
@@ -124,13 +121,13 @@ export default function BulkVlanAssignDrawer({
               return (
                 <Form.Item
                   name="access_vlan_id"
-                  label="Access VLAN ID"
+                  label={t('devices.detail.ports.vlan_modal.access_vlan_label')}
                   rules={[
-                    { required: true, message: 'Access VLAN ID zorunlu' },
-                    { type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' },
+                    { required: true, message: t('devices.detail.ports.vlan_modal.access_vlan_required') },
+                    { type: 'number', min: 1, max: 4094, message: t('devices.detail.ports.vlan_modal.range') },
                   ]}
                 >
-                  <InputNumber style={{ width: '100%' }} placeholder="ör. 100" min={1} max={4094} />
+                  <InputNumber style={{ width: '100%' }} placeholder={t('devices.detail.ports.vlan_modal.access_placeholder')} min={1} max={4094} />
                 </Form.Item>
               )
             }
@@ -138,19 +135,19 @@ export default function BulkVlanAssignDrawer({
               <>
                 <Form.Item
                   name="native_vlan_id"
-                  label="Native VLAN ID (opsiyonel)"
-                  rules={[{ type: 'number', min: 1, max: 4094, message: '1 ile 4094 arası' }]}
-                  extra="Boş bırakılırsa vendor varsayılanı uygulanır (Cisco/Ruijie: 1)."
+                  label={t('devices.detail.ports.vlan_modal.native_label')}
+                  rules={[{ type: 'number', min: 1, max: 4094, message: t('devices.detail.ports.vlan_modal.range') }]}
+                  extra={t('devices.detail.ports.vlan_modal.native_extra')}
                 >
-                  <InputNumber style={{ width: '100%' }} placeholder="ör. 1" min={1} max={4094} />
+                  <InputNumber style={{ width: '100%' }} placeholder={t('devices.detail.ports.vlan_modal.native_placeholder')} min={1} max={4094} />
                 </Form.Item>
                 <Form.Item
                   name="allowed_vlans"
                   label="Allowed VLANs"
-                  rules={[{ required: true, message: 'Allowed VLANs zorunlu (trunk için)' }]}
-                  extra="Örn: 1,10,20-30,100,200-220 — virgül + tire range."
+                  rules={[{ required: true, message: t('devices.detail.ports.vlan_modal.allowed_required') }]}
+                  extra={t('devices.detail.ports.vlan_modal.allowed_extra')}
                 >
-                  <Input placeholder="ör. 1,10,20-30,2400,2460" />
+                  <Input placeholder="1,10,20-30,2400,2460" />
                 </Form.Item>
               </>
             )

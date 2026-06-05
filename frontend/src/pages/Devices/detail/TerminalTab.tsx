@@ -28,6 +28,7 @@ import {
   DesktopOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import type { Device } from '@/types'
 import { devicesApi } from '@/api/devices'
 import { useAuthStore } from '@/store/auth'
@@ -49,6 +50,7 @@ type Mode = 'repl' | 'ssh'
 export default function TerminalTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const { message } = App.useApp()
+  const { t } = useTranslation()
   const canConnect = useAuthStore((s) => s.can('devices', 'connect'))
   const { isDark } = useTheme()
 
@@ -66,14 +68,14 @@ export default function TerminalTab({ device }: { device: Device }) {
       devicesApi.runCommand(device.id, cmd, confirm),
     onSuccess: (res, { cmd }) => {
       if (res.needs_confirm) {
-        setPendingConfirm({ cmd, warning: res.warning || 'Bu komut yapılandırmayı değiştirir.' })
+        setPendingConfirm({ cmd, warning: res.warning || t('devices.detail.terminal.default_confirm_warning') })
         return
       }
       if ((res as any).needs_approval) {
         const r = res as any
         setTerminalHistory((h) => [...h, {
           cmd,
-          output: `[ONAY GEREKLİ] Talep #${r.request_id} oluşturuldu. Admin onayı bekleniyor.\nRisk: ${(r.risk_level || '').toUpperCase()}`,
+          output: t('devices.detail.terminal.approval_message', { id: r.request_id, risk: (r.risk_level || '').toUpperCase() }),
           ok: false,
           approval: true,
         }])
@@ -90,7 +92,7 @@ export default function TerminalTab({ device }: { device: Device }) {
     onError: (e: any, { cmd }) => {
       setTerminalHistory((h) => [...h, {
         cmd,
-        output: e?.response?.data?.detail || 'Hata',
+        output: e?.response?.data?.detail || t('common.error'),
         ok: false,
       }])
     },
@@ -101,9 +103,11 @@ export default function TerminalTab({ device }: { device: Device }) {
     onSuccess: (updated) => {
       setLocalDevice(updated)
       qc.invalidateQueries({ queryKey: ['device', device.id] })
-      message.success(updated.is_readonly ? 'Salt-okunur mod aktif' : 'Yazma modu aktif')
+      message.success(updated.is_readonly
+        ? t('devices.detail.terminal.toast.readonly_on')
+        : t('devices.detail.terminal.toast.write_on'))
     },
-    onError: (e: any) => message.error(apiErr(e, 'Değiştirilemedi')),
+    onError: (e: any) => message.error(apiErr(e, t('devices.detail.terminal.toast.toggle_failed'))),
   })
 
   const approvalMut = useMutation({
@@ -112,9 +116,11 @@ export default function TerminalTab({ device }: { device: Device }) {
     onSuccess: (updated) => {
       setLocalDevice(updated)
       qc.invalidateQueries({ queryKey: ['device', device.id] })
-      message.success(updated.approval_required ? 'Onay akışı aktif' : 'Onay akışı devre dışı')
+      message.success(updated.approval_required
+        ? t('devices.detail.terminal.toast.approval_on')
+        : t('devices.detail.terminal.toast.approval_off'))
     },
-    onError: (e: any) => message.error(apiErr(e, 'Değiştirilemedi')),
+    onError: (e: any) => message.error(apiErr(e, t('devices.detail.terminal.toast.toggle_failed'))),
   })
 
   const submitCmd = (cmd: string, confirm = false) => {
@@ -127,8 +133,8 @@ export default function TerminalTab({ device }: { device: Device }) {
       <div style={{ padding: '16px 0' }}>
         <Alert
           type="warning" showIcon
-          message="Terminal erişimi için yetki yok"
-          description="Bu cihazda komut çalıştırmak veya canlı SSH oturumu açmak için 'devices.connect' yetkisi gerekir. org_admin+ rolü ile tekrar deneyin."
+          message={t('devices.detail.terminal.no_access_title')}
+          description={t('devices.detail.terminal.no_access_desc')}
         />
       </div>
     )
@@ -143,17 +149,17 @@ export default function TerminalTab({ device }: { device: Device }) {
           optionType="button"
           buttonStyle="solid"
         >
-          <Radio.Button value="repl"><CodeOutlined /> Komut (REPL)</Radio.Button>
-          <Radio.Button value="ssh"><DesktopOutlined /> Canlı SSH</Radio.Button>
+          <Radio.Button value="repl"><CodeOutlined /> {t('devices.detail.terminal.mode_repl')}</Radio.Button>
+          <Radio.Button value="ssh"><DesktopOutlined /> {t('devices.detail.terminal.mode_ssh')}</Radio.Button>
         </Radio.Group>
         {mode === 'repl' && (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Audit-edilebilir komut akışı (onay + readonly + risk değerlendirme)
+            {t('devices.detail.terminal.mode_repl_desc')}
           </Text>
         )}
         {mode === 'ssh' && (
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Tam interactive SSH (vim/htop). Onay/audit BU akışta YOK.
+            {t('devices.detail.terminal.mode_ssh_desc')}
           </Text>
         )}
       </div>
@@ -164,8 +170,8 @@ export default function TerminalTab({ device }: { device: Device }) {
             <Space.Compact style={{ flex: 1, minWidth: 320 }}>
               <Input
                 placeholder={localDevice.is_readonly
-                  ? 'show komut girin… (salt-okunur mod)'
-                  : 'komut girin… (yazma modu aktif)'}
+                  ? t('devices.detail.terminal.input_placeholder_readonly')
+                  : t('devices.detail.terminal.input_placeholder_write')}
                 value={terminalCmd}
                 onChange={(e) => setTerminalCmd(e.target.value)}
                 onPressEnter={() => submitCmd(terminalCmd)}
@@ -174,16 +180,16 @@ export default function TerminalTab({ device }: { device: Device }) {
               />
               <Button type="primary" icon={<SendOutlined />} loading={runCmdMut.isPending}
                 onClick={() => submitCmd(terminalCmd)}>
-                Çalıştır
+                {t('devices.detail.terminal.run_btn')}
               </Button>
               {terminalHistory.length > 0 && (
-                <Button onClick={() => setTerminalHistory([])}>Temizle</Button>
+                <Button onClick={() => setTerminalHistory([])}>{t('devices.detail.terminal.clear_btn')}</Button>
               )}
             </Space.Compact>
             <Space size={8}>
               <Tooltip title={localDevice.is_readonly
-                ? 'Salt-okunur: sadece show/ping komutları. Tıkla → yazma moduna geç.'
-                : 'Yazma modu: config komutları aktif. Tıkla → salt-okunura dön.'}>
+                ? t('devices.detail.terminal.readonly_tooltip_on')
+                : t('devices.detail.terminal.readonly_tooltip_off')}>
                 <Button
                   size="small"
                   icon={localDevice.is_readonly ? <SafetyCertificateOutlined /> : <WarningOutlined />}
@@ -194,12 +200,12 @@ export default function TerminalTab({ device }: { device: Device }) {
                     borderColor: localDevice.is_readonly ? '#52c41a' : '#faad14',
                   }}
                 >
-                  {localDevice.is_readonly ? 'Salt-okunur' : 'Yazma Modu'}
+                  {localDevice.is_readonly ? t('devices.form.readonly_on') : t('devices.detail.terminal.btn_write_mode')}
                 </Button>
               </Tooltip>
               <Tooltip title={(localDevice as any).approval_required
-                ? 'Onay akışı: config komutları admin onayına gider. Tıkla → devre dışı bırak.'
-                : 'Onay akışı devre dışı. Tıkla → config komutlarını admin onayına gönder.'}>
+                ? t('devices.detail.terminal.approval_tooltip_on')
+                : t('devices.detail.terminal.approval_tooltip_off')}>
                 <Button
                   size="small"
                   icon={<SafetyCertificateOutlined />}
@@ -210,11 +216,12 @@ export default function TerminalTab({ device }: { device: Device }) {
                     borderColor: (localDevice as any).approval_required ? '#3b82f6' : '#94a3b8',
                   }}
                 >
-                  {(localDevice as any).approval_required ? '4-Göz' : 'Serbest'}
+                  {(localDevice as any).approval_required ? t('devices.detail.terminal.btn_four_eyes') : t('devices.form.approval_off')}
                 </Button>
               </Tooltip>
             </Space>
           </Space>
+          {/* KURAL-E2: Terminal komutları + çıktıları çevrilmez (CLI literal). */}
           <div style={{
             background: '#1e1e1e', borderRadius: 6, padding: 12,
             minHeight: 280, maxHeight: 'calc(100vh - 360px)', overflow: 'auto',
@@ -222,7 +229,7 @@ export default function TerminalTab({ device }: { device: Device }) {
             fontSize: 12,
           }}>
             {terminalHistory.length === 0 ? (
-              <span style={{ color: '#666' }}>Komut girin ve Enter'a basın…</span>
+              <span style={{ color: '#666' }}>{t('devices.detail.terminal.empty_hint')}</span>
             ) : (
               terminalHistory.map((entry, idx) => (
                 <div key={idx} style={{ marginBottom: 12 }}>
@@ -239,7 +246,7 @@ export default function TerminalTab({ device }: { device: Device }) {
           </div>
 
           <Modal
-            title={<Space><WarningOutlined style={{ color: '#faad14' }} /> Komut Onayı</Space>}
+            title={<Space><WarningOutlined style={{ color: '#faad14' }} /> {t('devices.detail.terminal.confirm_modal_title')}</Space>}
             open={!!pendingConfirm}
             onOk={() => {
               if (pendingConfirm) {
@@ -248,12 +255,12 @@ export default function TerminalTab({ device }: { device: Device }) {
               }
             }}
             onCancel={() => setPendingConfirm(null)}
-            okText="Evet, Çalıştır"
-            cancelText="İptal"
+            okText={t('devices.detail.terminal.confirm_ok')}
+            cancelText={t('common.cancel')}
             okButtonProps={{ danger: true }}
           >
             <p>{pendingConfirm?.warning}</p>
-            <p>Komut: <code style={{ background: '#1e1e1e', color: '#4ec9b0', padding: '2px 6px', borderRadius: 4 }}>{pendingConfirm?.cmd}</code></p>
+            <p>{t('devices.detail.terminal.command_label')}: <code style={{ background: '#1e1e1e', color: '#4ec9b0', padding: '2px 6px', borderRadius: 4 }}>{pendingConfirm?.cmd}</code></p>
           </Modal>
         </>
       ) : (

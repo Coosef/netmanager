@@ -8,6 +8,7 @@
 import {
   Drawer, Form, InputNumber, Input, Button, Alert, Typography, Space, Tag,
 } from 'antd'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -29,6 +30,7 @@ interface Props {
 export default function BulkPoeRestartDrawer({
   open, onClose, selectedPorts, saving, onSubmit, defaultWaitSec = 10,
 }: Props) {
+  const { t } = useTranslation()
   const [form] = Form.useForm()
 
   const handleFinish = (vals: {
@@ -45,7 +47,7 @@ export default function BulkPoeRestartDrawer({
 
   return (
     <Drawer
-      title={`Toplu PoE Restart · ${selectedPorts.length} port`}
+      title={t('devices.detail.bulk_poe_restart.title', { count: selectedPorts.length })}
       open={open}
       onClose={onClose}
       width={480}
@@ -57,31 +59,25 @@ export default function BulkPoeRestartDrawer({
           onClick={() => form.submit()}
           disabled={selectedPorts.length === 0}
         >
-          Uygula
+          {t('common.apply')}
         </Button>
       }
     >
       <Alert
         type="warning" showIcon style={{ marginBottom: 16, fontSize: 12 }}
-        message="PoE Restart akışı: disable → bekle → enable"
-        description={
-          <span>
-            Her port için <strong>iki SSH komut</strong> arasında belirtilen süre kadar
-            beklenir. PoE-uyumsuz portlar atlanır (sayaç). AP / IP telefon / kamera için
-            <strong> 10–15 sn</strong> önerilir.
-          </span>
-        }
+        message={t('devices.detail.bulk_poe_restart.flow_title')}
+        description={t('devices.detail.bulk_poe_restart.flow_desc')}
       />
 
       <div style={{ marginBottom: 16 }}>
-        <Text strong>Seçili portlar</Text>
+        <Text strong>{t('devices.detail.bulk_policy.selected_ports')}</Text>
         <div style={{
           marginTop: 6, padding: 10, background: 'var(--bg-1, #f8fafc)',
           border: '1px solid var(--line-soft, #e2e8f0)', borderRadius: 6,
           maxHeight: 120, overflow: 'auto',
         }}>
           {selectedPorts.length === 0
-            ? <Text type="secondary" style={{ fontSize: 12 }}>port seçilmedi</Text>
+            ? <Text type="secondary" style={{ fontSize: 12 }}>{t('devices.detail.bulk_policy.no_ports')}</Text>
             : <Space size={[6, 6]} wrap>
                 {selectedPorts.map((p) => (
                   <Tag key={p} style={{ fontFamily: 'var(--font-mono, monospace)' }}>{p}</Tag>
@@ -100,31 +96,31 @@ export default function BulkPoeRestartDrawer({
       >
         <Form.Item
           name="restart_wait_sec"
-          label="Bekleme süresi (sn)"
+          label={t('devices.detail.bulk_poe_restart.wait_label')}
           rules={[
-            { required: true, message: 'Bekleme süresi gerekli' },
-            { type: 'number', min: 1, max: 60, message: '1 ile 60 arası' },
+            { required: true, message: t('devices.detail.bulk_poe_restart.wait_required') },
+            { type: 'number', min: 1, max: 60, message: t('devices.detail.bulk_poe_restart.wait_range') },
           ]}
-          extra="disable → bekle → enable arasındaki süre. Server varsayılanı uygulamak için boş bırakılabilir."
+          extra={t('devices.detail.bulk_poe_restart.wait_extra')}
         >
           <InputNumber style={{ width: '100%' }} min={1} max={60} />
         </Form.Item>
 
         <Form.Item
           name="rollback_after_sec"
-          label="Auto-rollback süresi (sn)"
-          rules={[{ type: 'number', min: 0, max: 3600, message: '0 ile 3600 arası' }]}
-          extra="Bu süre sonunda PoE yine açık kalır (rollback komutu enable). 0 → rollback timer'ı kapatır (kalıcı)."
+          label={t('devices.detail.bulk_poe_restart.rollback_label')}
+          rules={[{ type: 'number', min: 0, max: 3600, message: t('devices.detail.bulk_poe_restart.rollback_range') }]}
+          extra={t('devices.detail.bulk_poe_restart.rollback_extra')}
         >
           <InputNumber style={{ width: '100%' }} min={0} max={3600} />
         </Form.Item>
 
         <Form.Item
           name="reason"
-          label="Açıklama (opsiyonel)"
-          extra="Audit log'a yazılır."
+          label={t('devices.detail.bulk_poe_restart.reason_label')}
+          extra={t('devices.detail.bulk_poe_restart.reason_extra')}
         >
-          <Input.TextArea rows={2} placeholder="ör. 5. kat kamera donmuş, AP reset" />
+          <Input.TextArea rows={2} placeholder={t('devices.detail.bulk_poe_restart.reason_placeholder')} />
         </Form.Item>
       </Form>
     </Drawer>
