@@ -123,6 +123,19 @@
     "updated_at": "Обновлено",
     "apply": "Применить",
     "no_results": "Ничего не найдено",
+    "update": "Обновить",
+    "create": "Создать",
+    "required_field": "Обязательное поле",
+    "action_failed": "Операция не удалась",
+    "error_occurred": "Произошла ошибка",
+    "save_failed": "Не удалось сохранить",
+    "delete_failed": "Не удалось удалить",
+    "enabled": "Включено",
+    "disabled": "Отключено",
+    "test": "Тест",
+    "username": "Имя пользователя",
+    "password": "Пароль",
+    "unknown_error": "Неизвестная ошибка",
     "validation": {
       "required": "Поле обязательно",
       "ip_required": "IP-адрес обязателен",
@@ -1533,6 +1546,542 @@
     "title": "Настройки",
     "language": "Язык",
     "language_desc": "Выберите язык приложения",
+    "crumb_admin": "Администрирование",
+    "page_subtitle": "Общие настройки · каналы уведомлений · правила оповещений · политики SLA · управление учётными данными и токенами.",
+    "col": { "action": "Действие", "actions": "Действия" },
+    "unit": { "min_short": "мин", "day": "дней" },
+    "stat": {
+      "notification_channels": "Каналы уведомлений",
+      "alert_rules": "Правила оповещений",
+      "sla_policies": "Политики SLA",
+      "credential_profiles": "Профили учёток",
+      "api_tokens": "API-токены",
+      "n_active": "{{count}} активны"
+    },
+    "tab": {
+      "general": "Общее",
+      "system": "Система (сканирование)",
+      "password_policy": "Политика паролей",
+      "notifications": "Уведомления",
+      "alert_rules": "Правила оповещений",
+      "maintenance": "Окна обслуживания",
+      "credentials": "Профили учёток",
+      "rotation": "Ротация паролей",
+      "sla": "Политики SLA",
+      "snmp": "SNMP",
+      "api_tokens": "API-токены",
+      "driver_templates": "Шаблоны драйверов",
+      "ai": "AI-ассистент"
+    },
+    "alert_rules": {
+      "btn_new": "Новое правило",
+      "empty": "Пока нет правил",
+      "all_devices": "Все устройства",
+      "intro_message": "Отправляет уведомления, когда результаты SNMP-опроса превышают порог утилизации интерфейса или ошибок.",
+      "intro_desc": "В ваших каналах уведомлений должна быть включена опция 'Пороговое оповещение (SNMP)'.",
+      "col": {
+        "name": "Имя", "device": "Устройство", "interface": "Интерфейс",
+        "metric_threshold": "Метрика / Порог", "consecutive_poll": "Подряд опросов",
+        "severity": "Уровень", "enabled": "Активно"
+      },
+      "popconfirm": { "delete_title": "Удалить это правило?" },
+      "modal": { "title_new": "Новое правило оповещения", "title_edit": "Изменить правило" },
+      "form": {
+        "name_label": "Имя правила",
+        "name_placeholder": "Напр.: Core Switch высокая утилизация",
+        "device_label": "Устройство",
+        "device_tooltip": "Если пусто, применяется ко всем устройствам",
+        "device_placeholder": "— Все устройства —",
+        "interface_pattern_label": "Шаблон интерфейса",
+        "interface_pattern_tooltip": "fnmatch-шаблон. Напр.: Gi0/*, Te*, пусто = все интерфейсы",
+        "interface_pattern_placeholder": "* (все интерфейсы)",
+        "metric_label": "Метрика",
+        "threshold_label": "Порог (%)",
+        "consecutive_label": "Кол-во опросов подряд",
+        "consecutive_tooltip": "Сколько последовательных опросов должны превысить порог",
+        "severity_label": "Уровень",
+        "cooldown_label": "Кулдаун (мин)",
+        "cooldown_tooltip": "Минимальный интервал уведомлений для одного и того же правила",
+        "enabled_label": "Активно"
+      },
+      "toast": {
+        "created": "Правило создано",
+        "updated": "Правило обновлено",
+        "deleted": "Правило удалено"
+      }
+    },
+    "notifications": {
+      "intro": "Управляйте каналами уведомлений. При наступлении событий сообщения автоматически отправляются в выбранные каналы.",
+      "btn_add": "Добавить канал",
+      "btn_send_digest": "Отправить недельную сводку",
+      "status_active": "Активен",
+      "status_inactive": "Неактивен",
+      "tooltip_test_send": "Отправить тест",
+      "col": {
+        "name": "Имя", "type": "Тип", "triggers": "Триггеры", "status": "Статус"
+      },
+      "popconfirm": {
+        "send_digest_title": "Отправить недельную сводку?",
+        "delete_title": "Удалить канал?"
+      },
+      "modal": { "title_new": "Новый канал уведомлений", "title_edit": "Изменить канал" },
+      "form": {
+        "name_label": "Имя канала",
+        "type_label": "Тип",
+        "triggers_placeholder": "Выберите события для уведомлений",
+        "active_label": "Активен"
+      },
+      "channel": {
+        "email": "Email",
+        "webhook": "Generic Webhook",
+        "jira": "Jira (Ticket)"
+      },
+      "email": {
+        "recipients_label": "Получатели",
+        "recipients_extra": "Разделяйте запятыми"
+      },
+      "teams": {
+        "webhook_extra": "Получите из коннектора Incoming Webhook в канале Teams"
+      },
+      "webhook": {
+        "url_label": "Целевой URL",
+        "headers_label": "Свои заголовки",
+        "headers_extra": "JSON-формат: {\"X-API-Key\": \"abc123\"}"
+      },
+      "telegram": {
+        "bot_token_label": "Bot Token",
+        "chat_id_label": "Chat ID"
+      },
+      "jira": {
+        "info_alert": "Для Jira Cloud используйте Atlassian API Token. Для Jira Server введите имя пользователя + пароль.",
+        "url_label": "Jira URL",
+        "url_extra": "Напр.: https://mycompany.atlassian.net",
+        "email_label": "Email / Имя пользователя",
+        "api_token_label": "API Token / Пароль",
+        "api_token_extra": "Atlassian Cloud: id.atlassian.com → Безопасность → API token",
+        "project_key_label": "Ключ проекта",
+        "project_key_extra": "Короткий код со страницы проекта Jira (NET, OPS, INFRA и т.д.)",
+        "issue_type_label": "Тип задачи",
+        "issue_type_extra": "Имя типа задачи, определённое в вашем Jira-проекте"
+      },
+      "toast": {
+        "created": "Канал создан",
+        "updated": "Канал обновлён",
+        "deleted": "Канал удалён",
+        "test_sent": "Тестовое сообщение отправлено!",
+        "test_failed": "Тест не удался: {{error}}",
+        "digest_queued": "Недельная сводка поставлена в очередь"
+      }
+    },
+    "credentials": {
+      "btn_new": "Новый профиль",
+      "empty": "Пока нет профилей",
+      "intro_message": "Учётные данные хранятся с шифрованием Fernet. Пароли никогда не возвращаются в API-ответах.",
+      "intro_desc": "Централизуйте управление учётными данными, назначая профили устройствам. Устройства с назначенными профилями используют этот профиль для SSH/SNMP-соединений.",
+      "col": { "profile_name": "Имя профиля" },
+      "popconfirm": {
+        "delete_title": "Удалить этот профиль?",
+        "delete_desc": "Не может быть удалён, если устройства назначены на этот профиль."
+      },
+      "modal": { "title_new": "Новый профиль учётки", "title_edit": "Изменить профиль" },
+      "form": {
+        "name_label": "Имя профиля",
+        "name_placeholder": "Напр.: Cisco Core, Aruba Access, Read-Only",
+        "description_label": "Описание",
+        "description_placeholder": "Опциональная заметка",
+        "ssh_username_label": "SSH-пользователь",
+        "ssh_password_label": "SSH-пароль",
+        "ssh_password_edit_label": "SSH-пароль (заполните для изменения)",
+        "ssh_port_label": "SSH-порт",
+        "enable_secret_label": "Enable Secret",
+        "enable_secret_edit_label": "Enable Secret (заполните для изменения)",
+        "enable_secret_tooltip": "Если пусто, текущее значение сохраняется; пробел для очистки",
+        "password_edit_placeholder": "— введите для изменения —",
+        "snmp_enabled_label": "SNMP включён",
+        "snmp_version_label": "Версия SNMP",
+        "snmp_port_label": "SNMP-порт",
+        "v3_username_label": "Имя пользователя v3",
+        "v3_auth_proto_label": "Протокол Auth",
+        "v3_auth_pass_label": "Пароль Auth",
+        "v3_priv_proto_label": "Протокол Priv",
+        "v3_priv_pass_label": "Пароль Priv",
+        "empty_select": "— нет —"
+      },
+      "toast": {
+        "created": "Профиль создан",
+        "updated": "Профиль обновлён",
+        "deleted": "Профиль удалён"
+      }
+    },
+    "sla": {
+      "btn_new": "Добавить политику",
+      "intro": "Определите цели uptime для устройства или группы. При нарушении может отправляться уведомление.",
+      "days_value": "{{count}} дней",
+      "col": {
+        "policy_name": "Имя политики",
+        "target_uptime": "Целевой Uptime",
+        "measurement_window": "Окно измерения",
+        "scope": "Область",
+        "notification": "Уведомление"
+      },
+      "scope": {
+        "devices": "{{count}} устройств",
+        "groups": "{{count}} групп"
+      },
+      "popconfirm": { "delete_title": "Удалить эту политику?" },
+      "modal": { "title_new": "Новая политика SLA", "title_edit": "Изменить политику SLA" },
+      "form": {
+        "name_label": "Имя политики",
+        "name_placeholder": "SLA Критической Инфраструктуры",
+        "target_uptime_label": "Целевой Uptime (%)",
+        "measurement_window_label": "Окно измерения",
+        "scope_devices_label": "Область — Устройства",
+        "scope_devices_extra": "Если оставить пустым, включаются все устройства",
+        "scope_devices_placeholder": "Выберите конкретные устройства (опционально)",
+        "notify_on_breach_label": "Уведомлять при нарушении"
+      },
+      "toast": {
+        "created": "Политика SLA создана",
+        "updated": "Политика SLA обновлена",
+        "deleted": "Политика SLA удалена"
+      }
+    },
+    "snmp": {
+      "stat": {
+        "total_devices": "Всего устройств",
+        "snmp_enabled": "SNMP включён",
+        "poll_records": "Записей опроса",
+        "last_poll": "Последний опрос",
+        "not_yet": "Пока нет"
+      },
+      "col": { "device": "Устройство" },
+      "bulk_section_title": "Массовая конфигурация SNMP (SSH)",
+      "alert_ruijie_title": "Правило community-строки Ruijie",
+      "alert_ruijie_desc": "Community-строка должна включать минимум 3 типа символов: заглавная + строчная + цифра. Пример: \"Charon1\"",
+      "alert_ssh_title": "Команды SNMP отправляются напрямую в прошивку устройства через SSH",
+      "alert_ssh_desc": "Подключается по SSH к каждому устройству, включает SNMP и пишет community-строку. Для 58 устройств — ~2-3 минуты.",
+      "form": {
+        "community_label": "SNMP Community String",
+        "community_extra": "Ruijie требует заглавную + строчную + цифру — напр. \"Charon1\"",
+        "version_label": "Версия",
+        "version_v2c_recommended": "SNMPv2c (рекомендуется)"
+      },
+      "btn_apply_to_all": "Применить ко всем устройствам по SSH",
+      "btn_configuring": "Настраивается...",
+      "btn_yes_apply": "Да, применить",
+      "confirm_apply_all": "Будет SSH-подключение ко всем {{count}} устройствам. Уверены?",
+      "manual_poll_section": "Ручной опрос",
+      "manual_poll_hint": "Celery beat автоматически опрашивает каждые 5 минут. Эта кнопка ставит в очередь сразу.",
+      "btn_poll_now": "Опросить сейчас",
+      "result_modal_title": "Результат настройки SSH — {{succeeded}}/{{attempted}} успешно",
+      "result_succeeded": "Успешно: {{count}}",
+      "result_failed": "Не удалось: {{count}}",
+      "result_failed_hint": "Для неудачных устройств используйте Детали устройства → Здоровье → Обновить SNMP.",
+      "toast": {
+        "poll_queued": "Задача SNMP-опроса поставлена в очередь — данные обновятся через ~30 секунд",
+        "poll_failed": "Не удалось запустить задачу опроса",
+        "ssh_config_failed": "Не удалась настройка SSH",
+        "community_required": "Требуется community-строка"
+      }
+    },
+    "rotation": {
+      "intro_message": "Ротация SSH-пароля подключается к реальным устройствам и меняет пароль.",
+      "intro_desc": "Профиль не обновляется, пока все устройства не выполнят успешно. Поддерживаются Cisco IOS/IOS-XE и Ruijie.",
+      "unassigned_label": "Профили без политики: ",
+      "empty": "Пока нет политик ротации. Добавьте через кнопки профилей выше.",
+      "col": {
+        "profile": "Профиль учётки",
+        "interval": "Интервал",
+        "last_rotation": "Последняя ротация",
+        "next_rotation": "Следующая ротация"
+      },
+      "status": {
+        "idle": "Ожидает",
+        "running": "Выполняется",
+        "success": "Успешно",
+        "failed": "Не удалась"
+      },
+      "tooltip": {
+        "last_result": "Последний результат",
+        "rotate_now": "Ротировать сейчас"
+      },
+      "popconfirm": { "delete_title": "Удалить политику ротации?" },
+      "modal": {
+        "title_new": "Добавить политику ротации",
+        "title_edit": "Изменить политику",
+        "profile_label": "Профиль: {{name}}",
+        "last_result_title": "Результат последней ротации",
+        "executed_at": "Выполнено {{date}}"
+      },
+      "form": { "interval_label": "Интервал ротации (дни)" },
+      "toast": { "started": "Ротация запущена" }
+    },
+    "maintenance": {
+      "btn_new": "Добавить окно обслуживания",
+      "empty": "Пока нет окон обслуживания",
+      "alert_active": "{{count}} активн. окон обслуживания — SNMP-оповещения для этих устройств подавлены.",
+      "alert_idle": "Во время плановых обслуживаний пороговые SNMP-оповещения автоматически подавляются.",
+      "alert_desc": "Пока активно окно обслуживания, нарушения AlertRule для связанных устройств не отправляют уведомлений.",
+      "col": {
+        "name": "Имя обслуживания",
+        "start": "Начало",
+        "end": "Конец",
+        "scope": "Область"
+      },
+      "scope": { "selected_devices": "Выбранные устройства" },
+      "day": {
+        "mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг",
+        "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье",
+        "mon_short": "Пн", "tue_short": "Вт", "wed_short": "Ср",
+        "thu_short": "Чт", "fri_short": "Пт", "sat_short": "Сб", "sun_short": "Вс"
+      },
+      "recurrence": {
+        "section_title": "Повторение (опционально)",
+        "info_message": "Если определите повторение, на следующие 14 дней автоматически создаются примеры окон.",
+        "info_desc": "Диапазон даты/времени становится 'шаблоном'; примеры окон используют ту же длительность при каждом повторении.",
+        "label": "Повторение",
+        "placeholder_once": "Разово (без повторения)",
+        "daily": "Ежедневно",
+        "weekly": "Еженедельно (выбранные дни)",
+        "monthly": "Ежемесячно (выбранный день)",
+        "weekly_value": "Еженедельно: {{days}}",
+        "monthly_value": "Ежемесячно ({{day}} число месяца)",
+        "template_label": "{{label}} · {{count}} экземпл.",
+        "which_days_label": "Какие дни",
+        "which_days_required": "Выберите минимум один день",
+        "day_of_month_label": "День месяца (1-28)",
+        "end_date_label": "Дата окончания (опц.)",
+        "max_count_label": "Макс. число экземпл. (опц.)",
+        "unlimited": "без ограничения"
+      },
+      "popconfirm": { "delete_title": "Удалить это окно обслуживания?" },
+      "modal": { "title_new": "Новое окно обслуживания", "title_edit": "Изменить окно обслуживания" },
+      "form": {
+        "name_label": "Имя обслуживания",
+        "name_placeholder": "Напр.: Ежемесячное обновление — Core Layer",
+        "description_label": "Описание",
+        "time_range_label": "Диапазон даты и времени",
+        "devices_label": "Устройства",
+        "devices_tooltip": "Выберите устройства в зоне обслуживания",
+        "devices_placeholder": "Выберите устройства"
+      },
+      "toast": {
+        "created": "Окно обслуживания создано",
+        "updated": "Окно обслуживания обновлено",
+        "deleted": "Окно обслуживания удалено"
+      }
+    },
+    "api_tokens": {
+      "section_title": "Управление API-токенами",
+      "section_subtitle": "Создавайте долгоживущие токены для автоматизации и API-доступа.",
+      "btn_new": "Новый токен",
+      "btn_revoke": "Отозвать",
+      "empty": "Пока нет токенов",
+      "never_used": "Не использовался",
+      "never_expires": "Без срока",
+      "one_year": "1 год",
+      "usage_hint": "Использование в заголовке:",
+      "col": {
+        "name": "Имя",
+        "prefix": "Префикс",
+        "last_used": "Использовался",
+        "expires_at": "Истекает"
+      },
+      "popconfirm": {
+        "revoke_title": "Отозвать этот токен?",
+        "revoke_desc": "Это действие необратимо."
+      },
+      "modal": {
+        "title_new": "Создать новый API-токен",
+        "created_title": "Токен создан",
+        "saved_btn": "OK, сохранил",
+        "warn_title": "Этот токен больше не будет показан!",
+        "warn_desc": "Скопируйте сейчас и сохраните в надёжном месте."
+      },
+      "form": {
+        "name_label": "Имя токена",
+        "name_required": "Введите имя",
+        "name_placeholder": "напр. CI/CD Pipeline, Monitoring Bot",
+        "expires_label": "Дата истечения",
+        "expires_help": "Если пусто — без срока"
+      },
+      "toast": {
+        "create_failed": "Не удалось создать токен",
+        "revoked": "Токен отозван",
+        "copied": "Токен скопирован"
+      }
+    },
+    "ai": {
+      "security_message": "Ваши API-ключи хранятся на сервере с шифрованием Fernet и никогда не логируются.",
+      "active_provider_label": "Активный провайдер",
+      "active_provider_placeholder": "Выберите провайдера",
+      "provider_ollama_local": "Ollama (Локальный)",
+      "tag_configured": "Настроено",
+      "tag_no_key": "Нет API-ключа",
+      "tag_no_api_key": "Не требует API-ключ",
+      "api_key_placeholder": "{{name}} API-ключ",
+      "api_key_placeholder_change": "{{name}} API-ключ (введите для изменения)",
+      "model_placeholder": "Выберите модель",
+      "ollama_section_title": "Ollama (Локальная модель)",
+      "toast": { "saved": "Настройки AI сохранены" }
+    },
+    "system": {
+      "page_title": "Системные настройки",
+      "empty": "Настройки не найдены",
+      "no_permission_title": "Недостаточно прав",
+      "no_permission_desc": "Только org_admin или super_admin могут просматривать и изменять системные настройки.",
+      "info_desc": "Слишком низкая частота сканирования нагружает устройства лишний раз (особенно SNMP); очень высокое значение замедляет восприятие задержки. Под каждой настройкой есть рекомендованный диапазон; значения вне min/max не принимаются.",
+      "scope": {
+        "global": "Глобальное",
+        "org_override": "Переопр. Org",
+        "default": "По умолчанию"
+      },
+      "scope_legend_org": "применяется к этой организации,",
+      "scope_legend_global": "применяется ко всей платформе (изменяет только super_admin). Некоторые настройки вступают в силу после перезапуска Celery-воркера.",
+      "category": {
+        "scan_frequencies": "Частоты сканирования",
+        "alarm_dedup": "Тревога / Dedup",
+        "flap": "Обнаружение flap",
+        "correlation": "Движок корреляции",
+        "maintenance": "Окна обслуживания",
+        "session_stale": "Сессия / Stale",
+        "retention": "Хранение данных",
+        "other": "Прочее"
+      },
+      "row": {
+        "effective_label": "Эффективно",
+        "global_lock_tooltip": "Глобальная настройка — изменить может только super_admin",
+        "reset_to_default": "Сбросить к значению по умолчанию"
+      },
+      "popconfirm": {
+        "reset_title": "Удалить переопределение Org",
+        "reset_desc": "Эта настройка вернётся к значению по умолчанию. Продолжить?"
+      },
+      "toast": {
+        "saved_key": "Настройка сохранена: {{key}}",
+        "worker_restart_required": "⚠ Для некоторых настроек требуется перезапуск Celery-воркера",
+        "save_failed": "Не удалось сохранить настройку",
+        "override_removed": "Переопределение удалено: {{key}}",
+        "already_default": "Уже было значением по умолчанию",
+        "reset_failed": "Сброс не удался"
+      },
+      "retention": {
+        "panel_title": "Предпросмотр хранения (Dry-Run)",
+        "btn_preview": "Предпросмотр",
+        "preview_failed": "Не удалось загрузить предпросмотр",
+        "intro": "Если бы очистка запустилась сейчас, сколько строк из какой таблицы было бы удалено? Эта операция ничего не удаляет — только считает. Реальная очистка работает в ежедневной beat-задаче с эффективным хранением по org (потолок плана + базис 7 дней).",
+        "empty_hint": "Нажмите \"Предпросмотр\" для просмотра.",
+        "nothing_to_delete": "Нет старых данных для удаления — всё в пределах окна хранения.",
+        "total_candidates": "{{count}} строк являются кандидатами на удаление.",
+        "col_table": "Таблица",
+        "col_rows": "Строк к удалению"
+      }
+    },
+    "password_policy": {
+      "page_title": "Политика паролей",
+      "tag_global_default": "Глобальное по умолчанию",
+      "intro": "Эти правила применяются при создании новых пользователей, смене пароля пользователем и после сброса администратором. Источник:",
+      "card_rules_title": "Правила",
+      "no_permission_title": "Недостаточно прав",
+      "no_permission_desc": "Только org_admin или super_admin могут просматривать и изменять политику паролей.",
+      "btn_back_to_global": "Вернуться к глобальной",
+      "popconfirm": {
+        "reset_title": "Удалить переопределение Org",
+        "reset_desc": "Эта org вернётся к глобальной по умолчанию. Продолжить?"
+      },
+      "form": {
+        "min_length_label": "Минимальная длина",
+        "classes_label": "Требования к классам символов",
+        "history_label": "Проверка повторного использования (history)",
+        "history_tooltip": "Запретить повторное использование последних N паролей. 0 = без проверки.",
+        "expiry_label": "Срок действия пароля (дни)",
+        "expiry_tooltip": "По окончании этого срока пользователь принудительно меняет пароль. 0 = без срока.",
+        "force_change_label": "Принудительная смена пароля при первом входе"
+      },
+      "unit": { "password_short": "паролей" },
+      "tester_card_title": "Инструмент тестирования паролей",
+      "tester_hint": "Введите ниже, чтобы увидеть, проходит ли пароль текущую политику.",
+      "tester_placeholder": "Пароль для теста…",
+      "tester_pass_message": "Пароль прошёл политику ✓",
+      "tester_fail_message": "Пароль не прошёл политику",
+      "tester_source": "Источник политики: {{source}}",
+      "toast": {
+        "updated": "Политика паролей обновлена",
+        "save_failed": "Не удалось сохранить политику",
+        "reset_done": "Переопределение Org удалено — действует глобальная по умолчанию"
+      }
+    },
+    "mfa": {
+      "section_title": "Многофакторная аутентификация",
+      "enabled_title": "MFA активен",
+      "enabled_desc": "При каждом входе требуется 6-значный код из приложения-аутентификатора.",
+      "enrolled_at_label": "Регистрация",
+      "methods_label": "МЕТОДЫ",
+      "method": { "authenticator": "Аутентификатор" },
+      "recovery_remaining_label": "ОСТАЛОСЬ КОДОВ ВОССТАНОВЛЕНИЯ",
+      "tag_running_out": "Заканчиваются",
+      "btn_regen_recovery": "Перегенерировать коды восстановления",
+      "btn_regen_short": "Перегенерировать",
+      "btn_disable": "Отключить MFA",
+      "btn_enable": "Включить MFA",
+      "btn_confirm_enable": "Подтвердить и активировать",
+      "btn_copy_secret": "Скопировать ключ",
+      "disable_warning": "Ваш аккаунт снова станет одно-факторным.",
+      "disable_code_placeholder": "6-значный код или код восстановления (рекомендуется)",
+      "regen_warning": "При генерации новых кодов старые сразу становятся недействительными.",
+      "regen_code_placeholder": "6-значный код из аутентификатора",
+      "setup_title": "Настройка MFA — 1 / 2",
+      "setup_step2_title": "2 / 2 — Введите код из приложения",
+      "setup_intro_prefix": "В вашем приложении-аутентификаторе (",
+      "setup_intro_suffix": ") отсканируйте QR или введите ключ настройки вручную. Этот ключ показывается только один раз.",
+      "setup_key_label": "КЛЮЧ НАСТРОЙКИ (BASE32)",
+      "setup_qr_fallback_hint": "Если QR не сканируется, \"Ввести ключ настройки\" → вставьте этот текст.",
+      "code_6_placeholder": "6-значный код",
+      "idle_title": "MFA сейчас отключён",
+      "idle_desc": "Ваш аккаунт защищён только паролем. Включите TOTP одним кликом — работает с Google Authenticator, Microsoft Authenticator, Authy и 1Password.",
+      "recovery": {
+        "panel_title": "Ваши коды восстановления",
+        "panel_intro_pre": "Если потеряете доступ к аутентификатору, введите один из кодов ниже в поле ",
+        "panel_recovery_word": "Восстановление",
+        "panel_intro_mid": " на странице Login для повторного входа. Каждый код ",
+        "panel_one_time": "одноразовый",
+        "panel_intro_post": ". Этот список показывается только сейчас.",
+        "btn_download_txt": "Скачать (.txt)",
+        "btn_saved_close": "Сохранил, закрыть",
+        "file_title": "Коды восстановления MFA",
+        "file_created_at": "Создано",
+        "file_one_time_notice": "Каждый код ОДНОРАЗОВЫЙ. Используйте один, если потеряете доступ к аутентификатору."
+      },
+      "email": {
+        "card_title": "Проверка по email (2-й канал)",
+        "active_desc": "Во время логина OTP может отправляться на вашу почту вместо аутентификатора. Аутентификатор по-прежнему может использоваться как основной метод.",
+        "idle_desc": "6-значный OTP отправляется на вашу зарегистрированную почту. Работает как дополнительный канал проверки рядом с аутентификатором.",
+        "requirement_alert": "Чтобы отправлять email, в вашей организации должен быть хотя бы один активный email-канал уведомлений (Настройки → Уведомления).",
+        "sent_desc": "Введите 6-значный код из email. Код действует 10 минут.",
+        "btn_enable": "Включить email-канал",
+        "btn_remove": "Удалить email-канал",
+        "btn_verify": "Подтвердить",
+        "btn_resend": "Отправить ещё раз",
+        "toast": {
+          "code_sent": "Код подтверждения отправлен: {{email}}",
+          "send_failed": "Не удалось отправить email",
+          "added": "Email MFA-канал добавлен",
+          "verify_failed": "Код не прошёл проверку",
+          "removed": "Email MFA-канал удалён",
+          "remove_failed": "Не удалось удалить"
+        }
+      },
+      "toast": {
+        "enroll_failed": "Не удалось начать регистрацию",
+        "enabled": "MFA активирован — сохраните коды восстановления сейчас.",
+        "invalid_code": "Неверный код",
+        "disabled": "MFA отключён",
+        "disable_failed": "Не удалось отключить",
+        "regen_ok": "Новые коды восстановления сгенерированы — старые теперь недействительны.",
+        "regen_failed": "Перегенерация не удалась",
+        "secret_copied": "Ключ скопирован"
+      }
+    },
     "theme": "Тема",
     "theme_desc": "Выберите внешний вид приложения",
     "theme_dark": "Тёмная",

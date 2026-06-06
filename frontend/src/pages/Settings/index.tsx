@@ -61,6 +61,7 @@ function SectionHeader({ icon, title }: { icon: React.ReactNode; title: string }
 // ── Notification Channels CRUD ──────────────────────────────────────────────
 
 function ChannelTypeConfig({ type }: { type: ChannelType }) {
+  const { t } = useTranslation()
   if (type === 'email') return (
     <>
       <Form.Item label="SMTP Host" name={['config', 'smtp_host']} rules={[{ required: true }]}>
@@ -72,13 +73,13 @@ function ChannelTypeConfig({ type }: { type: ChannelType }) {
       <Form.Item label="TLS" name={['config', 'smtp_use_tls']} valuePropName="checked">
         <Switch />
       </Form.Item>
-      <Form.Item label="Kullanıcı Adı" name={['config', 'smtp_username']}>
+      <Form.Item label={t('common.username')} name={['config', 'smtp_username']}>
         <Input />
       </Form.Item>
-      <Form.Item label="Şifre" name={['config', 'smtp_password']}>
+      <Form.Item label={t('common.password')} name={['config', 'smtp_password']}>
         <Input.Password />
       </Form.Item>
-      <Form.Item label="Alıcılar" name={['config', 'recipients']} extra="Virgülle ayırın">
+      <Form.Item label={t('settings.notifications.email.recipients_label')} name={['config', 'recipients']} extra={t('settings.notifications.email.recipients_extra')}>
         <Select mode="tags" tokenSeparators={[',']} placeholder="user@example.com" />
       </Form.Item>
     </>
@@ -90,27 +91,27 @@ function ChannelTypeConfig({ type }: { type: ChannelType }) {
   )
   if (type === 'teams') return (
     <Form.Item label="Webhook URL" name={['config', 'webhook_url']} rules={[{ required: true }]}
-      extra="Teams kanalında Incoming Webhook bağlayıcısından alın">
+      extra={t('settings.notifications.teams.webhook_extra')}>
       <Input placeholder="https://outlook.office.com/webhook/..." />
     </Form.Item>
   )
   if (type === 'webhook') return (
     <>
-      <Form.Item label="Hedef URL" name={['config', 'url']} rules={[{ required: true }]}>
+      <Form.Item label={t('settings.notifications.webhook.url_label')} name={['config', 'url']} rules={[{ required: true }]}>
         <Input placeholder="https://example.com/hooks/netmanager" />
       </Form.Item>
-      <Form.Item label="Özel Başlıklar" name={['config', 'headers']}
-        extra='JSON formatında: {"X-API-Key": "abc123"}'>
+      <Form.Item label={t('settings.notifications.webhook.headers_label')} name={['config', 'headers']}
+        extra={t('settings.notifications.webhook.headers_extra')}>
         <Input.TextArea rows={3} placeholder='{"Authorization": "Bearer ..."}' />
       </Form.Item>
     </>
   )
   if (type === 'telegram') return (
     <>
-      <Form.Item label="Bot Token" name={['config', 'bot_token']} rules={[{ required: true }]}>
+      <Form.Item label={t('settings.notifications.telegram.bot_token_label')} name={['config', 'bot_token']} rules={[{ required: true }]}>
         <Input.Password placeholder="123456:ABC..." />
       </Form.Item>
-      <Form.Item label="Chat ID" name={['config', 'chat_id']} rules={[{ required: true }]}>
+      <Form.Item label={t('settings.notifications.telegram.chat_id_label')} name={['config', 'chat_id']} rules={[{ required: true }]}>
         <Input placeholder="-1001234567890" />
       </Form.Item>
     </>
@@ -121,44 +122,44 @@ function ChannelTypeConfig({ type }: { type: ChannelType }) {
         type="info"
         showIcon
         style={{ marginBottom: 12, fontSize: 12 }}
-        message="Jira Cloud için Atlassian API Token kullanın. Jira Server için kullanıcı adı + şifre girin."
+        message={t('settings.notifications.jira.info_alert')}
       />
       <Form.Item
-        label="Jira URL"
+        label={t('settings.notifications.jira.url_label')}
         name={['config', 'jira_url']}
         rules={[{ required: true }]}
-        extra="Örn: https://mycompany.atlassian.net"
+        extra={t('settings.notifications.jira.url_extra')}
       >
         <Input placeholder="https://mycompany.atlassian.net" />
       </Form.Item>
       <Form.Item
-        label="E-posta / Kullanıcı Adı"
+        label={t('settings.notifications.jira.email_label')}
         name={['config', 'jira_email']}
         rules={[{ required: true }]}
       >
         <Input placeholder="user@example.com" />
       </Form.Item>
       <Form.Item
-        label="API Token / Şifre"
+        label={t('settings.notifications.jira.api_token_label')}
         name={['config', 'jira_api_token']}
         rules={[{ required: true }]}
-        extra="Atlassian Cloud: id.atlassian.com → Güvenlik → API token"
+        extra={t('settings.notifications.jira.api_token_extra')}
       >
         <Input.Password placeholder="ATATT3xFfGF0..." />
       </Form.Item>
       <Form.Item
-        label="Proje Anahtarı"
+        label={t('settings.notifications.jira.project_key_label')}
         name={['config', 'jira_project_key']}
         rules={[{ required: true }]}
-        extra="Jira proje sayfasındaki kısa kod (NET, OPS, INFRA vb.)"
+        extra={t('settings.notifications.jira.project_key_extra')}
       >
         <Input placeholder="NET" style={{ width: 160 }} />
       </Form.Item>
       <Form.Item
-        label="Issue Türü"
+        label={t('settings.notifications.jira.issue_type_label')}
         name={['config', 'jira_issue_type']}
         initialValue="Bug"
-        extra="Jira projenizde tanımlı issue type adı"
+        extra={t('settings.notifications.jira.issue_type_extra')}
       >
         <Select style={{ width: 200 }}>
           <Select.Option value="Bug">Bug</Select.Option>
@@ -177,6 +178,7 @@ function ChannelTypeConfig({ type }: { type: ChannelType }) {
 
 function AlertRulesTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<AlertRule | null>(null)
   const [form] = Form.useForm()
@@ -212,16 +214,16 @@ function AlertRulesTab() {
       setModalOpen(false)
       form.resetFields()
       setEditing(null)
-      message.success(editing ? 'Kural güncellendi' : 'Kural oluşturuldu')
+      message.success(editing ? t('settings.alert_rules.toast.updated') : t('settings.alert_rules.toast.created'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('common.error_occurred')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: alertRulesApi.delete,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['alert-rules'] })
-      message.success('Kural silindi')
+      message.success(t('settings.alert_rules.toast.deleted'))
     },
   })
 
@@ -246,7 +248,7 @@ function AlertRulesTab() {
 
   const columns = [
     {
-      title: 'Ad', dataIndex: 'name', render: (v: string, r: AlertRule) => (
+      title: t('settings.alert_rules.col.name'), dataIndex: 'name', render: (v: string, r: AlertRule) => (
         <Space>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: r.enabled ? '#22c55e' : '#475569', display: 'inline-block', marginRight: 2 }} />
           <strong>{v}</strong>
@@ -254,37 +256,37 @@ function AlertRulesTab() {
       ),
     },
     {
-      title: 'Cihaz', dataIndex: 'device_id',
+      title: t('settings.alert_rules.col.device'), dataIndex: 'device_id',
       render: (v: number | null) => v
         ? <Tag>{devices.find((d) => d.id === v)?.hostname || `#${v}`}</Tag>
-        : <Tag color="default">Tüm Cihazlar</Tag>,
+        : <Tag color="default">{t('settings.alert_rules.all_devices')}</Tag>,
     },
     {
-      title: 'Interface', dataIndex: 'if_name_pattern',
+      title: t('settings.alert_rules.col.interface'), dataIndex: 'if_name_pattern',
       render: (v: string | null) => <code style={{ fontSize: 11 }}>{v || '*'}</code>,
     },
     {
-      title: 'Metrik / Eşik', render: (_: any, r: AlertRule) => (
+      title: t('settings.alert_rules.col.metric_threshold'), render: (_: any, r: AlertRule) => (
         <Space>
           <Tag color="blue">{METRIC_OPTIONS.find((m) => m.value === r.metric)?.label || r.metric}</Tag>
           <Tag color={r.threshold_value >= 80 ? 'red' : r.threshold_value >= 60 ? 'orange' : 'green'}>
-            {r.metric === 'error_rate' ? `>${r.threshold_value}/dk` : `≥ ${r.threshold_value}%`}
+            {r.metric === 'error_rate' ? `>${r.threshold_value}/${t('settings.unit.min_short')}` : `≥ ${r.threshold_value}%`}
           </Tag>
         </Space>
       ),
     },
     {
-      title: 'Ardışık Poll', dataIndex: 'consecutive_count',
+      title: t('settings.alert_rules.col.consecutive_poll'), dataIndex: 'consecutive_count',
       render: (v: number) => <Tag>{v}x</Tag>,
       width: 90,
     },
     {
-      title: 'Seviye', dataIndex: 'severity',
-      render: (v: string) => <Tag color={v === 'critical' ? 'red' : 'orange'}>{v === 'critical' ? 'Kritik' : 'Uyarı'}</Tag>,
+      title: t('settings.alert_rules.col.severity'), dataIndex: 'severity',
+      render: (v: string) => <Tag color={v === 'critical' ? 'red' : 'orange'}>{v === 'critical' ? t('common.critical') : t('common.warning')}</Tag>,
       width: 80,
     },
     {
-      title: 'Aktif', dataIndex: 'enabled', width: 70,
+      title: t('settings.alert_rules.col.enabled'), dataIndex: 'enabled', width: 70,
       render: (v: boolean, r: AlertRule) => (
         <Switch
           size="small"
@@ -294,13 +296,13 @@ function AlertRulesTab() {
       ),
     },
     {
-      title: 'İşlem', width: 90,
+      title: t('settings.col.action'), width: 90,
       render: (_: any, r: AlertRule) => (
         <Space>
-          <Tooltip title="Düzenle">
+          <Tooltip title={t('common.edit')}>
             <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           </Tooltip>
-          <Popconfirm title="Bu kural silinsin mi?" onConfirm={() => deleteMutation.mutate(r.id)}>
+          <Popconfirm title={t('settings.alert_rules.popconfirm.delete_title')} onConfirm={() => deleteMutation.mutate(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
@@ -314,12 +316,12 @@ function AlertRulesTab() {
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="SNMP poll sonuçlarına göre arayüz utilization veya hata eşiği aşıldığında bildirim gönderir."
-        description="Bildirim kanallarınızın 'Eşik Uyarısı (SNMP)' seçeneği etkin olmalıdır."
+        message={t('settings.alert_rules.intro_message')}
+        description={t('settings.alert_rules.intro_desc')}
       />
       <div style={{ marginBottom: 12 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Yeni Kural
+          {t('settings.alert_rules.btn_new')}
         </Button>
       </div>
       <Table
@@ -329,11 +331,11 @@ function AlertRulesTab() {
         loading={isLoading}
         size="small"
         pagination={false}
-        locale={{ emptyText: 'Henüz kural yok' }}
+        locale={{ emptyText: t('settings.alert_rules.empty') }}
       />
 
       <Modal
-        title={editing ? 'Kuralı Düzenle' : 'Yeni Uyarı Kuralı'}
+        title={editing ? t('settings.alert_rules.modal.title_edit') : t('settings.alert_rules.modal.title_new')}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null) }}
         onOk={() => form.submit()}
@@ -341,13 +343,13 @@ function AlertRulesTab() {
         width={520}
       >
         <Form form={form} layout="vertical" onFinish={(v) => saveMutation.mutate(v)}>
-          <Form.Item label="Kural Adı" name="name" rules={[{ required: true }]}>
-            <Input placeholder="Örn: Core Switch Yüksek Utilization" />
+          <Form.Item label={t('settings.alert_rules.form.name_label')} name="name" rules={[{ required: true }]}>
+            <Input placeholder={t('settings.alert_rules.form.name_placeholder')} />
           </Form.Item>
-          <Form.Item label="Cihaz" name="device_id" tooltip="Boş bırakılırsa tüm cihazlara uygulanır">
+          <Form.Item label={t('settings.alert_rules.form.device_label')} name="device_id" tooltip={t('settings.alert_rules.form.device_tooltip')}>
             <Select
               allowClear
-              placeholder="— Tüm Cihazlar —"
+              placeholder={t('settings.alert_rules.form.device_placeholder')}
               showSearch
               filterOption={(input, opt) =>
                 (opt?.label as string ?? '').toLowerCase().includes(input.toLowerCase())
@@ -356,28 +358,28 @@ function AlertRulesTab() {
             />
           </Form.Item>
           <Form.Item
-            label="Interface Pattern"
+            label={t('settings.alert_rules.form.interface_pattern_label')}
             name="if_name_pattern"
-            tooltip="fnmatch pattern. Örn: Gi0/*, Te*, boş = tüm interface"
+            tooltip={t('settings.alert_rules.form.interface_pattern_tooltip')}
           >
-            <Input placeholder="* (tüm interface)" />
+            <Input placeholder={t('settings.alert_rules.form.interface_pattern_placeholder')} />
           </Form.Item>
-          <Form.Item label="Metrik" name="metric" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.alert_rules.form.metric_label')} name="metric" rules={[{ required: true }]}>
             <Select options={METRIC_OPTIONS} />
           </Form.Item>
-          <Form.Item label="Eşik Değeri (%)" name="threshold_value" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.alert_rules.form.threshold_label')} name="threshold_value" rules={[{ required: true }]}>
             <InputNumber min={0} max={100} step={5} style={{ width: '100%' }} addonAfter="%" />
           </Form.Item>
-          <Form.Item label="Ardışık Poll Sayısı" name="consecutive_count" tooltip="Kaç ardışık poll sonucu eşiği aşmalı">
+          <Form.Item label={t('settings.alert_rules.form.consecutive_label')} name="consecutive_count" tooltip={t('settings.alert_rules.form.consecutive_tooltip')}>
             <InputNumber min={1} max={10} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="Seviye" name="severity" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.alert_rules.form.severity_label')} name="severity" rules={[{ required: true }]}>
             <Select options={SEVERITY_OPTIONS} />
           </Form.Item>
-          <Form.Item label="Soğuma Süresi (dk)" name="cooldown_minutes" tooltip="Aynı kural için minimum bildirim aralığı">
-            <InputNumber min={1} max={1440} style={{ width: '100%' }} addonAfter="dk" />
+          <Form.Item label={t('settings.alert_rules.form.cooldown_label')} name="cooldown_minutes" tooltip={t('settings.alert_rules.form.cooldown_tooltip')}>
+            <InputNumber min={1} max={1440} style={{ width: '100%' }} addonAfter={t('settings.unit.min_short')} />
           </Form.Item>
-          <Form.Item label="Aktif" name="enabled" valuePropName="checked">
+          <Form.Item label={t('settings.alert_rules.form.enabled_label')} name="enabled" valuePropName="checked">
             <Switch />
           </Form.Item>
         </Form>
@@ -390,6 +392,7 @@ function AlertRulesTab() {
 
 function NotificationChannelsTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editing, setEditing] = useState<NotificationChannel | null>(null)
   const [channelType, setChannelType] = useState<ChannelType>('email')
@@ -416,30 +419,30 @@ function NotificationChannelsTab() {
       qc.invalidateQueries({ queryKey: ['notification-channels'] })
       setDrawerOpen(false)
       form.resetFields()
-      message.success(editing ? 'Kanal güncellendi' : 'Kanal oluşturuldu')
+      message.success(editing ? t('settings.notifications.toast.updated') : t('settings.notifications.toast.created'))
     },
-    onError: () => message.error('İşlem başarısız'),
+    onError: () => message.error(t('common.action_failed')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: notificationsApi.delete,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notification-channels'] })
-      message.success('Kanal silindi')
+      message.success(t('settings.notifications.toast.deleted'))
     },
   })
 
   const testMutation = useMutation({
     mutationFn: notificationsApi.test,
     onSuccess: (res) => {
-      if (res.success) message.success('Test mesajı gönderildi!')
-      else message.error(`Test başarısız: ${res.error || 'Bilinmeyen hata'}`)
+      if (res.success) message.success(t('settings.notifications.toast.test_sent'))
+      else message.error(t('settings.notifications.toast.test_failed', { error: res.error || t('common.unknown_error') }))
     },
   })
 
   const digestMutation = useMutation({
     mutationFn: notificationsApi.sendWeeklyDigest,
-    onSuccess: () => message.success('Haftalık özet kuyruğa alındı'),
+    onSuccess: () => message.success(t('settings.notifications.toast.digest_queued')),
   })
 
   function openCreate() {
@@ -463,22 +466,23 @@ function NotificationChannelsTab() {
     setDrawerOpen(true)
   }
 
+  // KURAL-E1: backend ChannelType enum sabit; renkler teknik (AntD).
   const TYPE_COLORS: Record<ChannelType, string> = { email: 'blue', slack: 'purple', telegram: 'cyan', teams: 'geekblue', webhook: 'volcano', jira: 'blue' }
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <Text style={{ fontSize: 13, opacity: 0.6 }}>
-          Bildirim kanallarını yönetin. Olaylar gerçekleştiğinde seçilen kanallara otomatik mesaj gönderilir.
+          {t('settings.notifications.intro')}
         </Text>
         <Space>
-          <Popconfirm title="Haftalık özet gönderilsin mi?" onConfirm={() => digestMutation.mutate()}>
+          <Popconfirm title={t('settings.notifications.popconfirm.send_digest_title')} onConfirm={() => digestMutation.mutate()}>
             <Button icon={<SendOutlined />} loading={digestMutation.isPending}>
-              Haftalık Özet Gönder
+              {t('settings.notifications.btn_send_digest')}
             </Button>
           </Popconfirm>
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            Kanal Ekle
+            {t('settings.notifications.btn_add')}
           </Button>
         </Space>
       </div>
@@ -490,14 +494,14 @@ function NotificationChannelsTab() {
         size="small"
         pagination={false}
         columns={[
-          { title: 'Ad', dataIndex: 'name', render: (v: string, r: NotificationChannel) => (
+          { title: t('settings.notifications.col.name'), dataIndex: 'name', render: (v: string, r: NotificationChannel) => (
             <div>
               <Text strong style={{ fontSize: 13 }}>{v}</Text>
-              {!r.is_active && <Tag color="default" style={{ marginLeft: 6, fontSize: 10 }}>Pasif</Tag>}
+              {!r.is_active && <Tag color="default" style={{ marginLeft: 6, fontSize: 10 }}>{t('settings.notifications.status_inactive')}</Tag>}
             </div>
           )},
-          { title: 'Tür', dataIndex: 'type', width: 90, render: (v: ChannelType) => <Tag color={TYPE_COLORS[v]}>{v.toUpperCase()}</Tag> },
-          { title: 'Tetikleyiciler', dataIndex: 'notify_on', render: (v: string[]) => (
+          { title: t('settings.notifications.col.type'), dataIndex: 'type', width: 90, render: (v: ChannelType) => <Tag color={TYPE_COLORS[v]}>{v.toUpperCase()}</Tag> },
+          { title: t('settings.notifications.col.triggers'), dataIndex: 'notify_on', render: (v: string[]) => (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
               {v.map((on) => {
                 const opt = NOTIFY_ON_OPTIONS.find((o) => o.value === on)
@@ -505,15 +509,15 @@ function NotificationChannelsTab() {
               })}
             </div>
           )},
-          { title: 'Durum', dataIndex: 'is_active', width: 80, render: (v: boolean) => (
+          { title: t('settings.notifications.col.status'), dataIndex: 'is_active', width: 80, render: (v: boolean) => (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <span style={{ width: 7, height: 7, borderRadius: '50%', background: v ? '#22c55e' : '#475569', display: 'inline-block' }} />
-              <Text style={{ fontSize: 12, color: v ? '#22c55e' : '#64748b' }}>{v ? 'Aktif' : 'Pasif'}</Text>
+              <Text style={{ fontSize: 12, color: v ? '#22c55e' : '#64748b' }}>{v ? t('settings.notifications.status_active') : t('settings.notifications.status_inactive')}</Text>
             </span>
           )},
-          { title: 'İşlem', width: 140, render: (_: any, r: NotificationChannel) => (
+          { title: t('settings.col.action'), width: 140, render: (_: any, r: NotificationChannel) => (
             <Space size={4}>
-              <Tooltip title="Test gönder">
+              <Tooltip title={t('settings.notifications.tooltip_test_send')}>
                 <Button
                   size="small" icon={<ThunderboltOutlined />}
                   loading={testMutation.isPending && testMutation.variables === r.id}
@@ -521,7 +525,7 @@ function NotificationChannelsTab() {
                 />
               </Tooltip>
               <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-              <Popconfirm title="Kanal silinsin mi?" onConfirm={() => deleteMutation.mutate(r.id)}>
+              <Popconfirm title={t('settings.notifications.popconfirm.delete_title')} onConfirm={() => deleteMutation.mutate(r.id)}>
                 <Button size="small" danger icon={<DeleteOutlined />} />
               </Popconfirm>
             </Space>
@@ -532,10 +536,10 @@ function NotificationChannelsTab() {
       <Modal
         open={drawerOpen}
         onCancel={() => setDrawerOpen(false)}
-        title={editing ? 'Kanalı Düzenle' : 'Yeni Bildirim Kanalı'}
+        title={editing ? t('settings.notifications.modal.title_edit') : t('settings.notifications.modal.title_new')}
         width={560}
         onOk={() => form.submit()}
-        okText={editing ? 'Güncelle' : 'Oluştur'}
+        okText={editing ? t('common.update') : t('common.create')}
         confirmLoading={saveMutation.isPending}
       >
         <Form
@@ -544,18 +548,18 @@ function NotificationChannelsTab() {
           onFinish={(values) => saveMutation.mutate(values)}
           style={{ marginTop: 16 }}
         >
-          <Form.Item label="Kanal Adı" name="name" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.notifications.form.name_label')} name="name" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
-          <Form.Item label="Tür" name="type" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.notifications.form.type_label')} name="type" rules={[{ required: true }]}>
             <Select
               options={[
-                { value: 'email', label: 'E-posta' },
+                { value: 'email', label: t('settings.notifications.channel.email') },
                 { value: 'slack', label: 'Slack' },
                 { value: 'teams', label: 'Microsoft Teams' },
                 { value: 'telegram', label: 'Telegram' },
-                { value: 'webhook', label: 'Generic Webhook' },
-                { value: 'jira', label: 'Jira (Ticket)' },
+                { value: 'webhook', label: t('settings.notifications.channel.webhook') },
+                { value: 'jira', label: t('settings.notifications.channel.jira') },
               ]}
               onChange={(v) => {
                 setChannelType(v as ChannelType)
@@ -566,14 +570,14 @@ function NotificationChannelsTab() {
 
           <ChannelTypeConfig type={channelType} />
 
-          <Form.Item label="Tetikleyiciler" name="notify_on">
+          <Form.Item label={t('settings.notifications.col.triggers')} name="notify_on">
             <Select
               mode="multiple"
               options={NOTIFY_ON_OPTIONS}
-              placeholder="Bildirim gönderilecek olayları seçin"
+              placeholder={t('settings.notifications.form.triggers_placeholder')}
             />
           </Form.Item>
-          <Form.Item label="Aktif" name="is_active" valuePropName="checked">
+          <Form.Item label={t('settings.notifications.form.active_label')} name="is_active" valuePropName="checked">
             <Switch />
           </Form.Item>
         </Form>
@@ -586,6 +590,7 @@ function NotificationChannelsTab() {
 
 function CredentialProfilesTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<CredentialProfile | null>(null)
   const [form] = Form.useForm()
@@ -623,18 +628,18 @@ function CredentialProfilesTab() {
       setModalOpen(false)
       form.resetFields()
       setEditing(null)
-      message.success(editing ? 'Profil güncellendi' : 'Profil oluşturuldu')
+      message.success(editing ? t('settings.credentials.toast.updated') : t('settings.credentials.toast.created'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('common.error_occurred')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: credentialProfilesApi.delete,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['credential-profiles'] })
-      message.success('Profil silindi')
+      message.success(t('settings.credentials.toast.deleted'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Silinemedi'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('common.delete_failed')),
   })
 
   function openCreate() {
@@ -670,7 +675,7 @@ function CredentialProfilesTab() {
 
   const columns = [
     {
-      title: 'Profil Adı', dataIndex: 'name',
+      title: t('settings.credentials.col.profile_name'), dataIndex: 'name',
       render: (v: string, r: CredentialProfile) => (
         <Space>
           <LockOutlined style={{ opacity: 0.4 }} />
@@ -694,21 +699,21 @@ function CredentialProfilesTab() {
     },
     {
       title: 'SNMP', render: (_: any, r: CredentialProfile) => {
-        if (!r.snmp_enabled) return <Tag color="default">Devre Dışı</Tag>
+        if (!r.snmp_enabled) return <Tag color="default">{t('common.disabled')}</Tag>
         if (r.snmp_version === 'v3') return <Tag color="purple">v3 / {r.snmp_v3_username || '—'}</Tag>
         return <Tag color="blue">{r.snmp_version} / {r.snmp_community_set ? '••••••••' : '—'}</Tag>
       },
     },
     {
-      title: 'İşlem', width: 90,
+      title: t('settings.col.action'), width: 90,
       render: (_: any, r: CredentialProfile) => (
         <Space>
-          <Tooltip title="Düzenle">
+          <Tooltip title={t('common.edit')}>
             <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           </Tooltip>
           <Popconfirm
-            title="Bu profil silinsin mi?"
-            description="Profile atanmış cihazlar varsa silinemez."
+            title={t('settings.credentials.popconfirm.delete_title')}
+            description={t('settings.credentials.popconfirm.delete_desc')}
             onConfirm={() => deleteMutation.mutate(r.id)}
           >
             <Button size="small" danger icon={<DeleteOutlined />} />
@@ -724,12 +729,12 @@ function CredentialProfilesTab() {
         type="info"
         showIcon
         style={{ marginBottom: 16 }}
-        message="Kimlik bilgileri Fernet şifrelemesiyle saklanır. Şifreler hiçbir zaman API yanıtında döndürülmez."
-        description="Cihazlara profil atayarak credential yönetimini merkezileştirin. Profil atanmış cihazlar SSH/SNMP bağlantılarında bu profili kullanır."
+        message={t('settings.credentials.intro_message')}
+        description={t('settings.credentials.intro_desc')}
       />
       <div style={{ marginBottom: 12 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Yeni Profil
+          {t('settings.credentials.btn_new')}
         </Button>
       </div>
       <Table
@@ -739,11 +744,11 @@ function CredentialProfilesTab() {
         loading={isLoading}
         size="small"
         pagination={false}
-        locale={{ emptyText: 'Henüz profil yok' }}
+        locale={{ emptyText: t('settings.credentials.empty') }}
       />
 
       <Modal
-        title={editing ? 'Profili Düzenle' : 'Yeni Kimlik Profili'}
+        title={editing ? t('settings.credentials.modal.title_edit') : t('settings.credentials.modal.title_new')}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null) }}
         onOk={() => form.submit()}
@@ -751,36 +756,36 @@ function CredentialProfilesTab() {
         width={560}
       >
         <Form form={form} layout="vertical" onFinish={(v) => saveMutation.mutate(v)}>
-          <Form.Item label="Profil Adı" name="name" rules={[{ required: true }]}>
-            <Input placeholder="Örn: Cisco Core, Aruba Access, Read-Only" />
+          <Form.Item label={t('settings.credentials.form.name_label')} name="name" rules={[{ required: true }]}>
+            <Input placeholder={t('settings.credentials.form.name_placeholder')} />
           </Form.Item>
-          <Form.Item label="Açıklama" name="description">
-            <Input placeholder="Opsiyonel not" />
+          <Form.Item label={t('settings.credentials.form.description_label')} name="description">
+            <Input placeholder={t('settings.credentials.form.description_placeholder')} />
           </Form.Item>
 
           <Divider orientation="left" style={{ fontSize: 12, opacity: 0.6 }}>SSH</Divider>
-          <Form.Item label="SSH Kullanıcı Adı" name="ssh_username">
+          <Form.Item label={t('settings.credentials.form.ssh_username_label')} name="ssh_username">
             <Input placeholder="admin" />
           </Form.Item>
           <Form.Item
-            label={editing ? 'SSH Şifre (değiştirmek için doldurun)' : 'SSH Şifre'}
+            label={editing ? t('settings.credentials.form.ssh_password_edit_label') : t('settings.credentials.form.ssh_password_label')}
             name="ssh_password"
           >
-            <Input.Password placeholder={editing ? '— değiştirmek için girin —' : ''} />
+            <Input.Password placeholder={editing ? t('settings.credentials.form.password_edit_placeholder') : ''} />
           </Form.Item>
-          <Form.Item label="SSH Port" name="ssh_port">
+          <Form.Item label={t('settings.credentials.form.ssh_port_label')} name="ssh_port">
             <InputNumber min={1} max={65535} style={{ width: '100%' }} />
           </Form.Item>
           <Form.Item
-            label={editing ? 'Enable Secret (değiştirmek için doldurun)' : 'Enable Secret'}
+            label={editing ? t('settings.credentials.form.enable_secret_edit_label') : t('settings.credentials.form.enable_secret_label')}
             name="enable_secret"
-            tooltip="Boş bırakılırsa mevcut değer korunur; temizlemek için boşluk girin"
+            tooltip={t('settings.credentials.form.enable_secret_tooltip')}
           >
-            <Input.Password placeholder={editing ? '— değiştirmek için girin —' : ''} />
+            <Input.Password placeholder={editing ? t('settings.credentials.form.password_edit_placeholder') : ''} />
           </Form.Item>
 
           <Divider orientation="left" style={{ fontSize: 12, opacity: 0.6 }}>SNMP</Divider>
-          <Form.Item name="snmp_enabled" valuePropName="checked" label="SNMP Aktif">
+          <Form.Item name="snmp_enabled" valuePropName="checked" label={t('settings.credentials.form.snmp_enabled_label')}>
             <Switch />
           </Form.Item>
           <Form.Item
@@ -789,7 +794,7 @@ function CredentialProfilesTab() {
           >
             {({ getFieldValue }) => getFieldValue('snmp_enabled') && (
               <>
-                <Form.Item label="SNMP Versiyon" name="snmp_version">
+                <Form.Item label={t('settings.credentials.form.snmp_version_label')} name="snmp_version">
                   <Select
                     options={[
                       { value: 'v1', label: 'v1' },
@@ -798,7 +803,7 @@ function CredentialProfilesTab() {
                     ]}
                   />
                 </Form.Item>
-                <Form.Item label="SNMP Port" name="snmp_port">
+                <Form.Item label={t('settings.credentials.form.snmp_port_label')} name="snmp_port">
                   <InputNumber min={1} max={65535} style={{ width: '100%' }} />
                 </Form.Item>
                 <Form.Item
@@ -813,25 +818,25 @@ function CredentialProfilesTab() {
                     )
                     : (
                       <>
-                        <Form.Item label="v3 Kullanıcı Adı" name="snmp_v3_username">
+                        <Form.Item label={t('settings.credentials.form.v3_username_label')} name="snmp_v3_username">
                           <Input />
                         </Form.Item>
-                        <Form.Item label="Auth Protokolü" name="snmp_v3_auth_protocol">
-                          <Select allowClear placeholder="— yok —" options={[
+                        <Form.Item label={t('settings.credentials.form.v3_auth_proto_label')} name="snmp_v3_auth_protocol">
+                          <Select allowClear placeholder={t('settings.credentials.form.empty_select')} options={[
                             { value: 'md5', label: 'MD5' },
                             { value: 'sha1', label: 'SHA-1' },
                           ]} />
                         </Form.Item>
-                        <Form.Item label="Auth Parolası" name="snmp_v3_auth_passphrase">
+                        <Form.Item label={t('settings.credentials.form.v3_auth_pass_label')} name="snmp_v3_auth_passphrase">
                           <Input.Password />
                         </Form.Item>
-                        <Form.Item label="Priv Protokolü" name="snmp_v3_priv_protocol">
-                          <Select allowClear placeholder="— yok —" options={[
+                        <Form.Item label={t('settings.credentials.form.v3_priv_proto_label')} name="snmp_v3_priv_protocol">
+                          <Select allowClear placeholder={t('settings.credentials.form.empty_select')} options={[
                             { value: 'des', label: 'DES' },
                             { value: 'aes128', label: 'AES-128' },
                           ]} />
                         </Form.Item>
-                        <Form.Item label="Priv Parolası" name="snmp_v3_priv_passphrase">
+                        <Form.Item label={t('settings.credentials.form.v3_priv_pass_label')} name="snmp_v3_priv_passphrase">
                           <Input.Password />
                         </Form.Item>
                       </>
@@ -849,17 +854,20 @@ function CredentialProfilesTab() {
 
 // ── Secret Rotation ─────────────────────────────────────────────────────────
 
-const STATUS_CONFIG: Record<string, { color: string; hex: string; label: string; icon: React.ReactNode }> = {
-  idle:    { color: 'default',    hex: '#64748b', label: 'Bekliyor',    icon: <ClockCircleOutlined /> },
-  running: { color: 'processing', hex: '#3b82f6', label: 'Çalışıyor',  icon: <SyncOutlined spin /> },
-  success: { color: 'success',    hex: '#22c55e', label: 'Başarılı',   icon: <CheckCircleOutlined /> },
-  failed:  { color: 'error',      hex: '#ef4444', label: 'Başarısız',  icon: <CloseCircleOutlined /> },
+// KURAL-E1: STATUS_CONFIG'in teknik kısmı (color/hex/icon) module-level kalır;
+// label hook scope'unda t() ile çözülür (SecretRotationTab içinde STATUS_LABEL).
+const STATUS_CONFIG: Record<string, { color: string; hex: string; icon: React.ReactNode }> = {
+  idle:    { color: 'default',    hex: '#64748b', icon: <ClockCircleOutlined /> },
+  running: { color: 'processing', hex: '#3b82f6', icon: <SyncOutlined spin /> },
+  success: { color: 'success',    hex: '#22c55e', icon: <CheckCircleOutlined /> },
+  failed:  { color: 'error',      hex: '#ef4444', icon: <CloseCircleOutlined /> },
 }
 
 // ── SLA Policies Tab ───────────────────────────────────────────────────────
 
 function SlaPoliciesTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<SlaPolicy | null>(null)
   const [form] = Form.useForm()
@@ -882,16 +890,16 @@ function SlaPoliciesTab() {
       setModalOpen(false)
       form.resetFields()
       setEditing(null)
-      message.success(editing ? 'SLA politikası güncellendi' : 'SLA politikası oluşturuldu')
+      message.success(editing ? t('settings.sla.toast.updated') : t('settings.sla.toast.created'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('common.error_occurred')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: slaApi.deletePolicy,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sla-policies'] })
-      message.success('SLA politikası silindi')
+      message.success(t('settings.sla.toast.deleted'))
     },
   })
 
@@ -923,46 +931,46 @@ function SlaPoliciesTab() {
 
   const columns = [
     {
-      title: 'Politika Adı', dataIndex: 'name',
+      title: t('settings.sla.col.policy_name'), dataIndex: 'name',
       render: (v: string) => <strong>{v}</strong>,
     },
     {
-      title: 'Hedef Uptime',
+      title: t('settings.sla.col.target_uptime'),
       dataIndex: 'target_uptime_pct',
       render: (v: number) => (
         <Tag color={v >= 99.9 ? 'red' : v >= 99 ? 'orange' : 'blue'}>%{v}</Tag>
       ),
     },
     {
-      title: 'Ölçüm Penceresi',
+      title: t('settings.sla.col.measurement_window'),
       dataIndex: 'measurement_window_days',
-      render: (v: number) => `${v} gün`,
+      render: (v: number) => t('settings.sla.days_value', { count: v }),
     },
     {
-      title: 'Kapsam',
+      title: t('settings.sla.col.scope'),
       render: (_: unknown, r: SlaPolicy) => {
-        if (!r.device_ids?.length && !r.group_ids?.length) return <Tag>Tüm Cihazlar</Tag>
+        if (!r.device_ids?.length && !r.group_ids?.length) return <Tag>{t('settings.alert_rules.all_devices')}</Tag>
         return (
           <Space>
-            {r.device_ids?.length > 0 && <Tag color="blue">{r.device_ids.length} cihaz</Tag>}
-            {r.group_ids?.length > 0 && <Tag color="green">{r.group_ids.length} grup</Tag>}
+            {r.device_ids?.length > 0 && <Tag color="blue">{t('settings.sla.scope.devices', { count: r.device_ids.length })}</Tag>}
+            {r.group_ids?.length > 0 && <Tag color="green">{t('settings.sla.scope.groups', { count: r.group_ids.length })}</Tag>}
           </Space>
         )
       },
     },
     {
-      title: 'Bildirim',
+      title: t('settings.sla.col.notification'),
       dataIndex: 'notify_on_breach',
       render: (v: boolean) => v
-        ? <Tag icon={<BellOutlined />} color="orange">Aktif</Tag>
-        : <Tag>Pasif</Tag>,
+        ? <Tag icon={<BellOutlined />} color="orange">{t('settings.notifications.status_active')}</Tag>
+        : <Tag>{t('settings.notifications.status_inactive')}</Tag>,
     },
     {
       title: '',
       render: (_: unknown, r: SlaPolicy) => (
         <Space>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-          <Popconfirm title="Bu politikayı silmek istiyor musunuz?" onConfirm={() => deleteMutation.mutate(r.id)}>
+          <Popconfirm title={t('settings.sla.popconfirm.delete_title')} onConfirm={() => deleteMutation.mutate(r.id)}>
             <Button size="small" icon={<DeleteOutlined />} danger />
           </Popconfirm>
         </Space>
@@ -974,9 +982,9 @@ function SlaPoliciesTab() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <Text type="secondary" style={{ fontSize: 13 }}>
-          Cihaz veya grup bazında uptime hedefi tanımlayın. İhlalde bildirim gönderilebilir.
+          {t('settings.sla.intro')}
         </Text>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>Politika Ekle</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>{t('settings.sla.btn_new')}</Button>
       </div>
 
       <Table
@@ -989,7 +997,7 @@ function SlaPoliciesTab() {
       />
 
       <Modal
-        title={editing ? 'SLA Politikasını Düzenle' : 'Yeni SLA Politikası'}
+        title={editing ? t('settings.sla.modal.title_edit') : t('settings.sla.modal.title_new')}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null) }}
         onOk={() => form.submit()}
@@ -1001,34 +1009,34 @@ function SlaPoliciesTab() {
           layout="vertical"
           onFinish={(values) => saveMutation.mutate(values as SlaPolicyCreate)}
         >
-          <Form.Item label="Politika Adı" name="name" rules={[{ required: true }]}>
-            <Input placeholder="Kritik Altyapı SLA" />
+          <Form.Item label={t('settings.sla.form.name_label')} name="name" rules={[{ required: true }]}>
+            <Input placeholder={t('settings.sla.form.name_placeholder')} />
           </Form.Item>
-          <Form.Item label="Hedef Uptime (%)" name="target_uptime_pct" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.sla.form.target_uptime_label')} name="target_uptime_pct" rules={[{ required: true }]}>
             <InputNumber min={0} max={100} step={0.1} precision={2} style={{ width: '100%' }}
               addonAfter="%" />
           </Form.Item>
-          <Form.Item label="Ölçüm Penceresi" name="measurement_window_days" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.sla.form.measurement_window_label')} name="measurement_window_days" rules={[{ required: true }]}>
             <Select>
               {[7, 14, 30, 60, 90].map((d) => (
-                <Select.Option key={d} value={d}>{d} gün</Select.Option>
+                <Select.Option key={d} value={d}>{t('settings.sla.days_value', { count: d })}</Select.Option>
               ))}
             </Select>
           </Form.Item>
           <Form.Item
-            label="Kapsam — Cihazlar"
+            label={t('settings.sla.form.scope_devices_label')}
             name="device_ids"
-            extra="Boş bırakırsanız tüm cihazlar dahil edilir"
+            extra={t('settings.sla.form.scope_devices_extra')}
           >
             <Select
               mode="multiple"
               showSearch
               optionFilterProp="label"
-              placeholder="Belirli cihazlar seçin (opsiyonel)"
+              placeholder={t('settings.sla.form.scope_devices_placeholder')}
               options={devices.map((d: any) => ({ value: d.id, label: d.hostname }))}
             />
           </Form.Item>
-          <Form.Item label="İhlalde Bildirim Gönder" name="notify_on_breach" valuePropName="checked">
+          <Form.Item label={t('settings.sla.form.notify_on_breach_label')} name="notify_on_breach" valuePropName="checked">
             <Switch />
           </Form.Item>
         </Form>
@@ -1041,6 +1049,7 @@ function SlaPoliciesTab() {
 
 function SnmpConfigTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [form] = Form.useForm()
   const [confirmAll, setConfirmAll] = useState(false)
   const [sshResult, setSshResult] = useState<BulkSshResult | null>(null)
@@ -1054,10 +1063,10 @@ function SnmpConfigTab() {
   const pollMutation = useMutation({
     mutationFn: snmpApi.triggerPoll,
     onSuccess: () => {
-      message.success('SNMP poll görevi kuyruğa alındı — ~30 saniye sonra veri güncellenir')
+      message.success(t('settings.snmp.toast.poll_queued'))
       setTimeout(() => qc.invalidateQueries({ queryKey: ['snmp-status'] }), 31_000)
     },
-    onError: () => message.error('Poll görevi başlatılamadı'),
+    onError: () => message.error(t('settings.snmp.toast.poll_failed')),
   })
 
   const sshMutation = useMutation({
@@ -1068,11 +1077,11 @@ function SnmpConfigTab() {
       form.resetFields()
       setConfirmAll(false)
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'SSH yapılandırma başarısız'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('settings.snmp.toast.ssh_config_failed')),
   })
 
   const onApply = (values: any) => {
-    if (!values.community) return message.error('Community string gerekli')
+    if (!values.community) return message.error(t('settings.snmp.toast.community_required'))
     sshMutation.mutate({
       community: values.community,
       version: values.version || 'v2c',
@@ -1082,7 +1091,7 @@ function SnmpConfigTab() {
 
   const sshResultColumns = [
     {
-      title: 'Cihaz',
+      title: t('settings.snmp.col.device'),
       dataIndex: 'hostname',
       key: 'hostname',
       render: (hostname: string, row: BulkSshDeviceResult) => (
@@ -1094,17 +1103,17 @@ function SnmpConfigTab() {
       ),
     },
     {
-      title: 'Durum',
+      title: t('common.status'),
       dataIndex: 'success',
       key: 'success',
       width: 90,
       render: (ok: boolean) =>
         ok
-          ? <Tag color="success">Başarılı</Tag>
-          : <Tag color="error">Hata</Tag>,
+          ? <Tag color="success">{t('common.success')}</Tag>
+          : <Tag color="error">{t('common.error')}</Tag>,
     },
     {
-      title: 'Hata',
+      title: t('common.error'),
       dataIndex: 'error',
       key: 'error',
       render: (err?: string) => err ? <Text type="danger" style={{ fontSize: 12 }}>{err}</Text> : null,
@@ -1116,10 +1125,10 @@ function SnmpConfigTab() {
       {/* Status cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         {[
-          { label: 'Toplam Cihaz', value: status?.total_devices ?? '—', color: '#3b82f6' },
-          { label: 'SNMP Aktif', value: status?.snmp_enabled ?? '—', color: (status?.snmp_enabled ?? 0) > 0 ? '#22c55e' : '#64748b' },
-          { label: 'Poll Kayıt Sayısı', value: status?.poll_results ?? '—', color: '#8b5cf6' },
-          { label: 'Son Poll', value: status?.last_poll_at ? dayjs(status.last_poll_at).fromNow() : 'Henüz yok', color: '#06b6d4' },
+          { label: t('settings.snmp.stat.total_devices'), value: status?.total_devices ?? '—', color: '#3b82f6' },
+          { label: t('settings.snmp.stat.snmp_enabled'), value: status?.snmp_enabled ?? '—', color: (status?.snmp_enabled ?? 0) > 0 ? '#22c55e' : '#64748b' },
+          { label: t('settings.snmp.stat.poll_records'), value: status?.poll_results ?? '—', color: '#8b5cf6' },
+          { label: t('settings.snmp.stat.last_poll'), value: status?.last_poll_at ? dayjs(status.last_poll_at).fromNow() : t('settings.snmp.stat.not_yet'), color: '#06b6d4' },
         ].map((s) => (
           <div key={s.label} style={{
             flex: 1, minWidth: 130,
@@ -1133,37 +1142,37 @@ function SnmpConfigTab() {
         ))}
       </div>
 
-      <Divider orientation="left" plain style={{ fontSize: 13 }}>Toplu SNMP Yapılandırma (SSH)</Divider>
+      <Divider orientation="left" plain style={{ fontSize: 13 }}>{t('settings.snmp.bulk_section_title')}</Divider>
 
       <Alert
         type="warning"
         showIcon
-        message="Ruijie community string kuralı"
-        description='Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: "Charon1"'
+        message={t('settings.snmp.alert_ruijie_title')}
+        description={t('settings.snmp.alert_ruijie_desc')}
         style={{ marginBottom: 8 }}
       />
 
       <Alert
         type="info"
         showIcon
-        message="SSH ile doğrudan cihaz firmware'ine SNMP komutları gönderilir"
-        description="Her cihaza SSH bağlanılır, SNMP aktifleştirilir ve community string yazılır. 58 cihaz için ~2-3 dakika sürebilir."
+        message={t('settings.snmp.alert_ssh_title')}
+        description={t('settings.snmp.alert_ssh_desc')}
         style={{ marginBottom: 8 }}
       />
 
       <Form form={form} layout="vertical" onFinish={onApply} style={{ maxWidth: 480 }}>
         <Form.Item
-          label="SNMP Community String"
+          label={t('settings.snmp.form.community_label')}
           name="community"
-          rules={[{ required: true, message: 'Gerekli' }]}
-          extra='Ruijie için büyük harf + küçük harf + rakam gerekli — örn. "Charon1"'
+          rules={[{ required: true, message: t('common.required_field') }]}
+          extra={t('settings.snmp.form.community_extra')}
         >
           <Input placeholder="Charon1" />
         </Form.Item>
-        <Form.Item label="Versiyon" name="version" initialValue="v2c">
+        <Form.Item label={t('settings.snmp.form.version_label')} name="version" initialValue="v2c">
           <Select options={[
             { value: 'v1', label: 'SNMPv1' },
-            { value: 'v2c', label: 'SNMPv2c (önerilen)' },
+            { value: 'v2c', label: t('settings.snmp.form.version_v2c_recommended') },
           ]} style={{ width: 220 }} />
         </Form.Item>
         <Form.Item label="Port" name="port" initialValue={161}>
@@ -1172,25 +1181,25 @@ function SnmpConfigTab() {
         <Form.Item>
           {!confirmAll ? (
             <Button type="primary" icon={<SendOutlined />} onClick={() => setConfirmAll(true)}>
-              Tüm Cihazlara SSH ile Uygula
+              {t('settings.snmp.btn_apply_to_all')}
             </Button>
           ) : (
             <Space>
-              <Text type="warning">Tüm {status?.total_devices} cihaza SSH bağlanılacak. Emin misin?</Text>
+              <Text type="warning">{t('settings.snmp.confirm_apply_all', { count: status?.total_devices ?? 0 })}</Text>
               <Button
                 danger
                 loading={sshMutation.isPending}
                 onClick={() => form.submit()}
               >
-                {sshMutation.isPending ? 'Yapılandırılıyor...' : 'Evet, Uygula'}
+                {sshMutation.isPending ? t('settings.snmp.btn_configuring') : t('settings.snmp.btn_yes_apply')}
               </Button>
-              <Button onClick={() => setConfirmAll(false)} disabled={sshMutation.isPending}>İptal</Button>
+              <Button onClick={() => setConfirmAll(false)} disabled={sshMutation.isPending}>{t('common.cancel')}</Button>
             </Space>
           )}
         </Form.Item>
       </Form>
 
-      <Divider orientation="left" plain style={{ fontSize: 13 }}>Manuel Poll</Divider>
+      <Divider orientation="left" plain style={{ fontSize: 13 }}>{t('settings.snmp.manual_poll_section')}</Divider>
 
       <Space>
         <Button
@@ -1199,11 +1208,10 @@ function SnmpConfigTab() {
           loading={pollMutation.isPending}
           onClick={() => pollMutation.mutate()}
         >
-          Şimdi Poll Et
+          {t('settings.snmp.btn_poll_now')}
         </Button>
         <Text type="secondary" style={{ fontSize: 12 }}>
-          Celery beat her 5 dakikada bir otomatik poll eder.
-          Bu buton hemen kuyruğa gönderir.
+          {t('settings.snmp.manual_poll_hint')}
         </Text>
       </Space>
 
@@ -1212,26 +1220,26 @@ function SnmpConfigTab() {
         open={sshResult !== null}
         title={
           sshResult
-            ? `SSH Yapılandırma Sonucu — ${sshResult.succeeded}/${sshResult.attempted} başarılı`
+            ? t('settings.snmp.result_modal_title', { succeeded: sshResult.succeeded, attempted: sshResult.attempted })
             : ''
         }
         onCancel={() => setSshResult(null)}
         footer={
-          <Button type="primary" onClick={() => setSshResult(null)}>Kapat</Button>
+          <Button type="primary" onClick={() => setSshResult(null)}>{t('common.close')}</Button>
         }
         width={700}
       >
         {sshResult && (
           <>
             <Space style={{ marginBottom: 16 }}>
-              <Tag color="success">{sshResult.succeeded} Başarılı</Tag>
-              {sshResult.failed > 0 && <Tag color="error">{sshResult.failed} Başarısız</Tag>}
+              <Tag color="success">{t('settings.snmp.result_succeeded', { count: sshResult.succeeded })}</Tag>
+              {sshResult.failed > 0 && <Tag color="error">{t('settings.snmp.result_failed', { count: sshResult.failed })}</Tag>}
             </Space>
             {sshResult.failed > 0 && (
               <Alert
                 type="warning"
                 showIcon
-                message="Başarısız cihazlar için Cihaz Detayı → Health → SNMP Güncelle kullanabilirsiniz."
+                message={t('settings.snmp.result_failed_hint')}
                 style={{ marginBottom: 12 }}
               />
             )}
@@ -1252,9 +1260,18 @@ function SnmpConfigTab() {
 
 function SecretRotationTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [policyModal, setPolicyModal] = useState<{ open: boolean; profileId?: number; policy?: RotationPolicy | null }>({ open: false })
   const [resultModal, setResultModal] = useState<RotationPolicy | null>(null)
   const [policyForm] = Form.useForm()
+
+  // KURAL-E1: status label hook scope'unda useMemo + t().
+  const STATUS_LABEL = React.useMemo<Record<string, string>>(() => ({
+    idle:    t('settings.rotation.status.idle'),
+    running: t('settings.rotation.status.running'),
+    success: t('settings.rotation.status.success'),
+    failed:  t('settings.rotation.status.failed'),
+  }), [t])
 
   const { data: profiles = [] } = useQuery({ queryKey: ['credential-profiles'], queryFn: credentialProfilesApi.list })
   const { data: policies = [], isLoading } = useQuery({
@@ -1281,7 +1298,7 @@ function SecretRotationTab() {
   const rotateMutation = useMutation({
     mutationFn: (profileId: number) => credentialProfilesApi.rotateNow(profileId),
     onSuccess: () => {
-      message.success('Rotasyon başlatıldı')
+      message.success(t('settings.rotation.toast.started'))
       setTimeout(() => qc.invalidateQueries({ queryKey: ['rotation-policies'] }), 2000)
     },
   })
@@ -1302,29 +1319,29 @@ function SecretRotationTab() {
 
   const columns = [
     {
-      title: 'Kimlik Profili', dataIndex: 'profile_name', key: 'profile_name',
+      title: t('settings.rotation.col.profile'), dataIndex: 'profile_name', key: 'profile_name',
       render: (name: string) => <Text strong>{name}</Text>,
     },
     {
-      title: 'Aralık', dataIndex: 'interval_days', key: 'interval_days',
-      render: (d: number) => `${d} gün`,
+      title: t('settings.rotation.col.interval'), dataIndex: 'interval_days', key: 'interval_days',
+      render: (d: number) => t('settings.sla.days_value', { count: d }),
     },
     {
-      title: 'Durum', dataIndex: 'status', key: 'status',
+      title: t('common.status'), dataIndex: 'status', key: 'status',
       render: (s: string, row: RotationPolicy) => (
         <Space size={4}>
           <span style={{ width: 7, height: 7, borderRadius: '50%', background: STATUS_CONFIG[s]?.hex ?? '#64748b', display: 'inline-block' }} />
-          <Text>{STATUS_CONFIG[s]?.label ?? s}</Text>
-          {!row.is_active && <Tag>Pasif</Tag>}
+          <Text>{STATUS_LABEL[s] ?? s}</Text>
+          {!row.is_active && <Tag>{t('settings.notifications.status_inactive')}</Tag>}
         </Space>
       ),
     },
     {
-      title: 'Son Rotasyon', dataIndex: 'last_rotated_at', key: 'last_rotated_at',
+      title: t('settings.rotation.col.last_rotation'), dataIndex: 'last_rotated_at', key: 'last_rotated_at',
       render: (v: string | null) => v ? dayjs(v).format('DD.MM.YYYY HH:mm') : <Text type="secondary">—</Text>,
     },
     {
-      title: 'Sonraki Rotasyon', dataIndex: 'next_rotate_at', key: 'next_rotate_at',
+      title: t('settings.rotation.col.next_rotation'), dataIndex: 'next_rotate_at', key: 'next_rotate_at',
       render: (v: string | null) => {
         if (!v) return <Text type="secondary">—</Text>
         const diff = dayjs(v).diff(dayjs(), 'day')
@@ -1333,15 +1350,15 @@ function SecretRotationTab() {
       },
     },
     {
-      title: 'İşlemler', key: 'actions',
+      title: t('settings.col.actions'), key: 'actions',
       render: (_: unknown, row: RotationPolicy) => (
         <Space>
           {row.last_result && (
-            <Tooltip title="Son Sonuç">
+            <Tooltip title={t('settings.rotation.tooltip.last_result')}>
               <Button size="small" icon={<CheckCircleOutlined />} onClick={() => setResultModal(row)} />
             </Tooltip>
           )}
-          <Tooltip title="Şimdi Döndür">
+          <Tooltip title={t('settings.rotation.tooltip.rotate_now')}>
             <Button
               size="small" icon={<PlayCircleOutlined />} type="primary"
               loading={rotateMutation.isPending}
@@ -1350,7 +1367,7 @@ function SecretRotationTab() {
             />
           </Tooltip>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(row)} />
-          <Popconfirm title="Rotasyon politikası silinsin mi?" onConfirm={() => deleteMutation.mutate(row.credential_profile_id)}>
+          <Popconfirm title={t('settings.rotation.popconfirm.delete_title')} onConfirm={() => deleteMutation.mutate(row.credential_profile_id)}>
             <Button size="small" icon={<DeleteOutlined />} danger />
           </Popconfirm>
         </Space>
@@ -1362,14 +1379,14 @@ function SecretRotationTab() {
     <div>
       <Alert
         showIcon type="warning"
-        message="SSH şifresi rotasyonu gerçek cihazlara bağlanır ve parolayı değiştirir."
-        description="Tüm cihazlar başarılı olmadan profil güncellenmez. Cisco IOS/IOS-XE ve Ruijie desteklenmektedir."
+        message={t('settings.rotation.intro_message')}
+        description={t('settings.rotation.intro_desc')}
         style={{ marginBottom: 16 }}
       />
 
       {unassigned.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <Text type="secondary">Politika atanmamış profiller: </Text>
+          <Text type="secondary">{t('settings.rotation.unassigned_label')}</Text>
           <Space wrap>
             {unassigned.map((p) => (
               <Button key={p.id} size="small" icon={<PlusOutlined />} onClick={() => openCreate(p.id)}>
@@ -1387,12 +1404,12 @@ function SecretRotationTab() {
         size="small"
         columns={columns}
         pagination={false}
-        locale={{ emptyText: 'Henüz rotasyon politikası yok. Üstteki profil butonlarından ekleyin.' }}
+        locale={{ emptyText: t('settings.rotation.empty') }}
       />
 
       {/* Create/Edit Policy Modal */}
       <Modal
-        title={policyModal.policy ? 'Politikayı Düzenle' : 'Rotasyon Politikası Ekle'}
+        title={policyModal.policy ? t('settings.rotation.modal.title_edit') : t('settings.rotation.modal.title_new')}
         open={policyModal.open}
         onCancel={() => setPolicyModal({ open: false })}
         onOk={() => policyForm.submit()}
@@ -1401,14 +1418,14 @@ function SecretRotationTab() {
         {policyModal.profileId && (
           <Alert
             type="info" showIcon style={{ marginBottom: 16 }}
-            message={`Profil: ${profiles.find((p) => p.id === policyModal.profileId)?.name}`}
+            message={t('settings.rotation.modal.profile_label', { name: profiles.find((p) => p.id === policyModal.profileId)?.name ?? '' })}
           />
         )}
         <Form form={policyForm} layout="vertical" onFinish={(v) => saveMutation.mutate(v)}>
-          <Form.Item name="interval_days" label="Rotasyon Aralığı (Gün)" rules={[{ required: true }]}>
-            <InputNumber min={1} max={365} style={{ width: '100%' }} addonAfter="gün" />
+          <Form.Item name="interval_days" label={t('settings.rotation.form.interval_label')} rules={[{ required: true }]}>
+            <InputNumber min={1} max={365} style={{ width: '100%' }} addonAfter={t('settings.unit.day')} />
           </Form.Item>
-          <Form.Item name="is_active" label="Aktif" valuePropName="checked">
+          <Form.Item name="is_active" label={t('settings.notifications.form.active_label')} valuePropName="checked">
             <Switch />
           </Form.Item>
         </Form>
@@ -1416,17 +1433,17 @@ function SecretRotationTab() {
 
       {/* Last Result Modal */}
       <Modal
-        title="Son Rotasyon Sonucu"
+        title={t('settings.rotation.modal.last_result_title')}
         open={!!resultModal}
         onCancel={() => setResultModal(null)}
-        footer={<Button onClick={() => setResultModal(null)}>Kapat</Button>}
+        footer={<Button onClick={() => setResultModal(null)}>{t('common.close')}</Button>}
         width={560}
       >
         {resultModal?.last_result && (
           <div>
             {resultModal.last_result.rotated_at && (
               <Text type="secondary">
-                {dayjs(resultModal.last_result.rotated_at).format('DD.MM.YYYY HH:mm')} tarihinde çalıştırıldı
+                {t('settings.rotation.modal.executed_at', { date: dayjs(resultModal.last_result.rotated_at).format('DD.MM.YYYY HH:mm') })}
               </Text>
             )}
             {resultModal.last_result.message && (
@@ -1452,9 +1469,30 @@ function SecretRotationTab() {
 
 function MaintenanceWindowsTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<MaintenanceWindow | null>(null)
   const [form] = Form.useForm()
+
+  // KURAL-E1: gün adları hook scope'unda useMemo.
+  const DAY_LABELS_SHORT = React.useMemo<string[]>(() => [
+    t('settings.maintenance.day.mon_short'),
+    t('settings.maintenance.day.tue_short'),
+    t('settings.maintenance.day.wed_short'),
+    t('settings.maintenance.day.thu_short'),
+    t('settings.maintenance.day.fri_short'),
+    t('settings.maintenance.day.sat_short'),
+    t('settings.maintenance.day.sun_short'),
+  ], [t])
+  const DAY_LABELS_LONG = React.useMemo<string[]>(() => [
+    t('settings.maintenance.day.mon'),
+    t('settings.maintenance.day.tue'),
+    t('settings.maintenance.day.wed'),
+    t('settings.maintenance.day.thu'),
+    t('settings.maintenance.day.fri'),
+    t('settings.maintenance.day.sat'),
+    t('settings.maintenance.day.sun'),
+  ], [t])
 
   const { data: windows = [], isLoading } = useQuery({
     queryKey: ['maintenance-windows'],
@@ -1491,16 +1529,16 @@ function MaintenanceWindowsTab() {
       setModalOpen(false)
       form.resetFields()
       setEditing(null)
-      message.success(editing ? 'Bakım penceresi güncellendi' : 'Bakım penceresi oluşturuldu')
+      message.success(editing ? t('settings.maintenance.toast.updated') : t('settings.maintenance.toast.created'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Hata oluştu'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('common.error_occurred')),
   })
 
   const deleteMutation = useMutation({
     mutationFn: maintenanceWindowsApi.delete,
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['maintenance-windows'] })
-      message.success('Bakım penceresi silindi')
+      message.success(t('settings.maintenance.toast.deleted'))
     },
   })
 
@@ -1528,24 +1566,20 @@ function MaintenanceWindowsTab() {
     setModalOpen(true)
   }
 
-  // T9 Tur 6A — turkce gun adları (Pazartesi=0)
-  const DAY_LABELS_SHORT = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
-  const DAY_LABELS_LONG = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar']
-
   function recurrenceLabel(w: MaintenanceWindow): string {
     if (!w.recurrence) return ''
-    if (w.recurrence === 'daily') return 'Her gün'
+    if (w.recurrence === 'daily') return t('settings.maintenance.recurrence.daily')
     if (w.recurrence === 'weekly') {
       const days = (w.recur_days_of_week || []).map((d) => DAY_LABELS_SHORT[d]).join('/')
-      return `Haftalık: ${days}`
+      return t('settings.maintenance.recurrence.weekly_value', { days })
     }
-    if (w.recurrence === 'monthly') return `Aylık (ayın ${w.recur_day_of_month}.)`
+    if (w.recurrence === 'monthly') return t('settings.maintenance.recurrence.monthly_value', { day: w.recur_day_of_month })
     return w.recurrence
   }
 
   const columns = [
     {
-      title: 'Bakım Adı', dataIndex: 'name',
+      title: t('settings.maintenance.col.name'), dataIndex: 'name',
       render: (v: string, r: MaintenanceWindow) => (
         <Space>
           {r.is_active
@@ -1554,7 +1588,7 @@ function MaintenanceWindowsTab() {
           <strong>{v}</strong>
           {r.is_recurrence_template && (
             <Tag color="purple" style={{ fontSize: 10 }}>
-              {recurrenceLabel(r)} · {r.recur_instances_spawned} örnek
+              {t('settings.maintenance.recurrence.template_label', { label: recurrenceLabel(r), count: r.recur_instances_spawned })}
             </Tag>
           )}
           {r.description && <Text type="secondary" style={{ fontSize: 12 }}>{r.description}</Text>}
@@ -1562,18 +1596,18 @@ function MaintenanceWindowsTab() {
       ),
     },
     {
-      title: 'Başlangıç', dataIndex: 'start_time',
+      title: t('settings.maintenance.col.start'), dataIndex: 'start_time',
       render: (v: string) => dayjs(v).format('DD.MM.YYYY HH:mm'),
       width: 160,
     },
     {
-      title: 'Bitiş', dataIndex: 'end_time',
+      title: t('settings.maintenance.col.end'), dataIndex: 'end_time',
       render: (v: string) => dayjs(v).format('DD.MM.YYYY HH:mm'),
       width: 160,
     },
     {
-      title: 'Kapsam', render: (_: any, r: MaintenanceWindow) => r.applies_to_all
-        ? <Tag color="red">Tüm Cihazlar</Tag>
+      title: t('settings.maintenance.col.scope'), render: (_: any, r: MaintenanceWindow) => r.applies_to_all
+        ? <Tag color="red">{t('settings.alert_rules.all_devices')}</Tag>
         : (
           <Space size={4} wrap>
             {(r.device_ids || []).map((id) => {
@@ -1585,19 +1619,19 @@ function MaintenanceWindowsTab() {
         ),
     },
     {
-      title: 'Durum', dataIndex: 'is_active', width: 100,
+      title: t('common.status'), dataIndex: 'is_active', width: 100,
       render: (v: boolean) => v
-        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f97316', display: 'inline-block' }} /><Text style={{ fontSize: 12, color: '#f97316' }}>Aktif</Text></span>
-        : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#475569', display: 'inline-block' }} /><Text style={{ fontSize: 12, color: '#64748b' }}>Pasif</Text></span>,
+        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f97316', display: 'inline-block' }} /><Text style={{ fontSize: 12, color: '#f97316' }}>{t('settings.notifications.status_active')}</Text></span>
+        : <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><span style={{ width: 7, height: 7, borderRadius: '50%', background: '#475569', display: 'inline-block' }} /><Text style={{ fontSize: 12, color: '#64748b' }}>{t('settings.notifications.status_inactive')}</Text></span>,
     },
     {
-      title: 'İşlem', width: 90,
+      title: t('settings.col.action'), width: 90,
       render: (_: any, r: MaintenanceWindow) => (
         <Space>
-          <Tooltip title="Düzenle">
+          <Tooltip title={t('common.edit')}>
             <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
           </Tooltip>
-          <Popconfirm title="Bu bakım penceresi silinsin mi?" onConfirm={() => deleteMutation.mutate(r.id)}>
+          <Popconfirm title={t('settings.maintenance.popconfirm.delete_title')} onConfirm={() => deleteMutation.mutate(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
@@ -1615,14 +1649,14 @@ function MaintenanceWindowsTab() {
         style={{ marginBottom: 16 }}
         message={
           activeCount > 0
-            ? `${activeCount} aktif bakım penceresi — bu cihazlar için SNMP uyarıları susturulmuş.`
-            : 'Planlı bakım sürelerinde SNMP threshold uyarıları otomatik susturulur.'
+            ? t('settings.maintenance.alert_active', { count: activeCount })
+            : t('settings.maintenance.alert_idle')
         }
-        description="Bakım penceresi aktifken ilgili cihazlar için AlertRule ihlalleri bildirim göndermez."
+        description={t('settings.maintenance.alert_desc')}
       />
       <div style={{ marginBottom: 12 }}>
         <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Bakım Penceresi Ekle
+          {t('settings.maintenance.btn_new')}
         </Button>
       </div>
       <Table
@@ -1632,11 +1666,11 @@ function MaintenanceWindowsTab() {
         loading={isLoading}
         size="small"
         pagination={false}
-        locale={{ emptyText: 'Henüz bakım penceresi yok' }}
+        locale={{ emptyText: t('settings.maintenance.empty') }}
       />
 
       <Modal
-        title={editing ? 'Bakım Penceresini Düzenle' : 'Yeni Bakım Penceresi'}
+        title={editing ? t('settings.maintenance.modal.title_edit') : t('settings.maintenance.modal.title_new')}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null) }}
         onOk={() => form.submit()}
@@ -1644,31 +1678,31 @@ function MaintenanceWindowsTab() {
         width={520}
       >
         <Form form={form} layout="vertical" onFinish={(v) => saveMutation.mutate(v)}>
-          <Form.Item label="Bakım Adı" name="name" rules={[{ required: true }]}>
-            <Input placeholder="Örn: Aylık Güncelleme — Core Katman" />
+          <Form.Item label={t('settings.maintenance.form.name_label')} name="name" rules={[{ required: true }]}>
+            <Input placeholder={t('settings.maintenance.form.name_placeholder')} />
           </Form.Item>
-          <Form.Item label="Açıklama" name="description">
-            <Input placeholder="Opsiyonel not" />
+          <Form.Item label={t('settings.maintenance.form.description_label')} name="description">
+            <Input placeholder={t('settings.credentials.form.description_placeholder')} />
           </Form.Item>
-          <Form.Item label="Tarih & Saat Aralığı" name="time_range" rules={[{ required: true }]}>
+          <Form.Item label={t('settings.maintenance.form.time_range_label')} name="time_range" rules={[{ required: true }]}>
             <DatePicker.RangePicker
               showTime={{ format: 'HH:mm' }}
               format="DD.MM.YYYY HH:mm"
               style={{ width: '100%' }}
             />
           </Form.Item>
-          <Form.Item name="applies_to_all" valuePropName="checked" label="Kapsam">
-            <Switch checkedChildren="Tüm Cihazlar" unCheckedChildren="Seçili Cihazlar" />
+          <Form.Item name="applies_to_all" valuePropName="checked" label={t('settings.maintenance.col.scope')}>
+            <Switch checkedChildren={t('settings.alert_rules.all_devices')} unCheckedChildren={t('settings.maintenance.scope.selected_devices')} />
           </Form.Item>
           <Form.Item
             noStyle
             shouldUpdate={(prev, cur) => prev.applies_to_all !== cur.applies_to_all}
           >
             {({ getFieldValue }) => !getFieldValue('applies_to_all') && (
-              <Form.Item label="Cihazlar" name="device_ids" tooltip="Bakım kapsamındaki cihazları seçin">
+              <Form.Item label={t('settings.maintenance.form.devices_label')} name="device_ids" tooltip={t('settings.maintenance.form.devices_tooltip')}>
                 <Select
                   mode="multiple"
-                  placeholder="Cihaz seçin"
+                  placeholder={t('settings.maintenance.form.devices_placeholder')}
                   showSearch
                   filterOption={(input, opt) =>
                     (opt?.label as string ?? '').toLowerCase().includes(input.toLowerCase())
@@ -1683,23 +1717,23 @@ function MaintenanceWindowsTab() {
           {(!editing || !editing.parent_window_id) && (
             <>
               <Divider orientation="left" plain style={{ fontSize: 12, marginTop: 8, marginBottom: 8 }}>
-                Tekrar (opsiyonel)
+                {t('settings.maintenance.recurrence.section_title')}
               </Divider>
               <Alert
                 type="info"
                 showIcon
                 style={{ marginBottom: 10, fontSize: 12 }}
-                message="Tekrar tanımlarsanız ileriki 14 gün için otomatik örnek pencereler oluşturulur."
-                description="Tarih/saat aralığı bir 'şablon' olur; örnek pencereler her tekrarda aynı süreyi kullanır."
+                message={t('settings.maintenance.recurrence.info_message')}
+                description={t('settings.maintenance.recurrence.info_desc')}
               />
-              <Form.Item label="Tekrar" name="recurrence">
+              <Form.Item label={t('settings.maintenance.recurrence.label')} name="recurrence">
                 <Select
                   allowClear
-                  placeholder="Tek seferlik (tekrar yok)"
+                  placeholder={t('settings.maintenance.recurrence.placeholder_once')}
                   options={[
-                    { value: 'daily', label: 'Her gün' },
-                    { value: 'weekly', label: 'Haftalık (seçili günler)' },
-                    { value: 'monthly', label: 'Aylık (seçili gün)' },
+                    { value: 'daily', label: t('settings.maintenance.recurrence.daily') },
+                    { value: 'weekly', label: t('settings.maintenance.recurrence.weekly') },
+                    { value: 'monthly', label: t('settings.maintenance.recurrence.monthly') },
                   ]}
                 />
               </Form.Item>
@@ -1713,9 +1747,9 @@ function MaintenanceWindowsTab() {
                     <>
                       {rec === 'weekly' && (
                         <Form.Item
-                          label="Hangi günler"
+                          label={t('settings.maintenance.recurrence.which_days_label')}
                           name="recur_days_of_week"
-                          rules={[{ required: true, message: 'En az bir gün seçin' }]}
+                          rules={[{ required: true, message: t('settings.maintenance.recurrence.which_days_required') }]}
                         >
                           <Checkbox.Group>
                             <Space wrap>
@@ -1728,7 +1762,7 @@ function MaintenanceWindowsTab() {
                       )}
                       {rec === 'monthly' && (
                         <Form.Item
-                          label="Ayın hangi günü (1-28)"
+                          label={t('settings.maintenance.recurrence.day_of_month_label')}
                           name="recur_day_of_month"
                           rules={[{ required: true, type: 'number', min: 1, max: 28 }]}
                         >
@@ -1738,13 +1772,13 @@ function MaintenanceWindowsTab() {
                       {rec && (
                         <Row gutter={12}>
                           <Col span={12}>
-                            <Form.Item label="Bitiş tarihi (ops.)" name="recur_until">
+                            <Form.Item label={t('settings.maintenance.recurrence.end_date_label')} name="recur_until">
                               <DatePicker style={{ width: '100%' }} format="DD.MM.YYYY" />
                             </Form.Item>
                           </Col>
                           <Col span={12}>
-                            <Form.Item label="Maks. örnek sayısı (ops.)" name="recur_count_max">
-                              <InputNumber min={1} max={1000} style={{ width: '100%' }} placeholder="sınırsız" />
+                            <Form.Item label={t('settings.maintenance.recurrence.max_count_label')} name="recur_count_max">
+                              <InputNumber min={1} max={1000} style={{ width: '100%' }} placeholder={t('settings.maintenance.recurrence.unlimited')} />
                             </Form.Item>
                           </Col>
                         </Row>
@@ -1765,6 +1799,7 @@ function MaintenanceWindowsTab() {
 
 function ApiTokensTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { isDark } = useTheme()
   const [createOpen, setCreateOpen] = useState(false)
   const [createdToken, setCreatedToken] = useState<string | null>(null)
@@ -1784,14 +1819,14 @@ function ApiTokensTab() {
       qc.invalidateQueries({ queryKey: ['api-tokens'] })
       form.resetFields()
     },
-    onError: () => msgApi.error('Token oluşturulamadı'),
+    onError: () => msgApi.error(t('settings.api_tokens.toast.create_failed')),
   })
 
   const revokeMut = useMutation({
     mutationFn: (id: number) => apiTokensApi.revoke(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['api-tokens'] })
-      msgApi.success('Token iptal edildi')
+      msgApi.success(t('settings.api_tokens.toast.revoked'))
     },
   })
 
@@ -1801,13 +1836,13 @@ function ApiTokensTab() {
 
   const columns = [
     {
-      title: 'İsim',
+      title: t('settings.api_tokens.col.name'),
       dataIndex: 'name',
       key: 'name',
       render: (name: string) => <Text style={{ fontWeight: 600, color: C.text }}>{name}</Text>,
     },
     {
-      title: 'Prefix',
+      title: t('settings.api_tokens.col.prefix'),
       dataIndex: 'prefix',
       key: 'prefix',
       render: (p: string) => (
@@ -1817,27 +1852,27 @@ function ApiTokensTab() {
       ),
     },
     {
-      title: 'Son Kullanım',
+      title: t('settings.api_tokens.col.last_used'),
       dataIndex: 'last_used_at',
       key: 'last_used_at',
       render: (d?: string) => d ? (
         <Tooltip title={dayjs(d).format('DD.MM.YYYY HH:mm:ss')}>
           <Text style={{ color: C.muted, fontSize: 12 }}>{dayjs(d).fromNow()}</Text>
         </Tooltip>
-      ) : <Text style={{ color: C.muted, fontSize: 12 }}>Hiç kullanılmadı</Text>,
+      ) : <Text style={{ color: C.muted, fontSize: 12 }}>{t('settings.api_tokens.never_used')}</Text>,
     },
     {
-      title: 'Son Kullanma',
+      title: t('settings.api_tokens.col.expires_at'),
       dataIndex: 'expires_at',
       key: 'expires_at',
       render: (d?: string) => d ? (
         <Tag color={dayjs(d).isBefore(dayjs()) ? 'red' : dayjs(d).diff(dayjs(), 'day') < 7 ? 'orange' : 'default'}>
           {dayjs(d).format('DD.MM.YYYY')}
         </Tag>
-      ) : <Tag color="green">Süresiz</Tag>,
+      ) : <Tag color="green">{t('settings.api_tokens.never_expires')}</Tag>,
     },
     {
-      title: 'Oluşturulma',
+      title: t('common.created_at'),
       dataIndex: 'created_at',
       key: 'created_at',
       render: (d: string) => <Text style={{ color: C.muted, fontSize: 12 }}>{dayjs(d).format('DD.MM.YYYY HH:mm')}</Text>,
@@ -1847,15 +1882,15 @@ function ApiTokensTab() {
       key: 'action',
       render: (_: unknown, rec: ApiToken) => (
         <Popconfirm
-          title="Bu token'ı iptal et?"
-          description="Bu işlem geri alınamaz."
-          okText="İptal Et"
-          cancelText="Vazgeç"
+          title={t('settings.api_tokens.popconfirm.revoke_title')}
+          description={t('settings.api_tokens.popconfirm.revoke_desc')}
+          okText={t('settings.api_tokens.btn_revoke')}
+          cancelText={t('common.give_up')}
           okButtonProps={{ danger: true }}
           onConfirm={() => revokeMut.mutate(rec.id)}
         >
           <Button size="small" danger type="text" icon={<DeleteOutlined />} loading={revokeMut.isPending}>
-            İptal Et
+            {t('settings.api_tokens.btn_revoke')}
           </Button>
         </Popconfirm>
       ),
@@ -1867,14 +1902,14 @@ function ApiTokensTab() {
       {msgCtx}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <div>
-          <Text style={{ fontWeight: 600, fontSize: 15 }}>API Token Yönetimi</Text>
+          <Text style={{ fontWeight: 600, fontSize: 15 }}>{t('settings.api_tokens.section_title')}</Text>
           <br />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            Otomasyon ve API erişimi için uzun ömürlü tokenlar oluşturun.
+            {t('settings.api_tokens.section_subtitle')}
           </Text>
         </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-          Yeni Token
+          {t('settings.api_tokens.btn_new')}
         </Button>
       </div>
 
@@ -1884,17 +1919,17 @@ function ApiTokensTab() {
         rowKey="id"
         loading={isLoading}
         size="small"
-        locale={{ emptyText: 'Henüz token yok' }}
+        locale={{ emptyText: t('settings.api_tokens.empty') }}
         pagination={false}
       />
 
       {/* Create modal */}
       <Modal
         open={createOpen && !createdToken}
-        title={<Space><KeyOutlined style={{ color: '#3b82f6' }} /> Yeni API Token Oluştur</Space>}
+        title={<Space><KeyOutlined style={{ color: '#3b82f6' }} /> {t('settings.api_tokens.modal.title_new')}</Space>}
         onCancel={() => { setCreateOpen(false); form.resetFields() }}
         onOk={() => form.submit()}
-        okText="Oluştur"
+        okText={t('common.create')}
         confirmLoading={createMut.isPending}
       >
         <Form
@@ -1903,15 +1938,15 @@ function ApiTokensTab() {
           onFinish={(vals) => createMut.mutate({ name: vals.name, days: vals.expires_in_days || undefined })}
           style={{ marginTop: 16 }}
         >
-          <Form.Item label="Token İsmi" name="name" rules={[{ required: true, message: 'İsim giriniz' }]}>
-            <Input placeholder="ör. CI/CD Pipeline, Monitoring Bot" />
+          <Form.Item label={t('settings.api_tokens.form.name_label')} name="name" rules={[{ required: true, message: t('settings.api_tokens.form.name_required') }]}>
+            <Input placeholder={t('settings.api_tokens.form.name_placeholder')} />
           </Form.Item>
-          <Form.Item label="Son Kullanma Tarihi" name="expires_in_days" help="Boş bırakılırsa süresiz">
-            <Select allowClear placeholder="Süresiz">
-              <Select.Option value={30}>30 gün</Select.Option>
-              <Select.Option value={90}>90 gün</Select.Option>
-              <Select.Option value={180}>180 gün</Select.Option>
-              <Select.Option value={365}>1 yıl</Select.Option>
+          <Form.Item label={t('settings.api_tokens.form.expires_label')} name="expires_in_days" help={t('settings.api_tokens.form.expires_help')}>
+            <Select allowClear placeholder={t('settings.api_tokens.never_expires')}>
+              <Select.Option value={30}>{t('settings.sla.days_value', { count: 30 })}</Select.Option>
+              <Select.Option value={90}>{t('settings.sla.days_value', { count: 90 })}</Select.Option>
+              <Select.Option value={180}>{t('settings.sla.days_value', { count: 180 })}</Select.Option>
+              <Select.Option value={365}>{t('settings.api_tokens.one_year')}</Select.Option>
             </Select>
           </Form.Item>
         </Form>
@@ -1920,11 +1955,11 @@ function ApiTokensTab() {
       {/* Show created token */}
       <Modal
         open={!!createdToken}
-        title={<Space><KeyOutlined style={{ color: '#22c55e' }} /> Token Oluşturuldu</Space>}
+        title={<Space><KeyOutlined style={{ color: '#22c55e' }} /> {t('settings.api_tokens.modal.created_title')}</Space>}
         onCancel={() => { setCreatedToken(null); setCreateOpen(false) }}
         footer={[
           <Button key="close" type="primary" onClick={() => { setCreatedToken(null); setCreateOpen(false) }}>
-            Tamam, Sakladım
+            {t('settings.api_tokens.modal.saved_btn')}
           </Button>,
         ]}
       >
@@ -1932,8 +1967,8 @@ function ApiTokensTab() {
           type="warning"
           showIcon
           icon={<ExclamationCircleOutlined />}
-          message="Bu token bir daha gösterilmeyecek!"
-          description="Lütfen şimdi kopyalayın ve güvenli bir yere saklayın."
+          message={t('settings.api_tokens.modal.warn_title')}
+          description={t('settings.api_tokens.modal.warn_desc')}
           style={{ marginBottom: 16 }}
         />
         <div style={{
@@ -1943,19 +1978,19 @@ function ApiTokensTab() {
           <code style={{ flex: 1, fontSize: 13, wordBreak: 'break-all', color: '#22c55e', fontFamily: 'monospace' }}>
             {createdToken}
           </code>
-          <Tooltip title="Kopyala">
+          <Tooltip title={t('common.copy')}>
             <Button
               icon={<CopyOutlined />}
               size="small"
               onClick={() => {
                 navigator.clipboard.writeText(createdToken!)
-                msgApi.success('Token kopyalandı')
+                msgApi.success(t('settings.api_tokens.toast.copied'))
               }}
             />
           </Tooltip>
         </div>
         <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>
-          Header'da kullanım: <code>Authorization: Bearer {createdToken?.slice(0, 16)}…</code>
+          {t('settings.api_tokens.usage_hint')} <code>Authorization: Bearer {createdToken?.slice(0, 16)}…</code>
         </Text>
       </Modal>
     </div>
@@ -1977,6 +2012,7 @@ const GEMINI_MODELS = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-2.0-flash-e
 
 function AISettingsTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
   const [showKeys, setShowKeys] = useState<Record<string, boolean>>({})
@@ -2016,9 +2052,9 @@ function AISettingsTab() {
       if (vals.ollama_model !== undefined) payload.ollama_model = vals.ollama_model
       await aiAssistantApi.updateSettings(payload)
       qc.invalidateQueries({ queryKey: ['ai-settings'] })
-      message.success('AI ayarları kaydedildi')
+      message.success(t('settings.ai.toast.saved'))
     } catch {
-      message.error('Kayıt başarısız')
+      message.error(t('common.save_failed'))
     } finally {
       setSaving(false)
     }
@@ -2027,11 +2063,14 @@ function AISettingsTab() {
   const { isDark } = useTheme()
   const C = { bg2: isDark ? '#0f172a' : '#f8fafc', border: isDark ? '#334155' : '#e2e8f0', text: isDark ? '#f1f5f9' : '#1e293b', muted: isDark ? '#64748b' : '#94a3b8' }
 
+  // KURAL: 'Anthropic Claude', 'OpenAI GPT', 'Google Gemini' vendor markaları —
+  // çevrilmez (KURAL-vendor). 'Ollama (Yerel)' içindeki "Yerel" sadece bir UI
+  // suffix; t() ile çözülür.
   const providers: { id: string; name: string; keyField?: string; modelField?: string; models?: string[]; configured?: boolean }[] = [
     { id: 'claude', name: 'Anthropic Claude', keyField: 'claude_api_key', modelField: 'claude_model', models: CLAUDE_MODELS, configured: settings?.claude_configured },
     { id: 'openai', name: 'OpenAI GPT', keyField: 'openai_api_key', modelField: 'openai_model', models: OPENAI_MODELS, configured: settings?.openai_configured },
     { id: 'gemini', name: 'Google Gemini', keyField: 'gemini_api_key', modelField: 'gemini_model', models: GEMINI_MODELS, configured: settings?.gemini_configured },
-    { id: 'ollama', name: 'Ollama (Yerel)', configured: true },
+    { id: 'ollama', name: t('settings.ai.provider_ollama_local'), configured: true },
   ]
 
   return (
@@ -2039,13 +2078,13 @@ function AISettingsTab() {
       <Alert
         type="info"
         showIcon
-        message="API anahtarlarınız sunucuda Fernet şifrelemesiyle saklanır ve asla loglanmaz."
+        message={t('settings.ai.security_message')}
         style={{ marginBottom: 20 }}
       />
 
       <Form form={form} layout="vertical">
-        <Form.Item label="Aktif Sağlayıcı" name="active_provider">
-          <Select placeholder="Sağlayıcı seçin" allowClear style={{ width: 280 }}>
+        <Form.Item label={t('settings.ai.active_provider_label')} name="active_provider">
+          <Select placeholder={t('settings.ai.active_provider_placeholder')} allowClear style={{ width: 280 }}>
             {providers.map(p => (
               <Select.Option key={p.id} value={p.id}>
                 <span style={{ color: PROVIDER_COLORS[p.id], fontWeight: 600 }}>● </span>
@@ -2068,13 +2107,15 @@ function AISettingsTab() {
                 {p.name}
               </span>
               {p.configured
-                ? <Tag color="success" icon={<CheckCircleOutlined />}>Yapılandırıldı</Tag>
-                : <Tag color="default">API anahtarı yok</Tag>}
+                ? <Tag color="success" icon={<CheckCircleOutlined />}>{t('settings.ai.tag_configured')}</Tag>
+                : <Tag color="default">{t('settings.ai.tag_no_key')}</Tag>}
             </div>
             <Space direction="vertical" style={{ width: '100%' }} size={8}>
               <Form.Item name={p.keyField} noStyle>
                 <Input.Password
-                  placeholder={`${p.name} API Anahtarı${p.configured ? ' (değiştirmek için yaz)' : ''}`}
+                  placeholder={p.configured
+                    ? t('settings.ai.api_key_placeholder_change', { name: p.name })
+                    : t('settings.ai.api_key_placeholder', { name: p.name })}
                   style={{ width: '100%' }}
                   visibilityToggle={{
                     visible: showKeys[p.id!] ?? false,
@@ -2083,7 +2124,7 @@ function AISettingsTab() {
                 />
               </Form.Item>
               <Form.Item name={p.modelField} noStyle>
-                <Select style={{ width: 280 }} placeholder="Model seç">
+                <Select style={{ width: 280 }} placeholder={t('settings.ai.model_placeholder')}>
                   {(p.models ?? []).map(m => (
                     <Select.Option key={m} value={m}>{m}</Select.Option>
                   ))}
@@ -2101,8 +2142,8 @@ function AISettingsTab() {
           transition: 'all 0.2s',
         }}>
           <div style={{ fontWeight: 700, color: PROVIDER_COLORS['ollama'], marginBottom: 12, fontSize: 14 }}>
-            Ollama (Yerel Model)
-            <Tag color="purple" style={{ marginLeft: 8 }}>API Key Gerektirmez</Tag>
+            {t('settings.ai.ollama_section_title')}
+            <Tag color="purple" style={{ marginLeft: 8 }}>{t('settings.ai.tag_no_api_key')}</Tag>
           </div>
           <Space>
             <Form.Item name="ollama_base_url" noStyle>
@@ -2115,7 +2156,7 @@ function AISettingsTab() {
         </div>
 
         <Button type="primary" loading={saving || isLoading} onClick={save} icon={<CheckOutlined />}>
-          Kaydet
+          {t('common.save')}
         </Button>
       </Form>
     </div>
@@ -2260,41 +2301,41 @@ export default function SettingsPage() {
     <div className="nm-page" style={{ padding: '4px 2px' }}>
       <div className="nm-page-hd">
         <div className="title-block">
-          <div className="nm-crumbs"><span>Yönetim</span><span>{t('settings.title')}</span></div>
+          <div className="nm-crumbs"><span>{t('settings.crumb_admin')}</span><span>{t('settings.title')}</span></div>
           <h1 className="nm-page-title">
             {t('settings.title')}
             <span className="nm-pill mono">Charon v1.0</span>
           </h1>
-          <div className="nm-page-sub">Genel ayarlar · bildirim kanalları · uyarı kuralları · SLA politikaları · kimlik & token yönetimi.</div>
+          <div className="nm-page-sub">{t('settings.page_subtitle')}</div>
         </div>
       </div>
 
       <div className="nm-statbar">
         <div className="nm-stat">
-          <div className="nm-stat-label">Bildirim Kanalı</div>
+          <div className="nm-stat-label">{t('settings.stat.notification_channels')}</div>
           <div className="nm-stat-val">{channels.length}</div>
-          <div className="nm-stat-delta">{channels.filter((c) => c.is_active).length} aktif</div>
+          <div className="nm-stat-delta">{t('settings.stat.n_active', { count: channels.filter((c) => c.is_active).length })}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">Uyarı Kuralı</div>
+          <div className="nm-stat-label">{t('settings.stat.alert_rules')}</div>
           <div className="nm-stat-val">{rules.length}</div>
-          <div className="nm-stat-delta">{rules.filter((r) => r.enabled).length} aktif</div>
+          <div className="nm-stat-delta">{t('settings.stat.n_active', { count: rules.filter((r) => r.enabled).length })}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">SLA Politikası</div>
+          <div className="nm-stat-label">{t('settings.stat.sla_policies')}</div>
           <div className="nm-stat-val">{slaPolicies.length}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">Kimlik Profili</div>
+          <div className="nm-stat-label">{t('settings.stat.credential_profiles')}</div>
           <div className="nm-stat-val">{profiles.length}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">API Token</div>
+          <div className="nm-stat-label">{t('settings.stat.api_tokens')}</div>
           <div className="nm-stat-val">{tokens.length}</div>
         </div>
         <div className="nm-stat ok">
-          <div className="nm-stat-label">Tema</div>
-          <div className="nm-stat-val mono" style={{ fontSize: 18 }}>{isDark ? 'Karanlık' : 'Açık'}</div>
+          <div className="nm-stat-label">{t('settings.theme')}</div>
+          <div className="nm-stat-val mono" style={{ fontSize: 18 }}>{isDark ? t('settings.theme_dark') : t('settings.theme_light')}</div>
           <div className="nm-stat-delta">{currentLang.toUpperCase()} · v1.0.0</div>
         </div>
       </div>
@@ -2302,23 +2343,23 @@ export default function SettingsPage() {
       {/* Mockup tasarımı: sol dikey nav (220px) + sağ aktif sekme içeriği card */}
       {(() => {
         const TABS: { key: string; label: string; icon: React.ReactNode; content: React.ReactNode }[] = [
-          { key: 'general',          label: 'Genel',              icon: <GlobalOutlined />, content: generalContent },
-          { key: 'system',           label: 'Sistem (Tarama)',    icon: <ClockCircleOutlined />, content: <SystemSettingsTab /> },
-          { key: 'password-policy',  label: 'Şifre Politikası',   icon: <LockOutlined />,        content: <PasswordPolicyTab /> },
+          { key: 'general',          label: t('settings.tab.general'),           icon: <GlobalOutlined />, content: generalContent },
+          { key: 'system',           label: t('settings.tab.system'),            icon: <ClockCircleOutlined />, content: <SystemSettingsTab /> },
+          { key: 'password-policy',  label: t('settings.tab.password_policy'),   icon: <LockOutlined />,        content: <PasswordPolicyTab /> },
           // T8.4 — MFA artık kullanıcı bazlı /profile sayfasında (her
           // authenticated kullanıcı kendi MFA'sını yönetebilsin diye).
           // Settings org-admin gated; viewer/location_admin buradan kendi
           // MFA'sına ulaşamıyordu. Kaldırıldı.
-          { key: 'notifications',    label: 'Bildirimler',        icon: <BellOutlined />,   content: <NotificationChannelsTab /> },
-          { key: 'alert-rules',      label: 'Uyarı Kuralları',    icon: <AlertOutlined />,  content: <AlertRulesTab /> },
-          { key: 'maintenance',      label: 'Bakım Pencereleri',  icon: <ToolOutlined />,   content: <MaintenanceWindowsTab /> },
-          { key: 'credentials',      label: 'Kimlik Profilleri',  icon: <SafetyOutlined />, content: <CredentialProfilesTab /> },
-          { key: 'rotation',         label: 'Şifre Rotasyonu',    icon: <SyncOutlined />,   content: <SecretRotationTab /> },
-          { key: 'sla',              label: 'SLA Politikaları',   icon: <RiseOutlined />,   content: <SlaPoliciesTab /> },
-          { key: 'snmp',             label: 'SNMP',               icon: <WifiOutlined />,   content: <SnmpConfigTab /> },
-          { key: 'api-tokens',       label: 'API Tokenlar',       icon: <KeyOutlined />,    content: <ApiTokensTab /> },
-          { key: 'driver-templates', label: 'Sürücü Şablonları',  icon: <CodeOutlined />,   content: <DriverTemplatesPage /> },
-          { key: 'ai',               label: 'AI Asistanı',        icon: <RobotOutlined />,  content: <AISettingsTab /> },
+          { key: 'notifications',    label: t('settings.tab.notifications'),     icon: <BellOutlined />,   content: <NotificationChannelsTab /> },
+          { key: 'alert-rules',      label: t('settings.tab.alert_rules'),       icon: <AlertOutlined />,  content: <AlertRulesTab /> },
+          { key: 'maintenance',      label: t('settings.tab.maintenance'),       icon: <ToolOutlined />,   content: <MaintenanceWindowsTab /> },
+          { key: 'credentials',      label: t('settings.tab.credentials'),       icon: <SafetyOutlined />, content: <CredentialProfilesTab /> },
+          { key: 'rotation',         label: t('settings.tab.rotation'),          icon: <SyncOutlined />,   content: <SecretRotationTab /> },
+          { key: 'sla',              label: t('settings.tab.sla'),               icon: <RiseOutlined />,   content: <SlaPoliciesTab /> },
+          { key: 'snmp',             label: t('settings.tab.snmp'),              icon: <WifiOutlined />,   content: <SnmpConfigTab /> },
+          { key: 'api-tokens',       label: t('settings.tab.api_tokens'),        icon: <KeyOutlined />,    content: <ApiTokensTab /> },
+          { key: 'driver-templates', label: t('settings.tab.driver_templates'),  icon: <CodeOutlined />,   content: <DriverTemplatesPage /> },
+          { key: 'ai',               label: t('settings.tab.ai'),                icon: <RobotOutlined />,  content: <AISettingsTab /> },
         ]
         const active = TABS.find((t) => t.key === activeTab) ?? TABS[0]
         return (

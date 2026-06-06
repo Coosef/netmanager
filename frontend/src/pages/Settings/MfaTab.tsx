@@ -22,6 +22,7 @@ import {
   CheckCircleFilled, CopyOutlined, DownloadOutlined, KeyOutlined, LockOutlined,
   SafetyOutlined, SyncOutlined, WarningFilled,
 } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { mfaApi } from '@/api/mfa'
 import MfaEmailCard from '@/pages/Settings/MfaEmailCard'
 
@@ -34,6 +35,7 @@ function chunkSecret(secret: string): string {
 
 export default function MfaTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { data: status, isLoading } = useQuery({
     queryKey: ['mfa-status'],
     queryFn: () => mfaApi.status(),
@@ -58,7 +60,7 @@ export default function MfaTab() {
       setEnrollUri(r.otpauth_uri)
       setConfirmCode('')
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Kayıt başlatılamadı'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('settings.mfa.toast.enroll_failed')),
   })
 
   const confirmM = useMutation({
@@ -69,9 +71,9 @@ export default function MfaTab() {
       setEnrollUri(null)
       setConfirmCode('')
       qc.invalidateQueries({ queryKey: ['mfa-status'] })
-      message.success('MFA aktif edildi — kurtarma kodlarınızı şimdi saklayın.')
+      message.success(t('settings.mfa.toast.enabled'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Geçersiz kod'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('settings.mfa.toast.invalid_code')),
   })
 
   const disableM = useMutation({
@@ -80,9 +82,9 @@ export default function MfaTab() {
       setDisableOpen(false); setDisablePwd(''); setDisableCode('')
       setRecoveryCodes(null)
       qc.invalidateQueries({ queryKey: ['mfa-status'] })
-      message.success('MFA devre dışı bırakıldı')
+      message.success(t('settings.mfa.toast.disabled'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Devre dışı bırakılamadı'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('settings.mfa.toast.disable_failed')),
   })
 
   const regenM = useMutation({
@@ -91,9 +93,9 @@ export default function MfaTab() {
       setRecoveryCodes(r.recovery_codes)
       setRegenOpen(false); setRegenCode('')
       qc.invalidateQueries({ queryKey: ['mfa-status'] })
-      message.success('Yeni kurtarma kodları üretildi — eskileri artık geçersiz.')
+      message.success(t('settings.mfa.toast.regen_ok'))
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || 'Yenileme başarısız'),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('settings.mfa.toast.regen_failed')),
   })
 
   // Friendly setup-key form for manual entry into the authenticator app.
@@ -105,15 +107,16 @@ export default function MfaTab() {
   const copySecret = async () => {
     if (!enrollSecret) return
     await navigator.clipboard.writeText(enrollSecret)
-    message.success('Anahtar kopyalandı')
+    message.success(t('settings.mfa.toast.secret_copied'))
   }
 
   const downloadRecovery = () => {
     if (!recoveryCodes?.length) return
+    // KURAL: marka adı "Charon" literal kalır
     const blob = new Blob(
-      [`Charon — MFA Kurtarma Kodları\n` +
-       `Oluşturulma: ${new Date().toISOString()}\n` +
-       `Her kod TEK KULLANIMLIKTIR. Authenticator erişimini kaybederseniz birini kullanın.\n\n` +
+      [`Charon — ${t('settings.mfa.recovery.file_title')}\n` +
+       `${t('settings.mfa.recovery.file_created_at')}: ${new Date().toISOString()}\n` +
+       `${t('settings.mfa.recovery.file_one_time_notice')}\n\n` +
        recoveryCodes.map((c, i) => `${String(i + 1).padStart(2, '0')}.  ${c}`).join('\n')],
       { type: 'text/plain;charset=utf-8' },
     )
@@ -134,17 +137,17 @@ export default function MfaTab() {
   // ── ENABLED state ─────────────────────────────────────────────────────────
   if (status?.mfa_enabled) {
     return (
-      <Card title={<Space><SafetyOutlined style={{ color: 'var(--ok)' }} /> Çok Faktörlü Doğrulama</Space>}>
+      <Card title={<Space><SafetyOutlined style={{ color: 'var(--ok)' }} /> {t('settings.mfa.section_title')}</Space>}>
         <Alert
           type="success"
           showIcon
           icon={<CheckCircleFilled />}
-          message="MFA aktif"
+          message={t('settings.mfa.enabled_title')}
           description={
             <>
-              Her girişte authenticator uygulamanızdan 6-haneli kod istenir.
+              {t('settings.mfa.enabled_desc')}
               {status.enrolled_at && (
-                <> Kayıt: <Text type="secondary">{new Date(status.enrolled_at).toLocaleString('tr-TR')}</Text></>
+                <> {t('settings.mfa.enrolled_at_label')}: <Text type="secondary">{new Date(status.enrolled_at).toLocaleString('tr-TR')}</Text></>
               )}
             </>
           }
@@ -153,19 +156,19 @@ export default function MfaTab() {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, marginBottom: 16 }}>
           <Card size="small">
-            <Text type="secondary" style={{ fontSize: 11 }}>YÖNTEMLER</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('settings.mfa.methods_label')}</Text>
             <div style={{ fontSize: 14, marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              {status.methods.includes('totp') && <Tag color="green">Authenticator</Tag>}
+              {status.methods.includes('totp') && <Tag color="green">{t('settings.mfa.method.authenticator')}</Tag>}
               {status.methods.includes('email') && <Tag color="cyan">Email</Tag>}
               {status.methods.includes('sms') && <Tag color="blue">SMS</Tag>}
             </div>
           </Card>
           <Card size="small">
-            <Text type="secondary" style={{ fontSize: 11 }}>KURTARMA KODU KALAN</Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>{t('settings.mfa.recovery_remaining_label')}</Text>
             <div style={{ fontSize: 22, marginTop: 4, fontWeight: 500 }}>
               {status.recovery_codes_remaining} / 10
               {status.recovery_codes_remaining <= 3 && (
-                <Tag color="orange" style={{ marginLeft: 8 }}>Azalıyor</Tag>
+                <Tag color="orange" style={{ marginLeft: 8 }}>{t('settings.mfa.tag_running_out')}</Tag>
               )}
             </div>
           </Card>
@@ -185,43 +188,43 @@ export default function MfaTab() {
 
         <Space>
           <Button icon={<SyncOutlined />} onClick={() => setRegenOpen(true)}>
-            Kurtarma kodlarını yenile
+            {t('settings.mfa.btn_regen_recovery')}
           </Button>
           <Button danger icon={<LockOutlined />} onClick={() => setDisableOpen(true)}>
-            MFA'yı kapat
+            {t('settings.mfa.btn_disable')}
           </Button>
         </Space>
 
         <Modal
-          title={<Space><LockOutlined /> MFA'yı kapat</Space>}
+          title={<Space><LockOutlined /> {t('settings.mfa.btn_disable')}</Space>}
           open={disableOpen}
           onCancel={() => setDisableOpen(false)}
           onOk={() => disableM.mutate()}
-          okText="Kapat" okButtonProps={{ danger: true, loading: disableM.isPending,
+          okText={t('common.close')} okButtonProps={{ danger: true, loading: disableM.isPending,
             disabled: !disablePwd }}
-          cancelText="İptal"
+          cancelText={t('common.cancel')}
         >
-          <Alert type="warning" showIcon message="Hesabınız tekrar tek-faktörlü olacak."
+          <Alert type="warning" showIcon message={t('settings.mfa.disable_warning')}
             style={{ marginBottom: 12 }} />
           <Space direction="vertical" style={{ width: '100%' }}>
-            <Input.Password placeholder="Şifre" value={disablePwd}
+            <Input.Password placeholder={t('common.password')} value={disablePwd}
               onChange={(e) => setDisablePwd(e.target.value)} autoFocus />
-            <Input placeholder="6-haneli kod veya kurtarma kodu (önerilir)" value={disableCode}
+            <Input placeholder={t('settings.mfa.disable_code_placeholder')} value={disableCode}
               onChange={(e) => setDisableCode(e.target.value)} />
           </Space>
         </Modal>
 
         <Modal
-          title={<Space><SyncOutlined /> Kurtarma kodlarını yenile</Space>}
+          title={<Space><SyncOutlined /> {t('settings.mfa.btn_regen_recovery')}</Space>}
           open={regenOpen}
           onCancel={() => setRegenOpen(false)}
           onOk={() => regenM.mutate()}
-          okText="Yenile" okButtonProps={{ loading: regenM.isPending, disabled: regenCode.length !== 6 }}
-          cancelText="İptal"
+          okText={t('settings.mfa.btn_regen_short')} okButtonProps={{ loading: regenM.isPending, disabled: regenCode.length !== 6 }}
+          cancelText={t('common.cancel')}
         >
-          <Alert type="info" showIcon message="Yeni kodlar üretildiğinde eskiler anında geçersiz olur."
+          <Alert type="info" showIcon message={t('settings.mfa.regen_warning')}
             style={{ marginBottom: 12 }} />
-          <Input placeholder="Authenticator'dan 6-haneli kod" value={regenCode} maxLength={6}
+          <Input placeholder={t('settings.mfa.regen_code_placeholder')} value={regenCode} maxLength={6}
             onChange={(e) => setRegenCode(e.target.value.replace(/\D/g, ''))} />
         </Modal>
       </Card>
@@ -231,10 +234,9 @@ export default function MfaTab() {
   // ── ENROLLING state (we have a pending secret) ────────────────────────────
   if (enrollSecret && enrollUri) {
     return (
-      <Card title={<Space><KeyOutlined /> MFA Kurulumu — 1 / 2</Space>}>
+      <Card title={<Space><KeyOutlined /> {t('settings.mfa.setup_title')}</Space>}>
         <Paragraph type="secondary">
-          Authenticator uygulamanızda (<Text strong>Google Authenticator · Microsoft Authenticator · Authy · 1Password</Text>) QR'ı tarayın
-          veya kurulum anahtarını manuel girin. Bu anahtar yalnızca <strong>bir kez</strong> gösterilir.
+          {t('settings.mfa.setup_intro_prefix')}<Text strong>Google Authenticator · Microsoft Authenticator · Authy · 1Password</Text>{t('settings.mfa.setup_intro_suffix')}
         </Paragraph>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 24, alignItems: 'center', marginBottom: 20 }}>
@@ -242,27 +244,27 @@ export default function MfaTab() {
             <QRCode value={enrollUri} size={184} bordered={false} />
           </div>
           <div>
-            <Text type="secondary" style={{ fontSize: 11, letterSpacing: 1 }}>KURULUM ANAHTARI (BASE32)</Text>
+            <Text type="secondary" style={{ fontSize: 11, letterSpacing: 1 }}>{t('settings.mfa.setup_key_label')}</Text>
             <div className="mono" style={{
               fontSize: 16, letterSpacing: 1.5, padding: '10px 12px',
               background: 'var(--bg-2)', border: '1px solid var(--border-0)', borderRadius: 4,
               marginTop: 6, fontFamily: 'IBM Plex Mono, monospace', wordBreak: 'break-all',
             }}>{formattedSecret}</div>
             <Button type="text" icon={<CopyOutlined />} size="small" onClick={copySecret} style={{ marginTop: 4 }}>
-              Anahtarı kopyala
+              {t('settings.mfa.btn_copy_secret')}
             </Button>
             <Paragraph type="secondary" style={{ fontSize: 11, marginTop: 10, marginBottom: 0 }}>
-              QR taranamıyorsa "Kurulum anahtarı gir" → bu metni yapıştırın.
+              {t('settings.mfa.setup_qr_fallback_hint')}
             </Paragraph>
           </div>
         </div>
 
-        <Title level={5} style={{ marginTop: 0 }}>2 / 2 — Uygulamanızdaki kodu girin</Title>
+        <Title level={5} style={{ marginTop: 0 }}>{t('settings.mfa.setup_step2_title')}</Title>
         <Space>
           <Input
             value={confirmCode}
             onChange={(e) => setConfirmCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="6 haneli kod"
+            placeholder={t('settings.mfa.code_6_placeholder')}
             maxLength={6}
             style={{ width: 180, fontSize: 18, letterSpacing: 4, textAlign: 'center', fontFamily: 'IBM Plex Mono, monospace' }}
             autoFocus
@@ -271,10 +273,10 @@ export default function MfaTab() {
           <Button type="primary" loading={confirmM.isPending}
             disabled={confirmCode.length !== 6}
             onClick={() => confirmM.mutate(confirmCode)}>
-            Onayla ve aktif et
+            {t('settings.mfa.btn_confirm_enable')}
           </Button>
           <Button onClick={() => { setEnrollSecret(null); setEnrollUri(null); setConfirmCode('') }}>
-            İptal
+            {t('common.cancel')}
           </Button>
         </Space>
       </Card>
@@ -283,13 +285,13 @@ export default function MfaTab() {
 
   // ── IDLE state ────────────────────────────────────────────────────────────
   return (
-    <Card title={<Space><SafetyOutlined /> Çok Faktörlü Doğrulama</Space>}>
+    <Card title={<Space><SafetyOutlined /> {t('settings.mfa.section_title')}</Space>}>
       <Alert
         type="warning"
         showIcon
         icon={<WarningFilled />}
-        message="MFA şu anda devre dışı"
-        description="Hesabınız yalnızca şifre ile korunuyor. Tek tıkla TOTP açabilirsiniz — Google Authenticator, Microsoft Authenticator, Authy ve 1Password ile çalışır."
+        message={t('settings.mfa.idle_title')}
+        description={t('settings.mfa.idle_desc')}
         style={{ marginBottom: 16 }}
       />
 
@@ -300,7 +302,7 @@ export default function MfaTab() {
       <Button type="primary" size="large" icon={<KeyOutlined />}
         loading={enrollM.isPending}
         onClick={() => enrollM.mutate()}>
-        MFA'yı aç
+        {t('settings.mfa.btn_enable')}
       </Button>
     </Card>
   )
@@ -309,16 +311,16 @@ export default function MfaTab() {
 function RecoveryCodesPanel({
   codes, onDownload, onClose,
 }: { codes: string[]; onDownload: () => void; onClose: () => void }) {
+  const { t } = useTranslation()
   return (
     <Alert
       type="info"
       style={{ marginBottom: 16 }}
-      message={<Space><SafetyOutlined /> Kurtarma kodlarınız</Space>}
+      message={<Space><SafetyOutlined /> {t('settings.mfa.recovery.panel_title')}</Space>}
       description={
         <div>
           <Paragraph style={{ marginBottom: 8 }}>
-            Authenticator erişimini kaybederseniz aşağıdaki kodlardan birini Login sayfasında <strong>Kurtarma</strong> alanına girerek
-            yeniden giriş yapabilirsiniz. Her kod <strong>tek kullanımlıktır</strong>. Bu liste yalnızca şimdi gösterilir.
+            {t('settings.mfa.recovery.panel_intro_pre')}<strong>{t('settings.mfa.recovery.panel_recovery_word')}</strong>{t('settings.mfa.recovery.panel_intro_mid')}<strong>{t('settings.mfa.recovery.panel_one_time')}</strong>{t('settings.mfa.recovery.panel_intro_post')}
           </Paragraph>
           <div style={{
             display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6,
@@ -333,8 +335,8 @@ function RecoveryCodesPanel({
             ))}
           </div>
           <Space style={{ marginTop: 12 }}>
-            <Button icon={<DownloadOutlined />} onClick={onDownload}>İndir (.txt)</Button>
-            <Button onClick={onClose}>Sakladım, kapat</Button>
+            <Button icon={<DownloadOutlined />} onClick={onDownload}>{t('settings.mfa.recovery.btn_download_txt')}</Button>
+            <Button onClick={onClose}>{t('settings.mfa.recovery.btn_saved_close')}</Button>
           </Space>
         </div>
       }

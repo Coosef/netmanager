@@ -123,6 +123,19 @@
     "updated_at": "Güncellenme",
     "apply": "Uygula",
     "no_results": "Sonuç bulunamadı",
+    "update": "Güncelle",
+    "create": "Oluştur",
+    "required_field": "Zorunlu alan",
+    "action_failed": "İşlem başarısız",
+    "error_occurred": "Hata oluştu",
+    "save_failed": "Kayıt başarısız",
+    "delete_failed": "Silinemedi",
+    "enabled": "Etkin",
+    "disabled": "Devre dışı",
+    "test": "Test",
+    "username": "Kullanıcı Adı",
+    "password": "Şifre",
+    "unknown_error": "Bilinmeyen hata",
     "validation": {
       "required": "Bu alan gerekli",
       "ip_required": "IP adresi gerekli",
@@ -1547,7 +1560,543 @@
     "section_general": "GENEL",
     "section_appearance": "GÖRÜNÜM",
     "save_success": "Ayarlar kaydedildi",
-    "version": "Versiyon"
+    "version": "Versiyon",
+    "crumb_admin": "Yönetim",
+    "page_subtitle": "Genel ayarlar · bildirim kanalları · uyarı kuralları · SLA politikaları · kimlik & token yönetimi.",
+    "col": { "action": "İşlem", "actions": "İşlemler" },
+    "unit": { "min_short": "dk", "day": "gün" },
+    "stat": {
+      "notification_channels": "Bildirim Kanalı",
+      "alert_rules": "Uyarı Kuralı",
+      "sla_policies": "SLA Politikası",
+      "credential_profiles": "Kimlik Profili",
+      "api_tokens": "API Token",
+      "n_active": "{{count}} aktif"
+    },
+    "tab": {
+      "general": "Genel",
+      "system": "Sistem (Tarama)",
+      "password_policy": "Şifre Politikası",
+      "notifications": "Bildirimler",
+      "alert_rules": "Uyarı Kuralları",
+      "maintenance": "Bakım Pencereleri",
+      "credentials": "Kimlik Profilleri",
+      "rotation": "Şifre Rotasyonu",
+      "sla": "SLA Politikaları",
+      "snmp": "SNMP",
+      "api_tokens": "API Tokenlar",
+      "driver_templates": "Sürücü Şablonları",
+      "ai": "AI Asistanı"
+    },
+    "alert_rules": {
+      "btn_new": "Yeni Kural",
+      "empty": "Henüz kural yok",
+      "all_devices": "Tüm Cihazlar",
+      "intro_message": "SNMP poll sonuçlarına göre arayüz utilization veya hata eşiği aşıldığında bildirim gönderir.",
+      "intro_desc": "Bildirim kanallarınızın 'Eşik Uyarısı (SNMP)' seçeneği etkin olmalıdır.",
+      "col": {
+        "name": "Ad", "device": "Cihaz", "interface": "Interface",
+        "metric_threshold": "Metrik / Eşik", "consecutive_poll": "Ardışık Poll",
+        "severity": "Seviye", "enabled": "Aktif"
+      },
+      "popconfirm": { "delete_title": "Bu kural silinsin mi?" },
+      "modal": { "title_new": "Yeni Uyarı Kuralı", "title_edit": "Kuralı Düzenle" },
+      "form": {
+        "name_label": "Kural Adı",
+        "name_placeholder": "Örn: Core Switch Yüksek Utilization",
+        "device_label": "Cihaz",
+        "device_tooltip": "Boş bırakılırsa tüm cihazlara uygulanır",
+        "device_placeholder": "— Tüm Cihazlar —",
+        "interface_pattern_label": "Interface Pattern",
+        "interface_pattern_tooltip": "fnmatch pattern. Örn: Gi0/*, Te*, boş = tüm interface",
+        "interface_pattern_placeholder": "* (tüm interface)",
+        "metric_label": "Metrik",
+        "threshold_label": "Eşik Değeri (%)",
+        "consecutive_label": "Ardışık Poll Sayısı",
+        "consecutive_tooltip": "Kaç ardışık poll sonucu eşiği aşmalı",
+        "severity_label": "Seviye",
+        "cooldown_label": "Soğuma Süresi (dk)",
+        "cooldown_tooltip": "Aynı kural için minimum bildirim aralığı",
+        "enabled_label": "Aktif"
+      },
+      "toast": {
+        "created": "Kural oluşturuldu",
+        "updated": "Kural güncellendi",
+        "deleted": "Kural silindi"
+      }
+    },
+    "notifications": {
+      "intro": "Bildirim kanallarını yönetin. Olaylar gerçekleştiğinde seçilen kanallara otomatik mesaj gönderilir.",
+      "btn_add": "Kanal Ekle",
+      "btn_send_digest": "Haftalık Özet Gönder",
+      "status_active": "Aktif",
+      "status_inactive": "Pasif",
+      "tooltip_test_send": "Test gönder",
+      "col": {
+        "name": "Ad", "type": "Tür", "triggers": "Tetikleyiciler", "status": "Durum"
+      },
+      "popconfirm": {
+        "send_digest_title": "Haftalık özet gönderilsin mi?",
+        "delete_title": "Kanal silinsin mi?"
+      },
+      "modal": { "title_new": "Yeni Bildirim Kanalı", "title_edit": "Kanalı Düzenle" },
+      "form": {
+        "name_label": "Kanal Adı",
+        "type_label": "Tür",
+        "triggers_placeholder": "Bildirim gönderilecek olayları seçin",
+        "active_label": "Aktif"
+      },
+      "channel": {
+        "email": "E-posta",
+        "webhook": "Generic Webhook",
+        "jira": "Jira (Ticket)"
+      },
+      "email": {
+        "recipients_label": "Alıcılar",
+        "recipients_extra": "Virgülle ayırın"
+      },
+      "teams": {
+        "webhook_extra": "Teams kanalında Incoming Webhook bağlayıcısından alın"
+      },
+      "webhook": {
+        "url_label": "Hedef URL",
+        "headers_label": "Özel Başlıklar",
+        "headers_extra": "JSON formatında: {\"X-API-Key\": \"abc123\"}"
+      },
+      "telegram": {
+        "bot_token_label": "Bot Token",
+        "chat_id_label": "Chat ID"
+      },
+      "jira": {
+        "info_alert": "Jira Cloud için Atlassian API Token kullanın. Jira Server için kullanıcı adı + şifre girin.",
+        "url_label": "Jira URL",
+        "url_extra": "Örn: https://mycompany.atlassian.net",
+        "email_label": "E-posta / Kullanıcı Adı",
+        "api_token_label": "API Token / Şifre",
+        "api_token_extra": "Atlassian Cloud: id.atlassian.com → Güvenlik → API token",
+        "project_key_label": "Proje Anahtarı",
+        "project_key_extra": "Jira proje sayfasındaki kısa kod (NET, OPS, INFRA vb.)",
+        "issue_type_label": "Issue Türü",
+        "issue_type_extra": "Jira projenizde tanımlı issue type adı"
+      },
+      "toast": {
+        "created": "Kanal oluşturuldu",
+        "updated": "Kanal güncellendi",
+        "deleted": "Kanal silindi",
+        "test_sent": "Test mesajı gönderildi!",
+        "test_failed": "Test başarısız: {{error}}",
+        "digest_queued": "Haftalık özet kuyruğa alındı"
+      }
+    },
+    "credentials": {
+      "btn_new": "Yeni Profil",
+      "empty": "Henüz profil yok",
+      "intro_message": "Kimlik bilgileri Fernet şifrelemesiyle saklanır. Şifreler hiçbir zaman API yanıtında döndürülmez.",
+      "intro_desc": "Cihazlara profil atayarak credential yönetimini merkezileştirin. Profil atanmış cihazlar SSH/SNMP bağlantılarında bu profili kullanır.",
+      "col": { "profile_name": "Profil Adı" },
+      "popconfirm": {
+        "delete_title": "Bu profil silinsin mi?",
+        "delete_desc": "Profile atanmış cihazlar varsa silinemez."
+      },
+      "modal": { "title_new": "Yeni Kimlik Profili", "title_edit": "Profili Düzenle" },
+      "form": {
+        "name_label": "Profil Adı",
+        "name_placeholder": "Örn: Cisco Core, Aruba Access, Read-Only",
+        "description_label": "Açıklama",
+        "description_placeholder": "Opsiyonel not",
+        "ssh_username_label": "SSH Kullanıcı Adı",
+        "ssh_password_label": "SSH Şifre",
+        "ssh_password_edit_label": "SSH Şifre (değiştirmek için doldurun)",
+        "ssh_port_label": "SSH Port",
+        "enable_secret_label": "Enable Secret",
+        "enable_secret_edit_label": "Enable Secret (değiştirmek için doldurun)",
+        "enable_secret_tooltip": "Boş bırakılırsa mevcut değer korunur; temizlemek için boşluk girin",
+        "password_edit_placeholder": "— değiştirmek için girin —",
+        "snmp_enabled_label": "SNMP Aktif",
+        "snmp_version_label": "SNMP Versiyon",
+        "snmp_port_label": "SNMP Port",
+        "v3_username_label": "v3 Kullanıcı Adı",
+        "v3_auth_proto_label": "Auth Protokolü",
+        "v3_auth_pass_label": "Auth Parolası",
+        "v3_priv_proto_label": "Priv Protokolü",
+        "v3_priv_pass_label": "Priv Parolası",
+        "empty_select": "— yok —"
+      },
+      "toast": {
+        "created": "Profil oluşturuldu",
+        "updated": "Profil güncellendi",
+        "deleted": "Profil silindi"
+      }
+    },
+    "sla": {
+      "btn_new": "Politika Ekle",
+      "intro": "Cihaz veya grup bazında uptime hedefi tanımlayın. İhlalde bildirim gönderilebilir.",
+      "days_value": "{{count}} gün",
+      "col": {
+        "policy_name": "Politika Adı",
+        "target_uptime": "Hedef Uptime",
+        "measurement_window": "Ölçüm Penceresi",
+        "scope": "Kapsam",
+        "notification": "Bildirim"
+      },
+      "scope": {
+        "devices": "{{count}} cihaz",
+        "groups": "{{count}} grup"
+      },
+      "popconfirm": { "delete_title": "Bu politikayı silmek istiyor musunuz?" },
+      "modal": { "title_new": "Yeni SLA Politikası", "title_edit": "SLA Politikasını Düzenle" },
+      "form": {
+        "name_label": "Politika Adı",
+        "name_placeholder": "Kritik Altyapı SLA",
+        "target_uptime_label": "Hedef Uptime (%)",
+        "measurement_window_label": "Ölçüm Penceresi",
+        "scope_devices_label": "Kapsam — Cihazlar",
+        "scope_devices_extra": "Boş bırakırsanız tüm cihazlar dahil edilir",
+        "scope_devices_placeholder": "Belirli cihazlar seçin (opsiyonel)",
+        "notify_on_breach_label": "İhlalde Bildirim Gönder"
+      },
+      "toast": {
+        "created": "SLA politikası oluşturuldu",
+        "updated": "SLA politikası güncellendi",
+        "deleted": "SLA politikası silindi"
+      }
+    },
+    "snmp": {
+      "stat": {
+        "total_devices": "Toplam Cihaz",
+        "snmp_enabled": "SNMP Aktif",
+        "poll_records": "Poll Kayıt Sayısı",
+        "last_poll": "Son Poll",
+        "not_yet": "Henüz yok"
+      },
+      "col": { "device": "Cihaz" },
+      "bulk_section_title": "Toplu SNMP Yapılandırma (SSH)",
+      "alert_ruijie_title": "Ruijie community string kuralı",
+      "alert_ruijie_desc": "Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: \"Charon1\"",
+      "alert_ssh_title": "SSH ile doğrudan cihaz firmware'ine SNMP komutları gönderilir",
+      "alert_ssh_desc": "Her cihaza SSH bağlanılır, SNMP aktifleştirilir ve community string yazılır. 58 cihaz için ~2-3 dakika sürebilir.",
+      "form": {
+        "community_label": "SNMP Community String",
+        "community_extra": "Ruijie için büyük harf + küçük harf + rakam gerekli — örn. \"Charon1\"",
+        "version_label": "Versiyon",
+        "version_v2c_recommended": "SNMPv2c (önerilen)"
+      },
+      "btn_apply_to_all": "Tüm Cihazlara SSH ile Uygula",
+      "btn_configuring": "Yapılandırılıyor...",
+      "btn_yes_apply": "Evet, Uygula",
+      "confirm_apply_all": "Tüm {{count}} cihaza SSH bağlanılacak. Emin misin?",
+      "manual_poll_section": "Manuel Poll",
+      "manual_poll_hint": "Celery beat her 5 dakikada bir otomatik poll eder. Bu buton hemen kuyruğa gönderir.",
+      "btn_poll_now": "Şimdi Poll Et",
+      "result_modal_title": "SSH Yapılandırma Sonucu — {{succeeded}}/{{attempted}} başarılı",
+      "result_succeeded": "{{count}} Başarılı",
+      "result_failed": "{{count}} Başarısız",
+      "result_failed_hint": "Başarısız cihazlar için Cihaz Detayı → Health → SNMP Güncelle kullanabilirsiniz.",
+      "toast": {
+        "poll_queued": "SNMP poll görevi kuyruğa alındı — ~30 saniye sonra veri güncellenir",
+        "poll_failed": "Poll görevi başlatılamadı",
+        "ssh_config_failed": "SSH yapılandırma başarısız",
+        "community_required": "Community string gerekli"
+      }
+    },
+    "rotation": {
+      "intro_message": "SSH şifresi rotasyonu gerçek cihazlara bağlanır ve parolayı değiştirir.",
+      "intro_desc": "Tüm cihazlar başarılı olmadan profil güncellenmez. Cisco IOS/IOS-XE ve Ruijie desteklenmektedir.",
+      "unassigned_label": "Politika atanmamış profiller: ",
+      "empty": "Henüz rotasyon politikası yok. Üstteki profil butonlarından ekleyin.",
+      "col": {
+        "profile": "Kimlik Profili",
+        "interval": "Aralık",
+        "last_rotation": "Son Rotasyon",
+        "next_rotation": "Sonraki Rotasyon"
+      },
+      "status": {
+        "idle": "Bekliyor",
+        "running": "Çalışıyor",
+        "success": "Başarılı",
+        "failed": "Başarısız"
+      },
+      "tooltip": {
+        "last_result": "Son Sonuç",
+        "rotate_now": "Şimdi Döndür"
+      },
+      "popconfirm": { "delete_title": "Rotasyon politikası silinsin mi?" },
+      "modal": {
+        "title_new": "Rotasyon Politikası Ekle",
+        "title_edit": "Politikayı Düzenle",
+        "profile_label": "Profil: {{name}}",
+        "last_result_title": "Son Rotasyon Sonucu",
+        "executed_at": "{{date}} tarihinde çalıştırıldı"
+      },
+      "form": { "interval_label": "Rotasyon Aralığı (Gün)" },
+      "toast": { "started": "Rotasyon başlatıldı" }
+    },
+    "maintenance": {
+      "btn_new": "Bakım Penceresi Ekle",
+      "empty": "Henüz bakım penceresi yok",
+      "alert_active": "{{count}} aktif bakım penceresi — bu cihazlar için SNMP uyarıları susturulmuş.",
+      "alert_idle": "Planlı bakım sürelerinde SNMP threshold uyarıları otomatik susturulur.",
+      "alert_desc": "Bakım penceresi aktifken ilgili cihazlar için AlertRule ihlalleri bildirim göndermez.",
+      "col": {
+        "name": "Bakım Adı",
+        "start": "Başlangıç",
+        "end": "Bitiş",
+        "scope": "Kapsam"
+      },
+      "scope": { "selected_devices": "Seçili Cihazlar" },
+      "day": {
+        "mon": "Pazartesi", "tue": "Salı", "wed": "Çarşamba", "thu": "Perşembe",
+        "fri": "Cuma", "sat": "Cumartesi", "sun": "Pazar",
+        "mon_short": "Pzt", "tue_short": "Sal", "wed_short": "Çar",
+        "thu_short": "Per", "fri_short": "Cum", "sat_short": "Cmt", "sun_short": "Paz"
+      },
+      "recurrence": {
+        "section_title": "Tekrar (opsiyonel)",
+        "info_message": "Tekrar tanımlarsanız ileriki 14 gün için otomatik örnek pencereler oluşturulur.",
+        "info_desc": "Tarih/saat aralığı bir 'şablon' olur; örnek pencereler her tekrarda aynı süreyi kullanır.",
+        "label": "Tekrar",
+        "placeholder_once": "Tek seferlik (tekrar yok)",
+        "daily": "Her gün",
+        "weekly": "Haftalık (seçili günler)",
+        "monthly": "Aylık (seçili gün)",
+        "weekly_value": "Haftalık: {{days}}",
+        "monthly_value": "Aylık (ayın {{day}}.)",
+        "template_label": "{{label}} · {{count}} örnek",
+        "which_days_label": "Hangi günler",
+        "which_days_required": "En az bir gün seçin",
+        "day_of_month_label": "Ayın hangi günü (1-28)",
+        "end_date_label": "Bitiş tarihi (ops.)",
+        "max_count_label": "Maks. örnek sayısı (ops.)",
+        "unlimited": "sınırsız"
+      },
+      "popconfirm": { "delete_title": "Bu bakım penceresi silinsin mi?" },
+      "modal": { "title_new": "Yeni Bakım Penceresi", "title_edit": "Bakım Penceresini Düzenle" },
+      "form": {
+        "name_label": "Bakım Adı",
+        "name_placeholder": "Örn: Aylık Güncelleme — Core Katman",
+        "description_label": "Açıklama",
+        "time_range_label": "Tarih & Saat Aralığı",
+        "devices_label": "Cihazlar",
+        "devices_tooltip": "Bakım kapsamındaki cihazları seçin",
+        "devices_placeholder": "Cihaz seçin"
+      },
+      "toast": {
+        "created": "Bakım penceresi oluşturuldu",
+        "updated": "Bakım penceresi güncellendi",
+        "deleted": "Bakım penceresi silindi"
+      }
+    },
+    "api_tokens": {
+      "section_title": "API Token Yönetimi",
+      "section_subtitle": "Otomasyon ve API erişimi için uzun ömürlü tokenlar oluşturun.",
+      "btn_new": "Yeni Token",
+      "btn_revoke": "İptal Et",
+      "empty": "Henüz token yok",
+      "never_used": "Hiç kullanılmadı",
+      "never_expires": "Süresiz",
+      "one_year": "1 yıl",
+      "usage_hint": "Header'da kullanım:",
+      "col": {
+        "name": "İsim",
+        "prefix": "Prefix",
+        "last_used": "Son Kullanım",
+        "expires_at": "Son Kullanma"
+      },
+      "popconfirm": {
+        "revoke_title": "Bu token'ı iptal et?",
+        "revoke_desc": "Bu işlem geri alınamaz."
+      },
+      "modal": {
+        "title_new": "Yeni API Token Oluştur",
+        "created_title": "Token Oluşturuldu",
+        "saved_btn": "Tamam, Sakladım",
+        "warn_title": "Bu token bir daha gösterilmeyecek!",
+        "warn_desc": "Lütfen şimdi kopyalayın ve güvenli bir yere saklayın."
+      },
+      "form": {
+        "name_label": "Token İsmi",
+        "name_required": "İsim giriniz",
+        "name_placeholder": "ör. CI/CD Pipeline, Monitoring Bot",
+        "expires_label": "Son Kullanma Tarihi",
+        "expires_help": "Boş bırakılırsa süresiz"
+      },
+      "toast": {
+        "create_failed": "Token oluşturulamadı",
+        "revoked": "Token iptal edildi",
+        "copied": "Token kopyalandı"
+      }
+    },
+    "ai": {
+      "security_message": "API anahtarlarınız sunucuda Fernet şifrelemesiyle saklanır ve asla loglanmaz.",
+      "active_provider_label": "Aktif Sağlayıcı",
+      "active_provider_placeholder": "Sağlayıcı seçin",
+      "provider_ollama_local": "Ollama (Yerel)",
+      "tag_configured": "Yapılandırıldı",
+      "tag_no_key": "API anahtarı yok",
+      "tag_no_api_key": "API Key Gerektirmez",
+      "api_key_placeholder": "{{name}} API Anahtarı",
+      "api_key_placeholder_change": "{{name}} API Anahtarı (değiştirmek için yaz)",
+      "model_placeholder": "Model seç",
+      "ollama_section_title": "Ollama (Yerel Model)",
+      "toast": { "saved": "AI ayarları kaydedildi" }
+    },
+    "system": {
+      "page_title": "Sistem Ayarları",
+      "empty": "Ayar bulunamadı",
+      "no_permission_title": "Yetersiz Yetki",
+      "no_permission_desc": "Sistem ayarlarını sadece org_admin veya super_admin görüntüleyip değiştirebilir.",
+      "info_desc": "Çok düşük tarama frekansı cihazları gereksiz yükler (özellikle SNMP); çok yüksek değer gecikme algısını yavaşlatır. Her ayarın altında önerilen aralık vardır; min/max dışı değerler kabul edilmez.",
+      "scope": {
+        "global": "Global",
+        "org_override": "Org Özel",
+        "default": "Varsayılan"
+      },
+      "scope_legend_org": "bu organizasyona,",
+      "scope_legend_global": "tüm platforma uygulanır (yalnız super_admin değiştirir). Bazı ayarlar için Celery worker yeniden başlatılınca etkili olur.",
+      "category": {
+        "scan_frequencies": "Tarama Frekansları",
+        "alarm_dedup": "Alarm / Dedup",
+        "flap": "Flap Tespiti",
+        "correlation": "Korelasyon Motoru",
+        "maintenance": "Bakım Pencereleri",
+        "session_stale": "Oturum / Stale",
+        "retention": "Veri Saklama (Retention)",
+        "other": "Diğer"
+      },
+      "row": {
+        "effective_label": "Etkili",
+        "global_lock_tooltip": "Global ayar — yalnız super_admin değiştirebilir",
+        "reset_to_default": "Varsayılana sıfırla"
+      },
+      "popconfirm": {
+        "reset_title": "Org özel ayarını sil",
+        "reset_desc": "Bu ayar varsayılan değere döner. Devam edilsin mi?"
+      },
+      "toast": {
+        "saved_key": "Ayar kaydedildi: {{key}}",
+        "worker_restart_required": "⚠ Bazı ayarlar için Celery worker yeniden başlatılmalı",
+        "save_failed": "Ayar kaydedilemedi",
+        "override_removed": "Override silindi: {{key}}",
+        "already_default": "Zaten varsayılan değerdeydi",
+        "reset_failed": "Sıfırlama başarısız"
+      },
+      "retention": {
+        "panel_title": "Retention Önizleme (Dry-Run)",
+        "btn_preview": "Önizle",
+        "preview_failed": "Önizleme alınamadı",
+        "intro": "Temizlik şimdi çalışsaydı hangi tablodan kaç satır silinirdi? Bu işlem hiçbir şeyi silmez — yalnız sayar. Gerçek temizlik günlük beat task'ında, org bazlı etkili saklama (plan tavanı + 7 gün taban) ile çalışır.",
+        "empty_hint": "Önizleme için \"Önizle\"ye basın.",
+        "nothing_to_delete": "Silinecek eski veri yok — her şey saklama penceresi içinde.",
+        "total_candidates": "Toplam {{count}} satır silinmeye aday.",
+        "col_table": "Tablo",
+        "col_rows": "Silinecek satır"
+      }
+    },
+    "password_policy": {
+      "page_title": "Şifre Politikası",
+      "tag_global_default": "Global Varsayılan",
+      "intro": "Bu kurallar yeni kullanıcı oluşturma, kullanıcı kendi şifresini değiştirirken ve admin reset sonrasında uygulanır. Kaynak:",
+      "card_rules_title": "Kurallar",
+      "no_permission_title": "Yetersiz yetki",
+      "no_permission_desc": "Şifre politikasını sadece org_admin veya super_admin görüntüleyip değiştirebilir.",
+      "btn_back_to_global": "Global'e Dön",
+      "popconfirm": {
+        "reset_title": "Org özel politikasını sil",
+        "reset_desc": "Bu org global default'a döner. Devam edilsin mi?"
+      },
+      "form": {
+        "min_length_label": "Minimum uzunluk",
+        "classes_label": "Karakter sınıfı zorunlulukları",
+        "history_label": "Geçmiş tekrar kontrolü (history)",
+        "history_tooltip": "Son N şifrenin tekrar kullanılmasını engelle. 0 = kontrol yok.",
+        "expiry_label": "Şifre süresi (gün)",
+        "expiry_tooltip": "Bu sürenin sonunda kullanıcı zorla şifre değiştirir. 0 = expire yok.",
+        "force_change_label": "İlk login'de zorla şifre değiştir"
+      },
+      "unit": { "password_short": "şifre" },
+      "tester_card_title": "Şifre Test Aracı",
+      "tester_hint": "Bir şifrenin mevcut politikadan geçip geçmediğini görmek için aşağıya yazın.",
+      "tester_placeholder": "Test edilecek şifre…",
+      "tester_pass_message": "Şifre politikadan geçti ✓",
+      "tester_fail_message": "Şifre politikadan geçemedi",
+      "tester_source": "Politika kaynağı: {{source}}",
+      "toast": {
+        "updated": "Şifre politikası güncellendi",
+        "save_failed": "Politika kaydedilemedi",
+        "reset_done": "Org özel politikası silindi — global default geçerli"
+      }
+    },
+    "mfa": {
+      "section_title": "Çok Faktörlü Doğrulama",
+      "enabled_title": "MFA aktif",
+      "enabled_desc": "Her girişte authenticator uygulamanızdan 6-haneli kod istenir.",
+      "enrolled_at_label": "Kayıt",
+      "methods_label": "YÖNTEMLER",
+      "method": { "authenticator": "Authenticator" },
+      "recovery_remaining_label": "KURTARMA KODU KALAN",
+      "tag_running_out": "Azalıyor",
+      "btn_regen_recovery": "Kurtarma kodlarını yenile",
+      "btn_regen_short": "Yenile",
+      "btn_disable": "MFA'yı kapat",
+      "btn_enable": "MFA'yı aç",
+      "btn_confirm_enable": "Onayla ve aktif et",
+      "btn_copy_secret": "Anahtarı kopyala",
+      "disable_warning": "Hesabınız tekrar tek-faktörlü olacak.",
+      "disable_code_placeholder": "6-haneli kod veya kurtarma kodu (önerilir)",
+      "regen_warning": "Yeni kodlar üretildiğinde eskiler anında geçersiz olur.",
+      "regen_code_placeholder": "Authenticator'dan 6-haneli kod",
+      "setup_title": "MFA Kurulumu — 1 / 2",
+      "setup_step2_title": "2 / 2 — Uygulamanızdaki kodu girin",
+      "setup_intro_prefix": "Authenticator uygulamanızda (",
+      "setup_intro_suffix": ") QR'ı tarayın veya kurulum anahtarını manuel girin. Bu anahtar yalnızca bir kez gösterilir.",
+      "setup_key_label": "KURULUM ANAHTARI (BASE32)",
+      "setup_qr_fallback_hint": "QR taranamıyorsa \"Kurulum anahtarı gir\" → bu metni yapıştırın.",
+      "code_6_placeholder": "6 haneli kod",
+      "idle_title": "MFA şu anda devre dışı",
+      "idle_desc": "Hesabınız yalnızca şifre ile korunuyor. Tek tıkla TOTP açabilirsiniz — Google Authenticator, Microsoft Authenticator, Authy ve 1Password ile çalışır.",
+      "recovery": {
+        "panel_title": "Kurtarma kodlarınız",
+        "panel_intro_pre": "Authenticator erişimini kaybederseniz aşağıdaki kodlardan birini Login sayfasında ",
+        "panel_recovery_word": "Kurtarma",
+        "panel_intro_mid": " alanına girerek yeniden giriş yapabilirsiniz. Her kod ",
+        "panel_one_time": "tek kullanımlıktır",
+        "panel_intro_post": ". Bu liste yalnızca şimdi gösterilir.",
+        "btn_download_txt": "İndir (.txt)",
+        "btn_saved_close": "Sakladım, kapat",
+        "file_title": "MFA Kurtarma Kodları",
+        "file_created_at": "Oluşturulma",
+        "file_one_time_notice": "Her kod TEK KULLANIMLIKTIR. Authenticator erişimini kaybederseniz birini kullanın."
+      },
+      "email": {
+        "card_title": "Email Doğrulama (2. Kanal)",
+        "active_desc": "Login esnasında authenticator yerine email'inize OTP yollanabilir. Authenticator yine birincil yöntem olarak kullanılabilir.",
+        "idle_desc": "Kayıtlı email adresinize 6-haneli OTP yollanır. Authenticator'a ek bir doğrulama kanalı olarak çalışır.",
+        "requirement_alert": "Email gönderebilmek için organizasyonunuzda en az bir aktif email bildirim kanalı tanımlı olmalı (Settings → Bildirimler).",
+        "sent_desc": "Email'inize gelen 6-haneli kodu girin. Kod 10 dakika geçerli.",
+        "btn_enable": "Email kanalını etkinleştir",
+        "btn_remove": "Email kanalını kaldır",
+        "btn_verify": "Doğrula",
+        "btn_resend": "Yeniden yolla",
+        "toast": {
+          "code_sent": "Doğrulama kodu gönderildi: {{email}}",
+          "send_failed": "Email gönderilemedi",
+          "added": "Email MFA kanalı eklendi",
+          "verify_failed": "Kod doğrulanamadı",
+          "removed": "Email MFA kanalı kaldırıldı",
+          "remove_failed": "Kaldırılamadı"
+        }
+      },
+      "toast": {
+        "enroll_failed": "Kayıt başlatılamadı",
+        "enabled": "MFA aktif edildi — kurtarma kodlarınızı şimdi saklayın.",
+        "invalid_code": "Geçersiz kod",
+        "disabled": "MFA devre dışı bırakıldı",
+        "disable_failed": "Devre dışı bırakılamadı",
+        "regen_ok": "Yeni kurtarma kodları üretildi — eskileri artık geçersiz.",
+        "regen_failed": "Yenileme başarısız",
+        "secret_copied": "Anahtar kopyalandı"
+      }
+    }
   },
   "help": {
     "title": "Yardım & Başlangıç Rehberi",
