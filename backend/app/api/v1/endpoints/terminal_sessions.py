@@ -4,20 +4,25 @@
                                                   user/device/status/text)
   GET  /api/v1/terminal-sessions/{session_id}   — detay (komutlar + excerpt)
   GET  /api/v1/terminal-sessions/_stats          — özet (KPI)
+  POST /api/v1/terminal-sessions/{session_id}/terminate
+       — admin force-close aktif SSH oturumu (SSH_SESSION_TERMINATION).
 
 Yetki:
-  - viewer / location_admin: kendi org/lokasyon kapsamında SELECT
-  - org_admin: org'unun tüm session'ları
-  - super_admin: hepsi
+  - viewer / member: salt-okuma yok, kendi org/lokasyonu (RLS)
+  - location_admin: kendi org+lokasyonunu görür ve terminate edebilir
+  - org_admin: org'unun tüm session'ları + terminate
+  - super_admin: hepsi + cross-org terminate (audit row session'ın org'una)
 RLS politikası zaten org-scope; ek kullanıcı bazlı kısıt eklenmedi.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, desc, func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, desc, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -25,8 +30,25 @@ from app.core.deps import CurrentUser
 from app.models.device import Device
 from app.models.terminal_session_log import TerminalSessionLog
 from app.models.user import User
+from app.services import audit_service
+
+log = logging.getLogger("netmanager.terminal")
 
 router = APIRouter()
+
+
+# ── Pydantic schemas — SSH Session Termination ──────────────────────────────
+class TerminateSessionRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, max_length=256)
+
+
+class TerminateSessionResponse(BaseModel):
+    session_id: str
+    status: Literal["terminated"]
+    ended_at: datetime
+    duration_seconds: int
+    websocket_close_pending: bool
+    audit_log_id: Optional[int] = None  # RETURNING kullanılmıyor → her zaman None
 
 
 def _serialize_list_item(row: TerminalSessionLog, user: Optional[User], device: Optional[Device]) -> dict[str, Any]:
@@ -249,3 +271,155 @@ async def summarize_session(
         row.ai_summary_status = "failed"
         await db.commit()
         raise HTTPException(status_code=500, detail=f"AI özet üretilemedi: {e}")
+
+
+# ── SSH Session Termination ─────────────────────────────────────────────────
+@router.post("/{session_id}/terminate", response_model=TerminateSessionResponse)
+async def terminate_session(
+    session_id: str,
+    request: Request,
+    body: Optional[TerminateSessionRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: CurrentUser = None,
+) -> TerminateSessionResponse:
+    """Admin aktif SSH oturumunu sonlandırır.
+
+    Akış (tasarım dokümanı SSH_SESSION_TERMINATION_DESIGN.md §3):
+      1. RBAC gate: ``terminal_sessions:terminate`` izni zorunlu
+      2. RLS-scoped SELECT — org dışı session 404
+      3. ``ended_at IS NOT NULL`` → 410 (idempotent / zaten kapalı)
+      4. Redis pub/sub ``terminal:terminate`` publish (best-effort)
+      5. DB UPDATE ``WHERE ended_at IS NULL`` race guard (stale_cleanup
+         veya concurrent terminate ile çakışmayı önler)
+      6. Audit log (cross-org için ``organization_id_override`` ile
+         session'ın org'una stamp)
+      7. Response — WS handler kendisini pub/sub mesajıyla kapatır
+         (~<300ms latency)
+    """
+    if not current_user.has_permission("terminal_sessions:terminate"):
+        raise HTTPException(
+            status_code=403,
+            detail="terminal_sessions:terminate izni yok",
+        )
+
+    # RLS-scoped SELECT — non super_admin için org filtre otomatik
+    row = (await db.execute(
+        select(TerminalSessionLog).where(TerminalSessionLog.session_id == session_id)
+    )).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Session bulunamadı")
+
+    # Idempotent / zaten kapalı
+    if row.ended_at is not None:
+        raise HTTPException(
+            status_code=410,
+            detail={
+                "code": "session_already_closed",
+                "ended_at": row.ended_at.isoformat(),
+                "exit_reason": row.exit_reason,
+            },
+        )
+
+    # Reason (opsiyonel) — default: tasarım §6
+    reason = (body.reason if body else None) or "force_terminated_by_admin"
+
+    ended_at = datetime.now(timezone.utc)
+    duration_ms = int((ended_at - row.started_at).total_seconds() * 1000)
+
+    # Redis pub/sub publish — best-effort. Down ise log + DB devam.
+    try:
+        from app.core.redis_client import publish as _redis_publish
+        await _redis_publish("terminal:terminate", {
+            "session_id": session_id,
+            "reason": reason,
+            "terminated_by_user_id": current_user.id,
+            "terminated_by_username": current_user.username,
+            "at": ended_at.isoformat(),
+        })
+    except Exception as exc:
+        # Tasarım §10.7 — pub/sub fallback: WS 30sn revalidate ile kapanır
+        log.warning("terminal:terminate publish hata (continuing): %r", exc)
+
+    # Race guard: WHERE ended_at IS NULL — concurrent terminate veya
+    # stale_cleanup'tan önce davranıyorsak 1 row affected; aksi 0 → 410.
+    upd = await db.execute(
+        update(TerminalSessionLog)
+        .where(
+            TerminalSessionLog.session_id == session_id,
+            TerminalSessionLog.ended_at.is_(None),
+        )
+        .values(
+            ended_at=ended_at,
+            exit_reason="force_closed",
+            duration_ms=duration_ms,
+        )
+    )
+    if upd.rowcount == 0:
+        # Birisi (başka admin veya stale_cleanup beat) önce davrandı
+        await db.rollback()
+        raise HTTPException(
+            status_code=410,
+            detail={"code": "session_already_closed_during_race"},
+        )
+    await db.commit()
+
+    # Audit log — cross-org: row.organization_id'ye stamp
+    device = None
+    if row.device_id:
+        device = (await db.execute(
+            select(Device).where(Device.id == row.device_id)
+        )).scalar_one_or_none()
+    session_user = None
+    if row.user_id:
+        session_user = (await db.execute(
+            select(User).where(User.id == row.user_id)
+        )).scalar_one_or_none()
+
+    await audit_service.log_action(
+        db,
+        user=current_user,
+        action="terminal_sessions.terminate",
+        resource_type="terminal_session",
+        resource_id=session_id,
+        resource_name=device.hostname if device else None,
+        details={
+            "device_id": row.device_id,
+            "device_name": device.hostname if device else None,
+            "target_ip": device.ip_address if device else None,
+            "session_user_id": row.user_id,
+            "session_username": session_user.username if session_user else None,
+            "terminated_by_user_id": current_user.id,
+            "terminated_by_username": current_user.username,
+            "termination_reason": reason,
+            "started_at": row.started_at.isoformat(),
+            "terminated_at": ended_at.isoformat(),
+            "duration_seconds": duration_ms // 1000,
+            "agent_id": row.agent_id,
+            "connection_path": row.connection_path,
+            "commands_count_at_terminate": row.commands_count or 0,
+            "input_bytes_at_terminate": row.input_bytes or 0,
+            "output_bytes_at_terminate": row.output_bytes or 0,
+        },
+        before_state={
+            "ended_at": None,
+            "exit_reason": None,
+            "status": "active",
+        },
+        after_state={
+            "ended_at": ended_at.isoformat(),
+            "exit_reason": "force_closed",
+            "duration_ms": duration_ms,
+            "status": "closed",
+        },
+        request=request,
+        organization_id_override=row.organization_id,
+    )
+
+    return TerminateSessionResponse(
+        session_id=session_id,
+        status="terminated",
+        ended_at=ended_at,
+        duration_seconds=duration_ms // 1000,
+        websocket_close_pending=True,
+        audit_log_id=None,
+    )
