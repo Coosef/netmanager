@@ -69,4 +69,19 @@ export const terminalSessionsApi = {
       tokens_used?: number
     }>(`/terminal-sessions/${encodeURIComponent(session_id)}/summarize`)
       .then((r) => r.data),
+
+  /** SSH Session Termination — admin aktif oturumu zorla sonlandırır.
+   *  Backend RBAC: 'terminal_sessions:terminate'.
+   *  410 → oturum zaten kapalı. 403 → yetki yok. 404 → RLS scope dışı. */
+  terminate: (session_id: string, reason?: string) =>
+    client.post<{
+      session_id: string
+      status: 'terminated'
+      ended_at: string
+      duration_seconds: number
+      websocket_close_pending: boolean
+      audit_log_id: number | null
+    }>(`/terminal-sessions/${encodeURIComponent(session_id)}/terminate`,
+       reason ? { reason } : {})
+      .then((r) => r.data),
 }

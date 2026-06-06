@@ -10,16 +10,17 @@
  */
 import { useMemo, useState } from 'react'
 import {
-  Alert, Badge, Button, Card, Drawer, Input, message, Select, Space, Table,
-  Tag, Typography,
+  Alert, Badge, Button, Card, Drawer, Input, message, Popconfirm, Select, Space, Table,
+  Tag, Tooltip, Typography,
 } from 'antd'
 import {
   CodeOutlined, DesktopOutlined, RobotOutlined,
-  ReloadOutlined, SafetyOutlined, UserOutlined,
+  ReloadOutlined, SafetyOutlined, StopOutlined, UserOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { terminalSessionsApi, TerminalSessionListItem } from '@/api/terminalSessions'
+import { useAuthStore } from '@/store/auth'
 import dayjs from 'dayjs'
 
 const { Text, Paragraph } = Typography
@@ -51,6 +52,7 @@ const EXIT_COLOR: Record<string, string> = {
   paramiko_error: 'error',
   ws_error: 'error',
   stale_cleanup: 'warning',
+  force_closed: 'red',  // SSH Termination — admin force close
 }
 
 // connection_path için aynı pattern: backend enum sabit, renk teknik,
@@ -69,6 +71,9 @@ export default function TerminalSessionsPage() {
   const [pageSize] = useState(50)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
+  // SSH Termination — RBAC gate frontend
+  const canTerminate = useAuthStore((s) => s.can('terminal_sessions', 'terminate'))
+
   // KURAL-E1 — exit_reason label ve connection_path label hook scope'unda
   // useMemo. Backend enum sabit kalır (EXIT_COLOR / PATH_COLOR module-level).
   const EXIT_LABEL = useMemo<Record<string, string>>(() => ({
@@ -78,6 +83,7 @@ export default function TerminalSessionsPage() {
     paramiko_error:     t('terminal_sessions.status.paramiko_error'),
     ws_error:           t('terminal_sessions.status.ws_error'),
     stale_cleanup:      t('terminal_sessions.status.stale_cleanup'),
+    force_closed:       t('terminal_sessions.status.force_closed'),
   }), [t])
 
   const PATH_LABEL = useMemo<Record<string, string>>(() => ({
@@ -106,6 +112,38 @@ export default function TerminalSessionsPage() {
     onError: (e: any) => message.error(
       e?.response?.data?.detail || t('terminal_sessions.toast.ai_failed'),
     ),
+  })
+
+  // SSH Termination — admin force-close mutation. Optimistic UI yok
+  // (kullanıcı talebi 2026-06-06): backend response geldikten sonra
+  // listQ invalidate edilir; satır status 'force_closed' olarak yenilenir.
+  const terminateMut = useMutation({
+    mutationFn: (sid: string) => terminalSessionsApi.terminate(sid),
+    onSuccess: (data) => {
+      message.success({
+        content: t('terminal_sessions.terminate.toast.success_title'),
+      })
+      qc.invalidateQueries({ queryKey: ['terminal-sessions-list'] })
+      qc.invalidateQueries({ queryKey: ['terminal-sessions-stats'] })
+      if (selectedId === data.session_id) {
+        qc.invalidateQueries({ queryKey: ['terminal-session-detail', selectedId] })
+      }
+    },
+    onError: (e: any) => {
+      const status = e?.response?.status
+      const detail = e?.response?.data?.detail
+      if (status === 410) {
+        message.warning(t('terminal_sessions.terminate.toast.already_closed'))
+        qc.invalidateQueries({ queryKey: ['terminal-sessions-list'] })
+      } else if (status === 403) {
+        message.error(t('terminal_sessions.terminate.toast.forbidden'))
+      } else {
+        const msg = typeof detail === 'string'
+          ? detail
+          : t('terminal_sessions.terminate.toast.failed')
+        message.error(msg)
+      }
+    },
   })
 
   const statsQ = useQuery({
@@ -210,6 +248,39 @@ export default function TerminalSessionsPage() {
         ? <Text style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--fg-3)' }}>{v}</Text>
         : '—',
     },
+    // SSH Termination — aksiyon kolonu (sondaki, sadece canTerminate ile görünür)
+    ...(canTerminate ? [{
+      title: t('terminal_sessions.col.actions'),
+      width: 90,
+      align: 'center' as const,
+      render: (_: any, r: TerminalSessionListItem) => {
+        const isActive = r.ended_at === null
+        if (!isActive) return <span style={{ color: 'var(--fg-3)' }}>—</span>
+        const isPending = terminateMut.isPending && terminateMut.variables === r.session_id
+        return (
+          <Popconfirm
+            title={t('terminal_sessions.terminate.confirm_title')}
+            description={t('terminal_sessions.terminate.confirm_desc', {
+              username: r.username || `#${r.user_id || '?'}`,
+              device: r.device_hostname || r.device_ip || `#${r.device_id || '?'}`,
+            })}
+            okText={t('terminal_sessions.terminate.confirm_ok')}
+            cancelText={t('common.cancel')}
+            okButtonProps={{ danger: true, loading: isPending }}
+            onConfirm={() => terminateMut.mutate(r.session_id)}
+          >
+            <Tooltip title={t('terminal_sessions.terminate.btn_tooltip')}>
+              <Button
+                size="small"
+                danger
+                icon={<StopOutlined />}
+                loading={isPending}
+              />
+            </Tooltip>
+          </Popconfirm>
+        )
+      },
+    }] : []),
   ]
 
   const total = listQ.data?.total || 0
