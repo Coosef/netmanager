@@ -324,7 +324,12 @@ async def terminate_session(
     reason = (body.reason if body else None) or "force_terminated_by_admin"
 
     ended_at = datetime.now(timezone.utc)
-    duration_ms = int((ended_at - row.started_at).total_seconds() * 1000)
+    # SQLite (test) timezone bilgisini düşürür; PostgreSQL TIMESTAMPTZ aware.
+    # Portable kalmak için started_at naive ise UTC olarak yorumla.
+    started_at_aware = row.started_at
+    if started_at_aware.tzinfo is None:
+        started_at_aware = started_at_aware.replace(tzinfo=timezone.utc)
+    duration_ms = int((ended_at - started_at_aware).total_seconds() * 1000)
 
     # Redis pub/sub publish — best-effort. Down ise log + DB devam.
     try:
@@ -391,7 +396,7 @@ async def terminate_session(
             "terminated_by_user_id": current_user.id,
             "terminated_by_username": current_user.username,
             "termination_reason": reason,
-            "started_at": row.started_at.isoformat(),
+            "started_at": started_at_aware.isoformat(),
             "terminated_at": ended_at.isoformat(),
             "duration_seconds": duration_ms // 1000,
             "agent_id": row.agent_id,
