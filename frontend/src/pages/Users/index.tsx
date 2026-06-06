@@ -21,7 +21,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import type { User } from '@/types'
 import { ROLE_OPTIONS } from '@/types'
 import { useAuthStore } from '@/store/auth'
-import { useTranslation } from 'react-i18next'
+import { useTranslation, Trans } from 'react-i18next'
 import dayjs from 'dayjs'
 
 // Drawer içindeki lokasyon ataması artık SADECE "hangi lokasyonları
@@ -40,27 +40,20 @@ const USERS_CSS = `
 .users-row-inactive td { opacity: 0.55; }
 `
 
-// RBAC F2 — 4-role colour/label maps. Legacy keys (admin, org_viewer,
+// RBAC F2 — 4-role colour map. Legacy keys (admin, org_viewer,
 // location_manager, location_operator, location_viewer, operator, member)
 // are kept as aliases that point at the same colour as their normalised
 // target so OLD invite tokens / persisted state still render correctly
 // while the backend setter is migrating values.
+//
+// KURAL-E1: ROLE_HEX teknik (renk) — module-level kalır. ROLE_LABEL UI
+// metni → UsersPage içinde useMemo + t() ile çözülür (aşağı taşındı).
 const ROLE_HEX: Record<string, string> = {
   super_admin:    '#ef4444',
   org_admin:      '#f97316',  admin:             '#f97316',
   location_admin: '#06b6d4',  location_manager:  '#06b6d4',  location_operator: '#06b6d4',
   viewer:         '#22c55e',  location_viewer:   '#22c55e',  org_viewer:        '#22c55e',
                               operator:          '#22c55e',  member:            '#22c55e',
-}
-
-const ROLE_LABEL: Record<string, string> = {
-  super_admin:    'SÜPER ADMİN',
-  org_admin:      'ORG ADMİN',         admin:             'ORG ADMİN',
-  location_admin: 'LOKASYON ADMİN',    location_manager:  'LOKASYON ADMİN',
-                                       location_operator: 'LOKASYON ADMİN',
-  viewer:         'GÖRÜNTÜLEYİCİ',     location_viewer:   'GÖRÜNTÜLEYİCİ',
-  org_viewer:     'GÖRÜNTÜLEYİCİ',     operator:          'GÖRÜNTÜLEYİCİ',
-  member:         'GÖRÜNTÜLEYİCİ',
 }
 
 function mkC(isDark: boolean) {
@@ -263,11 +256,41 @@ export default function UsersPage() {
     return { total: userList.length, active, mfa, last24h, pendingInvites, distinctRoles }
   }, [userList, invites])
 
+  // KURAL-E1 — ROLE_LABEL hook scope'unda useMemo + t().
+  // Legacy alias keys (admin/org_viewer/location_manager/... — aşağıda
+  // module-level ROLE_HEX'te listelenenler) yine aynı i18n etiketine
+  // map'lenir; eski payload/token'lar doğru render olur.
+  const ROLE_LABEL = useMemo<Record<string, string>>(() => ({
+    super_admin:       t('users.role.super_admin'),
+    org_admin:         t('users.role.org_admin'),         admin:             t('users.role.org_admin'),
+    location_admin:    t('users.role.location_admin'),    location_manager:  t('users.role.location_admin'),
+                                                          location_operator: t('users.role.location_admin'),
+    viewer:            t('users.role.viewer'),            location_viewer:   t('users.role.viewer'),
+    org_viewer:        t('users.role.viewer'),            operator:          t('users.role.viewer'),
+    member:            t('users.role.viewer'),
+  }), [t])
+
   // Only a super-admin may grant another user the super_admin role; org
   // admins may not create / promote to super_admin or to org_admin.
-  const ROLE_OPTIONS_FILTERED = isSA
-    ? ROLE_OPTIONS
-    : ROLE_OPTIONS.filter((o) => o.value !== 'super_admin' && o.value !== 'org_admin')
+  // KURAL-E1: ROLE_OPTIONS types/ module'unde TR label ile sabit; burada
+  // useMemo ile aktif dilde label override edilir.
+  const ROLE_OPTIONS_FILTERED = useMemo(() => {
+    const localized = ROLE_OPTIONS.map((o) => ({
+      value: o.value,
+      label: ROLE_LABEL[o.value] ?? o.label,
+    }))
+    return isSA
+      ? localized
+      : localized.filter((o) => o.value !== 'super_admin' && o.value !== 'org_admin')
+  }, [ROLE_LABEL, isSA])
+
+  // Invite expiration options — hook scope (KURAL-E1).
+  const EXPIRES_OPTIONS = useMemo(() => [
+    { label: t('users.invite.expires.24h'), value: 24 },
+    { label: t('users.invite.expires.3d'),  value: 72 },
+    { label: t('users.invite.expires.7d'),  value: 168 },
+    { label: t('users.invite.expires.30d'), value: 720 },
+  ], [t])
 
   const locNameMap = Object.fromEntries(
     (locationsData?.items || []).map((l) => [l.id, l.name])
@@ -280,10 +303,10 @@ export default function UsersPage() {
       {/* NOC header */}
       <div className="nm-page-hd">
         <div className="title-block">
-          <div className="nm-crumbs"><span>Yönetim</span><span>{t('users.title')}</span></div>
+          <div className="nm-crumbs"><span>{t('settings.crumb_admin')}</span><span>{t('users.title')}</span></div>
           <h1 className="nm-page-title">
             {t('users.title')}
-            <span className="nm-pill mono">{userList.length} kullanıcı</span>
+            <span className="nm-pill mono">{t('users.users_count', { count: userList.length })}</span>
           </h1>
           <div className="nm-page-sub">
             {t('users.subtitle', 'Kullanıcı kayıtları · rol & lokasyon ataması · davet linkleri ve şifre yönetimi.')}
@@ -293,7 +316,7 @@ export default function UsersPage() {
           {canMutateUsers && (
             <Button icon={<MailOutlined />}
               onClick={() => { inviteForm.resetFields(); setLastInviteLink(null); setInviteModalOpen(true) }}>
-              Davet Oluştur
+              {t('users.invite.btn_new')}
             </Button>
           )}
           {canMutateUsers && (
@@ -307,41 +330,41 @@ export default function UsersPage() {
       {/* NOC stat bar — 6 real KPIs */}
       <div className="nm-statbar">
         <div className="nm-stat">
-          <div className="nm-stat-label">TOPLAM KULLANICI</div>
+          <div className="nm-stat-label">{t('users.stat.total')}</div>
           <div className="nm-stat-val">{stats.total}</div>
-          <div className="nm-stat-delta">{stats.distinctRoles} farklı rol</div>
+          <div className="nm-stat-delta">{t('users.stat.distinct_roles', { count: stats.distinctRoles })}</div>
         </div>
         <div className={`nm-stat ${stats.active === stats.total ? 'ok' : ''}`}>
-          <div className="nm-stat-label">AKTİF</div>
+          <div className="nm-stat-label">{t('users.stat.active')}</div>
           <div className="nm-stat-val">{stats.active}</div>
-          <div className="nm-stat-delta">{stats.total - stats.active} pasif</div>
+          <div className="nm-stat-delta">{t('users.stat.inactive_count', { count: stats.total - stats.active })}</div>
         </div>
         <div className={`nm-stat ${stats.mfa > 0 ? 'ok' : 'warn'}`}>
-          <div className="nm-stat-label">MFA AÇIK</div>
+          <div className="nm-stat-label">{t('users.stat.mfa_on')}</div>
           <div className="nm-stat-val">{stats.mfa}</div>
-          <div className="nm-stat-delta">{stats.total > 0 ? Math.round((stats.mfa / stats.total) * 100) : 0}% kapsam</div>
+          <div className="nm-stat-delta">{t('users.stat.mfa_coverage', { pct: stats.total > 0 ? Math.round((stats.mfa / stats.total) * 100) : 0 })}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">SON 24SA GİRİŞ</div>
+          <div className="nm-stat-label">{t('users.stat.login_24h')}</div>
           <div className="nm-stat-val">{stats.last24h}</div>
-          <div className="nm-stat-delta">son aktivite penceresi</div>
+          <div className="nm-stat-delta">{t('users.stat.activity_window')}</div>
         </div>
         <div className={`nm-stat ${stats.pendingInvites > 0 ? 'warn' : ''}`}>
-          <div className="nm-stat-label">BEKLEYEN DAVET</div>
+          <div className="nm-stat-label">{t('users.stat.pending_invite')}</div>
           <div className="nm-stat-val">{stats.pendingInvites}</div>
-          <div className="nm-stat-delta">aktif link</div>
+          <div className="nm-stat-delta">{t('users.stat.active_link')}</div>
         </div>
         <div className="nm-stat">
-          <div className="nm-stat-label">SÜPER ADMİN</div>
+          <div className="nm-stat-label">{t('users.stat.super_admin')}</div>
           <div className="nm-stat-val">{roleCounts['super_admin'] || 0}</div>
-          <div className="nm-stat-delta">{roleCounts['admin'] || 0} org admin</div>
+          <div className="nm-stat-delta">{t('users.stat.org_admin_count', { count: roleCounts['admin'] || 0 })}</div>
         </div>
       </div>
 
       {/* Users table — nm-table look */}
       <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="nm-card-hd">
-          <h3><TeamOutlined /> Kullanıcılar</h3>
+          <h3><TeamOutlined /> {t('users.card_title')}</h3>
           <span className="nm-pill mono">{userList.length}</span>
         </div>
         <div style={{ overflowX: 'auto' }}>
@@ -360,10 +383,10 @@ export default function UsersPage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={isSA ? 8 : 7} style={{ textAlign: 'center', padding: 24, color: 'var(--fg-3)' }}>Yükleniyor…</td></tr>
+                <tr><td colSpan={isSA ? 8 : 7} style={{ textAlign: 'center', padding: 24, color: 'var(--fg-3)' }}>{t('common.loading')}</td></tr>
               )}
               {!isLoading && userList.length === 0 && (
-                <tr><td colSpan={isSA ? 8 : 7} style={{ textAlign: 'center', padding: 30, color: 'var(--fg-3)' }}>Henüz kullanıcı yok</td></tr>
+                <tr><td colSpan={isSA ? 8 : 7} style={{ textAlign: 'center', padding: 30, color: 'var(--fg-3)' }}>{t('users.empty_users')}</td></tr>
               )}
               {!isLoading && userList.map((r) => {
                 const hex = ROLE_HEX[r.role] || '#64748b'
@@ -383,10 +406,10 @@ export default function UsersPage() {
                       <div style={{ fontWeight: 500, fontSize: 13 }}>{r.username}</div>
                       <div style={{ fontSize: 11, color: 'var(--fg-3)', marginTop: 2 }}>
                         {r.email}
-                        {isMe && <span className="nm-pill" style={{ marginLeft: 6, padding: '0 6px', fontSize: 9.5, color: 'var(--accent)', borderColor: 'var(--accent)' }}>SİZ</span>}
+                        {isMe && <span className="nm-pill" style={{ marginLeft: 6, padding: '0 6px', fontSize: 9.5, color: 'var(--accent)', borderColor: 'var(--accent)' }}>{t('users.you_pill')}</span>}
                         {r.locations && r.locations.length > 0 && (
                           <span className="nm-pill" style={{ marginLeft: 6, padding: '0 6px', fontSize: 9.5 }}>
-                            <EnvironmentOutlined style={{ marginRight: 3 }} />{r.locations.length} lok
+                            <EnvironmentOutlined style={{ marginRight: 3 }} />{t('users.locations_short', { count: r.locations.length })}
                           </span>
                         )}
                       </div>
@@ -410,11 +433,11 @@ export default function UsersPage() {
                     <td>
                       {mfaOn ? (
                         <span className="nm-pill mono" style={{ color: 'var(--ok)', borderColor: 'var(--ok)', background: 'transparent' }}>
-                          <LockOutlined style={{ marginRight: 3 }} />AÇIK
+                          <LockOutlined style={{ marginRight: 3 }} />{t('users.mfa_on_short')}
                         </span>
                       ) : (
                         <span className="nm-pill mono" style={{ color: 'var(--fg-3)', borderColor: 'var(--border-0)', background: 'transparent' }}>
-                          <UnlockOutlined style={{ marginRight: 3 }} />KAPALI
+                          <UnlockOutlined style={{ marginRight: 3 }} />{t('users.mfa_off_short')}
                         </span>
                       )}
                     </td>
@@ -429,7 +452,7 @@ export default function UsersPage() {
                           <Tooltip title={t('common.edit')}>
                             <button onClick={() => openDrawer(r, 'general')}><EditOutlined /></button>
                           </Tooltip>
-                          <Tooltip title="Org & Lokasyonlar">
+                          <Tooltip title={t('users.tab.org_locations')}>
                             <button onClick={() => openDrawer(r, 'locations')}><EnvironmentOutlined /></button>
                           </Tooltip>
                           <Tooltip title={t('users.reset_password')}>
@@ -532,7 +555,7 @@ export default function UsersPage() {
             items={[
               {
                 key: 'general',
-                label: <span><UserOutlined style={{ marginRight: 6 }} />Genel</span>,
+                label: <span><UserOutlined style={{ marginRight: 6 }} />{t('users.tab.general')}</span>,
                 children: (
                   <div style={{ padding: '16px 20px' }}>
                     {!editUser && (
@@ -541,7 +564,7 @@ export default function UsersPage() {
                       </Form.Item>
                     )}
                     {!editUser && (
-                      <Form.Item label="E-posta" name="email" rules={[{ required: true, type: 'email', message: 'Geçerli bir e-posta girin' }]}>
+                      <Form.Item label={t('users.form_email_label')} name="email" rules={[{ required: true, type: 'email', message: t('common.validation.email_invalid') }]}>
                         <Input prefix={<MailOutlined style={{ color: C.muted }} />} />
                       </Form.Item>
                     )}
@@ -563,25 +586,25 @@ export default function UsersPage() {
                       label={
                         <span>
                           <LockOutlined style={{ marginRight: 6, color: '#f59e0b' }} />
-                          İzin Verilen IP'ler (opsiyonel)
+                          {t('users.ip_allowlist.label')}
                         </span>
                       }
                       name="allowed_ips"
                       tooltip={
-                        <span>
-                          Kullanıcı sadece bu IP/CIDR'lardan giriş yapabilir.
-                          Boş bırakırsanız kısıtlama yok. Virgülle ayırarak birden çok yazın.
-                          Örnek: <code>10.0.0.0/8, 192.168.1.5, 1.2.3.4/32</code>
-                        </span>
+                        // KURAL-Trans: HTML embed (<code>) içerikli cümle — Trans component ile parçalama.
+                        <Trans i18nKey="users.ip_allowlist.tooltip"
+                          values={{ example: '10.0.0.0/8, 192.168.1.5, 1.2.3.4/32' }}
+                          components={{ ex: <code /> }}
+                        />
                       }
                       extra={
                         <span style={{ fontSize: 11, color: C.muted }}>
-                          Boş = kısıt yok · IPv4/IPv6 + CIDR (örn: 10.0.0.0/8)
+                          {t('users.ip_allowlist.extra')}
                         </span>
                       }
                     >
                       <Input
-                        placeholder="10.0.0.0/8, 192.168.1.5"
+                        placeholder={t('users.ip_allowlist.placeholder')}
                         style={{ fontFamily: 'monospace' }}
                       />
                     </Form.Item>
@@ -593,7 +616,7 @@ export default function UsersPage() {
                 label: (
                   <span>
                     <EnvironmentOutlined style={{ marginRight: 6, color: '#06b6d4' }} />
-                    Org & Lokasyonlar
+                    {t('users.tab.org_locations')}
                     {locAssignments.length > 0 && (
                       <Tag style={{ marginLeft: 6, fontSize: 10, padding: '0 4px', lineHeight: '16px' }} color="cyan">
                         {locAssignments.length}
@@ -605,22 +628,28 @@ export default function UsersPage() {
                   <div style={{ padding: '16px 20px' }}>
                     {isSA && (
                       <>
-                        <div style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>Organizasyon</div>
+                        <div style={{ color: C.muted, fontSize: 12, marginBottom: 6 }}>{t('users.locations.org_label')}</div>
                         <Form.Item name="organization_id" style={{ marginBottom: 16 }}>
-                          <Select options={tenantOptions} allowClear placeholder="Organizasyon seçin" />
+                          <Select options={tenantOptions} allowClear placeholder={t('users.locations.org_placeholder')} />
                         </Form.Item>
                         <Divider style={{ margin: '0 0 16px', borderColor: C.border }} />
                       </>
                     )}
+                    {/* Açıklama bloku — KURAL-Trans: <strong>/<em> embed; Trans component ile çevrilir. */}
                     <div style={{ color: C.muted, fontSize: 12, marginBottom: 10, lineHeight: 1.6 }}>
-                      Bu liste kullanıcının <strong>hangi lokasyonları görebileceğini</strong> belirler.
-                      Yetki seviyesini (yönetici/görüntüleyici) <em>Genel</em> sekmesindeki <strong>rol</strong> alanı verir.
+                      <Trans i18nKey="users.locations.intro" components={{ s: <strong />, e: <em /> }} />
                       <br />
-                      <span style={{ color: '#22c55e' }}>• <strong>Süper Admin</strong> tüm organizasyonların tüm lokasyonlarına erişir (atama gerekmez).</span>
+                      <span style={{ color: '#22c55e' }}>
+                        <Trans i18nKey="users.locations.bullet_super_admin" components={{ s: <strong /> }} />
+                      </span>
                       <br />
-                      <span style={{ color: '#f97316' }}>• <strong>Org Admin</strong> kendi organizasyonunun tüm lokasyonlarına otomatik erişir.</span>
+                      <span style={{ color: '#f97316' }}>
+                        <Trans i18nKey="users.locations.bullet_org_admin" components={{ s: <strong /> }} />
+                      </span>
                       <br />
-                      <span style={{ color: '#06b6d4' }}>• <strong>Lokasyon Admin</strong> ve <strong>Görüntüleyici</strong> sadece aşağıda atanmış lokasyonlara erişir.</span>
+                      <span style={{ color: '#06b6d4' }}>
+                        <Trans i18nKey="users.locations.bullet_location_admin" components={{ s: <strong /> }} />
+                      </span>
                     </div>
 
                     {/* Add location — sadece location seç + Ekle */}
@@ -629,10 +658,10 @@ export default function UsersPage() {
                       border: `1px solid ${C.border}`,
                       borderRadius: 8, padding: 12, marginBottom: 14,
                     }}>
-                      <div style={{ color: C.text, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Lokasyon Ekle</div>
+                      <div style={{ color: C.text, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>{t('users.locations.add_section_title')}</div>
                       <Space.Compact style={{ width: '100%' }}>
                         <Select
-                          placeholder="Lokasyon seç"
+                          placeholder={t('users.locations.add_placeholder')}
                           style={{ flex: 1 }}
                           value={addLocId}
                           onChange={setAddLocId}
@@ -641,20 +670,20 @@ export default function UsersPage() {
                           filterOption={(input, opt) => (opt?.label as string)?.toLowerCase().includes(input.toLowerCase())}
                         />
                         <Button type="primary" icon={<PlusOutlined />} onClick={addLocAssignment} disabled={!addLocId}>
-                          Ekle
+                          {t('common.add')}
                         </Button>
                       </Space.Compact>
                     </div>
 
                     <div style={{ color: C.muted, fontSize: 12, marginBottom: 8 }}>
-                      Atanmış Lokasyonlar ({locAssignments.length})
+                      {t('users.locations.assigned_label', { count: locAssignments.length })}
                     </div>
                     {locAssignments.length === 0 ? (
-                      <Empty description="Henüz lokasyon atanmamış" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      <Empty description={t('users.locations.empty')} image={Empty.PRESENTED_IMAGE_SIMPLE} />
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                         {locAssignments.map((a) => {
-                          const locName = locNameMap[a.location_id] || `Lokasyon #${a.location_id}`
+                          const locName = locNameMap[a.location_id] || t('users.locations.fallback_name', { id: a.location_id })
                           return (
                             <div key={a.location_id} style={{
                               display: 'flex', alignItems: 'center', gap: 8,
@@ -675,11 +704,14 @@ export default function UsersPage() {
                     {/* İnce ayar köprüsü — modül × eylem matrisine yönlendir */}
                     <Divider style={{ margin: '18px 0 10px', borderColor: C.border }} />
                     <div style={{ color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
-                      Daha ince ayar (modül × eylem) gerekiyorsa kullanıcıya{' '}
-                      <Link to="/permissions" onClick={() => setDrawerOpen(false)} style={{ color: 'var(--accent)' }}>
-                        Yetki Ayarları
-                      </Link>
-                      {' '}sayfasından özel bir yetki seti atayabilirsiniz.
+                      <Trans
+                        i18nKey="users.locations.fine_grained_hint"
+                        components={{
+                          permLink: (
+                            <Link to="/permissions" onClick={() => setDrawerOpen(false)} style={{ color: 'var(--accent)' }} />
+                          ),
+                        }}
+                      />
                     </div>
                   </div>
                 ),
@@ -698,23 +730,23 @@ export default function UsersPage() {
       {/* ── Invite Management ──────────────────────────────────────────── */}
       <div className="nm-card" style={{ padding: 0, overflow: 'hidden' }}>
         <div className="nm-card-hd">
-          <h3><MailOutlined /> Davet Linkleri</h3>
+          <h3><MailOutlined /> {t('users.invite.section_title')}</h3>
           <span className="nm-pill mono">{(invites || []).length}</span>
         </div>
         <div style={{ overflowX: 'auto' }}>
           <table className="nm-table">
             <thead>
               <tr>
-                <th>E-posta</th>
-                <th style={{ width: 130 }}>Rol</th>
-                <th style={{ width: 150 }}>Bitiş</th>
-                <th style={{ width: 110 }}>Durum</th>
+                <th>{t('users.invite.col.email')}</th>
+                <th style={{ width: 130 }}>{t('users.invite.col.role')}</th>
+                <th style={{ width: 150 }}>{t('users.invite.col.expires')}</th>
+                <th style={{ width: 110 }}>{t('users.invite.col.status')}</th>
                 <th className="col-actions" style={{ width: 90 }}></th>
               </tr>
             </thead>
             <tbody>
               {(!invites || invites.length === 0) && (
-                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--fg-3)' }}>Henüz davet oluşturulmamış</td></tr>
+                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: 'var(--fg-3)' }}>{t('users.invite.empty')}</td></tr>
               )}
               {(invites || []).map((rec: Invite) => {
                 const hex = ROLE_HEX[rec.role] || '#94a3b8'
@@ -732,13 +764,13 @@ export default function UsersPage() {
                     <td>
                       {rec.is_used ? (
                         <span className="nm-pill" style={{ color: 'var(--ok)', borderColor: 'var(--ok)' }}>
-                          <CheckCircleOutlined style={{ marginRight: 4 }} />Kullanıldı
+                          <CheckCircleOutlined style={{ marginRight: 4 }} />{t('users.invite.status_used')}
                         </span>
                       ) : rec.is_expired ? (
-                        <span className="nm-pill" style={{ color: 'var(--fg-3)', borderColor: 'var(--border-0)' }}>Süresi Doldu</span>
+                        <span className="nm-pill" style={{ color: 'var(--fg-3)', borderColor: 'var(--border-0)' }}>{t('users.invite.status_expired')}</span>
                       ) : (
                         <span className="nm-pill" style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}>
-                          <span className="nm-status-dot ok pulse" style={{ marginRight: 4 }} />Aktif
+                          <span className="nm-status-dot ok pulse" style={{ marginRight: 4 }} />{t('users.invite.status_active')}
                         </span>
                       )}
                     </td>
@@ -746,14 +778,14 @@ export default function UsersPage() {
                       {canMutateUsers ? (
                         <span className="nm-rowact" onClick={(e) => e.stopPropagation()}>
                           {!rec.is_used && !rec.is_expired && (
-                            <Tooltip title="Linki Kopyala">
-                              <button onClick={() => message.info('Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun')}>
+                            <Tooltip title={t('users.invite.tooltip_copy')}>
+                              <button onClick={() => message.info(t('users.invite.toast_token_not_stored'))}>
                                 <LinkOutlined />
                               </button>
                             </Tooltip>
                           )}
-                          <Popconfirm title="Daveti iptal et?" onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
-                            <Tooltip title="İptal Et">
+                          <Popconfirm title={t('users.invite.popconfirm_revoke_title')} onConfirm={() => revokeInviteMutation.mutate(rec.id)}>
+                            <Tooltip title={t('users.invite.tooltip_revoke')}>
                               <button><StopOutlined style={{ color: 'var(--crit)' }} /></button>
                             </Tooltip>
                           </Popconfirm>
@@ -772,12 +804,12 @@ export default function UsersPage() {
 
       {/* Create invite modal */}
       <Modal
-        title={<span style={{ color: C.text }}><MailOutlined style={{ marginRight: 8, color: '#3b82f6' }} />Davet Linki Oluştur</span>}
+        title={<span style={{ color: C.text }}><MailOutlined style={{ marginRight: 8, color: '#3b82f6' }} />{t('users.invite.modal.title')}</span>}
         open={inviteModalOpen}
         onOk={lastInviteLink ? () => setInviteModalOpen(false) : handleCreateInvite}
         onCancel={() => setInviteModalOpen(false)}
-        okText={lastInviteLink ? 'Tamam' : 'Davet Oluştur'}
-        cancelText="İptal"
+        okText={lastInviteLink ? t('users.invite.modal.ok_done') : t('users.invite.modal.ok_create')}
+        cancelText={t('common.cancel')}
         confirmLoading={createInviteMutation.isPending}
         width={480}
         styles={{ body: { background: C.bg }, header: { background: C.bg } }}
@@ -785,26 +817,21 @@ export default function UsersPage() {
         {lastInviteLink ? (
           <div style={{ marginTop: 16 }}>
             <div style={{ background: isDark ? '#071224' : '#f0f9ff', border: `1px solid ${isDark ? '#1a3458' : '#bae6fd'}`, borderRadius: 8, padding: 12, marginBottom: 12 }}>
-              <div style={{ color: '#22c55e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>✓ Davet linki panoya kopyalandı</div>
+              <div style={{ color: '#22c55e', fontWeight: 600, fontSize: 13, marginBottom: 6 }}>✓ {t('users.invite.modal.success_copied')}</div>
               <div style={{ fontSize: 11, color: C.muted, wordBreak: 'break-all', fontFamily: 'monospace' }}>{lastInviteLink}</div>
             </div>
-            <div style={{ color: C.muted, fontSize: 12 }}>Bu linki davette bulunmak istediğiniz kişiyle paylaşın. Link tek kullanımlıktır.</div>
+            <div style={{ color: C.muted, fontSize: 12 }}>{t('users.invite.modal.success_share_hint')}</div>
           </div>
         ) : (
           <Form form={inviteForm} layout="vertical" style={{ marginTop: 16 }} initialValues={{ role: 'viewer', expires_hours: 72 }}>
-            <Form.Item label="E-posta Adresi" name="email" rules={[{ required: true, type: 'email', message: 'Geçerli bir e-posta girin' }]}>
-              <Input placeholder="kullanici@sirket.com" />
+            <Form.Item label={t('users.invite.form.email_label')} name="email" rules={[{ required: true, type: 'email', message: t('common.validation.email_invalid') }]}>
+              <Input placeholder={t('users.invite.form.email_placeholder')} />
             </Form.Item>
-            <Form.Item label="Rol" name="role" rules={[{ required: true }]}>
-              <Select options={ROLE_OPTIONS.filter((r) => r.value !== 'super_admin')} />
+            <Form.Item label={t('users.invite.form.role_label')} name="role" rules={[{ required: true }]}>
+              <Select options={ROLE_OPTIONS_FILTERED.filter((r) => r.value !== 'super_admin')} />
             </Form.Item>
-            <Form.Item label="Geçerlilik Süresi" name="expires_hours" rules={[{ required: true }]}>
-              <Select options={[
-                { label: '24 saat', value: 24 },
-                { label: '3 gün', value: 72 },
-                { label: '7 gün', value: 168 },
-                { label: '30 gün', value: 720 },
-              ]} />
+            <Form.Item label={t('users.invite.form.expires_label')} name="expires_hours" rules={[{ required: true }]}>
+              <Select options={EXPIRES_OPTIONS} />
             </Form.Item>
           </Form>
         )}

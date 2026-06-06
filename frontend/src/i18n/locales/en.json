@@ -137,6 +137,7 @@
     "password": "Password",
     "unknown_error": "Unknown error",
     "validation": {
+      "email_invalid": "Enter a valid email",
       "required": "This field is required",
       "ip_required": "IP address is required",
       "ipv4_invalid": "Enter a valid IPv4 address",
@@ -1452,7 +1453,96 @@
     "organization": "Organization",
     "subtitle": "User accounts and access roles",
     "active": "Active",
-    "inactive": "Inactive"
+    "inactive": "Inactive",
+    "users_count": "{{count}} users",
+    "card_title": "Users",
+    "empty_users": "No users yet",
+    "you_pill": "YOU",
+    "locations_short": "{{count}} loc",
+    "mfa_on_short": "ON",
+    "mfa_off_short": "OFF",
+    "form_email_label": "Email",
+    "role": {
+      "super_admin": "SUPER ADMIN",
+      "org_admin": "ORG ADMIN",
+      "location_admin": "LOCATION ADMIN",
+      "viewer": "VIEWER"
+    },
+    "stat": {
+      "total": "TOTAL USERS",
+      "active": "ACTIVE",
+      "mfa_on": "MFA ON",
+      "login_24h": "LOGIN (24H)",
+      "pending_invite": "PENDING INVITES",
+      "super_admin": "SUPER ADMIN",
+      "distinct_roles": "{{count}} distinct roles",
+      "inactive_count": "{{count}} inactive",
+      "mfa_coverage": "{{pct}}% coverage",
+      "activity_window": "recent activity window",
+      "active_link": "active link",
+      "org_admin_count": "{{count}} org admin"
+    },
+    "tab": {
+      "general": "General",
+      "org_locations": "Org & Locations"
+    },
+    "ip_allowlist": {
+      "label": "Allowed IPs (optional)",
+      "tooltip": "User can log in only from these IP/CIDRs. Empty = no restriction. Separate multiple values with commas. Example: <ex>{{example}}</ex>",
+      "extra": "Empty = no restriction · IPv4/IPv6 + CIDR (e.g.: 10.0.0.0/8)",
+      "placeholder": "10.0.0.0/8, 192.168.1.5"
+    },
+    "locations": {
+      "org_label": "Organization",
+      "org_placeholder": "Select organization",
+      "intro": "This list determines <s>which locations the user can see</s>. The authority level (admin/viewer) is set by the <s>role</s> field on the <e>General</e> tab.",
+      "bullet_super_admin": "• <s>Super Admin</s> accesses all locations of all organizations (no assignment needed).",
+      "bullet_org_admin": "• <s>Org Admin</s> automatically accesses all locations of their organization.",
+      "bullet_location_admin": "• <s>Location Admin</s> and <s>Viewer</s> only access the locations assigned below.",
+      "add_section_title": "Add Location",
+      "add_placeholder": "Select location",
+      "assigned_label": "Assigned Locations ({{count}})",
+      "empty": "No locations assigned yet",
+      "fallback_name": "Location #{{id}}",
+      "fine_grained_hint": "For finer-grained control (module × action) you can assign the user a custom permission set on the <permLink>Permission Settings</permLink> page."
+    },
+    "invite": {
+      "section_title": "Invite Links",
+      "btn_new": "Create Invite",
+      "empty": "No invites created yet",
+      "col": {
+        "email": "Email",
+        "role": "Role",
+        "expires": "Expires",
+        "status": "Status"
+      },
+      "status_used": "Used",
+      "status_expired": "Expired",
+      "status_active": "Active",
+      "tooltip_copy": "Copy Link",
+      "tooltip_revoke": "Revoke",
+      "popconfirm_revoke_title": "Revoke invite?",
+      "toast_token_not_stored": "Token is not stored for security — create a new invite",
+      "modal": {
+        "title": "Create Invite Link",
+        "ok_create": "Create Invite",
+        "ok_done": "Done",
+        "success_copied": "Invite link copied to clipboard",
+        "success_share_hint": "Share this link with the person you want to invite. The link is single-use."
+      },
+      "form": {
+        "email_label": "Email Address",
+        "email_placeholder": "user@company.com",
+        "role_label": "Role",
+        "expires_label": "Validity Period"
+      },
+      "expires": {
+        "24h": "24 hours",
+        "3d": "3 days",
+        "7d": "7 days",
+        "30d": "30 days"
+      }
+    }
   },
   "audit": {
     "title": "Audit Log",
