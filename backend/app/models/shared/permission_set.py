@@ -23,6 +23,9 @@ DEFAULT_PERMISSIONS: dict = {
         "settings":        {"view": False, "edit": False},
         "agents":          {"view": False, "edit": False},
         "driver_templates":{"view": False, "edit": False},
+        # SSH Session Termination (deny-by-default for back-compat — eski
+        # permission_set kayıtları bu modülü içermez; default False döner).
+        "terminal_sessions":{"view": False, "terminate": False},
     }
 }
 

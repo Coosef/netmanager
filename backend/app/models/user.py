@@ -43,6 +43,10 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         # T8.4 F2 — locations:view artık explicit izin; viewer da görür
         # (lokasyon switcher sidebar için gerekli) ama org_admin tam yönetir.
         "locations:view", "locations:edit", "locations:delete",
+        # SSH Termination — admin aktif SSH oturumunu sonlandırabilir.
+        # Mevcut audit_logs:edit verb'inden ayrı (silme/maskeleme değil,
+        # operasyonel zorunlu kapama). Bkz. SSH_SESSION_TERMINATION_DESIGN.md.
+        "terminal_sessions:terminate",
     ],
     SystemRole.LOCATION_ADMIN: [
         "device:view", "device:create", "device:edit", "device:connect",
@@ -51,6 +55,7 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "task:view", "task:create",
         "audit:view", "monitor:view", "approval:view",
         "locations:view",  # kendi atanmış lokasyonlarını görür (scope RLS'de)
+        "terminal_sessions:terminate",  # kendi lokasyonundaki session'lar (RLS)
     ],
     SystemRole.VIEWER: [
         # T8.4 F2 / CyberStrike pentest — viewer minimal grant'a indirildi.
