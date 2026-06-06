@@ -30,7 +30,14 @@ async def log_action(
     before_state: Optional[dict] = None,
     after_state: Optional[dict] = None,
     duration_ms: Optional[float] = None,
+    *,
+    organization_id_override: Optional[int] = None,
 ) -> None:
+    """``organization_id_override`` — audit satırının yazılacağı org'u
+    açıkça belirt. Default (None) eski davranış: ``user.organization_id``.
+    Kullanım: super_admin cross-org bir aksiyon yaptığında (ör. başka
+    org'daki SSH session terminate), audit satırı session'ın org'unda
+    kalmalı — post-mortem zincir doğru yere düşer."""
     client_ip = None
     user_agent = None
     request_id = None
@@ -67,7 +74,11 @@ async def log_action(
     # succeeds; raw `text()` here skips RETURNING so the post-insert read
     # is never attempted. The audit row's `id` is never needed by callers
     # — `log_action` is fire-and-forget.
-    organization_id = user.organization_id if user else None
+    organization_id = (
+        organization_id_override
+        if organization_id_override is not None
+        else (user.organization_id if user else None)
+    )
     # Per-dialect JSON: native JSONB on Postgres for performance + index
     # support, generic JSON on SQLite (tests) so suite still passes.
     dialect = db.bind.dialect.name if db.bind else "sqlite"
