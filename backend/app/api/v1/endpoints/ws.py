@@ -466,9 +466,13 @@ async def ssh_terminal_ws(
 
         session_id: Optional[str] = None
         try:
+            # SSH Termination: TerminalSessionLogger DB UUID'sini agent
+            # registry anahtarı olarak kullan — terminate endpoint logger
+            # UUID'siyle gelir, force-close akışı bu sayede agent'a ulaşır.
             session_id = await _ag.open_shell_session(
                 device.agent_id, device, cols=cols, rows=rows,
                 on_output=_on_output, on_close=_on_close, timeout=20.0,
+                override_session_id=_term_logger.session_id,
             )
         except Exception as exc:
             # T9 follow-up: agent-scope reddinde kullanıcıya net hata göster.

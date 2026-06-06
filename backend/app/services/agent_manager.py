@@ -1605,10 +1605,18 @@ class AgentManager:
     async def open_shell_session(
         self, agent_id: str, device, cols: int, rows: int,
         on_output, on_close, timeout: float = 20.0,
+        *, override_session_id: str | None = None,
     ) -> str:
         """Agent üzerinde interaktif SSH shell aç. Döner: session_id.
         Backend WS endpoint on_output(bytes) ve on_close() callback'leri
         sağlar; gelen veri/kapanış olayları bu callback'lere yönlendirilir.
+
+        ``override_session_id`` SSH WS handler tarafından kullanılır:
+        TerminalSessionLogger DB kaydını oluştururken üretilen UUID'yi
+        agent shell registry anahtarı olarak ata. Tek UUID hem
+        ``terminal_session_logs.session_id`` hem ``_shell_sessions`` key —
+        force-close akışı için zorunlu. None ise (default), eski davranış:
+        kendi yeni UUID üret.
 
         Yükselen exception'lar:
           - RuntimeError: agent bağlı değil / scope check başarısız
@@ -1622,7 +1630,7 @@ class AgentManager:
         self._enforce_device_scope(agent_id, device, "ssh_shell")
 
         from app.core.security import decrypt_credential
-        session_id = uuid.uuid4().hex
+        session_id = override_session_id or uuid.uuid4().hex
 
         self._shell_sessions[session_id] = {
             "agent_id":  agent_id,
