@@ -114,7 +114,7 @@ export default function UsersPage() {
   const revokeInviteMutation = useMutation({
     mutationFn: (id: number) => invitesApi.revoke(id),
     onSuccess: () => refetchInvites(),
-    onError: () => message.error('Davet iptal edilemedi'),
+    onError: () => message.error(t('users.invite.toast_revoke_failed')),
   })
 
   const handleCreateInvite = async () => {
@@ -226,7 +226,7 @@ export default function UsersPage() {
   const addLocAssignment = () => {
     if (!addLocId) return
     const exists = locAssignments.find((a) => a.location_id === addLocId)
-    if (exists) { message.warning('Bu lokasyon zaten eklenmiş'); return }
+    if (exists) { message.warning(t('users.locations.toast_already_added')); return }
     setLocAssignments([...locAssignments, { location_id: addLocId }])
     setAddLocId(null)
   }

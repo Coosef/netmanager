@@ -66,7 +66,7 @@ export default function ActionsTab({ device }: { device: Device }) {
       qc.invalidateQueries({ queryKey: ['devices'] })
       navigate('/devices')
     },
-    onError: (e: any) => message.error(e?.response?.data?.detail || t('devices.delete_error')),
+    onError: (e: any) => message.error(e?.response?.data?.detail || t('common.delete_failed')),
   })
 
   const ident = (

@@ -1,5 +1,9 @@
 {
-  "__meta": { "name": "Русский", "flag": "🇷🇺", "region": "Россия" },
+  "__meta": {
+    "name": "Русский",
+    "flag": "🇷🇺",
+    "region": "Россия"
+  },
   "lang": {
     "tr": "Türkçe",
     "en": "English",
@@ -411,7 +415,6 @@
     "delete_confirm": "Удалить устройство?",
     "delete_confirm_desc": "Резервные данные также будут удалены.",
     "deleted": "Устройство удалено",
-    "delete_error": "Ошибка удаления",
     "bulk_delete_error": "Ошибка массового удаления",
     "test_connection": "Проверить подключение",
     "fetch_info": "Получить информацию об устройстве (hostname, модель, прошивка)",
@@ -682,7 +685,6 @@
     },
     "bulk_lifecycle": {
       "title": "Массовый жизненный цикл — {{count}} устройств",
-      "apply": "Применить",
       "rules_title": "Правила переходов",
       "rule_1": "• production ⇄ passive ⇄ stock — в любую сторону (org_admin)",
       "rule_2": "• * → archived — в архив из любого статуса",
@@ -756,7 +758,6 @@
       "result_alert": "Импорт завершён: создано {{created}}, обновлено {{updated}}, ошибок {{errors}}",
       "result_created": "Создано",
       "result_updated": "Обновлено",
-      "result_errors": "Ошибок",
       "row_error": "Строка {{row}}{{ip}}: {{error}}",
       "nothing_to_export": "Нет устройств для экспорта",
       "export_success": "{{count}} устройств экспортировано"
@@ -774,7 +775,11 @@
         "actions": "Действия",
         "terminal": "Терминал"
       },
-      "risk": { "healthy": "ИСПРАВНО", "watch": "НАБЛЮДЕНИЕ", "critical": "КРИТИЧНО" },
+      "risk": {
+        "healthy": "ИСПРАВНО",
+        "watch": "НАБЛЮДЕНИЕ",
+        "critical": "КРИТИЧНО"
+      },
       "invalid_id": "Неверный ID устройства",
       "back_to_list": "← Устройства",
       "loading": "Загрузка устройства…",
@@ -839,7 +844,11 @@
         "last_backup_label": "Последняя копия"
       },
       "ports": {
-        "col": { "port": "Порт", "description": "Описание", "policy": "Policy" },
+        "col": {
+          "port": "Порт",
+          "description": "Описание",
+          "policy": "Policy"
+        },
         "mac_tooltip": "На этом порту записей MAC: {{label}}",
         "poe_processing": "В обработке…",
         "poe_on_tag": "Вкл",
@@ -868,7 +877,6 @@
           "poe_on_title": "{{iface}} → PoE Вкл?",
           "poe_on_desc": "Действие постоянное.",
           "poe_on_ok": "Вкл",
-          "poe_cancel": "Отмена",
           "poe_off_title": "{{iface}} → PoE Выкл?",
           "poe_off_desc": "Устройство на этом порту потеряет питание. Действие постоянное.",
           "poe_off_ok": "Выкл",
@@ -944,7 +952,11 @@
         }
       },
       "vlan": {
-        "col": { "name": "Имя", "port_count": "Кол-во портов", "ports": "Порты" },
+        "col": {
+          "name": "Имя",
+          "port_count": "Кол-во портов",
+          "ports": "Порты"
+        },
         "stat": {
           "total": "Всего VLAN",
           "active": "Активные",
@@ -1071,7 +1083,9 @@
         "right_default": "следующий",
         "no_changes_title": "Между двумя копиями нет изменений",
         "no_changes_desc": "Хэши двух конфигов могут отличаться, но строчный diff пуст.",
-        "toast": { "copied": "Diff скопирован в буфер" }
+        "toast": {
+          "copied": "Diff скопирован в буфер"
+        }
       },
       "security": {
         "device_level_title": "Назначения на уровне устройства",
@@ -1095,7 +1109,9 @@
         "tag_fallback": "fallback",
         "tag_device_default": "device default",
         "fallback_text": "hardcoded baseline",
-        "toast": { "saved": "Назначение политики сохранено" }
+        "toast": {
+          "saved": "Назначение политики сохранено"
+        }
       },
       "actions_tab": {
         "readonly_alert": "Только чтение. Действия (тест/получение инфо/lifecycle/удаление) требуют роль org_admin+.",
@@ -1132,7 +1148,11 @@
         }
       },
       "events": {
-        "sev": { "critical": "КРИТИЧНО", "warning": "ПРЕДУПР.", "info": "ИНФО" },
+        "sev": {
+          "critical": "КРИТИЧНО",
+          "warning": "ПРЕДУПР.",
+          "info": "ИНФО"
+        },
         "col_date": "Дата",
         "col_severity": "Серьёзность",
         "col_type": "Тип",
@@ -1211,7 +1231,10 @@
         "alert_msg": "Назначение VLAN применяется к {{count}} выбранным портам.",
         "alert_desc": "НЕ атомарно: на каждый порт отдельная SSH-команда; при ошибке одного остальные всё равно пишутся. Отчёт об ошибках показывается сообщением."
       }
-    }
+    },
+    "bulk_fetch_info": "Массовое получение инфо",
+    "bulk_fetch_info_confirm": "Получить инфо для {{count}} устройств по SSH?",
+    "bulk_fetch_info_success": "{{succeeded}} успешно, {{failed}} не удалось"
   },
   "topology": {
     "title": "Топология сети",
@@ -1260,7 +1283,11 @@
     "col_neighbor": "Сосед",
     "col_type": "Тип",
     "col_protocol": "Протокол",
-    "inventory_tag": "Инвентарь"
+    "inventory_tag": "Инвентарь",
+    "filter_layer": "Фильтр по слою",
+    "blast_radius": "Радиус поражения",
+    "blast_critical": "Критично",
+    "blast_safe": "Безопасно"
   },
   "discovery": {
     "title": "Инвентарь обнаружения",
@@ -1429,7 +1456,6 @@
     "created": "Пользователь создан",
     "create_error": "Ошибка",
     "updated": "Обновлено",
-    "update_error": "Ошибка обновления",
     "form_username": "Имя пользователя",
     "form_password": "Пароль",
     "form_role": "Роль",
@@ -1497,7 +1523,8 @@
       "assigned_label": "Назначенные локации ({{count}})",
       "empty": "Локации пока не назначены",
       "fallback_name": "Локация #{{id}}",
-      "fine_grained_hint": "Для более тонкой настройки (модуль × действие) можно назначить пользователю собственный набор прав на странице <permLink>Настройки прав</permLink>."
+      "fine_grained_hint": "Для более тонкой настройки (модуль × действие) можно назначить пользователю собственный набор прав на странице <permLink>Настройки прав</permLink>.",
+      "toast_already_added": "Эта локация уже добавлена"
     },
     "invite": {
       "section_title": "Ссылки-приглашения",
@@ -1534,7 +1561,8 @@
         "3d": "3 дня",
         "7d": "7 дней",
         "30d": "30 дней"
-      }
+      },
+      "toast_revoke_failed": "Не удалось отозвать приглашение"
     }
   },
   "audit": {
@@ -1638,8 +1666,14 @@
     "language_desc": "Выберите язык приложения",
     "crumb_admin": "Администрирование",
     "page_subtitle": "Общие настройки · каналы уведомлений · правила оповещений · политики SLA · управление учётными данными и токенами.",
-    "col": { "action": "Действие", "actions": "Действия" },
-    "unit": { "min_short": "мин", "day": "дней" },
+    "col": {
+      "action": "Действие",
+      "actions": "Действия"
+    },
+    "unit": {
+      "min_short": "мин",
+      "day": "дней"
+    },
     "stat": {
       "notification_channels": "Каналы уведомлений",
       "alert_rules": "Правила оповещений",
@@ -1670,12 +1704,21 @@
       "intro_message": "Отправляет уведомления, когда результаты SNMP-опроса превышают порог утилизации интерфейса или ошибок.",
       "intro_desc": "В ваших каналах уведомлений должна быть включена опция 'Пороговое оповещение (SNMP)'.",
       "col": {
-        "name": "Имя", "device": "Устройство", "interface": "Интерфейс",
-        "metric_threshold": "Метрика / Порог", "consecutive_poll": "Подряд опросов",
-        "severity": "Уровень", "enabled": "Активно"
+        "name": "Имя",
+        "device": "Устройство",
+        "interface": "Интерфейс",
+        "metric_threshold": "Метрика / Порог",
+        "consecutive_poll": "Подряд опросов",
+        "severity": "Уровень",
+        "enabled": "Активно"
       },
-      "popconfirm": { "delete_title": "Удалить это правило?" },
-      "modal": { "title_new": "Новое правило оповещения", "title_edit": "Изменить правило" },
+      "popconfirm": {
+        "delete_title": "Удалить это правило?"
+      },
+      "modal": {
+        "title_new": "Новое правило оповещения",
+        "title_edit": "Изменить правило"
+      },
       "form": {
         "name_label": "Имя правила",
         "name_placeholder": "Напр.: Core Switch высокая утилизация",
@@ -1708,13 +1751,19 @@
       "status_inactive": "Неактивен",
       "tooltip_test_send": "Отправить тест",
       "col": {
-        "name": "Имя", "type": "Тип", "triggers": "Триггеры", "status": "Статус"
+        "name": "Имя",
+        "type": "Тип",
+        "triggers": "Триггеры",
+        "status": "Статус"
       },
       "popconfirm": {
         "send_digest_title": "Отправить недельную сводку?",
         "delete_title": "Удалить канал?"
       },
-      "modal": { "title_new": "Новый канал уведомлений", "title_edit": "Изменить канал" },
+      "modal": {
+        "title_new": "Новый канал уведомлений",
+        "title_edit": "Изменить канал"
+      },
       "form": {
         "name_label": "Имя канала",
         "type_label": "Тип",
@@ -1768,12 +1817,17 @@
       "empty": "Пока нет профилей",
       "intro_message": "Учётные данные хранятся с шифрованием Fernet. Пароли никогда не возвращаются в API-ответах.",
       "intro_desc": "Централизуйте управление учётными данными, назначая профили устройствам. Устройства с назначенными профилями используют этот профиль для SSH/SNMP-соединений.",
-      "col": { "profile_name": "Имя профиля" },
+      "col": {
+        "profile_name": "Имя профиля"
+      },
       "popconfirm": {
         "delete_title": "Удалить этот профиль?",
         "delete_desc": "Не может быть удалён, если устройства назначены на этот профиль."
       },
-      "modal": { "title_new": "Новый профиль учётки", "title_edit": "Изменить профиль" },
+      "modal": {
+        "title_new": "Новый профиль учётки",
+        "title_edit": "Изменить профиль"
+      },
       "form": {
         "name_label": "Имя профиля",
         "name_placeholder": "Напр.: Cisco Core, Aruba Access, Read-Only",
@@ -1818,8 +1872,13 @@
         "devices": "{{count}} устройств",
         "groups": "{{count}} групп"
       },
-      "popconfirm": { "delete_title": "Удалить эту политику?" },
-      "modal": { "title_new": "Новая политика SLA", "title_edit": "Изменить политику SLA" },
+      "popconfirm": {
+        "delete_title": "Удалить эту политику?"
+      },
+      "modal": {
+        "title_new": "Новая политика SLA",
+        "title_edit": "Изменить политику SLA"
+      },
       "form": {
         "name_label": "Имя политики",
         "name_placeholder": "SLA Критической Инфраструктуры",
@@ -1844,7 +1903,9 @@
         "last_poll": "Последний опрос",
         "not_yet": "Пока нет"
       },
-      "col": { "device": "Устройство" },
+      "col": {
+        "device": "Устройство"
+      },
       "bulk_section_title": "Массовая конфигурация SNMP (SSH)",
       "alert_ruijie_title": "Правило community-строки Ruijie",
       "alert_ruijie_desc": "Community-строка должна включать минимум 3 типа символов: заглавная + строчная + цифра. Пример: \"Charon1\"",
@@ -1895,7 +1956,9 @@
         "last_result": "Последний результат",
         "rotate_now": "Ротировать сейчас"
       },
-      "popconfirm": { "delete_title": "Удалить политику ротации?" },
+      "popconfirm": {
+        "delete_title": "Удалить политику ротации?"
+      },
       "modal": {
         "title_new": "Добавить политику ротации",
         "title_edit": "Изменить политику",
@@ -1903,8 +1966,12 @@
         "last_result_title": "Результат последней ротации",
         "executed_at": "Выполнено {{date}}"
       },
-      "form": { "interval_label": "Интервал ротации (дни)" },
-      "toast": { "started": "Ротация запущена" }
+      "form": {
+        "interval_label": "Интервал ротации (дни)"
+      },
+      "toast": {
+        "started": "Ротация запущена"
+      }
     },
     "maintenance": {
       "btn_new": "Добавить окно обслуживания",
@@ -1918,12 +1985,24 @@
         "end": "Конец",
         "scope": "Область"
       },
-      "scope": { "selected_devices": "Выбранные устройства" },
+      "scope": {
+        "selected_devices": "Выбранные устройства"
+      },
       "day": {
-        "mon": "Понедельник", "tue": "Вторник", "wed": "Среда", "thu": "Четверг",
-        "fri": "Пятница", "sat": "Суббота", "sun": "Воскресенье",
-        "mon_short": "Пн", "tue_short": "Вт", "wed_short": "Ср",
-        "thu_short": "Чт", "fri_short": "Пт", "sat_short": "Сб", "sun_short": "Вс"
+        "mon": "Понедельник",
+        "tue": "Вторник",
+        "wed": "Среда",
+        "thu": "Четверг",
+        "fri": "Пятница",
+        "sat": "Суббота",
+        "sun": "Воскресенье",
+        "mon_short": "Пн",
+        "tue_short": "Вт",
+        "wed_short": "Ср",
+        "thu_short": "Чт",
+        "fri_short": "Пт",
+        "sat_short": "Сб",
+        "sun_short": "Вс"
       },
       "recurrence": {
         "section_title": "Повторение (опционально)",
@@ -1944,8 +2023,13 @@
         "max_count_label": "Макс. число экземпл. (опц.)",
         "unlimited": "без ограничения"
       },
-      "popconfirm": { "delete_title": "Удалить это окно обслуживания?" },
-      "modal": { "title_new": "Новое окно обслуживания", "title_edit": "Изменить окно обслуживания" },
+      "popconfirm": {
+        "delete_title": "Удалить это окно обслуживания?"
+      },
+      "modal": {
+        "title_new": "Новое окно обслуживания",
+        "title_edit": "Изменить окно обслуживания"
+      },
       "form": {
         "name_label": "Имя обслуживания",
         "name_placeholder": "Напр.: Ежемесячное обновление — Core Layer",
@@ -2013,7 +2097,9 @@
       "api_key_placeholder_change": "{{name}} API-ключ (введите для изменения)",
       "model_placeholder": "Выберите модель",
       "ollama_section_title": "Ollama (Локальная модель)",
-      "toast": { "saved": "Настройки AI сохранены" }
+      "toast": {
+        "saved": "Настройки AI сохранены"
+      }
     },
     "system": {
       "page_title": "Системные настройки",
@@ -2088,7 +2174,9 @@
         "expiry_tooltip": "По окончании этого срока пользователь принудительно меняет пароль. 0 = без срока.",
         "force_change_label": "Принудительная смена пароля при первом входе"
       },
-      "unit": { "password_short": "паролей" },
+      "unit": {
+        "password_short": "паролей"
+      },
       "tester_card_title": "Инструмент тестирования паролей",
       "tester_hint": "Введите ниже, чтобы увидеть, проходит ли пароль текущую политику.",
       "tester_placeholder": "Пароль для теста…",
@@ -2107,7 +2195,9 @@
       "enabled_desc": "При каждом входе требуется 6-значный код из приложения-аутентификатора.",
       "enrolled_at_label": "Регистрация",
       "methods_label": "МЕТОДЫ",
-      "method": { "authenticator": "Аутентификатор" },
+      "method": {
+        "authenticator": "Аутентификатор"
+      },
       "recovery_remaining_label": "ОСТАЛОСЬ КОДОВ ВОССТАНОВЛЕНИЯ",
       "tag_running_out": "Заканчиваются",
       "btn_regen_recovery": "Перегенерировать коды восстановления",
