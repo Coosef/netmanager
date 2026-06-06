@@ -445,6 +445,64 @@ async def ssh_terminal_ws(
             connection_path="agent_relay" if use_agent else "direct_paramiko",
         )
 
+    # SSH Session Termination — Redis pub/sub listener. Admin
+    # POST /terminal-sessions/{id}/terminate çağrısı 'terminal:terminate'
+    # kanalına broadcast eder; bu task kendi session_id'siyle eşleşen
+    # mesajı yakalar, banner basar ve WS'yi kapatır → read/write task'leri
+    # exit eder, finally bloğunda exit_reason='force_closed' işlenir.
+    _terminate_evt = asyncio.Event()
+    _my_session_id = _term_logger.session_id
+
+    async def _terminate_listener():
+        from app.core.redis_client import get_redis
+        pubsub = None
+        try:
+            r = get_redis()
+            pubsub = r.pubsub()
+            await pubsub.subscribe("terminal:terminate")
+            async for msg in pubsub.listen():
+                if msg.get("type") != "message":
+                    continue
+                try:
+                    payload = json.loads(msg.get("data") or "{}")
+                except Exception:
+                    continue
+                if payload.get("session_id") != _my_session_id:
+                    continue
+                _terminate_evt.set()
+                try:
+                    await websocket.send_text(
+                        "\r\n\x1b[31m"
+                        "═══════════════════════════════════════════\r\n"
+                        "  This terminal session was terminated by\r\n"
+                        "  an administrator.\r\n"
+                        "═══════════════════════════════════════════"
+                        "\x1b[0m\r\n"
+                    )
+                except Exception:
+                    pass
+                try:
+                    await websocket.close(code=4000)
+                except Exception:
+                    pass
+                return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return  # Redis down vs.; tasarım §10.7 — sessizce çık
+        finally:
+            if pubsub is not None:
+                try:
+                    await pubsub.unsubscribe("terminal:terminate")
+                except Exception:
+                    pass
+                try:
+                    await pubsub.aclose()
+                except Exception:
+                    pass
+
+    _terminate_task = asyncio.create_task(_terminate_listener())
+
     if use_agent:
         await websocket.send_text(
             f"\r\nConnecting to {username}@{host}:{port} via agent…\r\n"
@@ -500,6 +558,7 @@ async def ssh_terminal_ws(
             try: await websocket.close()
             except Exception: pass
             revalidator.cancel()
+            _terminate_task.cancel()
             try:
                 await _term_logger.close(_AsyncSessionLocal, exit_reason="agent_scope_error")
             except Exception:
@@ -545,13 +604,19 @@ async def ssh_terminal_ws(
                 await _ag.send_shell_input(session_id, _input_bytes)
         finally:
             revalidator.cancel()
+            _terminate_task.cancel()
             if session_id:
                 await _ag.close_shell_session(session_id)
             try: await websocket.close()
             except Exception: pass
-            # T9 Tur 3A — session log final flush
+            # T9 Tur 3A — session log final flush. SSH Termination: admin
+            # force-close çalıştıysa exit_reason='force_closed' yaz.
+            # NOTE: terminate endpoint zaten ended_at/exit_reason yazmıştır;
+            # bu close() çağrısı race guard'lı (WHERE ended_at IS NULL) →
+            # ikinci yazım no-op olur; yine de exit_reason'ı doğru gönder.
+            _exit_reason = "force_closed" if _terminate_evt.is_set() else "user_closed"
             try:
-                await _term_logger.close(_AsyncSessionLocal, exit_reason="user_closed")
+                await _term_logger.close(_AsyncSessionLocal, exit_reason=_exit_reason)
             except Exception:
                 pass
         return
@@ -574,6 +639,7 @@ async def ssh_terminal_ws(
         await websocket.close()
         ssh_client.close()
         revalidator.cancel()
+        _terminate_task.cancel()
         return
 
     channel = await loop.run_in_executor(None, lambda: ssh_client.invoke_shell(term="xterm-256color", width=cols, height=rows))
@@ -655,14 +721,17 @@ async def ssh_terminal_ws(
         pass
     finally:
         revalidator.cancel()
+        _terminate_task.cancel()
         channel.close()
         ssh_client.close()
         try:
             await websocket.close()
         except Exception:
             pass
-        # T9 Tur 3A — session log final flush
+        # T9 Tur 3A — session log final flush. SSH Termination: bkz. agent
+        # finally bloğundaki not. exit_reason gerçek nedene göre yazılır.
+        _exit_reason = "force_closed" if _terminate_evt.is_set() else "user_closed"
         try:
-            await _term_logger.close(_AsyncSessionLocal, exit_reason="user_closed")
+            await _term_logger.close(_AsyncSessionLocal, exit_reason=_exit_reason)
         except Exception:
             pass
