@@ -1,5 +1,9 @@
 {
-  "__meta": { "name": "Deutsch", "flag": "🇩🇪", "region": "Deutschland" },
+  "__meta": {
+    "name": "Deutsch",
+    "flag": "🇩🇪",
+    "region": "Deutschland"
+  },
   "lang": {
     "tr": "Türkçe",
     "en": "English",
@@ -411,7 +415,6 @@
     "delete_confirm": "Gerät löschen?",
     "delete_confirm_desc": "Sicherungsdaten werden ebenfalls gelöscht.",
     "deleted": "Gerät gelöscht",
-    "delete_error": "Löschen fehlgeschlagen",
     "bulk_delete_error": "Massenlöschung fehlgeschlagen",
     "test_connection": "Verbindung testen",
     "fetch_info": "Geräteinformationen abrufen (Hostname, Modell, Firmware)",
@@ -682,7 +685,6 @@
     },
     "bulk_lifecycle": {
       "title": "Lebenszyklus (Bulk) — {{count}} Geräte",
-      "apply": "Anwenden",
       "rules_title": "Übergangsregeln",
       "rule_1": "• production ⇄ passive ⇄ stock — jede Richtung (org_admin)",
       "rule_2": "• * → archived — kann aus jedem Zustand archiviert werden",
@@ -756,7 +758,6 @@
       "result_alert": "Import abgeschlossen: {{created}} erstellt, {{updated}} aktualisiert, {{errors}} Fehler",
       "result_created": "Erstellt",
       "result_updated": "Aktualisiert",
-      "result_errors": "Fehler",
       "row_error": "Zeile {{row}}{{ip}}: {{error}}",
       "nothing_to_export": "Keine Geräte zum Exportieren",
       "export_success": "{{count}} Geräte exportiert"
@@ -774,7 +775,11 @@
         "actions": "Aktionen",
         "terminal": "Terminal"
       },
-      "risk": { "healthy": "GESUND", "watch": "BEOBACHTEN", "critical": "KRITISCH" },
+      "risk": {
+        "healthy": "GESUND",
+        "watch": "BEOBACHTEN",
+        "critical": "KRITISCH"
+      },
       "invalid_id": "Ungültige Geräte-ID",
       "back_to_list": "← Geräte",
       "loading": "Gerät wird geladen…",
@@ -839,7 +844,11 @@
         "last_backup_label": "Letztes Backup"
       },
       "ports": {
-        "col": { "port": "Port", "description": "Beschreibung", "policy": "Policy" },
+        "col": {
+          "port": "Port",
+          "description": "Beschreibung",
+          "policy": "Policy"
+        },
         "mac_tooltip": "{{label}} MAC-Einträge auf diesem Port",
         "poe_processing": "In Bearbeitung…",
         "poe_on_tag": "Ein",
@@ -868,7 +877,6 @@
           "poe_on_title": "{{iface}} → PoE Ein?",
           "poe_on_desc": "Die Aktion ist dauerhaft.",
           "poe_on_ok": "Ein",
-          "poe_cancel": "Abbrechen",
           "poe_off_title": "{{iface}} → PoE Aus?",
           "poe_off_desc": "Das Gerät an diesem Port verliert Strom. Die Aktion ist dauerhaft.",
           "poe_off_ok": "Aus",
@@ -944,7 +952,11 @@
         }
       },
       "vlan": {
-        "col": { "name": "Name", "port_count": "Portanzahl", "ports": "Ports" },
+        "col": {
+          "name": "Name",
+          "port_count": "Portanzahl",
+          "ports": "Ports"
+        },
         "stat": {
           "total": "VLANs gesamt",
           "active": "Aktiv",
@@ -1071,7 +1083,9 @@
         "right_default": "nachher",
         "no_changes_title": "Keine Änderungen zwischen den zwei Backups",
         "no_changes_desc": "Die beiden Konfigurationen können unterschiedliche Hashes haben, der zeilenweise Diff ist aber leer.",
-        "toast": { "copied": "Diff in die Zwischenablage kopiert" }
+        "toast": {
+          "copied": "Diff in die Zwischenablage kopiert"
+        }
       },
       "security": {
         "device_level_title": "Geräteebenen-Zuweisungen",
@@ -1095,7 +1109,9 @@
         "tag_fallback": "Fallback",
         "tag_device_default": "Geräte-Default",
         "fallback_text": "hardcoded Baseline",
-        "toast": { "saved": "Policy-Zuweisung gespeichert" }
+        "toast": {
+          "saved": "Policy-Zuweisung gespeichert"
+        }
       },
       "actions_tab": {
         "readonly_alert": "Nur-Lesen. Aktion (Test/Info-Abruf/Lifecycle/Löschen) erfordert org_admin+.",
@@ -1132,7 +1148,11 @@
         }
       },
       "events": {
-        "sev": { "critical": "KRITISCH", "warning": "WARNUNG", "info": "INFO" },
+        "sev": {
+          "critical": "KRITISCH",
+          "warning": "WARNUNG",
+          "info": "INFO"
+        },
         "col_date": "Datum",
         "col_severity": "Schweregrad",
         "col_type": "Typ",
@@ -1211,7 +1231,10 @@
         "alert_msg": "Die VLAN-Zuweisung wird auf {{count}} ausgewählte Ports angewendet.",
         "alert_desc": "NICHT atomar: für jeden Port ein eigener SSH-Befehl; bei Fehler eines Ports werden die anderen trotzdem geschrieben. Fehlerbericht wird als Nachricht angezeigt."
       }
-    }
+    },
+    "bulk_fetch_info": "Bulk-Info abrufen",
+    "bulk_fetch_info_confirm": "Info für {{count}} Geräte per SSH abrufen?",
+    "bulk_fetch_info_success": "{{succeeded}} erfolgreich, {{failed}} fehlgeschlagen"
   },
   "topology": {
     "title": "Netzwerktopologie",
@@ -1260,7 +1283,11 @@
     "col_neighbor": "Nachbar",
     "col_type": "Typ",
     "col_protocol": "Protokoll",
-    "inventory_tag": "Inventar"
+    "inventory_tag": "Inventar",
+    "filter_layer": "Schicht filtern",
+    "blast_radius": "Auswirkungsbereich",
+    "blast_critical": "Kritisch",
+    "blast_safe": "Sicher"
   },
   "discovery": {
     "title": "Erkundungsinventar",
@@ -1429,7 +1456,6 @@
     "created": "Benutzer erstellt",
     "create_error": "Fehler",
     "updated": "Aktualisiert",
-    "update_error": "Aktualisierung fehlgeschlagen",
     "form_username": "Benutzername",
     "form_password": "Passwort",
     "form_role": "Rolle",
@@ -1497,7 +1523,8 @@
       "assigned_label": "Zugewiesene Standorte ({{count}})",
       "empty": "Noch keine Standorte zugewiesen",
       "fallback_name": "Standort #{{id}}",
-      "fine_grained_hint": "Für feinere Einstellungen (Modul × Aktion) können Sie dem Benutzer einen eigenen Berechtigungssatz auf der Seite <permLink>Berechtigungseinstellungen</permLink> zuweisen."
+      "fine_grained_hint": "Für feinere Einstellungen (Modul × Aktion) können Sie dem Benutzer einen eigenen Berechtigungssatz auf der Seite <permLink>Berechtigungseinstellungen</permLink> zuweisen.",
+      "toast_already_added": "Dieser Standort ist bereits hinzugefügt"
     },
     "invite": {
       "section_title": "Einladungslinks",
@@ -1534,7 +1561,8 @@
         "3d": "3 Tage",
         "7d": "7 Tage",
         "30d": "30 Tage"
-      }
+      },
+      "toast_revoke_failed": "Einladung konnte nicht widerrufen werden"
     }
   },
   "audit": {
@@ -1638,8 +1666,14 @@
     "language_desc": "Anwendungssprache auswählen",
     "crumb_admin": "Verwaltung",
     "page_subtitle": "Allgemeine Einstellungen · Benachrichtigungskanäle · Alarmregeln · SLA-Richtlinien · Anmeldedaten- & Token-Verwaltung.",
-    "col": { "action": "Aktion", "actions": "Aktionen" },
-    "unit": { "min_short": "Min", "day": "Tage" },
+    "col": {
+      "action": "Aktion",
+      "actions": "Aktionen"
+    },
+    "unit": {
+      "min_short": "Min",
+      "day": "Tage"
+    },
     "stat": {
       "notification_channels": "Benachrichtigungskanäle",
       "alert_rules": "Alarmregeln",
@@ -1670,12 +1704,21 @@
       "intro_message": "Sendet Benachrichtigungen, wenn SNMP-Poll-Ergebnisse Interface-Auslastung oder Fehlerschwellen überschreiten.",
       "intro_desc": "Ihre Benachrichtigungskanäle müssen 'Schwellwertalarm (SNMP)' aktiviert haben.",
       "col": {
-        "name": "Name", "device": "Gerät", "interface": "Interface",
-        "metric_threshold": "Metrik / Schwelle", "consecutive_poll": "Aufeinanderfolgende Polls",
-        "severity": "Schweregrad", "enabled": "Aktiv"
+        "name": "Name",
+        "device": "Gerät",
+        "interface": "Interface",
+        "metric_threshold": "Metrik / Schwelle",
+        "consecutive_poll": "Aufeinanderfolgende Polls",
+        "severity": "Schweregrad",
+        "enabled": "Aktiv"
       },
-      "popconfirm": { "delete_title": "Diese Regel löschen?" },
-      "modal": { "title_new": "Neue Alarmregel", "title_edit": "Regel bearbeiten" },
+      "popconfirm": {
+        "delete_title": "Diese Regel löschen?"
+      },
+      "modal": {
+        "title_new": "Neue Alarmregel",
+        "title_edit": "Regel bearbeiten"
+      },
       "form": {
         "name_label": "Regelname",
         "name_placeholder": "Z.B.: Core Switch hohe Auslastung",
@@ -1708,13 +1751,19 @@
       "status_inactive": "Inaktiv",
       "tooltip_test_send": "Test senden",
       "col": {
-        "name": "Name", "type": "Typ", "triggers": "Auslöser", "status": "Status"
+        "name": "Name",
+        "type": "Typ",
+        "triggers": "Auslöser",
+        "status": "Status"
       },
       "popconfirm": {
         "send_digest_title": "Wochenübersicht senden?",
         "delete_title": "Kanal löschen?"
       },
-      "modal": { "title_new": "Neuer Benachrichtigungskanal", "title_edit": "Kanal bearbeiten" },
+      "modal": {
+        "title_new": "Neuer Benachrichtigungskanal",
+        "title_edit": "Kanal bearbeiten"
+      },
       "form": {
         "name_label": "Kanalname",
         "type_label": "Typ",
@@ -1768,12 +1817,17 @@
       "empty": "Noch keine Profile",
       "intro_message": "Anmeldedaten werden mit Fernet-Verschlüsselung gespeichert. Passwörter werden niemals in API-Antworten zurückgegeben.",
       "intro_desc": "Zentralisieren Sie die Anmeldedatenverwaltung, indem Sie Geräten Profile zuweisen. Geräte mit zugewiesenen Profilen nutzen dieses Profil für SSH/SNMP-Verbindungen.",
-      "col": { "profile_name": "Profilname" },
+      "col": {
+        "profile_name": "Profilname"
+      },
       "popconfirm": {
         "delete_title": "Dieses Profil löschen?",
         "delete_desc": "Kann nicht gelöscht werden, wenn Geräte diesem Profil zugewiesen sind."
       },
-      "modal": { "title_new": "Neues Anmeldedaten-Profil", "title_edit": "Profil bearbeiten" },
+      "modal": {
+        "title_new": "Neues Anmeldedaten-Profil",
+        "title_edit": "Profil bearbeiten"
+      },
       "form": {
         "name_label": "Profilname",
         "name_placeholder": "Z.B.: Cisco Core, Aruba Access, Read-Only",
@@ -1818,8 +1872,13 @@
         "devices": "{{count}} Geräte",
         "groups": "{{count}} Gruppen"
       },
-      "popconfirm": { "delete_title": "Möchten Sie diese Richtlinie löschen?" },
-      "modal": { "title_new": "Neue SLA-Richtlinie", "title_edit": "SLA-Richtlinie bearbeiten" },
+      "popconfirm": {
+        "delete_title": "Möchten Sie diese Richtlinie löschen?"
+      },
+      "modal": {
+        "title_new": "Neue SLA-Richtlinie",
+        "title_edit": "SLA-Richtlinie bearbeiten"
+      },
       "form": {
         "name_label": "Richtlinienname",
         "name_placeholder": "SLA Kritische Infrastruktur",
@@ -1844,7 +1903,9 @@
         "last_poll": "Letzter Poll",
         "not_yet": "Noch keiner"
       },
-      "col": { "device": "Gerät" },
+      "col": {
+        "device": "Gerät"
+      },
       "bulk_section_title": "Bulk-SNMP-Konfiguration (SSH)",
       "alert_ruijie_title": "Ruijie Community-String-Regel",
       "alert_ruijie_desc": "Community-String muss mind. 3 Zeichenarten enthalten: Großbuchstabe + Kleinbuchstabe + Ziffer. Beispiel: \"Charon1\"",
@@ -1895,7 +1956,9 @@
         "last_result": "Letztes Ergebnis",
         "rotate_now": "Jetzt rotieren"
       },
-      "popconfirm": { "delete_title": "Rotationsrichtlinie löschen?" },
+      "popconfirm": {
+        "delete_title": "Rotationsrichtlinie löschen?"
+      },
       "modal": {
         "title_new": "Rotationsrichtlinie hinzufügen",
         "title_edit": "Richtlinie bearbeiten",
@@ -1903,8 +1966,12 @@
         "last_result_title": "Letztes Rotationsergebnis",
         "executed_at": "Ausgeführt am {{date}}"
       },
-      "form": { "interval_label": "Rotationsintervall (Tage)" },
-      "toast": { "started": "Rotation gestartet" }
+      "form": {
+        "interval_label": "Rotationsintervall (Tage)"
+      },
+      "toast": {
+        "started": "Rotation gestartet"
+      }
     },
     "maintenance": {
       "btn_new": "Wartungsfenster hinzufügen",
@@ -1918,12 +1985,24 @@
         "end": "Ende",
         "scope": "Geltungsbereich"
       },
-      "scope": { "selected_devices": "Ausgewählte Geräte" },
+      "scope": {
+        "selected_devices": "Ausgewählte Geräte"
+      },
       "day": {
-        "mon": "Montag", "tue": "Dienstag", "wed": "Mittwoch", "thu": "Donnerstag",
-        "fri": "Freitag", "sat": "Samstag", "sun": "Sonntag",
-        "mon_short": "Mo", "tue_short": "Di", "wed_short": "Mi",
-        "thu_short": "Do", "fri_short": "Fr", "sat_short": "Sa", "sun_short": "So"
+        "mon": "Montag",
+        "tue": "Dienstag",
+        "wed": "Mittwoch",
+        "thu": "Donnerstag",
+        "fri": "Freitag",
+        "sat": "Samstag",
+        "sun": "Sonntag",
+        "mon_short": "Mo",
+        "tue_short": "Di",
+        "wed_short": "Mi",
+        "thu_short": "Do",
+        "fri_short": "Fr",
+        "sat_short": "Sa",
+        "sun_short": "So"
       },
       "recurrence": {
         "section_title": "Wiederholung (optional)",
@@ -1944,8 +2023,13 @@
         "max_count_label": "Max. Beispielanzahl (opt.)",
         "unlimited": "unbegrenzt"
       },
-      "popconfirm": { "delete_title": "Dieses Wartungsfenster löschen?" },
-      "modal": { "title_new": "Neues Wartungsfenster", "title_edit": "Wartungsfenster bearbeiten" },
+      "popconfirm": {
+        "delete_title": "Dieses Wartungsfenster löschen?"
+      },
+      "modal": {
+        "title_new": "Neues Wartungsfenster",
+        "title_edit": "Wartungsfenster bearbeiten"
+      },
       "form": {
         "name_label": "Wartungsname",
         "name_placeholder": "Z.B.: Monatliches Update — Core Layer",
@@ -2013,7 +2097,9 @@
       "api_key_placeholder_change": "{{name}} API-Schlüssel (zum Ändern eingeben)",
       "model_placeholder": "Modell wählen",
       "ollama_section_title": "Ollama (Lokales Modell)",
-      "toast": { "saved": "KI-Einstellungen gespeichert" }
+      "toast": {
+        "saved": "KI-Einstellungen gespeichert"
+      }
     },
     "system": {
       "page_title": "Systemeinstellungen",
@@ -2088,7 +2174,9 @@
         "expiry_tooltip": "Am Ende dieser Frist wird der Benutzer zum Passwortwechsel gezwungen. 0 = kein Ablauf.",
         "force_change_label": "Passwortwechsel bei erstem Login erzwingen"
       },
-      "unit": { "password_short": "Passwörter" },
+      "unit": {
+        "password_short": "Passwörter"
+      },
       "tester_card_title": "Passwort-Test-Tool",
       "tester_hint": "Geben Sie unten ein Passwort ein, um zu sehen, ob es die aktuelle Richtlinie besteht.",
       "tester_placeholder": "Zu testendes Passwort…",
@@ -2107,7 +2195,9 @@
       "enabled_desc": "Bei jedem Login wird ein 6-stelliger Code aus Ihrer Authenticator-App verlangt.",
       "enrolled_at_label": "Registriert",
       "methods_label": "METHODEN",
-      "method": { "authenticator": "Authenticator" },
+      "method": {
+        "authenticator": "Authenticator"
+      },
       "recovery_remaining_label": "VERBLEIBENDE WIEDERHERSTELLUNGSCODES",
       "tag_running_out": "Geht zu Ende",
       "btn_regen_recovery": "Wiederherstellungscodes neu erstellen",

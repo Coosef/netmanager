@@ -414,7 +414,6 @@
     "delete_confirm": "Cihazı sil?",
     "delete_confirm_desc": "Backup verileri de silinir.",
     "deleted": "Cihaz silindi",
-    "delete_error": "Silme başarısız",
     "bulk_delete_error": "Toplu silme başarısız",
     "test_connection": "Bağlantı Test",
     "fetch_info": "Cihaz Bilgilerini Çek (hostname, model, firmware)",
@@ -685,7 +684,6 @@
     },
     "bulk_lifecycle": {
       "title": "Toplu Yaşam Döngüsü — {{count}} cihaz",
-      "apply": "Uygula",
       "rules_title": "Geçiş kuralları",
       "rule_1": "• production ⇄ passive ⇄ stock — her yön (org_admin)",
       "rule_2": "• * → archived — her durumdan arşive geçilebilir",
@@ -759,7 +757,6 @@
       "result_alert": "İçe aktarma tamamlandı: {{created}} oluşturuldu, {{updated}} güncellendi, {{errors}} hata",
       "result_created": "Oluşturulan",
       "result_updated": "Güncellenen",
-      "result_errors": "Hata",
       "row_error": "Satır {{row}}{{ip}}: {{error}}",
       "nothing_to_export": "Dışa aktarılacak cihaz yok",
       "export_success": "{{count}} cihaz dışa aktarıldı"
@@ -871,7 +868,6 @@
           "poe_on_title": "{{iface}} → PoE Aç?",
           "poe_on_desc": "İşlem kalıcıdır.",
           "poe_on_ok": "Aç",
-          "poe_cancel": "Vazgeç",
           "poe_off_title": "{{iface}} → PoE Kapat?",
           "poe_off_desc": "Bu port üzerindeki cihaz güç kaybeder. İşlem kalıcıdır.",
           "poe_off_ok": "Kapat",
@@ -1436,7 +1432,6 @@
     "created": "Kullanıcı oluşturuldu",
     "create_error": "Hata",
     "updated": "Güncellendi",
-    "update_error": "Güncelleme başarısız",
     "form_username": "Kullanıcı Adı",
     "form_password": "Şifre",
     "form_role": "Rol",
@@ -1504,7 +1499,8 @@
       "assigned_label": "Atanmış Lokasyonlar ({{count}})",
       "empty": "Henüz lokasyon atanmamış",
       "fallback_name": "Lokasyon #{{id}}",
-      "fine_grained_hint": "Daha ince ayar (modül × eylem) gerekiyorsa kullanıcıya <permLink>Yetki Ayarları</permLink> sayfasından özel bir yetki seti atayabilirsiniz."
+      "fine_grained_hint": "Daha ince ayar (modül × eylem) gerekiyorsa kullanıcıya <permLink>Yetki Ayarları</permLink> sayfasından özel bir yetki seti atayabilirsiniz.",
+      "toast_already_added": "Bu lokasyon zaten eklenmiş"
     },
     "invite": {
       "section_title": "Davet Linkleri",
@@ -1523,6 +1519,7 @@
       "tooltip_revoke": "İptal Et",
       "popconfirm_revoke_title": "Daveti iptal et?",
       "toast_token_not_stored": "Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun",
+      "toast_revoke_failed": "Davet iptal edilemedi",
       "modal": {
         "title": "Davet Linki Oluştur",
         "ok_create": "Davet Oluştur",

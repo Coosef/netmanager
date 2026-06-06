@@ -1,5 +1,9 @@
 {
-  "__meta": { "name": "English", "flag": "🇬🇧", "region": "United Kingdom" },
+  "__meta": {
+    "name": "English",
+    "flag": "🇬🇧",
+    "region": "United Kingdom"
+  },
   "lang": {
     "tr": "Türkçe",
     "en": "English",
@@ -414,7 +418,6 @@
     "delete_confirm": "Delete device?",
     "delete_confirm_desc": "Backup data will also be deleted.",
     "deleted": "Device deleted",
-    "delete_error": "Delete failed",
     "bulk_delete_error": "Bulk delete failed",
     "test_connection": "Test Connection",
     "fetch_info": "Fetch Device Info (hostname, model, firmware)",
@@ -685,7 +688,6 @@
     },
     "bulk_lifecycle": {
       "title": "Bulk Lifecycle — {{count}} devices",
-      "apply": "Apply",
       "rules_title": "Transition rules",
       "rule_1": "• production ⇄ passive ⇄ stock — any direction (org_admin)",
       "rule_2": "• * → archived — anything can be archived",
@@ -759,7 +761,6 @@
       "result_alert": "Import completed: {{created}} created, {{updated}} updated, {{errors}} errors",
       "result_created": "Created",
       "result_updated": "Updated",
-      "result_errors": "Errors",
       "row_error": "Row {{row}}{{ip}}: {{error}}",
       "nothing_to_export": "No devices to export",
       "export_success": "{{count}} devices exported"
@@ -777,7 +778,11 @@
         "actions": "Actions",
         "terminal": "Terminal"
       },
-      "risk": { "healthy": "HEALTHY", "watch": "WATCH", "critical": "CRITICAL" },
+      "risk": {
+        "healthy": "HEALTHY",
+        "watch": "WATCH",
+        "critical": "CRITICAL"
+      },
       "invalid_id": "Invalid device ID",
       "back_to_list": "← Devices",
       "loading": "Loading device…",
@@ -842,7 +847,11 @@
         "last_backup_label": "Last Backup"
       },
       "ports": {
-        "col": { "port": "Port", "description": "Description", "policy": "Policy" },
+        "col": {
+          "port": "Port",
+          "description": "Description",
+          "policy": "Policy"
+        },
         "mac_tooltip": "{{label}} MAC entries on this port",
         "poe_processing": "Processing…",
         "poe_on_tag": "On",
@@ -871,7 +880,6 @@
           "poe_on_title": "{{iface}} → PoE On?",
           "poe_on_desc": "The action is permanent.",
           "poe_on_ok": "On",
-          "poe_cancel": "Cancel",
           "poe_off_title": "{{iface}} → PoE Off?",
           "poe_off_desc": "The device on this port will lose power. The action is permanent.",
           "poe_off_ok": "Off",
@@ -947,7 +955,11 @@
         }
       },
       "vlan": {
-        "col": { "name": "Name", "port_count": "Port count", "ports": "Ports" },
+        "col": {
+          "name": "Name",
+          "port_count": "Port count",
+          "ports": "Ports"
+        },
         "stat": {
           "total": "Total VLANs",
           "active": "Active",
@@ -1074,7 +1086,9 @@
         "right_default": "next",
         "no_changes_title": "No changes between the two backups",
         "no_changes_desc": "The two configurations may have different hashes but the line-based diff is empty.",
-        "toast": { "copied": "Diff copied to clipboard" }
+        "toast": {
+          "copied": "Diff copied to clipboard"
+        }
       },
       "security": {
         "device_level_title": "Device-Level Assignments",
@@ -1098,7 +1112,9 @@
         "tag_fallback": "fallback",
         "tag_device_default": "device default",
         "fallback_text": "hardcoded baseline",
-        "toast": { "saved": "Policy assignment saved" }
+        "toast": {
+          "saved": "Policy assignment saved"
+        }
       },
       "actions_tab": {
         "readonly_alert": "Read-only. Actions (test/fetch-info/lifecycle/delete) require org_admin+ role.",
@@ -1135,7 +1151,11 @@
         }
       },
       "events": {
-        "sev": { "critical": "CRITICAL", "warning": "WARNING", "info": "INFO" },
+        "sev": {
+          "critical": "CRITICAL",
+          "warning": "WARNING",
+          "info": "INFO"
+        },
         "col_date": "Date",
         "col_severity": "Severity",
         "col_type": "Type",
@@ -1436,7 +1456,6 @@
     "created": "User created",
     "create_error": "Error",
     "updated": "Updated",
-    "update_error": "Update failed",
     "form_username": "Username",
     "form_password": "Password",
     "form_role": "Role",
@@ -1504,7 +1523,8 @@
       "assigned_label": "Assigned Locations ({{count}})",
       "empty": "No locations assigned yet",
       "fallback_name": "Location #{{id}}",
-      "fine_grained_hint": "For finer-grained control (module × action) you can assign the user a custom permission set on the <permLink>Permission Settings</permLink> page."
+      "fine_grained_hint": "For finer-grained control (module × action) you can assign the user a custom permission set on the <permLink>Permission Settings</permLink> page.",
+      "toast_already_added": "This location is already added"
     },
     "invite": {
       "section_title": "Invite Links",
@@ -1541,7 +1561,8 @@
         "3d": "3 days",
         "7d": "7 days",
         "30d": "30 days"
-      }
+      },
+      "toast_revoke_failed": "Invite could not be revoked"
     }
   },
   "audit": {
@@ -1645,8 +1666,14 @@
     "language_desc": "Select application language",
     "crumb_admin": "Administration",
     "page_subtitle": "General settings · notification channels · alert rules · SLA policies · credential & token management.",
-    "col": { "action": "Action", "actions": "Actions" },
-    "unit": { "min_short": "min", "day": "days" },
+    "col": {
+      "action": "Action",
+      "actions": "Actions"
+    },
+    "unit": {
+      "min_short": "min",
+      "day": "days"
+    },
     "stat": {
       "notification_channels": "Notification Channels",
       "alert_rules": "Alert Rules",
@@ -1677,12 +1704,21 @@
       "intro_message": "Sends notifications when SNMP poll results exceed interface utilization or error thresholds.",
       "intro_desc": "Your notification channels must have the 'Threshold Alert (SNMP)' option enabled.",
       "col": {
-        "name": "Name", "device": "Device", "interface": "Interface",
-        "metric_threshold": "Metric / Threshold", "consecutive_poll": "Consecutive Polls",
-        "severity": "Severity", "enabled": "Enabled"
+        "name": "Name",
+        "device": "Device",
+        "interface": "Interface",
+        "metric_threshold": "Metric / Threshold",
+        "consecutive_poll": "Consecutive Polls",
+        "severity": "Severity",
+        "enabled": "Enabled"
       },
-      "popconfirm": { "delete_title": "Delete this rule?" },
-      "modal": { "title_new": "New Alert Rule", "title_edit": "Edit Rule" },
+      "popconfirm": {
+        "delete_title": "Delete this rule?"
+      },
+      "modal": {
+        "title_new": "New Alert Rule",
+        "title_edit": "Edit Rule"
+      },
       "form": {
         "name_label": "Rule Name",
         "name_placeholder": "E.g.: Core Switch High Utilization",
@@ -1715,13 +1751,19 @@
       "status_inactive": "Inactive",
       "tooltip_test_send": "Send test",
       "col": {
-        "name": "Name", "type": "Type", "triggers": "Triggers", "status": "Status"
+        "name": "Name",
+        "type": "Type",
+        "triggers": "Triggers",
+        "status": "Status"
       },
       "popconfirm": {
         "send_digest_title": "Send weekly digest?",
         "delete_title": "Delete channel?"
       },
-      "modal": { "title_new": "New Notification Channel", "title_edit": "Edit Channel" },
+      "modal": {
+        "title_new": "New Notification Channel",
+        "title_edit": "Edit Channel"
+      },
       "form": {
         "name_label": "Channel Name",
         "type_label": "Type",
@@ -1775,12 +1817,17 @@
       "empty": "No profiles yet",
       "intro_message": "Credentials are stored with Fernet encryption. Passwords are never returned in API responses.",
       "intro_desc": "Centralize credential management by assigning profiles to devices. Devices with assigned profiles use this profile for SSH/SNMP connections.",
-      "col": { "profile_name": "Profile Name" },
+      "col": {
+        "profile_name": "Profile Name"
+      },
       "popconfirm": {
         "delete_title": "Delete this profile?",
         "delete_desc": "Cannot be deleted if devices are assigned to this profile."
       },
-      "modal": { "title_new": "New Credential Profile", "title_edit": "Edit Profile" },
+      "modal": {
+        "title_new": "New Credential Profile",
+        "title_edit": "Edit Profile"
+      },
       "form": {
         "name_label": "Profile Name",
         "name_placeholder": "E.g.: Cisco Core, Aruba Access, Read-Only",
@@ -1825,8 +1872,13 @@
         "devices": "{{count}} devices",
         "groups": "{{count}} groups"
       },
-      "popconfirm": { "delete_title": "Do you want to delete this policy?" },
-      "modal": { "title_new": "New SLA Policy", "title_edit": "Edit SLA Policy" },
+      "popconfirm": {
+        "delete_title": "Do you want to delete this policy?"
+      },
+      "modal": {
+        "title_new": "New SLA Policy",
+        "title_edit": "Edit SLA Policy"
+      },
       "form": {
         "name_label": "Policy Name",
         "name_placeholder": "Critical Infrastructure SLA",
@@ -1851,7 +1903,9 @@
         "last_poll": "Last Poll",
         "not_yet": "None yet"
       },
-      "col": { "device": "Device" },
+      "col": {
+        "device": "Device"
+      },
       "bulk_section_title": "Bulk SNMP Configuration (SSH)",
       "alert_ruijie_title": "Ruijie community string rule",
       "alert_ruijie_desc": "Community string must include at least 3 character types: uppercase + lowercase + digit. Example: \"Charon1\"",
@@ -1902,7 +1956,9 @@
         "last_result": "Last Result",
         "rotate_now": "Rotate Now"
       },
-      "popconfirm": { "delete_title": "Delete rotation policy?" },
+      "popconfirm": {
+        "delete_title": "Delete rotation policy?"
+      },
       "modal": {
         "title_new": "Add Rotation Policy",
         "title_edit": "Edit Policy",
@@ -1910,8 +1966,12 @@
         "last_result_title": "Last Rotation Result",
         "executed_at": "Executed at {{date}}"
       },
-      "form": { "interval_label": "Rotation Interval (Days)" },
-      "toast": { "started": "Rotation started" }
+      "form": {
+        "interval_label": "Rotation Interval (Days)"
+      },
+      "toast": {
+        "started": "Rotation started"
+      }
     },
     "maintenance": {
       "btn_new": "Add Maintenance Window",
@@ -1925,12 +1985,24 @@
         "end": "End",
         "scope": "Scope"
       },
-      "scope": { "selected_devices": "Selected Devices" },
+      "scope": {
+        "selected_devices": "Selected Devices"
+      },
       "day": {
-        "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
-        "fri": "Friday", "sat": "Saturday", "sun": "Sunday",
-        "mon_short": "Mon", "tue_short": "Tue", "wed_short": "Wed",
-        "thu_short": "Thu", "fri_short": "Fri", "sat_short": "Sat", "sun_short": "Sun"
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday",
+        "mon_short": "Mon",
+        "tue_short": "Tue",
+        "wed_short": "Wed",
+        "thu_short": "Thu",
+        "fri_short": "Fri",
+        "sat_short": "Sat",
+        "sun_short": "Sun"
       },
       "recurrence": {
         "section_title": "Recurrence (optional)",
@@ -1951,8 +2023,13 @@
         "max_count_label": "Max. sample count (opt.)",
         "unlimited": "unlimited"
       },
-      "popconfirm": { "delete_title": "Delete this maintenance window?" },
-      "modal": { "title_new": "New Maintenance Window", "title_edit": "Edit Maintenance Window" },
+      "popconfirm": {
+        "delete_title": "Delete this maintenance window?"
+      },
+      "modal": {
+        "title_new": "New Maintenance Window",
+        "title_edit": "Edit Maintenance Window"
+      },
       "form": {
         "name_label": "Maintenance Name",
         "name_placeholder": "E.g.: Monthly Update — Core Layer",
@@ -2020,7 +2097,9 @@
       "api_key_placeholder_change": "{{name}} API Key (type to change)",
       "model_placeholder": "Select model",
       "ollama_section_title": "Ollama (Local Model)",
-      "toast": { "saved": "AI settings saved" }
+      "toast": {
+        "saved": "AI settings saved"
+      }
     },
     "system": {
       "page_title": "System Settings",
@@ -2095,7 +2174,9 @@
         "expiry_tooltip": "At the end of this period the user is forced to change their password. 0 = no expiry.",
         "force_change_label": "Force password change on first login"
       },
-      "unit": { "password_short": "passwords" },
+      "unit": {
+        "password_short": "passwords"
+      },
       "tester_card_title": "Password Test Tool",
       "tester_hint": "Type below to see if a password passes the current policy.",
       "tester_placeholder": "Password to test…",
@@ -2114,7 +2195,9 @@
       "enabled_desc": "Each login requires a 6-digit code from your authenticator app.",
       "enrolled_at_label": "Enrolled",
       "methods_label": "METHODS",
-      "method": { "authenticator": "Authenticator" },
+      "method": {
+        "authenticator": "Authenticator"
+      },
       "recovery_remaining_label": "RECOVERY CODES REMAINING",
       "tag_running_out": "Running out",
       "btn_regen_recovery": "Regenerate recovery codes",

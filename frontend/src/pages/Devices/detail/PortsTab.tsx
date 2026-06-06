@@ -524,7 +524,7 @@ export default function PortsTab({ device }: { device: Device }) {
                 <Popconfirm
                   title={t('devices.detail.ports.row.poe_on_title', { iface: r.key })}
                   description={t('devices.detail.ports.row.poe_on_desc')}
-                  okText={t('devices.detail.ports.row.poe_on_ok')} cancelText={t('devices.detail.ports.row.poe_cancel')}
+                  okText={t('devices.detail.ports.row.poe_on_ok')} cancelText={t('common.cancel')}
                   onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: true })}
                   disabled={poeSt === 'on' || isPending}
                 >
@@ -538,7 +538,7 @@ export default function PortsTab({ device }: { device: Device }) {
                 <Popconfirm
                   title={t('devices.detail.ports.row.poe_off_title', { iface: r.key })}
                   description={t('devices.detail.ports.row.poe_off_desc')}
-                  okText={t('devices.detail.ports.row.poe_off_ok')} okButtonProps={{ danger: true }} cancelText={t('devices.detail.ports.row.poe_cancel')}
+                  okText={t('devices.detail.ports.row.poe_off_ok')} okButtonProps={{ danger: true }} cancelText={t('common.cancel')}
                   onConfirm={() => setPoeMut.mutate({ iface: r.key, enable: false })}
                   disabled={poeSt === 'off' || isPending}
                 >
@@ -552,7 +552,7 @@ export default function PortsTab({ device }: { device: Device }) {
                 <Popconfirm
                   title={t('devices.detail.ports.row.poe_restart_title', { iface: r.key })}
                   description={t('devices.detail.ports.row.poe_restart_desc')}
-                  okText={t('devices.detail.ports.row.poe_restart_ok')} cancelText={t('devices.detail.ports.row.poe_cancel')}
+                  okText={t('devices.detail.ports.row.poe_restart_ok')} cancelText={t('common.cancel')}
                   onConfirm={() => restartPoeMut.mutate(r.key)}
                   disabled={isPending}
                 >
@@ -695,7 +695,7 @@ export default function PortsTab({ device }: { device: Device }) {
           <Popconfirm
             title={t('devices.detail.ports.bulk_poe.on_title', { count: selected.length })}
             description={t('devices.detail.ports.bulk_poe.on_desc')}
-            okText={t('devices.detail.ports.row.poe_on_ok')} cancelText={t('devices.detail.ports.row.poe_cancel')}
+            okText={t('devices.detail.ports.row.poe_on_ok')} cancelText={t('common.cancel')}
             onConfirm={() => bulkPoeMut.mutate({ action: 'on' })}
           >
             <Button
@@ -706,7 +706,7 @@ export default function PortsTab({ device }: { device: Device }) {
           <Popconfirm
             title={t('devices.detail.ports.bulk_poe.off_title', { count: selected.length })}
             description={t('devices.detail.ports.bulk_poe.off_desc')}
-            okText={t('devices.detail.ports.row.poe_off_ok')} okButtonProps={{ danger: true }} cancelText={t('devices.detail.ports.row.poe_cancel')}
+            okText={t('devices.detail.ports.row.poe_off_ok')} okButtonProps={{ danger: true }} cancelText={t('common.cancel')}
             onConfirm={() => bulkPoeMut.mutate({ action: 'off' })}
           >
             <Button

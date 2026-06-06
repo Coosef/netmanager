@@ -440,7 +440,7 @@ function BulkLifecycleModal({
       title={<Space><InboxOutlined style={{ color: '#0ea5e9' }} />{t('devices.bulk_lifecycle.title', { count: selectedIds.length })}</Space>}
       onOk={() => result ? onClose() : mut.mutate()}
       confirmLoading={mut.isPending}
-      okText={result ? t('common.close') : t('devices.bulk_lifecycle.apply')}
+      okText={result ? t('common.close') : t('common.apply')}
       cancelButtonProps={result ? { style: { display: 'none' } } : undefined}
       width={620}
     >
@@ -962,7 +962,7 @@ export default function DevicesPage() {
   const deleteMutation = useMutation({
     mutationFn: devicesApi.delete,
     onSuccess: () => { message.success(t('devices.deleted')); queryClient.invalidateQueries({ queryKey: ['devices'] }); queryClient.invalidateQueries({ queryKey: ['devices-stats'] }) },
-    onError: (err: any) => message.error(apiErr(err, t('devices.delete_error'))),
+    onError: (err: any) => message.error(apiErr(err, t('common.delete_failed'))),
   })
 
   // T9 Tur 4 #7+#14 — Lifecycle state transition (archived dahil)
@@ -1433,7 +1433,7 @@ export default function DevicesPage() {
               {[
                 { label: t('devices.csv.result_created'), value: csvResult.created, color: '#22c55e' },
                 { label: t('devices.csv.result_updated'), value: csvResult.updated, color: '#3b82f6' },
-                { label: t('devices.csv.result_errors'), value: csvResult.errors.length, color: '#ef4444' },
+                { label: t('common.error'), value: csvResult.errors.length, color: '#ef4444' },
               ].map(s => (
                 <Col span={8} key={s.label}>
                   <Card size="small" style={{ textAlign: 'center', border: `1px solid ${s.color}33` }}>
