@@ -27,6 +27,69 @@ async def _authenticate_ws(websocket: WebSocket, token: Optional[str]) -> bool:
     return True
 
 
+# SSH Session Termination — module-level for test access.
+async def _ssh_terminate_listener(
+    my_session_id: str,
+    websocket: WebSocket,
+    evt: asyncio.Event,
+) -> None:
+    """Redis 'terminal:terminate' kanalını dinler ve kendi session_id'siyle
+    eşleşen mesajı yakalar. Eşleşmede:
+      1. ANSI kırmızı banner WS'ye yaz
+      2. websocket.close(code=4000) — read/write task'leri exit eder
+      3. ``evt`` set — finally bloğunda exit_reason='force_closed' override
+
+    Redis down / cancel: sessizce çıkar (tasarım §10.7), revalidator
+    veya kullanıcı kapama akışı devreye girer.
+    """
+    from app.core.redis_client import get_redis
+    pubsub = None
+    try:
+        r = get_redis()
+        pubsub = r.pubsub()
+        await pubsub.subscribe("terminal:terminate")
+        async for msg in pubsub.listen():
+            if msg.get("type") != "message":
+                continue
+            try:
+                payload = json.loads(msg.get("data") or "{}")
+            except Exception:
+                continue
+            if payload.get("session_id") != my_session_id:
+                continue
+            evt.set()
+            try:
+                await websocket.send_text(
+                    "\r\n\x1b[31m"
+                    "═══════════════════════════════════════════\r\n"
+                    "  This terminal session was terminated by\r\n"
+                    "  an administrator.\r\n"
+                    "═══════════════════════════════════════════"
+                    "\x1b[0m\r\n"
+                )
+            except Exception:
+                pass
+            try:
+                await websocket.close(code=4000)
+            except Exception:
+                pass
+            return
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        return
+    finally:
+        if pubsub is not None:
+            try:
+                await pubsub.unsubscribe("terminal:terminate")
+            except Exception:
+                pass
+            try:
+                await pubsub.aclose()
+            except Exception:
+                pass
+
+
 @dataclass
 class WsScope:
     """The validated tenancy scope of one realtime connection — Faz 8
@@ -445,63 +508,17 @@ async def ssh_terminal_ws(
             connection_path="agent_relay" if use_agent else "direct_paramiko",
         )
 
-    # SSH Session Termination — Redis pub/sub listener. Admin
-    # POST /terminal-sessions/{id}/terminate çağrısı 'terminal:terminate'
-    # kanalına broadcast eder; bu task kendi session_id'siyle eşleşen
-    # mesajı yakalar, banner basar ve WS'yi kapatır → read/write task'leri
-    # exit eder, finally bloğunda exit_reason='force_closed' işlenir.
+    # SSH Session Termination — Redis pub/sub listener.
+    # Admin POST /terminal-sessions/{id}/terminate çağrısı
+    # 'terminal:terminate' kanalına broadcast eder; bu task kendi
+    # session_id'siyle eşleşen mesajı yakalar, banner basar ve WS'yi
+    # kapatır → read/write task'leri exit eder, finally bloğunda
+    # exit_reason='force_closed' işlenir. Helper module-level
+    # (_ssh_terminate_listener) — test edilebilir.
     _terminate_evt = asyncio.Event()
-    _my_session_id = _term_logger.session_id
-
-    async def _terminate_listener():
-        from app.core.redis_client import get_redis
-        pubsub = None
-        try:
-            r = get_redis()
-            pubsub = r.pubsub()
-            await pubsub.subscribe("terminal:terminate")
-            async for msg in pubsub.listen():
-                if msg.get("type") != "message":
-                    continue
-                try:
-                    payload = json.loads(msg.get("data") or "{}")
-                except Exception:
-                    continue
-                if payload.get("session_id") != _my_session_id:
-                    continue
-                _terminate_evt.set()
-                try:
-                    await websocket.send_text(
-                        "\r\n\x1b[31m"
-                        "═══════════════════════════════════════════\r\n"
-                        "  This terminal session was terminated by\r\n"
-                        "  an administrator.\r\n"
-                        "═══════════════════════════════════════════"
-                        "\x1b[0m\r\n"
-                    )
-                except Exception:
-                    pass
-                try:
-                    await websocket.close(code=4000)
-                except Exception:
-                    pass
-                return
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return  # Redis down vs.; tasarım §10.7 — sessizce çık
-        finally:
-            if pubsub is not None:
-                try:
-                    await pubsub.unsubscribe("terminal:terminate")
-                except Exception:
-                    pass
-                try:
-                    await pubsub.aclose()
-                except Exception:
-                    pass
-
-    _terminate_task = asyncio.create_task(_terminate_listener())
+    _terminate_task = asyncio.create_task(
+        _ssh_terminate_listener(_term_logger.session_id, websocket, _terminate_evt)
+    )
 
     if use_agent:
         await websocket.send_text(
