@@ -137,6 +137,7 @@
     "password": "Пароль",
     "unknown_error": "Неизвестная ошибка",
     "validation": {
+      "email_invalid": "Введите корректный email",
       "required": "Поле обязательно",
       "ip_required": "IP-адрес обязателен",
       "ipv4_invalid": "Введите корректный IPv4-адрес",
@@ -1445,7 +1446,96 @@
     "organization": "Организация",
     "subtitle": "Учётные записи и роли доступа",
     "active": "Активен",
-    "inactive": "Неактивен"
+    "inactive": "Неактивен",
+    "users_count": "{{count}} пользователей",
+    "card_title": "Пользователи",
+    "empty_users": "Пользователей пока нет",
+    "you_pill": "ВЫ",
+    "locations_short": "{{count}} лок",
+    "mfa_on_short": "ВКЛ",
+    "mfa_off_short": "ВЫКЛ",
+    "form_email_label": "Email",
+    "role": {
+      "super_admin": "СУПЕР АДМИН",
+      "org_admin": "ORG АДМИН",
+      "location_admin": "АДМИН ЛОКАЦИИ",
+      "viewer": "ПРОСМОТРЩИК"
+    },
+    "stat": {
+      "total": "ВСЕГО ПОЛЬЗОВАТЕЛЕЙ",
+      "active": "АКТИВНЫЕ",
+      "mfa_on": "MFA ВКЛ",
+      "login_24h": "ВХОД (24Ч)",
+      "pending_invite": "ОЖИДАЮЩИЕ ПРИГЛАШЕНИЯ",
+      "super_admin": "СУПЕР АДМИН",
+      "distinct_roles": "ролей: {{count}}",
+      "inactive_count": "{{count}} неактивны",
+      "mfa_coverage": "охват {{pct}}%",
+      "activity_window": "окно последней активности",
+      "active_link": "активная ссылка",
+      "org_admin_count": "{{count}} org admin"
+    },
+    "tab": {
+      "general": "Общее",
+      "org_locations": "Org & Локации"
+    },
+    "ip_allowlist": {
+      "label": "Разрешённые IP (опционально)",
+      "tooltip": "Пользователь может входить только с этих IP/CIDR. Пусто = без ограничений. Несколько значений через запятую. Пример: <ex>{{example}}</ex>",
+      "extra": "Пусто = без ограничений · IPv4/IPv6 + CIDR (напр.: 10.0.0.0/8)",
+      "placeholder": "10.0.0.0/8, 192.168.1.5"
+    },
+    "locations": {
+      "org_label": "Организация",
+      "org_placeholder": "Выберите организацию",
+      "intro": "Этот список определяет, <s>какие локации может видеть пользователь</s>. Уровень полномочий (админ/просмотр) задаётся полем <s>роль</s> на вкладке <e>Общее</e>.",
+      "bullet_super_admin": "• <s>Супер Админ</s> получает доступ ко всем локациям всех организаций (назначение не требуется).",
+      "bullet_org_admin": "• <s>Org Admin</s> автоматически получает доступ ко всем локациям своей организации.",
+      "bullet_location_admin": "• <s>Админ Локации</s> и <s>Просмотрщик</s> получают доступ только к назначенным ниже локациям.",
+      "add_section_title": "Добавить локацию",
+      "add_placeholder": "Выберите локацию",
+      "assigned_label": "Назначенные локации ({{count}})",
+      "empty": "Локации пока не назначены",
+      "fallback_name": "Локация #{{id}}",
+      "fine_grained_hint": "Для более тонкой настройки (модуль × действие) можно назначить пользователю собственный набор прав на странице <permLink>Настройки прав</permLink>."
+    },
+    "invite": {
+      "section_title": "Ссылки-приглашения",
+      "btn_new": "Создать приглашение",
+      "empty": "Приглашения пока не созданы",
+      "col": {
+        "email": "Email",
+        "role": "Роль",
+        "expires": "Истекает",
+        "status": "Статус"
+      },
+      "status_used": "Использовано",
+      "status_expired": "Истекло",
+      "status_active": "Активно",
+      "tooltip_copy": "Копировать ссылку",
+      "tooltip_revoke": "Отозвать",
+      "popconfirm_revoke_title": "Отозвать приглашение?",
+      "toast_token_not_stored": "Токен не хранится в целях безопасности — создайте новое приглашение",
+      "modal": {
+        "title": "Создать ссылку-приглашение",
+        "ok_create": "Создать приглашение",
+        "ok_done": "Готово",
+        "success_copied": "Ссылка-приглашение скопирована в буфер обмена",
+        "success_share_hint": "Поделитесь этой ссылкой с приглашаемым человеком. Ссылка одноразовая."
+      },
+      "form": {
+        "email_label": "Email-адрес",
+        "email_placeholder": "user@company.com",
+        "role_label": "Роль",
+        "expires_label": "Срок действия"
+      },
+      "expires": {
+        "24h": "24 часа",
+        "3d": "3 дня",
+        "7d": "7 дней",
+        "30d": "30 дней"
+      }
+    }
   },
   "audit": {
     "title": "Журнал аудита",

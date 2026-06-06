@@ -140,6 +140,7 @@
       "required": "Bu alan gerekli",
       "ip_required": "IP adresi gerekli",
       "ipv4_invalid": "Geçerli bir IPv4 adresi girin",
+      "email_invalid": "Geçerli bir e-posta girin",
       "username_required": "Kullanıcı adı gerekli",
       "password_required": "Şifre gerekli",
       "ssh_username_required": "SSH Kullanıcısı gerekli",
@@ -1452,7 +1453,96 @@
     "organization": "Organizasyon",
     "subtitle": "Kullanıcı hesapları ve erişim rolleri",
     "active": "Aktif",
-    "inactive": "Pasif"
+    "inactive": "Pasif",
+    "users_count": "{{count}} kullanıcı",
+    "card_title": "Kullanıcılar",
+    "empty_users": "Henüz kullanıcı yok",
+    "you_pill": "SİZ",
+    "locations_short": "{{count}} lok",
+    "mfa_on_short": "AÇIK",
+    "mfa_off_short": "KAPALI",
+    "form_email_label": "E-posta",
+    "role": {
+      "super_admin": "SÜPER ADMİN",
+      "org_admin": "ORG ADMİN",
+      "location_admin": "LOKASYON ADMİN",
+      "viewer": "GÖRÜNTÜLEYİCİ"
+    },
+    "stat": {
+      "total": "TOPLAM KULLANICI",
+      "active": "AKTİF",
+      "mfa_on": "MFA AÇIK",
+      "login_24h": "SON 24SA GİRİŞ",
+      "pending_invite": "BEKLEYEN DAVET",
+      "super_admin": "SÜPER ADMİN",
+      "distinct_roles": "{{count}} farklı rol",
+      "inactive_count": "{{count}} pasif",
+      "mfa_coverage": "{{pct}}% kapsam",
+      "activity_window": "son aktivite penceresi",
+      "active_link": "aktif link",
+      "org_admin_count": "{{count}} org admin"
+    },
+    "tab": {
+      "general": "Genel",
+      "org_locations": "Org & Lokasyonlar"
+    },
+    "ip_allowlist": {
+      "label": "İzin Verilen IP'ler (opsiyonel)",
+      "tooltip": "Kullanıcı sadece bu IP/CIDR'lardan giriş yapabilir. Boş bırakırsanız kısıtlama yok. Virgülle ayırarak birden çok yazın. Örnek: <ex>{{example}}</ex>",
+      "extra": "Boş = kısıt yok · IPv4/IPv6 + CIDR (örn: 10.0.0.0/8)",
+      "placeholder": "10.0.0.0/8, 192.168.1.5"
+    },
+    "locations": {
+      "org_label": "Organizasyon",
+      "org_placeholder": "Organizasyon seçin",
+      "intro": "Bu liste kullanıcının <s>hangi lokasyonları görebileceğini</s> belirler. Yetki seviyesini (yönetici/görüntüleyici) <e>Genel</e> sekmesindeki <s>rol</s> alanı verir.",
+      "bullet_super_admin": "• <s>Süper Admin</s> tüm organizasyonların tüm lokasyonlarına erişir (atama gerekmez).",
+      "bullet_org_admin": "• <s>Org Admin</s> kendi organizasyonunun tüm lokasyonlarına otomatik erişir.",
+      "bullet_location_admin": "• <s>Lokasyon Admin</s> ve <s>Görüntüleyici</s> sadece aşağıda atanmış lokasyonlara erişir.",
+      "add_section_title": "Lokasyon Ekle",
+      "add_placeholder": "Lokasyon seç",
+      "assigned_label": "Atanmış Lokasyonlar ({{count}})",
+      "empty": "Henüz lokasyon atanmamış",
+      "fallback_name": "Lokasyon #{{id}}",
+      "fine_grained_hint": "Daha ince ayar (modül × eylem) gerekiyorsa kullanıcıya <permLink>Yetki Ayarları</permLink> sayfasından özel bir yetki seti atayabilirsiniz."
+    },
+    "invite": {
+      "section_title": "Davet Linkleri",
+      "btn_new": "Davet Oluştur",
+      "empty": "Henüz davet oluşturulmamış",
+      "col": {
+        "email": "E-posta",
+        "role": "Rol",
+        "expires": "Bitiş",
+        "status": "Durum"
+      },
+      "status_used": "Kullanıldı",
+      "status_expired": "Süresi Doldu",
+      "status_active": "Aktif",
+      "tooltip_copy": "Linki Kopyala",
+      "tooltip_revoke": "İptal Et",
+      "popconfirm_revoke_title": "Daveti iptal et?",
+      "toast_token_not_stored": "Token güvenlik amacıyla saklanmıyor — yeni davet oluşturun",
+      "modal": {
+        "title": "Davet Linki Oluştur",
+        "ok_create": "Davet Oluştur",
+        "ok_done": "Tamam",
+        "success_copied": "Davet linki panoya kopyalandı",
+        "success_share_hint": "Bu linki davette bulunmak istediğiniz kişiyle paylaşın. Link tek kullanımlıktır."
+      },
+      "form": {
+        "email_label": "E-posta Adresi",
+        "email_placeholder": "kullanici@sirket.com",
+        "role_label": "Rol",
+        "expires_label": "Geçerlilik Süresi"
+      },
+      "expires": {
+        "24h": "24 saat",
+        "3d": "3 gün",
+        "7d": "7 gün",
+        "30d": "30 gün"
+      }
+    }
   },
   "audit": {
     "title": "Audit Log",

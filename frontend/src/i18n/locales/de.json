@@ -137,6 +137,7 @@
     "password": "Passwort",
     "unknown_error": "Unbekannter Fehler",
     "validation": {
+      "email_invalid": "Geben Sie eine gültige E-Mail ein",
       "required": "Dieses Feld ist erforderlich",
       "ip_required": "IP-Adresse ist erforderlich",
       "ipv4_invalid": "Eine gültige IPv4-Adresse eingeben",
@@ -1445,7 +1446,96 @@
     "organization": "Organisation",
     "subtitle": "Benutzerkonten und Zugriffsrollen",
     "active": "Aktiv",
-    "inactive": "Inaktiv"
+    "inactive": "Inaktiv",
+    "users_count": "{{count}} Benutzer",
+    "card_title": "Benutzer",
+    "empty_users": "Noch keine Benutzer",
+    "you_pill": "SIE",
+    "locations_short": "{{count}} Std.",
+    "mfa_on_short": "EIN",
+    "mfa_off_short": "AUS",
+    "form_email_label": "E-Mail",
+    "role": {
+      "super_admin": "SUPER ADMIN",
+      "org_admin": "ORG ADMIN",
+      "location_admin": "STANDORT-ADMIN",
+      "viewer": "BETRACHTER"
+    },
+    "stat": {
+      "total": "BENUTZER GESAMT",
+      "active": "AKTIV",
+      "mfa_on": "MFA EIN",
+      "login_24h": "LOGIN (24H)",
+      "pending_invite": "AUSSTEHENDE EINLADUNGEN",
+      "super_admin": "SUPER ADMIN",
+      "distinct_roles": "{{count}} verschiedene Rollen",
+      "inactive_count": "{{count}} inaktiv",
+      "mfa_coverage": "{{pct}}% Abdeckung",
+      "activity_window": "letztes Aktivitätsfenster",
+      "active_link": "aktiver Link",
+      "org_admin_count": "{{count}} Org-Admin"
+    },
+    "tab": {
+      "general": "Allgemein",
+      "org_locations": "Org & Standorte"
+    },
+    "ip_allowlist": {
+      "label": "Erlaubte IPs (optional)",
+      "tooltip": "Benutzer kann sich nur von diesen IP/CIDRs anmelden. Leer = keine Einschränkung. Mehrere Werte mit Komma trennen. Beispiel: <ex>{{example}}</ex>",
+      "extra": "Leer = keine Einschränkung · IPv4/IPv6 + CIDR (z.B.: 10.0.0.0/8)",
+      "placeholder": "10.0.0.0/8, 192.168.1.5"
+    },
+    "locations": {
+      "org_label": "Organisation",
+      "org_placeholder": "Organisation auswählen",
+      "intro": "Diese Liste bestimmt, <s>welche Standorte der Benutzer sehen kann</s>. Die Berechtigungsstufe (Admin/Betrachter) wird durch das Feld <s>Rolle</s> auf dem Tab <e>Allgemein</e> festgelegt.",
+      "bullet_super_admin": "• <s>Super Admin</s> greift auf alle Standorte aller Organisationen zu (keine Zuweisung erforderlich).",
+      "bullet_org_admin": "• <s>Org Admin</s> greift automatisch auf alle Standorte seiner Organisation zu.",
+      "bullet_location_admin": "• <s>Standort-Admin</s> und <s>Betrachter</s> greifen nur auf unten zugewiesene Standorte zu.",
+      "add_section_title": "Standort hinzufügen",
+      "add_placeholder": "Standort auswählen",
+      "assigned_label": "Zugewiesene Standorte ({{count}})",
+      "empty": "Noch keine Standorte zugewiesen",
+      "fallback_name": "Standort #{{id}}",
+      "fine_grained_hint": "Für feinere Einstellungen (Modul × Aktion) können Sie dem Benutzer einen eigenen Berechtigungssatz auf der Seite <permLink>Berechtigungseinstellungen</permLink> zuweisen."
+    },
+    "invite": {
+      "section_title": "Einladungslinks",
+      "btn_new": "Einladung erstellen",
+      "empty": "Noch keine Einladungen erstellt",
+      "col": {
+        "email": "E-Mail",
+        "role": "Rolle",
+        "expires": "Ablauf",
+        "status": "Status"
+      },
+      "status_used": "Verwendet",
+      "status_expired": "Abgelaufen",
+      "status_active": "Aktiv",
+      "tooltip_copy": "Link kopieren",
+      "tooltip_revoke": "Widerrufen",
+      "popconfirm_revoke_title": "Einladung widerrufen?",
+      "toast_token_not_stored": "Token wird aus Sicherheitsgründen nicht gespeichert — neue Einladung erstellen",
+      "modal": {
+        "title": "Einladungslink erstellen",
+        "ok_create": "Einladung erstellen",
+        "ok_done": "Fertig",
+        "success_copied": "Einladungslink in die Zwischenablage kopiert",
+        "success_share_hint": "Teilen Sie diesen Link mit der einzuladenden Person. Der Link ist einmalig verwendbar."
+      },
+      "form": {
+        "email_label": "E-Mail-Adresse",
+        "email_placeholder": "benutzer@firma.com",
+        "role_label": "Rolle",
+        "expires_label": "Gültigkeitsdauer"
+      },
+      "expires": {
+        "24h": "24 Stunden",
+        "3d": "3 Tage",
+        "7d": "7 Tage",
+        "30d": "30 Tage"
+      }
+    }
   },
   "audit": {
     "title": "Auditprotokoll",
