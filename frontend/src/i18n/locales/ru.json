@@ -1607,7 +1607,8 @@
       "duration": "ДЛИТ.",
       "io": "I/O",
       "status": "СТАТУС",
-      "client_ip": "IP"
+      "client_ip": "IP",
+      "actions": "Действие"
     },
     "status": {
       "in_progress": "Выполняется",
@@ -1616,7 +1617,8 @@
       "agent_disconnected": "Агент отключён",
       "paramiko_error": "Ошибка Paramiko",
       "ws_error": "Ошибка WebSocket",
-      "stale_cleanup": "Автоочистка"
+      "stale_cleanup": "Автоочистка",
+      "force_closed": "Закрыто администратором"
     },
     "path": {
       "agent_relay": "Агент",
@@ -1658,6 +1660,18 @@
       "ai_ready": "AI-сводка готова ({{provider}} / {{tokens}} токенов)",
       "ai_status_other": "Статус: {{status}}",
       "ai_failed": "Не удалось сгенерировать AI-сводку"
+    },
+    "terminate": {
+      "btn_tooltip": "Завершить сессию",
+      "confirm_title": "Закрыть эту SSH-сессию?",
+      "confirm_desc": "Активная сессия {{username}} на {{device}} будет принудительно закрыта.",
+      "confirm_ok": "Да, закрыть",
+      "toast": {
+        "success_title": "Сессия завершена",
+        "already_closed": "Эта сессия уже закрыта",
+        "forbidden": "У вас нет прав для этого действия",
+        "failed": "Не удалось завершить сессию"
+      }
     }
   },
   "settings": {
