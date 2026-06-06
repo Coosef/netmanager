@@ -1583,7 +1583,8 @@
       "duration": "SÜRE",
       "io": "I/O",
       "status": "DURUM",
-      "client_ip": "IP"
+      "client_ip": "IP",
+      "actions": "Eylem"
     },
     "status": {
       "in_progress": "Devam ediyor",
@@ -1592,7 +1593,8 @@
       "agent_disconnected": "Agent bağlantısı koptu",
       "paramiko_error": "Paramiko hatası",
       "ws_error": "WebSocket hatası",
-      "stale_cleanup": "Otomatik temizlik"
+      "stale_cleanup": "Otomatik temizlik",
+      "force_closed": "Yönetici tarafından kapatıldı"
     },
     "path": {
       "agent_relay": "Agent",
@@ -1634,6 +1636,18 @@
       "ai_ready": "AI özet hazırlandı ({{provider}} / {{tokens}} token)",
       "ai_status_other": "Durum: {{status}}",
       "ai_failed": "AI özet üretilemedi"
+    },
+    "terminate": {
+      "btn_tooltip": "Oturumu Sonlandır",
+      "confirm_title": "Bu SSH oturumunu kapatmak istiyor musunuz?",
+      "confirm_desc": "{{username}} kullanıcısının {{device}} cihazındaki aktif oturumu zorla kapanacak.",
+      "confirm_ok": "Evet, Kapat",
+      "toast": {
+        "success_title": "Oturum sonlandırıldı",
+        "already_closed": "Bu oturum zaten kapatılmış",
+        "forbidden": "Bu işlem için yetkiniz yok",
+        "failed": "Oturum sonlandırılamadı"
+      }
     }
   },
   "settings": {

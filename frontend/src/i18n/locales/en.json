@@ -1607,7 +1607,8 @@
       "duration": "DURATION",
       "io": "I/O",
       "status": "STATUS",
-      "client_ip": "IP"
+      "client_ip": "IP",
+      "actions": "Action"
     },
     "status": {
       "in_progress": "In progress",
@@ -1616,7 +1617,8 @@
       "agent_disconnected": "Agent disconnected",
       "paramiko_error": "Paramiko error",
       "ws_error": "WebSocket error",
-      "stale_cleanup": "Auto cleanup"
+      "stale_cleanup": "Auto cleanup",
+      "force_closed": "Closed by administrator"
     },
     "path": {
       "agent_relay": "Agent",
@@ -1658,6 +1660,18 @@
       "ai_ready": "AI summary ready ({{provider}} / {{tokens}} tokens)",
       "ai_status_other": "Status: {{status}}",
       "ai_failed": "AI summary could not be generated"
+    },
+    "terminate": {
+      "btn_tooltip": "Terminate Session",
+      "confirm_title": "Close this SSH session?",
+      "confirm_desc": "{{username}}'s active session on {{device}} will be force-closed.",
+      "confirm_ok": "Yes, close",
+      "toast": {
+        "success_title": "Session terminated",
+        "already_closed": "This session is already closed",
+        "forbidden": "You do not have permission for this action",
+        "failed": "Failed to terminate session"
+      }
     }
   },
   "settings": {

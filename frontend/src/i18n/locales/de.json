@@ -1607,7 +1607,8 @@
       "duration": "DAUER",
       "io": "I/O",
       "status": "STATUS",
-      "client_ip": "IP"
+      "client_ip": "IP",
+      "actions": "Aktion"
     },
     "status": {
       "in_progress": "Läuft",
@@ -1616,7 +1617,8 @@
       "agent_disconnected": "Agent getrennt",
       "paramiko_error": "Paramiko-Fehler",
       "ws_error": "WebSocket-Fehler",
-      "stale_cleanup": "Automatische Bereinigung"
+      "stale_cleanup": "Automatische Bereinigung",
+      "force_closed": "Vom Administrator geschlossen"
     },
     "path": {
       "agent_relay": "Agent",
@@ -1658,6 +1660,18 @@
       "ai_ready": "KI-Zusammenfassung bereit ({{provider}} / {{tokens}} Token)",
       "ai_status_other": "Status: {{status}}",
       "ai_failed": "KI-Zusammenfassung konnte nicht erstellt werden"
+    },
+    "terminate": {
+      "btn_tooltip": "Sitzung beenden",
+      "confirm_title": "Diese SSH-Sitzung schließen?",
+      "confirm_desc": "Aktive Sitzung von {{username}} auf {{device}} wird zwangsweise geschlossen.",
+      "confirm_ok": "Ja, schließen",
+      "toast": {
+        "success_title": "Sitzung beendet",
+        "already_closed": "Diese Sitzung ist bereits geschlossen",
+        "forbidden": "Sie haben keine Berechtigung für diese Aktion",
+        "failed": "Sitzung konnte nicht beendet werden"
+      }
     }
   },
   "settings": {
