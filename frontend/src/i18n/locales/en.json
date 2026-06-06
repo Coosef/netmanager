@@ -123,6 +123,19 @@
     "updated_at": "Updated",
     "apply": "Apply",
     "no_results": "No results found",
+    "update": "Update",
+    "create": "Create",
+    "required_field": "Required",
+    "action_failed": "Operation failed",
+    "error_occurred": "An error occurred",
+    "save_failed": "Save failed",
+    "delete_failed": "Delete failed",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "test": "Test",
+    "username": "Username",
+    "password": "Password",
+    "unknown_error": "Unknown error",
     "validation": {
       "required": "This field is required",
       "ip_required": "IP address is required",
@@ -1540,6 +1553,542 @@
     "title": "Settings",
     "language": "Language",
     "language_desc": "Select application language",
+    "crumb_admin": "Administration",
+    "page_subtitle": "General settings · notification channels · alert rules · SLA policies · credential & token management.",
+    "col": { "action": "Action", "actions": "Actions" },
+    "unit": { "min_short": "min", "day": "days" },
+    "stat": {
+      "notification_channels": "Notification Channels",
+      "alert_rules": "Alert Rules",
+      "sla_policies": "SLA Policies",
+      "credential_profiles": "Credential Profiles",
+      "api_tokens": "API Tokens",
+      "n_active": "{{count}} active"
+    },
+    "tab": {
+      "general": "General",
+      "system": "System (Scanning)",
+      "password_policy": "Password Policy",
+      "notifications": "Notifications",
+      "alert_rules": "Alert Rules",
+      "maintenance": "Maintenance Windows",
+      "credentials": "Credential Profiles",
+      "rotation": "Password Rotation",
+      "sla": "SLA Policies",
+      "snmp": "SNMP",
+      "api_tokens": "API Tokens",
+      "driver_templates": "Driver Templates",
+      "ai": "AI Assistant"
+    },
+    "alert_rules": {
+      "btn_new": "New Rule",
+      "empty": "No rules yet",
+      "all_devices": "All Devices",
+      "intro_message": "Sends notifications when SNMP poll results exceed interface utilization or error thresholds.",
+      "intro_desc": "Your notification channels must have the 'Threshold Alert (SNMP)' option enabled.",
+      "col": {
+        "name": "Name", "device": "Device", "interface": "Interface",
+        "metric_threshold": "Metric / Threshold", "consecutive_poll": "Consecutive Polls",
+        "severity": "Severity", "enabled": "Enabled"
+      },
+      "popconfirm": { "delete_title": "Delete this rule?" },
+      "modal": { "title_new": "New Alert Rule", "title_edit": "Edit Rule" },
+      "form": {
+        "name_label": "Rule Name",
+        "name_placeholder": "E.g.: Core Switch High Utilization",
+        "device_label": "Device",
+        "device_tooltip": "If empty, applies to all devices",
+        "device_placeholder": "— All Devices —",
+        "interface_pattern_label": "Interface Pattern",
+        "interface_pattern_tooltip": "fnmatch pattern. E.g.: Gi0/*, Te*, empty = all interfaces",
+        "interface_pattern_placeholder": "* (all interfaces)",
+        "metric_label": "Metric",
+        "threshold_label": "Threshold (%)",
+        "consecutive_label": "Consecutive Poll Count",
+        "consecutive_tooltip": "How many consecutive polls must exceed the threshold",
+        "severity_label": "Severity",
+        "cooldown_label": "Cooldown (min)",
+        "cooldown_tooltip": "Minimum notification interval for the same rule",
+        "enabled_label": "Enabled"
+      },
+      "toast": {
+        "created": "Rule created",
+        "updated": "Rule updated",
+        "deleted": "Rule deleted"
+      }
+    },
+    "notifications": {
+      "intro": "Manage notification channels. When events occur, messages are sent automatically to the selected channels.",
+      "btn_add": "Add Channel",
+      "btn_send_digest": "Send Weekly Digest",
+      "status_active": "Active",
+      "status_inactive": "Inactive",
+      "tooltip_test_send": "Send test",
+      "col": {
+        "name": "Name", "type": "Type", "triggers": "Triggers", "status": "Status"
+      },
+      "popconfirm": {
+        "send_digest_title": "Send weekly digest?",
+        "delete_title": "Delete channel?"
+      },
+      "modal": { "title_new": "New Notification Channel", "title_edit": "Edit Channel" },
+      "form": {
+        "name_label": "Channel Name",
+        "type_label": "Type",
+        "triggers_placeholder": "Select events to notify on",
+        "active_label": "Active"
+      },
+      "channel": {
+        "email": "Email",
+        "webhook": "Generic Webhook",
+        "jira": "Jira (Ticket)"
+      },
+      "email": {
+        "recipients_label": "Recipients",
+        "recipients_extra": "Separate with commas"
+      },
+      "teams": {
+        "webhook_extra": "Get it from the Incoming Webhook connector in the Teams channel"
+      },
+      "webhook": {
+        "url_label": "Target URL",
+        "headers_label": "Custom Headers",
+        "headers_extra": "JSON format: {\"X-API-Key\": \"abc123\"}"
+      },
+      "telegram": {
+        "bot_token_label": "Bot Token",
+        "chat_id_label": "Chat ID"
+      },
+      "jira": {
+        "info_alert": "For Jira Cloud use an Atlassian API Token. For Jira Server enter username + password.",
+        "url_label": "Jira URL",
+        "url_extra": "E.g.: https://mycompany.atlassian.net",
+        "email_label": "Email / Username",
+        "api_token_label": "API Token / Password",
+        "api_token_extra": "Atlassian Cloud: id.atlassian.com → Security → API token",
+        "project_key_label": "Project Key",
+        "project_key_extra": "Short code from the Jira project page (NET, OPS, INFRA, etc.)",
+        "issue_type_label": "Issue Type",
+        "issue_type_extra": "Issue type name defined in your Jira project"
+      },
+      "toast": {
+        "created": "Channel created",
+        "updated": "Channel updated",
+        "deleted": "Channel deleted",
+        "test_sent": "Test message sent!",
+        "test_failed": "Test failed: {{error}}",
+        "digest_queued": "Weekly digest queued"
+      }
+    },
+    "credentials": {
+      "btn_new": "New Profile",
+      "empty": "No profiles yet",
+      "intro_message": "Credentials are stored with Fernet encryption. Passwords are never returned in API responses.",
+      "intro_desc": "Centralize credential management by assigning profiles to devices. Devices with assigned profiles use this profile for SSH/SNMP connections.",
+      "col": { "profile_name": "Profile Name" },
+      "popconfirm": {
+        "delete_title": "Delete this profile?",
+        "delete_desc": "Cannot be deleted if devices are assigned to this profile."
+      },
+      "modal": { "title_new": "New Credential Profile", "title_edit": "Edit Profile" },
+      "form": {
+        "name_label": "Profile Name",
+        "name_placeholder": "E.g.: Cisco Core, Aruba Access, Read-Only",
+        "description_label": "Description",
+        "description_placeholder": "Optional note",
+        "ssh_username_label": "SSH Username",
+        "ssh_password_label": "SSH Password",
+        "ssh_password_edit_label": "SSH Password (fill to change)",
+        "ssh_port_label": "SSH Port",
+        "enable_secret_label": "Enable Secret",
+        "enable_secret_edit_label": "Enable Secret (fill to change)",
+        "enable_secret_tooltip": "If empty, the current value is preserved; enter a space to clear",
+        "password_edit_placeholder": "— enter to change —",
+        "snmp_enabled_label": "SNMP Enabled",
+        "snmp_version_label": "SNMP Version",
+        "snmp_port_label": "SNMP Port",
+        "v3_username_label": "v3 Username",
+        "v3_auth_proto_label": "Auth Protocol",
+        "v3_auth_pass_label": "Auth Passphrase",
+        "v3_priv_proto_label": "Priv Protocol",
+        "v3_priv_pass_label": "Priv Passphrase",
+        "empty_select": "— none —"
+      },
+      "toast": {
+        "created": "Profile created",
+        "updated": "Profile updated",
+        "deleted": "Profile deleted"
+      }
+    },
+    "sla": {
+      "btn_new": "Add Policy",
+      "intro": "Define uptime targets per device or group. Notifications can be sent on breach.",
+      "days_value": "{{count}} days",
+      "col": {
+        "policy_name": "Policy Name",
+        "target_uptime": "Target Uptime",
+        "measurement_window": "Measurement Window",
+        "scope": "Scope",
+        "notification": "Notification"
+      },
+      "scope": {
+        "devices": "{{count}} devices",
+        "groups": "{{count}} groups"
+      },
+      "popconfirm": { "delete_title": "Do you want to delete this policy?" },
+      "modal": { "title_new": "New SLA Policy", "title_edit": "Edit SLA Policy" },
+      "form": {
+        "name_label": "Policy Name",
+        "name_placeholder": "Critical Infrastructure SLA",
+        "target_uptime_label": "Target Uptime (%)",
+        "measurement_window_label": "Measurement Window",
+        "scope_devices_label": "Scope — Devices",
+        "scope_devices_extra": "If left empty, all devices are included",
+        "scope_devices_placeholder": "Select specific devices (optional)",
+        "notify_on_breach_label": "Notify on Breach"
+      },
+      "toast": {
+        "created": "SLA policy created",
+        "updated": "SLA policy updated",
+        "deleted": "SLA policy deleted"
+      }
+    },
+    "snmp": {
+      "stat": {
+        "total_devices": "Total Devices",
+        "snmp_enabled": "SNMP Enabled",
+        "poll_records": "Poll Records",
+        "last_poll": "Last Poll",
+        "not_yet": "None yet"
+      },
+      "col": { "device": "Device" },
+      "bulk_section_title": "Bulk SNMP Configuration (SSH)",
+      "alert_ruijie_title": "Ruijie community string rule",
+      "alert_ruijie_desc": "Community string must include at least 3 character types: uppercase + lowercase + digit. Example: \"Charon1\"",
+      "alert_ssh_title": "SNMP commands are sent directly to the device firmware over SSH",
+      "alert_ssh_desc": "SSH connects to each device, enables SNMP, and writes the community string. Can take ~2-3 minutes for 58 devices.",
+      "form": {
+        "community_label": "SNMP Community String",
+        "community_extra": "Ruijie requires uppercase + lowercase + digit — e.g. \"Charon1\"",
+        "version_label": "Version",
+        "version_v2c_recommended": "SNMPv2c (recommended)"
+      },
+      "btn_apply_to_all": "Apply to All Devices via SSH",
+      "btn_configuring": "Configuring...",
+      "btn_yes_apply": "Yes, Apply",
+      "confirm_apply_all": "Will SSH-connect to all {{count}} devices. Are you sure?",
+      "manual_poll_section": "Manual Poll",
+      "manual_poll_hint": "Celery beat auto-polls every 5 minutes. This button queues immediately.",
+      "btn_poll_now": "Poll Now",
+      "result_modal_title": "SSH Configuration Result — {{succeeded}}/{{attempted}} successful",
+      "result_succeeded": "{{count}} Successful",
+      "result_failed": "{{count}} Failed",
+      "result_failed_hint": "For failed devices use Device Detail → Health → Update SNMP.",
+      "toast": {
+        "poll_queued": "SNMP poll task queued — data will update in ~30 seconds",
+        "poll_failed": "Could not start poll task",
+        "ssh_config_failed": "SSH configuration failed",
+        "community_required": "Community string required"
+      }
+    },
+    "rotation": {
+      "intro_message": "SSH password rotation connects to real devices and changes the password.",
+      "intro_desc": "Profile is not updated unless all devices succeed. Cisco IOS/IOS-XE and Ruijie are supported.",
+      "unassigned_label": "Profiles without a policy: ",
+      "empty": "No rotation policies yet. Add one from the profile buttons above.",
+      "col": {
+        "profile": "Credential Profile",
+        "interval": "Interval",
+        "last_rotation": "Last Rotation",
+        "next_rotation": "Next Rotation"
+      },
+      "status": {
+        "idle": "Idle",
+        "running": "Running",
+        "success": "Success",
+        "failed": "Failed"
+      },
+      "tooltip": {
+        "last_result": "Last Result",
+        "rotate_now": "Rotate Now"
+      },
+      "popconfirm": { "delete_title": "Delete rotation policy?" },
+      "modal": {
+        "title_new": "Add Rotation Policy",
+        "title_edit": "Edit Policy",
+        "profile_label": "Profile: {{name}}",
+        "last_result_title": "Last Rotation Result",
+        "executed_at": "Executed at {{date}}"
+      },
+      "form": { "interval_label": "Rotation Interval (Days)" },
+      "toast": { "started": "Rotation started" }
+    },
+    "maintenance": {
+      "btn_new": "Add Maintenance Window",
+      "empty": "No maintenance windows yet",
+      "alert_active": "{{count}} active maintenance window(s) — SNMP alerts are suppressed for these devices.",
+      "alert_idle": "SNMP threshold alerts are auto-suppressed during scheduled maintenance.",
+      "alert_desc": "While a maintenance window is active, AlertRule violations for the related devices do not send notifications.",
+      "col": {
+        "name": "Maintenance Name",
+        "start": "Start",
+        "end": "End",
+        "scope": "Scope"
+      },
+      "scope": { "selected_devices": "Selected Devices" },
+      "day": {
+        "mon": "Monday", "tue": "Tuesday", "wed": "Wednesday", "thu": "Thursday",
+        "fri": "Friday", "sat": "Saturday", "sun": "Sunday",
+        "mon_short": "Mon", "tue_short": "Tue", "wed_short": "Wed",
+        "thu_short": "Thu", "fri_short": "Fri", "sat_short": "Sat", "sun_short": "Sun"
+      },
+      "recurrence": {
+        "section_title": "Recurrence (optional)",
+        "info_message": "If you define a recurrence, sample windows are created automatically for the next 14 days.",
+        "info_desc": "The date/time range becomes a 'template'; sample windows use the same duration on each recurrence.",
+        "label": "Recurrence",
+        "placeholder_once": "One-time (no recurrence)",
+        "daily": "Daily",
+        "weekly": "Weekly (selected days)",
+        "monthly": "Monthly (selected day)",
+        "weekly_value": "Weekly: {{days}}",
+        "monthly_value": "Monthly (day {{day}} of the month)",
+        "template_label": "{{label}} · {{count}} samples",
+        "which_days_label": "Which days",
+        "which_days_required": "Select at least one day",
+        "day_of_month_label": "Day of month (1-28)",
+        "end_date_label": "End date (opt.)",
+        "max_count_label": "Max. sample count (opt.)",
+        "unlimited": "unlimited"
+      },
+      "popconfirm": { "delete_title": "Delete this maintenance window?" },
+      "modal": { "title_new": "New Maintenance Window", "title_edit": "Edit Maintenance Window" },
+      "form": {
+        "name_label": "Maintenance Name",
+        "name_placeholder": "E.g.: Monthly Update — Core Layer",
+        "description_label": "Description",
+        "time_range_label": "Date & Time Range",
+        "devices_label": "Devices",
+        "devices_tooltip": "Select devices in the maintenance scope",
+        "devices_placeholder": "Select devices"
+      },
+      "toast": {
+        "created": "Maintenance window created",
+        "updated": "Maintenance window updated",
+        "deleted": "Maintenance window deleted"
+      }
+    },
+    "api_tokens": {
+      "section_title": "API Token Management",
+      "section_subtitle": "Create long-lived tokens for automation and API access.",
+      "btn_new": "New Token",
+      "btn_revoke": "Revoke",
+      "empty": "No tokens yet",
+      "never_used": "Never used",
+      "never_expires": "No expiry",
+      "one_year": "1 year",
+      "usage_hint": "Use in header:",
+      "col": {
+        "name": "Name",
+        "prefix": "Prefix",
+        "last_used": "Last Used",
+        "expires_at": "Expires"
+      },
+      "popconfirm": {
+        "revoke_title": "Revoke this token?",
+        "revoke_desc": "This action cannot be undone."
+      },
+      "modal": {
+        "title_new": "Create New API Token",
+        "created_title": "Token Created",
+        "saved_btn": "OK, I Saved It",
+        "warn_title": "This token will never be shown again!",
+        "warn_desc": "Please copy it now and save it somewhere safe."
+      },
+      "form": {
+        "name_label": "Token Name",
+        "name_required": "Enter a name",
+        "name_placeholder": "e.g. CI/CD Pipeline, Monitoring Bot",
+        "expires_label": "Expiry Date",
+        "expires_help": "Leave empty for no expiry"
+      },
+      "toast": {
+        "create_failed": "Could not create token",
+        "revoked": "Token revoked",
+        "copied": "Token copied"
+      }
+    },
+    "ai": {
+      "security_message": "Your API keys are stored on the server with Fernet encryption and never logged.",
+      "active_provider_label": "Active Provider",
+      "active_provider_placeholder": "Select provider",
+      "provider_ollama_local": "Ollama (Local)",
+      "tag_configured": "Configured",
+      "tag_no_key": "No API key",
+      "tag_no_api_key": "Does Not Require API Key",
+      "api_key_placeholder": "{{name}} API Key",
+      "api_key_placeholder_change": "{{name}} API Key (type to change)",
+      "model_placeholder": "Select model",
+      "ollama_section_title": "Ollama (Local Model)",
+      "toast": { "saved": "AI settings saved" }
+    },
+    "system": {
+      "page_title": "System Settings",
+      "empty": "No settings found",
+      "no_permission_title": "Insufficient Permission",
+      "no_permission_desc": "Only org_admin or super_admin can view and change system settings.",
+      "info_desc": "Very low scan frequency overloads devices (especially SNMP); very high values slow down latency perception. Each setting has a recommended range below it; values outside min/max are not accepted.",
+      "scope": {
+        "global": "Global",
+        "org_override": "Org Override",
+        "default": "Default"
+      },
+      "scope_legend_org": "applies to this organization,",
+      "scope_legend_global": "applies to the entire platform (only super_admin can change). Some settings take effect after a Celery worker restart.",
+      "category": {
+        "scan_frequencies": "Scan Frequencies",
+        "alarm_dedup": "Alarm / Dedup",
+        "flap": "Flap Detection",
+        "correlation": "Correlation Engine",
+        "maintenance": "Maintenance Windows",
+        "session_stale": "Session / Stale",
+        "retention": "Data Retention",
+        "other": "Other"
+      },
+      "row": {
+        "effective_label": "Effective",
+        "global_lock_tooltip": "Global setting — only super_admin can change",
+        "reset_to_default": "Reset to default"
+      },
+      "popconfirm": {
+        "reset_title": "Delete org override",
+        "reset_desc": "This setting will return to its default value. Continue?"
+      },
+      "toast": {
+        "saved_key": "Setting saved: {{key}}",
+        "worker_restart_required": "⚠ Some settings require Celery worker restart",
+        "save_failed": "Could not save setting",
+        "override_removed": "Override removed: {{key}}",
+        "already_default": "Was already at default value",
+        "reset_failed": "Reset failed"
+      },
+      "retention": {
+        "panel_title": "Retention Preview (Dry-Run)",
+        "btn_preview": "Preview",
+        "preview_failed": "Could not load preview",
+        "intro": "If cleanup were running now, how many rows would be deleted from each table? This operation deletes nothing — it only counts. Actual cleanup runs in the daily beat task with per-org effective retention (plan cap + 7-day floor).",
+        "empty_hint": "Click \"Preview\" to see the preview.",
+        "nothing_to_delete": "No old data to delete — everything is within the retention window.",
+        "total_candidates": "{{count}} rows are candidates for deletion.",
+        "col_table": "Table",
+        "col_rows": "Rows to delete"
+      }
+    },
+    "password_policy": {
+      "page_title": "Password Policy",
+      "tag_global_default": "Global Default",
+      "intro": "These rules apply on new user creation, user password change, and after admin reset. Source:",
+      "card_rules_title": "Rules",
+      "no_permission_title": "Insufficient permission",
+      "no_permission_desc": "Only org_admin or super_admin can view and change the password policy.",
+      "btn_back_to_global": "Back to Global",
+      "popconfirm": {
+        "reset_title": "Delete org override policy",
+        "reset_desc": "This org will return to the global default. Continue?"
+      },
+      "form": {
+        "min_length_label": "Minimum length",
+        "classes_label": "Character class requirements",
+        "history_label": "History reuse check",
+        "history_tooltip": "Prevent reuse of the last N passwords. 0 = no check.",
+        "expiry_label": "Password expiry (days)",
+        "expiry_tooltip": "At the end of this period the user is forced to change their password. 0 = no expiry.",
+        "force_change_label": "Force password change on first login"
+      },
+      "unit": { "password_short": "passwords" },
+      "tester_card_title": "Password Test Tool",
+      "tester_hint": "Type below to see if a password passes the current policy.",
+      "tester_placeholder": "Password to test…",
+      "tester_pass_message": "Password passed the policy ✓",
+      "tester_fail_message": "Password did not pass the policy",
+      "tester_source": "Policy source: {{source}}",
+      "toast": {
+        "updated": "Password policy updated",
+        "save_failed": "Could not save policy",
+        "reset_done": "Org override policy deleted — global default applies"
+      }
+    },
+    "mfa": {
+      "section_title": "Multi-Factor Authentication",
+      "enabled_title": "MFA active",
+      "enabled_desc": "Each login requires a 6-digit code from your authenticator app.",
+      "enrolled_at_label": "Enrolled",
+      "methods_label": "METHODS",
+      "method": { "authenticator": "Authenticator" },
+      "recovery_remaining_label": "RECOVERY CODES REMAINING",
+      "tag_running_out": "Running out",
+      "btn_regen_recovery": "Regenerate recovery codes",
+      "btn_regen_short": "Regenerate",
+      "btn_disable": "Disable MFA",
+      "btn_enable": "Enable MFA",
+      "btn_confirm_enable": "Confirm and enable",
+      "btn_copy_secret": "Copy key",
+      "disable_warning": "Your account will be single-factor again.",
+      "disable_code_placeholder": "6-digit code or recovery code (recommended)",
+      "regen_warning": "When new codes are generated, the old ones become invalid immediately.",
+      "regen_code_placeholder": "6-digit code from authenticator",
+      "setup_title": "MFA Setup — 1 / 2",
+      "setup_step2_title": "2 / 2 — Enter the code from your app",
+      "setup_intro_prefix": "In your authenticator app (",
+      "setup_intro_suffix": ") scan the QR or manually enter the setup key. This key is shown only once.",
+      "setup_key_label": "SETUP KEY (BASE32)",
+      "setup_qr_fallback_hint": "If you cannot scan the QR, use \"Enter setup key\" → paste this text.",
+      "code_6_placeholder": "6-digit code",
+      "idle_title": "MFA is currently disabled",
+      "idle_desc": "Your account is protected by password only. Enable TOTP with one click — works with Google Authenticator, Microsoft Authenticator, Authy and 1Password.",
+      "recovery": {
+        "panel_title": "Your recovery codes",
+        "panel_intro_pre": "If you lose authenticator access, enter one of the codes below in the ",
+        "panel_recovery_word": "Recovery",
+        "panel_intro_mid": " field on the Login page to sign back in. Each code is ",
+        "panel_one_time": "single-use",
+        "panel_intro_post": ". This list is shown only now.",
+        "btn_download_txt": "Download (.txt)",
+        "btn_saved_close": "I saved them, close",
+        "file_title": "MFA Recovery Codes",
+        "file_created_at": "Created",
+        "file_one_time_notice": "Each code is SINGLE-USE. Use one if you lose authenticator access."
+      },
+      "email": {
+        "card_title": "Email Verification (2nd Channel)",
+        "active_desc": "During login, OTP can be sent to your email instead of the authenticator. Authenticator can still be used as the primary method.",
+        "idle_desc": "A 6-digit OTP is sent to your registered email address. Acts as an additional verification channel alongside the authenticator.",
+        "requirement_alert": "To send email, your organization must have at least one active email notification channel defined (Settings → Notifications).",
+        "sent_desc": "Enter the 6-digit code sent to your email. The code is valid for 10 minutes.",
+        "btn_enable": "Enable email channel",
+        "btn_remove": "Remove email channel",
+        "btn_verify": "Verify",
+        "btn_resend": "Resend",
+        "toast": {
+          "code_sent": "Verification code sent: {{email}}",
+          "send_failed": "Email could not be sent",
+          "added": "Email MFA channel added",
+          "verify_failed": "Code could not be verified",
+          "removed": "Email MFA channel removed",
+          "remove_failed": "Could not remove"
+        }
+      },
+      "toast": {
+        "enroll_failed": "Could not start enrollment",
+        "enabled": "MFA enabled — save your recovery codes now.",
+        "invalid_code": "Invalid code",
+        "disabled": "MFA disabled",
+        "disable_failed": "Could not disable",
+        "regen_ok": "New recovery codes generated — the old ones are now invalid.",
+        "regen_failed": "Regeneration failed",
+        "secret_copied": "Key copied"
+      }
+    },
     "theme": "Theme",
     "theme_desc": "Select application appearance",
     "theme_dark": "Dark",

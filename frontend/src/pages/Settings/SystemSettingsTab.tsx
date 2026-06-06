@@ -20,18 +20,23 @@ import {
   SaveOutlined, UndoOutlined,
 } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { systemSettingsApi, SettingValue, SettingMeta } from '@/api/systemSettings'
 import { useAuthStore } from '@/store/auth'
 
+// KURAL-E3: backend kategori adı (meta.category) RAW string — RetentionPreviewPanel
+// karşılaştırması için kategori karşılığını backend'den alıyoruz; UI etiketi ise
+// CATEGORY_LABEL useMemo'da t() ile çözülür.
 const RETENTION_CATEGORY = 'Veri Saklama (Retention)'
 
 // T10 A3 — dry-run önizleme paneli: "şu an çalışsa ne silinirdi?" (hiçbir
 // şey silinmez). Retention sekmesinin altında gösterilir.
 function RetentionPreviewPanel() {
+  const { t } = useTranslation()
   const previewMut = useMutation({
     mutationFn: () => systemSettingsApi.retentionPreview(),
     onError: (err: any) =>
-      message.error(err?.response?.data?.detail || 'Önizleme alınamadı'),
+      message.error(err?.response?.data?.detail || t('settings.system.retention.preview_failed')),
   })
   const data = previewMut.data
 
@@ -39,30 +44,28 @@ function RetentionPreviewPanel() {
     <Card
       size="small"
       style={{ marginTop: 12 }}
-      title={<Space><ExperimentOutlined /><span>Retention Önizleme (Dry-Run)</span></Space>}
+      title={<Space><ExperimentOutlined /><span>{t('settings.system.retention.panel_title')}</span></Space>}
       extra={
         <Button
           size="small" type="primary" ghost
           loading={previewMut.isPending}
           onClick={() => previewMut.mutate()}
-        >Önizle</Button>
+        >{t('settings.system.retention.btn_preview')}</Button>
       }
     >
       <Paragraph style={{ color: 'var(--fg-3)', fontSize: 12, marginBottom: 8 }}>
-        Temizlik <strong>şimdi çalışsaydı</strong> hangi tablodan kaç satır silinirdi?
-        Bu işlem <strong>hiçbir şeyi silmez</strong> — yalnız sayar. Gerçek temizlik
-        günlük beat task'ında, org bazlı etkili saklama (plan tavanı + 7 gün taban) ile çalışır.
+        {t('settings.system.retention.intro')}
       </Paragraph>
 
       {!data ? (
         <Text style={{ color: 'var(--fg-3)', fontSize: 12 }}>
-          Önizleme için "Önizle"ye basın.
+          {t('settings.system.retention.empty_hint')}
         </Text>
       ) : data.total === 0 ? (
-        <Alert type="success" showIcon message="Silinecek eski veri yok — her şey saklama penceresi içinde." />
+        <Alert type="success" showIcon message={t('settings.system.retention.nothing_to_delete')} />
       ) : (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
-          <Text>Toplam <strong>{data.total}</strong> satır silinmeye aday.</Text>
+          <Text>{t('settings.system.retention.total_candidates', { count: data.total })}</Text>
           {data.organizations.map((org) => {
             const rows = Object.entries(org.tables).map(([table, count]) => ({
               key: table, table, count,
@@ -74,8 +77,8 @@ function RetentionPreviewPanel() {
                   size="small" pagination={false}
                   dataSource={rows}
                   columns={[
-                    { title: 'Tablo', dataIndex: 'table', key: 'table' },
-                    { title: 'Silinecek satır', dataIndex: 'count', key: 'count', align: 'right' as const },
+                    { title: t('settings.system.retention.col_table'), dataIndex: 'table', key: 'table' },
+                    { title: t('settings.system.retention.col_rows'), dataIndex: 'count', key: 'count', align: 'right' as const },
                   ]}
                 />
               </Card>
@@ -177,6 +180,7 @@ interface RowProps {
 }
 
 function SettingRow({ setting, meta, canEdit, onSave, onReset, saving }: RowProps) {
+  const { t } = useTranslation()
   const kind = unitKind(setting.key)
   const initialVal = Number(setting.value)
   const [draft, setDraft] = useState<number>(initialVal)
@@ -196,13 +200,16 @@ function SettingRow({ setting, meta, canEdit, onSave, onReset, saving }: RowProp
     }}>
       <div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {/* KURAL-E3: LABELS sözlüğü backend setting key'leri için TR isim
+              veriyor; bunlar sayfa-spesifik tooltip/hint. İleride i18n
+              kapsamına alınabilir (ayrı sprint), şu an raw tutuluyor. */}
           <strong style={{ fontSize: 13 }}>{label.tr}</strong>
           {isGlobal ? (
-            <Tag color="purple" style={{ fontSize: 10 }}>Global</Tag>
+            <Tag color="purple" style={{ fontSize: 10 }}>{t('settings.system.scope.global')}</Tag>
           ) : setting.is_org_override ? (
-            <Tag color="cyan" style={{ fontSize: 10 }}>Org Özel</Tag>
+            <Tag color="cyan" style={{ fontSize: 10 }}>{t('settings.system.scope.org_override')}</Tag>
           ) : (
-            <Tag color="default" style={{ fontSize: 10 }}>Varsayılan</Tag>
+            <Tag color="default" style={{ fontSize: 10 }}>{t('settings.system.scope.default')}</Tag>
           )}
           {label.hint && (
             <Tooltip title={label.hint}>
@@ -213,7 +220,7 @@ function SettingRow({ setting, meta, canEdit, onSave, onReset, saving }: RowProp
         <Text style={{ fontSize: 11, color: 'var(--fg-3)', display: 'block', marginTop: 2 }}>
           <code style={{ fontSize: 11 }}>{setting.key}</code>
           {' · '}
-          <span>Etkili: <strong>{formatValue(kind, draft)}</strong></span>
+          <span>{t('settings.system.row.effective_label')}: <strong>{formatValue(kind, draft)}</strong></span>
           {rng && <span style={{ marginLeft: 8 }}>({rng})</span>}
         </Text>
       </div>
@@ -231,21 +238,21 @@ function SettingRow({ setting, meta, canEdit, onSave, onReset, saving }: RowProp
       />
 
       <Space size={6}>
-        <Tooltip title={!canEdit ? 'Global ayar — yalnız super_admin değiştirebilir' : ''}>
+        <Tooltip title={!canEdit ? t('settings.system.row.global_lock_tooltip') : ''}>
           <Button
             type="primary" size="small"
             icon={<SaveOutlined />} disabled={!dirty || saving || !canEdit}
             loading={saving}
             onClick={() => onSave(draft)}
-          >Kaydet</Button>
+          >{t('common.save')}</Button>
         </Tooltip>
         {canEdit && setting.is_org_override && !isGlobal && (
           <Popconfirm
-            title="Org özel ayarını sil"
-            description="Bu ayar varsayılan değere döner. Devam edilsin mi?"
+            title={t('settings.system.popconfirm.reset_title')}
+            description={t('settings.system.popconfirm.reset_desc')}
             onConfirm={onReset}
           >
-            <Tooltip title="Varsayılana sıfırla">
+            <Tooltip title={t('settings.system.row.reset_to_default')}>
               <Button size="small" icon={<UndoOutlined />} />
             </Tooltip>
           </Popconfirm>
@@ -257,9 +264,23 @@ function SettingRow({ setting, meta, canEdit, onSave, onReset, saving }: RowProp
 
 export default function SystemSettingsTab() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { user } = useAuthStore()
   const isSuperAdmin = user?.system_role === 'super_admin'
   const canView = isSuperAdmin || user?.system_role === 'org_admin'
+
+  // KURAL-E1: kategori UI etiketleri hook scope'unda useMemo + t().
+  // RETENTION_CATEGORY backend string'i karşılaştırma için sabit kalır.
+  const CATEGORY_LABEL = useMemo<Record<string, string>>(() => ({
+    'Tarama Frekansları':         t('settings.system.category.scan_frequencies'),
+    'Alarm / Dedup':              t('settings.system.category.alarm_dedup'),
+    'Flap Tespiti':               t('settings.system.category.flap'),
+    'Korelasyon Motoru':          t('settings.system.category.correlation'),
+    'Bakım Pencereleri':          t('settings.system.category.maintenance'),
+    'Oturum / Stale':             t('settings.system.category.session_stale'),
+    'Veri Saklama (Retention)':   t('settings.system.category.retention'),
+    'Diğer':                       t('settings.system.category.other'),
+  }), [t])
 
   const settingsQ = useQuery({
     queryKey: ['system-settings'],
@@ -276,10 +297,10 @@ export default function SystemSettingsTab() {
     onSuccess: (data) => {
       message.success(
         <Space direction="vertical" size={0}>
-          <Text>Ayar kaydedildi: <code>{data.key}</code></Text>
+          <Text>{t('settings.system.toast.saved_key', { key: data.key })}</Text>
           {!data.applied_immediately && (
             <Text type="warning" style={{ fontSize: 11 }}>
-              ⚠ Bazı ayarlar için Celery worker yeniden başlatılmalı
+              {t('settings.system.toast.worker_restart_required')}
             </Text>
           )}
         </Space>,
@@ -288,7 +309,7 @@ export default function SystemSettingsTab() {
       qc.invalidateQueries({ queryKey: ['system-settings'] })
     },
     onError: (err: any) => {
-      message.error(err?.response?.data?.detail || 'Ayar kaydedilemedi')
+      message.error(err?.response?.data?.detail || t('settings.system.toast.save_failed'))
     },
   })
 
@@ -296,11 +317,11 @@ export default function SystemSettingsTab() {
     mutationFn: (key: string) => systemSettingsApi.resetToDefault(key),
     onSuccess: (data) => {
       message.success(
-        data.removed ? `Override silindi: ${data.key}` : 'Zaten varsayılan değerdeydi',
+        data.removed ? t('settings.system.toast.override_removed', { key: data.key }) : t('settings.system.toast.already_default'),
       )
       qc.invalidateQueries({ queryKey: ['system-settings'] })
     },
-    onError: () => message.error('Sıfırlama başarısız'),
+    onError: () => message.error(t('settings.system.toast.reset_failed')),
   })
 
   const metaByKey = useMemo<Record<string, SettingMeta>>(() => {
@@ -323,17 +344,17 @@ export default function SystemSettingsTab() {
     return (
       <Alert
         type="warning" showIcon
-        message="Yetersiz Yetki"
-        description="Sistem ayarlarını sadece org_admin veya super_admin görüntüleyip değiştirebilir."
+        message={t('settings.system.no_permission_title')}
+        description={t('settings.system.no_permission_desc')}
       />
     )
   }
 
   if (settingsQ.isLoading || metaQ.isLoading) {
-    return <Text style={{ color: 'var(--fg-3)' }}>Yükleniyor…</Text>
+    return <Text style={{ color: 'var(--fg-3)' }}>{t('common.loading')}</Text>
   }
   const data = settingsQ.data
-  if (!data) return <Empty description="Ayar bulunamadı" />
+  if (!data) return <Empty description={t('settings.system.empty')} />
 
   const categories = Object.keys(grouped).sort(
     (a, b) => {
@@ -344,7 +365,7 @@ export default function SystemSettingsTab() {
 
   const tabItems = categories.map((cat) => ({
     key: cat,
-    label: <span>{cat} <Badge count={grouped[cat].length} style={{ backgroundColor: 'var(--accent)' }} /></span>,
+    label: <span>{CATEGORY_LABEL[cat] ?? cat} <Badge count={grouped[cat].length} style={{ backgroundColor: 'var(--accent)' }} /></span>,
     children: (
       <>
         <Card bodyStyle={{ padding: 0 }}>
@@ -374,24 +395,23 @@ export default function SystemSettingsTab() {
     <Space direction="vertical" size={18} style={{ width: '100%' }}>
       <div>
         <Space size={8} style={{ marginBottom: 6 }}>
-          <Text strong style={{ fontSize: 15 }}>Sistem Ayarları</Text>
+          <Text strong style={{ fontSize: 15 }}>{t('settings.system.page_title')}</Text>
           <Badge count={data.settings.length} style={{ backgroundColor: 'var(--accent)' }} />
           <Button
             size="small" icon={<ReloadOutlined />}
             onClick={() => qc.invalidateQueries({ queryKey: ['system-settings'] })}
-          >Yenile</Button>
+          >{t('common.refresh')}</Button>
         </Space>
         <Paragraph style={{ color: 'var(--fg-3)', fontSize: 12, marginBottom: 0 }}>
-          <Tag color="cyan" style={{ fontSize: 10 }}>Org Özel</Tag> bu organizasyona,
-          {' '}<Tag color="purple" style={{ fontSize: 10 }}>Global</Tag> tüm platforma uygulanır
-          (yalnız super_admin değiştirir). Bazı ayarlar için Celery worker yeniden başlatılınca etkili olur.
+          <Tag color="cyan" style={{ fontSize: 10 }}>{t('settings.system.scope.org_override')}</Tag> {t('settings.system.scope_legend_org')}
+          {' '}<Tag color="purple" style={{ fontSize: 10 }}>{t('settings.system.scope.global')}</Tag> {t('settings.system.scope_legend_global')}
         </Paragraph>
       </div>
 
       <Alert
         type="info" showIcon
-        message="Bilgi"
-        description="Çok düşük tarama frekansı cihazları gereksiz yükler (özellikle SNMP); çok yüksek değer gecikme algısını yavaşlatır. Her ayarın altında önerilen aralık vardır; min/max dışı değerler kabul edilmez."
+        message={t('common.info')}
+        description={t('settings.system.info_desc')}
         style={{ marginBottom: 4 }}
       />
 

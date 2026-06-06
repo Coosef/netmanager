@@ -123,6 +123,19 @@
     "updated_at": "Aktualisiert",
     "apply": "Anwenden",
     "no_results": "Keine Ergebnisse gefunden",
+    "update": "Aktualisieren",
+    "create": "Erstellen",
+    "required_field": "Pflichtfeld",
+    "action_failed": "Aktion fehlgeschlagen",
+    "error_occurred": "Ein Fehler ist aufgetreten",
+    "save_failed": "Speichern fehlgeschlagen",
+    "delete_failed": "Löschen fehlgeschlagen",
+    "enabled": "Aktiviert",
+    "disabled": "Deaktiviert",
+    "test": "Test",
+    "username": "Benutzername",
+    "password": "Passwort",
+    "unknown_error": "Unbekannter Fehler",
     "validation": {
       "required": "Dieses Feld ist erforderlich",
       "ip_required": "IP-Adresse ist erforderlich",
@@ -1533,6 +1546,542 @@
     "title": "Einstellungen",
     "language": "Sprache",
     "language_desc": "Anwendungssprache auswählen",
+    "crumb_admin": "Verwaltung",
+    "page_subtitle": "Allgemeine Einstellungen · Benachrichtigungskanäle · Alarmregeln · SLA-Richtlinien · Anmeldedaten- & Token-Verwaltung.",
+    "col": { "action": "Aktion", "actions": "Aktionen" },
+    "unit": { "min_short": "Min", "day": "Tage" },
+    "stat": {
+      "notification_channels": "Benachrichtigungskanäle",
+      "alert_rules": "Alarmregeln",
+      "sla_policies": "SLA-Richtlinien",
+      "credential_profiles": "Anmeldedaten-Profile",
+      "api_tokens": "API-Tokens",
+      "n_active": "{{count}} aktiv"
+    },
+    "tab": {
+      "general": "Allgemein",
+      "system": "System (Scan)",
+      "password_policy": "Passwort-Richtlinie",
+      "notifications": "Benachrichtigungen",
+      "alert_rules": "Alarmregeln",
+      "maintenance": "Wartungsfenster",
+      "credentials": "Anmeldedaten-Profile",
+      "rotation": "Passwort-Rotation",
+      "sla": "SLA-Richtlinien",
+      "snmp": "SNMP",
+      "api_tokens": "API-Tokens",
+      "driver_templates": "Treiber-Vorlagen",
+      "ai": "KI-Assistent"
+    },
+    "alert_rules": {
+      "btn_new": "Neue Regel",
+      "empty": "Noch keine Regeln",
+      "all_devices": "Alle Geräte",
+      "intro_message": "Sendet Benachrichtigungen, wenn SNMP-Poll-Ergebnisse Interface-Auslastung oder Fehlerschwellen überschreiten.",
+      "intro_desc": "Ihre Benachrichtigungskanäle müssen 'Schwellwertalarm (SNMP)' aktiviert haben.",
+      "col": {
+        "name": "Name", "device": "Gerät", "interface": "Interface",
+        "metric_threshold": "Metrik / Schwelle", "consecutive_poll": "Aufeinanderfolgende Polls",
+        "severity": "Schweregrad", "enabled": "Aktiv"
+      },
+      "popconfirm": { "delete_title": "Diese Regel löschen?" },
+      "modal": { "title_new": "Neue Alarmregel", "title_edit": "Regel bearbeiten" },
+      "form": {
+        "name_label": "Regelname",
+        "name_placeholder": "Z.B.: Core Switch hohe Auslastung",
+        "device_label": "Gerät",
+        "device_tooltip": "Wenn leer, gilt für alle Geräte",
+        "device_placeholder": "— Alle Geräte —",
+        "interface_pattern_label": "Interface-Muster",
+        "interface_pattern_tooltip": "fnmatch-Muster. Z.B.: Gi0/*, Te*, leer = alle Interfaces",
+        "interface_pattern_placeholder": "* (alle Interfaces)",
+        "metric_label": "Metrik",
+        "threshold_label": "Schwellwert (%)",
+        "consecutive_label": "Anzahl aufeinanderfolgender Polls",
+        "consecutive_tooltip": "Wie viele aufeinanderfolgende Polls müssen den Schwellwert überschreiten",
+        "severity_label": "Schweregrad",
+        "cooldown_label": "Abklingzeit (Min)",
+        "cooldown_tooltip": "Minimales Benachrichtigungsintervall für dieselbe Regel",
+        "enabled_label": "Aktiv"
+      },
+      "toast": {
+        "created": "Regel erstellt",
+        "updated": "Regel aktualisiert",
+        "deleted": "Regel gelöscht"
+      }
+    },
+    "notifications": {
+      "intro": "Benachrichtigungskanäle verwalten. Bei Ereignissen werden automatisch Nachrichten an die ausgewählten Kanäle gesendet.",
+      "btn_add": "Kanal hinzufügen",
+      "btn_send_digest": "Wochenübersicht senden",
+      "status_active": "Aktiv",
+      "status_inactive": "Inaktiv",
+      "tooltip_test_send": "Test senden",
+      "col": {
+        "name": "Name", "type": "Typ", "triggers": "Auslöser", "status": "Status"
+      },
+      "popconfirm": {
+        "send_digest_title": "Wochenübersicht senden?",
+        "delete_title": "Kanal löschen?"
+      },
+      "modal": { "title_new": "Neuer Benachrichtigungskanal", "title_edit": "Kanal bearbeiten" },
+      "form": {
+        "name_label": "Kanalname",
+        "type_label": "Typ",
+        "triggers_placeholder": "Wählen Sie zu benachrichtigende Ereignisse",
+        "active_label": "Aktiv"
+      },
+      "channel": {
+        "email": "E-Mail",
+        "webhook": "Generic Webhook",
+        "jira": "Jira (Ticket)"
+      },
+      "email": {
+        "recipients_label": "Empfänger",
+        "recipients_extra": "Mit Komma trennen"
+      },
+      "teams": {
+        "webhook_extra": "Vom Incoming-Webhook-Connector im Teams-Kanal abrufen"
+      },
+      "webhook": {
+        "url_label": "Ziel-URL",
+        "headers_label": "Eigene Header",
+        "headers_extra": "JSON-Format: {\"X-API-Key\": \"abc123\"}"
+      },
+      "telegram": {
+        "bot_token_label": "Bot-Token",
+        "chat_id_label": "Chat-ID"
+      },
+      "jira": {
+        "info_alert": "Für Jira Cloud Atlassian API-Token verwenden. Für Jira Server Benutzername + Passwort eingeben.",
+        "url_label": "Jira-URL",
+        "url_extra": "Z.B.: https://mycompany.atlassian.net",
+        "email_label": "E-Mail / Benutzername",
+        "api_token_label": "API-Token / Passwort",
+        "api_token_extra": "Atlassian Cloud: id.atlassian.com → Sicherheit → API-Token",
+        "project_key_label": "Projektschlüssel",
+        "project_key_extra": "Kurzcode aus der Jira-Projektseite (NET, OPS, INFRA usw.)",
+        "issue_type_label": "Vorgangstyp",
+        "issue_type_extra": "In Ihrem Jira-Projekt definierter Vorgangstyp-Name"
+      },
+      "toast": {
+        "created": "Kanal erstellt",
+        "updated": "Kanal aktualisiert",
+        "deleted": "Kanal gelöscht",
+        "test_sent": "Testnachricht gesendet!",
+        "test_failed": "Test fehlgeschlagen: {{error}}",
+        "digest_queued": "Wochenübersicht eingereiht"
+      }
+    },
+    "credentials": {
+      "btn_new": "Neues Profil",
+      "empty": "Noch keine Profile",
+      "intro_message": "Anmeldedaten werden mit Fernet-Verschlüsselung gespeichert. Passwörter werden niemals in API-Antworten zurückgegeben.",
+      "intro_desc": "Zentralisieren Sie die Anmeldedatenverwaltung, indem Sie Geräten Profile zuweisen. Geräte mit zugewiesenen Profilen nutzen dieses Profil für SSH/SNMP-Verbindungen.",
+      "col": { "profile_name": "Profilname" },
+      "popconfirm": {
+        "delete_title": "Dieses Profil löschen?",
+        "delete_desc": "Kann nicht gelöscht werden, wenn Geräte diesem Profil zugewiesen sind."
+      },
+      "modal": { "title_new": "Neues Anmeldedaten-Profil", "title_edit": "Profil bearbeiten" },
+      "form": {
+        "name_label": "Profilname",
+        "name_placeholder": "Z.B.: Cisco Core, Aruba Access, Read-Only",
+        "description_label": "Beschreibung",
+        "description_placeholder": "Optionale Notiz",
+        "ssh_username_label": "SSH-Benutzername",
+        "ssh_password_label": "SSH-Passwort",
+        "ssh_password_edit_label": "SSH-Passwort (zum Ändern ausfüllen)",
+        "ssh_port_label": "SSH-Port",
+        "enable_secret_label": "Enable Secret",
+        "enable_secret_edit_label": "Enable Secret (zum Ändern ausfüllen)",
+        "enable_secret_tooltip": "Wenn leer, wird der aktuelle Wert beibehalten; Leerzeichen zum Löschen",
+        "password_edit_placeholder": "— zum Ändern eingeben —",
+        "snmp_enabled_label": "SNMP aktiviert",
+        "snmp_version_label": "SNMP-Version",
+        "snmp_port_label": "SNMP-Port",
+        "v3_username_label": "v3-Benutzername",
+        "v3_auth_proto_label": "Auth-Protokoll",
+        "v3_auth_pass_label": "Auth-Passphrase",
+        "v3_priv_proto_label": "Priv-Protokoll",
+        "v3_priv_pass_label": "Priv-Passphrase",
+        "empty_select": "— keine —"
+      },
+      "toast": {
+        "created": "Profil erstellt",
+        "updated": "Profil aktualisiert",
+        "deleted": "Profil gelöscht"
+      }
+    },
+    "sla": {
+      "btn_new": "Richtlinie hinzufügen",
+      "intro": "Uptime-Ziele pro Gerät oder Gruppe definieren. Bei Verletzung können Benachrichtigungen gesendet werden.",
+      "days_value": "{{count}} Tage",
+      "col": {
+        "policy_name": "Richtlinienname",
+        "target_uptime": "Ziel-Uptime",
+        "measurement_window": "Messfenster",
+        "scope": "Geltungsbereich",
+        "notification": "Benachrichtigung"
+      },
+      "scope": {
+        "devices": "{{count}} Geräte",
+        "groups": "{{count}} Gruppen"
+      },
+      "popconfirm": { "delete_title": "Möchten Sie diese Richtlinie löschen?" },
+      "modal": { "title_new": "Neue SLA-Richtlinie", "title_edit": "SLA-Richtlinie bearbeiten" },
+      "form": {
+        "name_label": "Richtlinienname",
+        "name_placeholder": "SLA Kritische Infrastruktur",
+        "target_uptime_label": "Ziel-Uptime (%)",
+        "measurement_window_label": "Messfenster",
+        "scope_devices_label": "Geltungsbereich — Geräte",
+        "scope_devices_extra": "Wenn leer, sind alle Geräte enthalten",
+        "scope_devices_placeholder": "Bestimmte Geräte auswählen (optional)",
+        "notify_on_breach_label": "Bei Verletzung benachrichtigen"
+      },
+      "toast": {
+        "created": "SLA-Richtlinie erstellt",
+        "updated": "SLA-Richtlinie aktualisiert",
+        "deleted": "SLA-Richtlinie gelöscht"
+      }
+    },
+    "snmp": {
+      "stat": {
+        "total_devices": "Geräte gesamt",
+        "snmp_enabled": "SNMP aktiviert",
+        "poll_records": "Poll-Einträge",
+        "last_poll": "Letzter Poll",
+        "not_yet": "Noch keiner"
+      },
+      "col": { "device": "Gerät" },
+      "bulk_section_title": "Bulk-SNMP-Konfiguration (SSH)",
+      "alert_ruijie_title": "Ruijie Community-String-Regel",
+      "alert_ruijie_desc": "Community-String muss mind. 3 Zeichenarten enthalten: Großbuchstabe + Kleinbuchstabe + Ziffer. Beispiel: \"Charon1\"",
+      "alert_ssh_title": "SNMP-Befehle werden direkt per SSH an die Geräte-Firmware gesendet",
+      "alert_ssh_desc": "Verbindet sich per SSH mit jedem Gerät, aktiviert SNMP und schreibt den Community-String. Für 58 Geräte ~2-3 Minuten.",
+      "form": {
+        "community_label": "SNMP Community-String",
+        "community_extra": "Ruijie benötigt Großbuchstabe + Kleinbuchstabe + Ziffer — z.B. \"Charon1\"",
+        "version_label": "Version",
+        "version_v2c_recommended": "SNMPv2c (empfohlen)"
+      },
+      "btn_apply_to_all": "Auf alle Geräte per SSH anwenden",
+      "btn_configuring": "Wird konfiguriert...",
+      "btn_yes_apply": "Ja, anwenden",
+      "confirm_apply_all": "Verbindet sich mit allen {{count}} Geräten per SSH. Sind Sie sicher?",
+      "manual_poll_section": "Manueller Poll",
+      "manual_poll_hint": "Celery Beat pollt alle 5 Minuten automatisch. Dieser Button reiht sofort in die Warteschlange ein.",
+      "btn_poll_now": "Jetzt pollen",
+      "result_modal_title": "SSH-Konfigurationsergebnis — {{succeeded}}/{{attempted}} erfolgreich",
+      "result_succeeded": "{{count}} Erfolgreich",
+      "result_failed": "{{count}} Fehlgeschlagen",
+      "result_failed_hint": "Für fehlgeschlagene Geräte Gerätedetail → Status → SNMP aktualisieren verwenden.",
+      "toast": {
+        "poll_queued": "SNMP-Poll-Aufgabe eingereiht — Daten werden in ~30 Sekunden aktualisiert",
+        "poll_failed": "Poll-Aufgabe konnte nicht gestartet werden",
+        "ssh_config_failed": "SSH-Konfiguration fehlgeschlagen",
+        "community_required": "Community-String erforderlich"
+      }
+    },
+    "rotation": {
+      "intro_message": "SSH-Passwort-Rotation verbindet sich mit echten Geräten und ändert das Passwort.",
+      "intro_desc": "Profil wird erst aktualisiert, wenn alle Geräte erfolgreich sind. Cisco IOS/IOS-XE und Ruijie werden unterstützt.",
+      "unassigned_label": "Profile ohne Richtlinie: ",
+      "empty": "Noch keine Rotationsrichtlinien. Über die Profil-Buttons oben hinzufügen.",
+      "col": {
+        "profile": "Anmeldedaten-Profil",
+        "interval": "Intervall",
+        "last_rotation": "Letzte Rotation",
+        "next_rotation": "Nächste Rotation"
+      },
+      "status": {
+        "idle": "Im Leerlauf",
+        "running": "Läuft",
+        "success": "Erfolgreich",
+        "failed": "Fehlgeschlagen"
+      },
+      "tooltip": {
+        "last_result": "Letztes Ergebnis",
+        "rotate_now": "Jetzt rotieren"
+      },
+      "popconfirm": { "delete_title": "Rotationsrichtlinie löschen?" },
+      "modal": {
+        "title_new": "Rotationsrichtlinie hinzufügen",
+        "title_edit": "Richtlinie bearbeiten",
+        "profile_label": "Profil: {{name}}",
+        "last_result_title": "Letztes Rotationsergebnis",
+        "executed_at": "Ausgeführt am {{date}}"
+      },
+      "form": { "interval_label": "Rotationsintervall (Tage)" },
+      "toast": { "started": "Rotation gestartet" }
+    },
+    "maintenance": {
+      "btn_new": "Wartungsfenster hinzufügen",
+      "empty": "Noch keine Wartungsfenster",
+      "alert_active": "{{count}} aktive(s) Wartungsfenster — SNMP-Alarme für diese Geräte sind stummgeschaltet.",
+      "alert_idle": "Während geplanter Wartungen werden SNMP-Schwellwert-Alarme automatisch unterdrückt.",
+      "alert_desc": "Während ein Wartungsfenster aktiv ist, senden AlertRule-Verletzungen für die zugehörigen Geräte keine Benachrichtigungen.",
+      "col": {
+        "name": "Wartungsname",
+        "start": "Beginn",
+        "end": "Ende",
+        "scope": "Geltungsbereich"
+      },
+      "scope": { "selected_devices": "Ausgewählte Geräte" },
+      "day": {
+        "mon": "Montag", "tue": "Dienstag", "wed": "Mittwoch", "thu": "Donnerstag",
+        "fri": "Freitag", "sat": "Samstag", "sun": "Sonntag",
+        "mon_short": "Mo", "tue_short": "Di", "wed_short": "Mi",
+        "thu_short": "Do", "fri_short": "Fr", "sat_short": "Sa", "sun_short": "So"
+      },
+      "recurrence": {
+        "section_title": "Wiederholung (optional)",
+        "info_message": "Wenn Sie eine Wiederholung definieren, werden für die nächsten 14 Tage automatisch Beispielfenster erstellt.",
+        "info_desc": "Der Datum/Uhrzeit-Bereich wird zu einer 'Vorlage'; Beispielfenster verwenden dieselbe Dauer bei jeder Wiederholung.",
+        "label": "Wiederholung",
+        "placeholder_once": "Einmalig (keine Wiederholung)",
+        "daily": "Täglich",
+        "weekly": "Wöchentlich (ausgewählte Tage)",
+        "monthly": "Monatlich (ausgewählter Tag)",
+        "weekly_value": "Wöchentlich: {{days}}",
+        "monthly_value": "Monatlich (Tag {{day}} des Monats)",
+        "template_label": "{{label}} · {{count}} Beispiele",
+        "which_days_label": "Welche Tage",
+        "which_days_required": "Mindestens einen Tag wählen",
+        "day_of_month_label": "Tag des Monats (1-28)",
+        "end_date_label": "Enddatum (opt.)",
+        "max_count_label": "Max. Beispielanzahl (opt.)",
+        "unlimited": "unbegrenzt"
+      },
+      "popconfirm": { "delete_title": "Dieses Wartungsfenster löschen?" },
+      "modal": { "title_new": "Neues Wartungsfenster", "title_edit": "Wartungsfenster bearbeiten" },
+      "form": {
+        "name_label": "Wartungsname",
+        "name_placeholder": "Z.B.: Monatliches Update — Core Layer",
+        "description_label": "Beschreibung",
+        "time_range_label": "Datum & Uhrzeitbereich",
+        "devices_label": "Geräte",
+        "devices_tooltip": "Geräte im Wartungsbereich auswählen",
+        "devices_placeholder": "Geräte auswählen"
+      },
+      "toast": {
+        "created": "Wartungsfenster erstellt",
+        "updated": "Wartungsfenster aktualisiert",
+        "deleted": "Wartungsfenster gelöscht"
+      }
+    },
+    "api_tokens": {
+      "section_title": "API-Token-Verwaltung",
+      "section_subtitle": "Erstellen Sie langlebige Tokens für Automatisierung und API-Zugriff.",
+      "btn_new": "Neuer Token",
+      "btn_revoke": "Widerrufen",
+      "empty": "Noch keine Tokens",
+      "never_used": "Nie verwendet",
+      "never_expires": "Kein Ablauf",
+      "one_year": "1 Jahr",
+      "usage_hint": "Im Header verwenden:",
+      "col": {
+        "name": "Name",
+        "prefix": "Präfix",
+        "last_used": "Letzte Verwendung",
+        "expires_at": "Läuft ab"
+      },
+      "popconfirm": {
+        "revoke_title": "Diesen Token widerrufen?",
+        "revoke_desc": "Diese Aktion kann nicht rückgängig gemacht werden."
+      },
+      "modal": {
+        "title_new": "Neuen API-Token erstellen",
+        "created_title": "Token erstellt",
+        "saved_btn": "OK, gespeichert",
+        "warn_title": "Dieser Token wird nie wieder angezeigt!",
+        "warn_desc": "Bitte kopieren Sie ihn jetzt und speichern Sie ihn sicher."
+      },
+      "form": {
+        "name_label": "Token-Name",
+        "name_required": "Name eingeben",
+        "name_placeholder": "z.B. CI/CD Pipeline, Monitoring Bot",
+        "expires_label": "Ablaufdatum",
+        "expires_help": "Leer lassen für kein Ablauf"
+      },
+      "toast": {
+        "create_failed": "Token konnte nicht erstellt werden",
+        "revoked": "Token widerrufen",
+        "copied": "Token kopiert"
+      }
+    },
+    "ai": {
+      "security_message": "Ihre API-Schlüssel werden auf dem Server mit Fernet-Verschlüsselung gespeichert und niemals geloggt.",
+      "active_provider_label": "Aktiver Anbieter",
+      "active_provider_placeholder": "Anbieter auswählen",
+      "provider_ollama_local": "Ollama (Lokal)",
+      "tag_configured": "Konfiguriert",
+      "tag_no_key": "Kein API-Schlüssel",
+      "tag_no_api_key": "Benötigt keinen API-Schlüssel",
+      "api_key_placeholder": "{{name}} API-Schlüssel",
+      "api_key_placeholder_change": "{{name}} API-Schlüssel (zum Ändern eingeben)",
+      "model_placeholder": "Modell wählen",
+      "ollama_section_title": "Ollama (Lokales Modell)",
+      "toast": { "saved": "KI-Einstellungen gespeichert" }
+    },
+    "system": {
+      "page_title": "Systemeinstellungen",
+      "empty": "Keine Einstellungen gefunden",
+      "no_permission_title": "Unzureichende Berechtigung",
+      "no_permission_desc": "Nur org_admin oder super_admin kann Systemeinstellungen einsehen und ändern.",
+      "info_desc": "Sehr niedrige Scan-Frequenzen belasten Geräte unnötig (besonders SNMP); sehr hohe Werte verlangsamen die Latenzwahrnehmung. Unter jeder Einstellung steht ein empfohlener Bereich; Werte außerhalb von min/max werden nicht akzeptiert.",
+      "scope": {
+        "global": "Global",
+        "org_override": "Org-Override",
+        "default": "Standard"
+      },
+      "scope_legend_org": "gilt für diese Organisation,",
+      "scope_legend_global": "gilt für die gesamte Plattform (nur super_admin kann ändern). Einige Einstellungen werden erst nach Neustart eines Celery-Workers wirksam.",
+      "category": {
+        "scan_frequencies": "Scan-Frequenzen",
+        "alarm_dedup": "Alarm / Dedup",
+        "flap": "Flap-Erkennung",
+        "correlation": "Korrelations-Engine",
+        "maintenance": "Wartungsfenster",
+        "session_stale": "Sitzung / Stale",
+        "retention": "Datenaufbewahrung",
+        "other": "Sonstiges"
+      },
+      "row": {
+        "effective_label": "Effektiv",
+        "global_lock_tooltip": "Globale Einstellung — nur super_admin kann ändern",
+        "reset_to_default": "Auf Standard zurücksetzen"
+      },
+      "popconfirm": {
+        "reset_title": "Org-Override löschen",
+        "reset_desc": "Diese Einstellung kehrt zum Standardwert zurück. Fortfahren?"
+      },
+      "toast": {
+        "saved_key": "Einstellung gespeichert: {{key}}",
+        "worker_restart_required": "⚠ Einige Einstellungen erfordern einen Celery-Worker-Neustart",
+        "save_failed": "Einstellung konnte nicht gespeichert werden",
+        "override_removed": "Override entfernt: {{key}}",
+        "already_default": "War bereits auf Standardwert",
+        "reset_failed": "Zurücksetzen fehlgeschlagen"
+      },
+      "retention": {
+        "panel_title": "Aufbewahrung-Vorschau (Dry-Run)",
+        "btn_preview": "Vorschau",
+        "preview_failed": "Vorschau konnte nicht geladen werden",
+        "intro": "Wenn die Bereinigung jetzt liefe, wie viele Zeilen aus welcher Tabelle würden gelöscht? Diese Operation löscht nichts — sie zählt nur. Die tatsächliche Bereinigung läuft in der täglichen Beat-Aufgabe mit org-basierter effektiver Aufbewahrung (Plan-Obergrenze + 7-Tage-Basis).",
+        "empty_hint": "Klicken Sie \"Vorschau\" für die Vorschau.",
+        "nothing_to_delete": "Keine alten Daten zu löschen — alles im Aufbewahrungsfenster.",
+        "total_candidates": "{{count}} Zeilen sind Löschkandidaten.",
+        "col_table": "Tabelle",
+        "col_rows": "Zu löschende Zeilen"
+      }
+    },
+    "password_policy": {
+      "page_title": "Passwort-Richtlinie",
+      "tag_global_default": "Globaler Standard",
+      "intro": "Diese Regeln gelten bei neuer Benutzererstellung, wenn der Benutzer sein Passwort ändert und nach einem Admin-Reset. Quelle:",
+      "card_rules_title": "Regeln",
+      "no_permission_title": "Unzureichende Berechtigung",
+      "no_permission_desc": "Nur org_admin oder super_admin kann die Passwort-Richtlinie einsehen und ändern.",
+      "btn_back_to_global": "Zurück zu Global",
+      "popconfirm": {
+        "reset_title": "Org-Override-Richtlinie löschen",
+        "reset_desc": "Diese Org kehrt zum globalen Standard zurück. Fortfahren?"
+      },
+      "form": {
+        "min_length_label": "Minimale Länge",
+        "classes_label": "Zeichenklassen-Anforderungen",
+        "history_label": "Verlauf-Wiederverwendungsprüfung",
+        "history_tooltip": "Verhindert Wiederverwendung der letzten N Passwörter. 0 = keine Prüfung.",
+        "expiry_label": "Passwort-Ablauf (Tage)",
+        "expiry_tooltip": "Am Ende dieser Frist wird der Benutzer zum Passwortwechsel gezwungen. 0 = kein Ablauf.",
+        "force_change_label": "Passwortwechsel bei erstem Login erzwingen"
+      },
+      "unit": { "password_short": "Passwörter" },
+      "tester_card_title": "Passwort-Test-Tool",
+      "tester_hint": "Geben Sie unten ein Passwort ein, um zu sehen, ob es die aktuelle Richtlinie besteht.",
+      "tester_placeholder": "Zu testendes Passwort…",
+      "tester_pass_message": "Passwort hat die Richtlinie bestanden ✓",
+      "tester_fail_message": "Passwort hat die Richtlinie nicht bestanden",
+      "tester_source": "Richtlinienquelle: {{source}}",
+      "toast": {
+        "updated": "Passwort-Richtlinie aktualisiert",
+        "save_failed": "Richtlinie konnte nicht gespeichert werden",
+        "reset_done": "Org-Override-Richtlinie gelöscht — globaler Standard gilt"
+      }
+    },
+    "mfa": {
+      "section_title": "Multi-Faktor-Authentifizierung",
+      "enabled_title": "MFA aktiv",
+      "enabled_desc": "Bei jedem Login wird ein 6-stelliger Code aus Ihrer Authenticator-App verlangt.",
+      "enrolled_at_label": "Registriert",
+      "methods_label": "METHODEN",
+      "method": { "authenticator": "Authenticator" },
+      "recovery_remaining_label": "VERBLEIBENDE WIEDERHERSTELLUNGSCODES",
+      "tag_running_out": "Geht zu Ende",
+      "btn_regen_recovery": "Wiederherstellungscodes neu erstellen",
+      "btn_regen_short": "Erneuern",
+      "btn_disable": "MFA deaktivieren",
+      "btn_enable": "MFA aktivieren",
+      "btn_confirm_enable": "Bestätigen und aktivieren",
+      "btn_copy_secret": "Schlüssel kopieren",
+      "disable_warning": "Ihr Konto wird wieder ein-Faktor.",
+      "disable_code_placeholder": "6-stelliger Code oder Wiederherstellungscode (empfohlen)",
+      "regen_warning": "Wenn neue Codes generiert werden, sind die alten sofort ungültig.",
+      "regen_code_placeholder": "6-stelliger Code aus Authenticator",
+      "setup_title": "MFA-Einrichtung — 1 / 2",
+      "setup_step2_title": "2 / 2 — Code aus Ihrer App eingeben",
+      "setup_intro_prefix": "Scannen Sie in Ihrer Authenticator-App (",
+      "setup_intro_suffix": ") den QR oder geben Sie den Setup-Schlüssel manuell ein. Dieser Schlüssel wird nur einmal angezeigt.",
+      "setup_key_label": "SETUP-SCHLÜSSEL (BASE32)",
+      "setup_qr_fallback_hint": "Wenn der QR nicht scanbar ist, \"Setup-Schlüssel eingeben\" → diesen Text einfügen.",
+      "code_6_placeholder": "6-stelliger Code",
+      "idle_title": "MFA ist derzeit deaktiviert",
+      "idle_desc": "Ihr Konto ist nur durch ein Passwort geschützt. Aktivieren Sie TOTP mit einem Klick — funktioniert mit Google Authenticator, Microsoft Authenticator, Authy und 1Password.",
+      "recovery": {
+        "panel_title": "Ihre Wiederherstellungscodes",
+        "panel_intro_pre": "Wenn Sie den Zugriff auf den Authenticator verlieren, können Sie einen der unten stehenden Codes auf der Login-Seite im ",
+        "panel_recovery_word": "Wiederherstellung",
+        "panel_intro_mid": "-Feld eingeben, um sich erneut anzumelden. Jeder Code ist ",
+        "panel_one_time": "einmalig verwendbar",
+        "panel_intro_post": ". Diese Liste wird nur jetzt angezeigt.",
+        "btn_download_txt": "Herunterladen (.txt)",
+        "btn_saved_close": "Gespeichert, schließen",
+        "file_title": "MFA-Wiederherstellungscodes",
+        "file_created_at": "Erstellt",
+        "file_one_time_notice": "Jeder Code ist EINMALIG. Verwenden Sie einen, wenn Sie den Zugriff auf den Authenticator verlieren."
+      },
+      "email": {
+        "card_title": "E-Mail-Verifizierung (2. Kanal)",
+        "active_desc": "Beim Login kann OTP an Ihre E-Mail anstelle des Authenticators gesendet werden. Authenticator kann weiterhin als primäre Methode verwendet werden.",
+        "idle_desc": "Ein 6-stelliger OTP wird an Ihre registrierte E-Mail-Adresse gesendet. Fungiert als zusätzlicher Verifizierungskanal neben dem Authenticator.",
+        "requirement_alert": "Um E-Mails senden zu können, muss Ihre Organisation mindestens einen aktiven E-Mail-Benachrichtigungskanal definiert haben (Einstellungen → Benachrichtigungen).",
+        "sent_desc": "Geben Sie den 6-stelligen Code aus Ihrer E-Mail ein. Der Code ist 10 Minuten gültig.",
+        "btn_enable": "E-Mail-Kanal aktivieren",
+        "btn_remove": "E-Mail-Kanal entfernen",
+        "btn_verify": "Verifizieren",
+        "btn_resend": "Erneut senden",
+        "toast": {
+          "code_sent": "Verifizierungscode gesendet: {{email}}",
+          "send_failed": "E-Mail konnte nicht gesendet werden",
+          "added": "E-Mail-MFA-Kanal hinzugefügt",
+          "verify_failed": "Code konnte nicht verifiziert werden",
+          "removed": "E-Mail-MFA-Kanal entfernt",
+          "remove_failed": "Konnte nicht entfernt werden"
+        }
+      },
+      "toast": {
+        "enroll_failed": "Registrierung konnte nicht gestartet werden",
+        "enabled": "MFA aktiviert — speichern Sie jetzt Ihre Wiederherstellungscodes.",
+        "invalid_code": "Ungültiger Code",
+        "disabled": "MFA deaktiviert",
+        "disable_failed": "Konnte nicht deaktiviert werden",
+        "regen_ok": "Neue Wiederherstellungscodes generiert — die alten sind jetzt ungültig.",
+        "regen_failed": "Erneuerung fehlgeschlagen",
+        "secret_copied": "Schlüssel kopiert"
+      }
+    },
     "theme": "Design",
     "theme_desc": "Anwendungsaussehen auswählen",
     "theme_dark": "Dunkel",

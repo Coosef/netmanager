@@ -14,6 +14,7 @@ import { useState } from 'react'
 import { Alert, Button, Card, Input, Space, Tag, Typography, message } from 'antd'
 import { CheckCircleFilled, MailOutlined } from '@ant-design/icons'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useTranslation } from 'react-i18next'
 import { mfaApi } from '@/api/mfa'
 
 const { Paragraph } = Typography
@@ -27,6 +28,7 @@ interface Props {
 
 export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const emailActive = methods.includes('email')
 
   const [stage, setStage] = useState<'idle' | 'sent'>('idle')
@@ -38,17 +40,17 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
     onSuccess: (r) => {
       setEmailMasked(r.email_masked)
       setStage('sent')
-      message.success(`Doğrulama kodu gönderildi: ${r.email_masked}`)
+      message.success(t('settings.mfa.email.toast.code_sent', { email: r.email_masked }))
     },
     onError: (e: any) => message.error(
-      e?.response?.data?.detail || 'Email gönderilemedi',
+      e?.response?.data?.detail || t('settings.mfa.email.toast.send_failed'),
     ),
   })
 
   const confirmM = useMutation({
     mutationFn: (c: string) => mfaApi.confirmEmail(c),
     onSuccess: (r) => {
-      message.success('Email MFA kanalı eklendi')
+      message.success(t('settings.mfa.email.toast.added'))
       setStage('idle')
       setCode('')
       if (r.recovery_codes && onRecoveryCodes) {
@@ -57,7 +59,7 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
       qc.invalidateQueries({ queryKey: ['mfa-status'] })
     },
     onError: (e: any) => message.error(
-      e?.response?.data?.detail || 'Kod doğrulanamadı',
+      e?.response?.data?.detail || t('settings.mfa.email.toast.verify_failed'),
     ),
   })
 
@@ -65,14 +67,14 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
     mutationFn: () => mfaApi.removeEmail(),
     onSuccess: (r) => {
       if (r.removed) {
-        message.success('Email MFA kanalı kaldırıldı')
+        message.success(t('settings.mfa.email.toast.removed'))
         qc.invalidateQueries({ queryKey: ['mfa-status'] })
       } else if (r.note) {
         message.info(r.note)
       }
     },
     onError: (e: any) => message.error(
-      e?.response?.data?.detail || 'Kaldırılamadı',
+      e?.response?.data?.detail || t('settings.mfa.email.toast.remove_failed'),
     ),
   })
 
@@ -82,10 +84,10 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
       title={
         <Space>
           <MailOutlined style={{ color: emailActive ? 'var(--ok)' : 'var(--fg-3)' }} />
-          Email Doğrulama (2. Kanal)
+          {t('settings.mfa.email.card_title')}
           {emailActive && (
             <Tag color="green" style={{ marginLeft: 6 }}>
-              <CheckCircleFilled /> Aktif
+              <CheckCircleFilled /> {t('settings.notifications.status_active')}
             </Tag>
           )}
         </Space>
@@ -94,29 +96,26 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
       {emailActive ? (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Paragraph style={{ marginBottom: 0, color: 'var(--fg-3)', fontSize: 12 }}>
-            Login esnasında authenticator yerine email'inize OTP yollanabilir.
-            Authenticator yine birincil yöntem olarak kullanılabilir.
+            {t('settings.mfa.email.active_desc')}
           </Paragraph>
           <Button
             danger size="small"
             onClick={() => removeM.mutate()}
             loading={removeM.isPending}
           >
-            Email kanalını kaldır
+            {t('settings.mfa.email.btn_remove')}
           </Button>
         </Space>
       ) : stage === 'idle' ? (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Paragraph style={{ marginBottom: 0, color: 'var(--fg-3)', fontSize: 12 }}>
-            Kayıtlı email adresinize 6-haneli OTP yollanır. Authenticator'a
-            ek bir doğrulama kanalı olarak çalışır.
+            {t('settings.mfa.email.idle_desc')}
           </Paragraph>
           <Alert
             type="info" showIcon
             message={
               <span style={{ fontSize: 12 }}>
-                Email gönderebilmek için organizasyonunuzda en az bir aktif
-                email bildirim kanalı tanımlı olmalı (Settings → Bildirimler).
+                {t('settings.mfa.email.requirement_alert')}
               </span>
             }
           />
@@ -126,15 +125,15 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
             onClick={() => enrollM.mutate()}
             loading={enrollM.isPending}
           >
-            Email kanalını etkinleştir
+            {t('settings.mfa.email.btn_enable')}
           </Button>
         </Space>
       ) : (
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <Alert
             type="success" showIcon
-            message={`Doğrulama kodu gönderildi: ${emailMasked}`}
-            description="Email'inize gelen 6-haneli kodu girin. Kod 10 dakika geçerli."
+            message={t('settings.mfa.email.toast.code_sent', { email: emailMasked })}
+            description={t('settings.mfa.email.sent_desc')}
           />
           <Input
             value={code}
@@ -153,16 +152,16 @@ export default function MfaEmailCard({ methods, onRecoveryCodes }: Props) {
               loading={confirmM.isPending}
               onClick={() => confirmM.mutate(code)}
             >
-              Doğrula
+              {t('settings.mfa.email.btn_verify')}
             </Button>
             <Button
               size="small"
               onClick={() => enrollM.mutate()}
               loading={enrollM.isPending}
             >
-              Yeniden yolla
+              {t('settings.mfa.email.btn_resend')}
             </Button>
-            <Button size="small" onClick={() => setStage('idle')}>İptal</Button>
+            <Button size="small" onClick={() => setStage('idle')}>{t('common.cancel')}</Button>
           </Space>
         </Space>
       )}
