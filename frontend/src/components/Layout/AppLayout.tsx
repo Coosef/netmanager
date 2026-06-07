@@ -5,6 +5,7 @@ import Sidebar from './Sidebar'
 import TopNav from './TopNav'
 import AppHeader from './Header'
 import LocationGate from './LocationGate'
+import MenuGroupNav from './MenuGroupNav'
 import CommandPalette from '@/components/CommandPalette'
 import CustomizePanel from '@/components/CustomizePanel'
 import NocWallOverlay from '@/components/NocWallOverlay'
@@ -22,6 +23,41 @@ const LAYOUT_CSS = `
   @keyframes pageEnterFade {
     from { opacity: 0; transform: translateY(7px); }
     to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* MenuGroupNav — sayfa içerik öncesi yatay tab strip (Faz 3). */
+  .nm-mg-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 8px 14px 0;
+    background: transparent;
+    border-bottom: 1px solid var(--border-0);
+    scrollbar-width: thin;
+  }
+  .nm-mg-nav::-webkit-scrollbar { height: 4px; }
+  .nm-mg-nav::-webkit-scrollbar-thumb { background: var(--border-0); border-radius: 2px; }
+  .nm-mg-tab {
+    flex: 0 0 auto;
+    padding: 8px 16px;
+    background: transparent;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    color: var(--fg-2);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+    border-radius: 4px 4px 0 0;
+  }
+  .nm-mg-tab:hover { color: var(--fg-0); background: var(--bg-1); }
+  .nm-mg-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 600;
   }
 `
 
@@ -97,6 +133,9 @@ function AppLayoutInner() {
             onOpenMobileNav={() => setMobileNavOpen(true)}
           />
           <div className="nm-workspace">
+            {/* Faz 3 menu restructure: yatay tab strip — aktif grup tab'ları.
+                Dashboard veya bilinmeyen route'ta render edilmez (null döner). */}
+            <MenuGroupNav />
             <div key={location.pathname} style={{ animation: 'pageEnterFade 0.28s ease both', minHeight: '100%' }}>
               {/* Faz 8 Phase F — gate every page on a resolved location context. */}
               <LocationGate>

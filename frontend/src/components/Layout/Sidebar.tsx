@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/auth'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useNavGroups } from './useNavGroups'
 import CharonLogo from '@/components/CharonLogo'
+import { getActiveGroup } from '@/utils/menuGroups'
 
 interface SidebarProps {
   mobileOpen?: boolean
@@ -16,7 +17,10 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
   const location = useLocation()
   const { user } = useAuthStore()
   const isMobile = useIsMobile()
-  const NAV_GROUPS = useNavGroups()
+  // Faz 3: useNavGroups artık 12 flat NavGroupItem döner; eski iç-içe
+  // (group.items[]) yapı kaldırıldı.
+  const NAV_ITEMS = useNavGroups()
+  const activeGroup = getActiveGroup(location.pathname)
 
   const initials = (user?.username ?? 'CH').slice(0, 2).toUpperCase()
 
@@ -35,28 +39,24 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', margin: '0 -10px', padding: '0 10px' }}>
-        {/* NAV_GROUPS hook'tan zaten filtreli geliyor (role/permission). */}
-        {NAV_GROUPS.map((group) => (
-          <div key={group.label}>
-            <div className="nm-navsect">{group.label}</div>
-            {group.items.map((item) => {
-              const active = location.pathname === item.key ||
-                (item.key !== '/' && location.pathname.startsWith(item.key))
-              const badgeCount = item.badgeCount ?? 0
-              return (
-                <div key={item.key}
-                  className={`nm-navitem ${active ? 'active' : ''}`}
-                  onClick={() => { navigate(item.key); if (isMobile) onMobileClose?.() }}>
-                  <span className="nm-navicon">{item.icon}</span>
-                  <span>{item.label}</span>
-                  {badgeCount > 0 && (
-                    <span className={`nm-navbadge ${item.badge === 'approval' ? 'warn' : 'crit'}`}>{badgeCount}</span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        ))}
+        {/* NAV_ITEMS hook'tan zaten filtreli geliyor (RBAC + feature).
+            Faz 3: 12 ana grup düz liste, sayfa içi tab strip MenuGroupNav. */}
+        {NAV_ITEMS.map((item) => {
+          const active = item.groupKey === activeGroup
+          const badgeCount = item.badgeCount ?? 0
+          const badgeCls = item.badgeKind === 'warn' ? 'warn' : 'crit'
+          return (
+            <div key={item.groupKey}
+              className={`nm-navitem ${active ? 'active' : ''}`}
+              onClick={() => { navigate(item.route); if (isMobile) onMobileClose?.() }}>
+              <span className="nm-navicon">{item.icon}</span>
+              <span>{item.label}</span>
+              {badgeCount > 0 && (
+                <span className={`nm-navbadge ${badgeCls}`}>{badgeCount}</span>
+              )}
+            </div>
+          )
+        })}
       </div>
 
       <div className="nm-sidebar-foot">
