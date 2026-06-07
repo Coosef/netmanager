@@ -254,15 +254,25 @@ class TerminalSessionLogger:
 
         try:
             async with session_factory() as db2:
-                # RLS GUC — agent_offline pattern (commit sonrası geri set)
+                # RLS GUC — agent_offline pattern (commit sonrası geri set).
+                # SQLite (test) için set_config yoktur; skip et.
                 from sqlalchemy import text as _sql_text
-                await db2.execute(_sql_text(
-                    "SELECT set_config('app.is_super_admin','off',true),"
-                    "       set_config('app.current_org_id', :o, true)"
-                ), {"o": str(self.organization_id)})
-                await db2.execute(
+                dialect = db2.bind.dialect.name if db2.bind else "sqlite"
+                if dialect == "postgresql":
+                    await db2.execute(_sql_text(
+                        "SELECT set_config('app.is_super_admin','off',true),"
+                        "       set_config('app.current_org_id', :o, true)"
+                    ), {"o": str(self.organization_id)})
+                # HOTFIX (Bug #1) — race guard: ended_at IS NULL koşulu.
+                # Admin terminate endpoint'i daha önce force_closed yazmışsa
+                # (admin → force_closed → user terminal'i kapatır → bu close)
+                # bu UPDATE no-op olur. Aksi takdirde WS finally'sin
+                # exit_reason='user_closed' yazımı endpoint'in force_closed'unu
+                # üzerine yazardı. Detay: docs/SSH_TERMINATION_RCA_2026-06-07.md
+                result = await db2.execute(
                     _sa_update(TerminalSessionLog).where(
                         TerminalSessionLog.session_id == self.session_id,
+                        TerminalSessionLog.ended_at.is_(None),
                     ).values(
                         ended_at=ended_at,
                         duration_ms=duration_ms,
@@ -275,6 +285,15 @@ class TerminalSessionLogger:
                     )
                 )
                 await db2.commit()
+                if result.rowcount == 0:
+                    log.info(
+                        "ssh-term: logger close skipped because already ended",
+                        extra={
+                            "event": "ssh_term_logger_close_skipped",
+                            "session_id": self.session_id,
+                            "requested_exit_reason": exit_reason,
+                        },
+                    )
         except Exception as exc:
             log.warning("TerminalSessionLogger.close UPDATE hata: %r", exc)
 
