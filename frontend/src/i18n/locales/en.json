@@ -42,7 +42,93 @@
     "locations": "Locations",
     "tenants": "Organizations",
     "driver_templates": "Driver Templates",
-    "help": "Help"
+    "help": "Help",
+    "group": {
+      "dashboard": "Dashboard",
+      "inventory": "Network Inventory",
+      "monitoring": "Monitoring & Analytics",
+      "alerts": "Alerts & Incidents",
+      "config": "Configuration Management",
+      "automation": "Automation & Workflows",
+      "security": "Security & Compliance",
+      "reports": "Performance & Reports",
+      "tools": "Operations Tools",
+      "admin_users": "Users & Access Management",
+      "admin_audit": "Audit & Logs",
+      "admin_platform": "Platform Management"
+    },
+    "tab": {
+      "inventory": {
+        "switch": "Devices",
+        "topology": "Topology",
+        "discovery": "Discovery",
+        "ipam": "IPAM",
+        "vlan": "VLAN",
+        "racks": "Racks",
+        "map": "Map",
+        "lldp": "LLDP Inventory"
+      },
+      "monitoring": {
+        "alerts": "Alerts",
+        "live": "Live Monitoring",
+        "analytics": "Network Analytics",
+        "bandwidth": "Bandwidth",
+        "port_intelligence": "Port Intelligence",
+        "probes": "Synthetic Probes"
+      },
+      "alerts": {
+        "rules": "Alert Rules",
+        "escalation": "Escalation Rules",
+        "incidents": "Incident / RCA",
+        "services": "Service Impact Map"
+      },
+      "config": {
+        "drift": "Config Drift",
+        "templates": "Config Templates",
+        "builder": "Config Builder",
+        "backups": "Backup Center",
+        "firmware": "Firmware",
+        "drivers": "Driver Templates"
+      },
+      "automation": {
+        "tasks": "Tasks",
+        "playbooks": "Playbooks",
+        "change": "Change Management",
+        "approvals": "Approvals"
+      },
+      "security": {
+        "audit": "Security Audit",
+        "policies": "Security Policies",
+        "compliance": "Compliance",
+        "lifecycle": "Asset Lifecycle"
+      },
+      "reports": {
+        "sla": "SLA & Uptime",
+        "poe": "PoE / Energy",
+        "reports": "Reports",
+        "twin": "Network Digital Twin"
+      },
+      "tools": {
+        "diagnostics": "Diagnostics",
+        "ai": "AI Network Assistant"
+      },
+      "admin_users": {
+        "users": "Users",
+        "permissions": "Permission Management",
+        "locations": "Locations",
+        "agents": "Proxy Agents"
+      },
+      "admin_audit": {
+        "logs": "Audit Log",
+        "ssh": "SSH Session Audit"
+      },
+      "admin_platform": {
+        "platform": "Platform Panel",
+        "organization": "Organization Panel",
+        "settings": "Settings",
+        "help": "Help"
+      }
+    }
   },
   "nav_group": {
     "main": "MAIN MENU",

@@ -42,7 +42,93 @@
     "locations": "Standorte",
     "tenants": "Organisationen",
     "driver_templates": "Treiber-Vorlagen",
-    "help": "Hilfe"
+    "help": "Hilfe",
+    "group": {
+      "dashboard": "Dashboard",
+      "inventory": "Netzwerk-Inventar",
+      "monitoring": "Überwachung & Analytik",
+      "alerts": "Alarme & Vorfälle",
+      "config": "Konfigurationsverwaltung",
+      "automation": "Automatisierung & Abläufe",
+      "security": "Sicherheit & Compliance",
+      "reports": "Leistung & Berichte",
+      "tools": "Betriebswerkzeuge",
+      "admin_users": "Benutzer & Zugriffsverwaltung",
+      "admin_audit": "Audit & Protokolle",
+      "admin_platform": "Plattformverwaltung"
+    },
+    "tab": {
+      "inventory": {
+        "switch": "Geräte",
+        "topology": "Topologie",
+        "discovery": "Discovery",
+        "ipam": "IPAM",
+        "vlan": "VLAN",
+        "racks": "Racks",
+        "map": "Karte",
+        "lldp": "LLDP-Inventar"
+      },
+      "monitoring": {
+        "alerts": "Alarme",
+        "live": "Live-Überwachung",
+        "analytics": "Netzwerkanalyse",
+        "bandwidth": "Bandbreite",
+        "port_intelligence": "Port Intelligence",
+        "probes": "Synthetic Probes"
+      },
+      "alerts": {
+        "rules": "Alarmregeln",
+        "escalation": "Eskalationsregeln",
+        "incidents": "Vorfall / RCA",
+        "services": "Service-Impact-Karte"
+      },
+      "config": {
+        "drift": "Config-Drift",
+        "templates": "Config-Vorlagen",
+        "builder": "Config-Builder",
+        "backups": "Backup-Zentrum",
+        "firmware": "Firmware",
+        "drivers": "Treibervorlagen"
+      },
+      "automation": {
+        "tasks": "Aufgaben",
+        "playbooks": "Playbooks",
+        "change": "Änderungsverwaltung",
+        "approvals": "Genehmigungen"
+      },
+      "security": {
+        "audit": "Sicherheitsprüfung",
+        "policies": "Sicherheitsrichtlinien",
+        "compliance": "Compliance",
+        "lifecycle": "Asset-Lifecycle"
+      },
+      "reports": {
+        "sla": "SLA & Verfügbarkeit",
+        "poe": "PoE / Energie",
+        "reports": "Berichte",
+        "twin": "Network Digital Twin"
+      },
+      "tools": {
+        "diagnostics": "Diagnose",
+        "ai": "KI-Netzwerkassistent"
+      },
+      "admin_users": {
+        "users": "Benutzer",
+        "permissions": "Berechtigungsverwaltung",
+        "locations": "Standorte",
+        "agents": "Proxy-Agenten"
+      },
+      "admin_audit": {
+        "logs": "Audit-Protokoll",
+        "ssh": "SSH-Sitzungsaudit"
+      },
+      "admin_platform": {
+        "platform": "Plattform-Panel",
+        "organization": "Organisations-Panel",
+        "settings": "Einstellungen",
+        "help": "Hilfe"
+      }
+    }
   },
   "nav_group": {
     "main": "HAUPTMENÜ",

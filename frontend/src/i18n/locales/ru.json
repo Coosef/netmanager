@@ -42,7 +42,93 @@
     "locations": "Местоположения",
     "tenants": "Организации",
     "driver_templates": "Шаблоны драйверов",
-    "help": "Помощь"
+    "help": "Помощь",
+    "group": {
+      "dashboard": "Дашборд",
+      "inventory": "Инвентарь сети",
+      "monitoring": "Мониторинг и аналитика",
+      "alerts": "Оповещения и инциденты",
+      "config": "Управление конфигурацией",
+      "automation": "Автоматизация и рабочие процессы",
+      "security": "Безопасность и соответствие",
+      "reports": "Производительность и отчёты",
+      "tools": "Инструменты эксплуатации",
+      "admin_users": "Управление пользователями и доступом",
+      "admin_audit": "Аудит и журналы",
+      "admin_platform": "Управление платформой"
+    },
+    "tab": {
+      "inventory": {
+        "switch": "Устройства",
+        "topology": "Топология",
+        "discovery": "Обнаружение",
+        "ipam": "IPAM",
+        "vlan": "VLAN",
+        "racks": "Стойки",
+        "map": "Карта",
+        "lldp": "Инвентарь LLDP"
+      },
+      "monitoring": {
+        "alerts": "Оповещения",
+        "live": "Живой мониторинг",
+        "analytics": "Сетевая аналитика",
+        "bandwidth": "Пропускная способность",
+        "port_intelligence": "Port Intelligence",
+        "probes": "Synthetic Probes"
+      },
+      "alerts": {
+        "rules": "Правила оповещений",
+        "escalation": "Правила эскалации",
+        "incidents": "Инцидент / RCA",
+        "services": "Карта влияния сервисов"
+      },
+      "config": {
+        "drift": "Дрейф конфигурации",
+        "templates": "Шаблоны конфигурации",
+        "builder": "Конструктор конфигурации",
+        "backups": "Центр резервных копий",
+        "firmware": "Прошивка",
+        "drivers": "Шаблоны драйверов"
+      },
+      "automation": {
+        "tasks": "Задачи",
+        "playbooks": "Playbooks",
+        "change": "Управление изменениями",
+        "approvals": "Утверждения"
+      },
+      "security": {
+        "audit": "Аудит безопасности",
+        "policies": "Политики безопасности",
+        "compliance": "Соответствие",
+        "lifecycle": "Жизненный цикл активов"
+      },
+      "reports": {
+        "sla": "SLA и доступность",
+        "poe": "PoE / Энергия",
+        "reports": "Отчёты",
+        "twin": "Network Digital Twin"
+      },
+      "tools": {
+        "diagnostics": "Диагностика",
+        "ai": "ИИ-помощник сети"
+      },
+      "admin_users": {
+        "users": "Пользователи",
+        "permissions": "Управление правами",
+        "locations": "Локации",
+        "agents": "Прокси-агенты"
+      },
+      "admin_audit": {
+        "logs": "Журнал аудита",
+        "ssh": "Аудит SSH-сессий"
+      },
+      "admin_platform": {
+        "platform": "Платформенная панель",
+        "organization": "Панель организации",
+        "settings": "Настройки",
+        "help": "Помощь"
+      }
+    }
   },
   "nav_group": {
     "main": "ГЛАВНОЕ МЕНЮ",
