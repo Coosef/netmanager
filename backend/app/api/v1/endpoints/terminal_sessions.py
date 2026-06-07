@@ -341,9 +341,46 @@ async def terminate_session(
             "terminated_by_username": current_user.username,
             "at": ended_at.isoformat(),
         })
+        log.info(
+            "ssh-term: terminate publish success",
+            extra={
+                "event": "ssh_term_publish",
+                "session_id": session_id,
+                "channel": "terminal:terminate",
+            },
+        )
     except Exception as exc:
         # Tasarım §10.7 — pub/sub fallback: WS 30sn revalidate ile kapanır
-        log.warning("terminal:terminate publish hata (continuing): %r", exc)
+        log.warning(
+            "ssh-term: Redis publish failed (continuing): %r", exc,
+            extra={"event": "ssh_term_publish_failed", "session_id": session_id},
+        )
+
+    # HOTFIX (Bug #2) — pub/sub'a güvenmeyen direct agent close. Agent path
+    # session'ı ise agent_manager._shell_sessions'tan kaldır + agent'a
+    # ssh_shell_close gönder. Pub/sub mesajı listener'a ulaşmasa bile shell
+    # transport kapanır → WS read loop EOF görür → finally çalışır.
+    if row.agent_id:
+        try:
+            from app.services.agent_manager import agent_manager as _ag
+            await _ag.close_shell_session(session_id)
+            log.info(
+                "ssh-term: direct agent close attempted",
+                extra={
+                    "event": "ssh_term_agent_close",
+                    "session_id": session_id,
+                    "agent_id": row.agent_id,
+                },
+            )
+        except Exception as exc:
+            log.warning(
+                "ssh-term: agent close failed (continuing): %r", exc,
+                extra={
+                    "event": "ssh_term_agent_close_failed",
+                    "session_id": session_id,
+                    "agent_id": row.agent_id,
+                },
+            )
 
     # Race guard: WHERE ended_at IS NULL — concurrent terminate veya
     # stale_cleanup'tan önce davranıyorsak 1 row affected; aksi 0 → 410.
