@@ -1,4 +1,5 @@
 import json
+import logging
 import socket
 from typing import Any, Optional
 
@@ -8,6 +9,7 @@ from redis.retry import Retry
 
 from app.core.config import settings
 
+log = logging.getLogger("netmanager.redis")
 _redis: Optional[aioredis.Redis] = None
 
 
@@ -49,5 +51,22 @@ async def delete_key(key: str) -> None:
 
 
 async def publish(channel: str, message: Any) -> None:
+    """Redis pub/sub publish. HOTFIX HF#4 — INFO log subscriber count;
+    WARNING log on failure (re-raise — caller karar verir)."""
     r = get_redis()
-    await r.publish(channel, json.dumps(message))
+    try:
+        sub_count = await r.publish(channel, json.dumps(message))
+        log.info(
+            "redis: publish ok",
+            extra={
+                "event": "redis_publish",
+                "channel": channel,
+                "subscriber_count": sub_count,
+            },
+        )
+    except Exception as exc:
+        log.warning(
+            "redis: publish failed: %r", exc,
+            extra={"event": "redis_publish_failed", "channel": channel},
+        )
+        raise
