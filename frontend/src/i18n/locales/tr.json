@@ -1,5 +1,9 @@
 {
-  "__meta": { "name": "Türkçe", "flag": "🇹🇷", "region": "Türkiye" },
+  "__meta": {
+    "name": "Türkçe",
+    "flag": "🇹🇷",
+    "region": "Türkiye"
+  },
   "lang": {
     "tr": "Türkçe",
     "en": "English",
@@ -38,7 +42,93 @@
     "locations": "Lokasyonlar",
     "tenants": "Organizasyonlar",
     "driver_templates": "Sürücü Şablonları",
-    "help": "Yardım"
+    "help": "Yardım",
+    "group": {
+      "dashboard": "Dashboard",
+      "inventory": "Ağ Envanteri",
+      "monitoring": "İzleme & Analitik",
+      "alerts": "Uyarı & Olay Yönetimi",
+      "config": "Konfigürasyon Yönetimi",
+      "automation": "Otomasyon & İş Akışları",
+      "security": "Güvenlik & Uyumluluk",
+      "reports": "Performans & Raporlar",
+      "tools": "Operasyon Araçları",
+      "admin_users": "Kullanıcı & Erişim Yönetimi",
+      "admin_audit": "Denetim & Kayıtlar",
+      "admin_platform": "Platform Yönetimi"
+    },
+    "tab": {
+      "inventory": {
+        "switch": "Cihazlar",
+        "topology": "Topoloji",
+        "discovery": "Keşif",
+        "ipam": "IPAM",
+        "vlan": "VLAN",
+        "racks": "Kabinler",
+        "map": "Harita",
+        "lldp": "LLDP Envanteri"
+      },
+      "monitoring": {
+        "alerts": "Uyarılar",
+        "live": "Canlı İzleme",
+        "analytics": "Ağ Analitik",
+        "bandwidth": "Bant Genişliği",
+        "port_intelligence": "Port Intelligence",
+        "probes": "Synthetic Probes"
+      },
+      "alerts": {
+        "rules": "Uyarı Kuralları",
+        "escalation": "Escalation Kuralları",
+        "incidents": "Incident / RCA",
+        "services": "Servis Etki Haritası"
+      },
+      "config": {
+        "drift": "Config Drift",
+        "templates": "Config Şablonları",
+        "builder": "Config Builder",
+        "backups": "Yedekleme Merkezi",
+        "firmware": "Firmware",
+        "drivers": "Sürücü Şablonları"
+      },
+      "automation": {
+        "tasks": "Görevler",
+        "playbooks": "Playbooks",
+        "change": "Değişiklik Yönetimi",
+        "approvals": "Onaylar"
+      },
+      "security": {
+        "audit": "Güvenlik Denetimi",
+        "policies": "Güvenlik Politikaları",
+        "compliance": "Uyumluluk Denetimi",
+        "lifecycle": "Asset Lifecycle"
+      },
+      "reports": {
+        "sla": "SLA & Uptime",
+        "poe": "PoE / Enerji",
+        "reports": "Raporlar",
+        "twin": "Network Digital Twin"
+      },
+      "tools": {
+        "diagnostics": "Ağ Tanılama",
+        "ai": "AI Ağ Asistanı"
+      },
+      "admin_users": {
+        "users": "Kullanıcılar",
+        "permissions": "Yetki Yönetimi",
+        "locations": "Lokasyonlar",
+        "agents": "Proxy Agents"
+      },
+      "admin_audit": {
+        "logs": "Audit Log",
+        "ssh": "SSH Oturum Audit"
+      },
+      "admin_platform": {
+        "platform": "Platform Paneli",
+        "organization": "Organizasyon Paneli",
+        "settings": "Ayarlar",
+        "help": "Yardım"
+      }
+    }
   },
   "nav_group": {
     "main": "ANA MENÜ",
@@ -774,7 +864,11 @@
         "actions": "Aksiyonlar",
         "terminal": "Terminal"
       },
-      "risk": { "healthy": "SAĞLIKLI", "watch": "İZLENMELİ", "critical": "KRİTİK" },
+      "risk": {
+        "healthy": "SAĞLIKLI",
+        "watch": "İZLENMELİ",
+        "critical": "KRİTİK"
+      },
       "invalid_id": "Geçersiz cihaz ID",
       "back_to_list": "← Cihazlar",
       "loading": "Cihaz yükleniyor…",
@@ -839,7 +933,11 @@
         "last_backup_label": "Son Backup"
       },
       "ports": {
-        "col": { "port": "Port", "description": "Açıklama", "policy": "Policy" },
+        "col": {
+          "port": "Port",
+          "description": "Açıklama",
+          "policy": "Policy"
+        },
         "mac_tooltip": "Bu portta {{label}} MAC kaydı",
         "poe_processing": "İşlemde…",
         "poe_on_tag": "Açık",
@@ -943,7 +1041,11 @@
         }
       },
       "vlan": {
-        "col": { "name": "Ad", "port_count": "Port sayısı", "ports": "Portlar" },
+        "col": {
+          "name": "Ad",
+          "port_count": "Port sayısı",
+          "ports": "Portlar"
+        },
         "stat": {
           "total": "Toplam VLAN",
           "active": "Aktif",
@@ -1070,7 +1172,9 @@
         "right_default": "sonraki",
         "no_changes_title": "İki backup arası değişiklik yok",
         "no_changes_desc": "Seçili iki konfigürasyon hash'leri farklı olabilir ama satır bazlı diff boş.",
-        "toast": { "copied": "Diff panoya kopyalandı" }
+        "toast": {
+          "copied": "Diff panoya kopyalandı"
+        }
       },
       "security": {
         "device_level_title": "Cihaz Seviyesi Atamalar",
@@ -1094,7 +1198,9 @@
         "tag_fallback": "fallback",
         "tag_device_default": "cihaz default",
         "fallback_text": "hardcoded baseline",
-        "toast": { "saved": "Politika ataması kaydedildi" }
+        "toast": {
+          "saved": "Politika ataması kaydedildi"
+        }
       },
       "actions_tab": {
         "readonly_alert": "Salt-okunur. Aksiyon (test/bilgi-çek/lifecycle/sil) için org_admin+ rolü gerekir.",
@@ -1131,7 +1237,11 @@
         }
       },
       "events": {
-        "sev": { "critical": "KRİTİK", "warning": "UYARI", "info": "BİLGİ" },
+        "sev": {
+          "critical": "KRİTİK",
+          "warning": "UYARI",
+          "info": "BİLGİ"
+        },
         "col_date": "Tarih",
         "col_severity": "Önem",
         "col_type": "Tür",
@@ -1650,8 +1760,14 @@
     "version": "Versiyon",
     "crumb_admin": "Yönetim",
     "page_subtitle": "Genel ayarlar · bildirim kanalları · uyarı kuralları · SLA politikaları · kimlik & token yönetimi.",
-    "col": { "action": "İşlem", "actions": "İşlemler" },
-    "unit": { "min_short": "dk", "day": "gün" },
+    "col": {
+      "action": "İşlem",
+      "actions": "İşlemler"
+    },
+    "unit": {
+      "min_short": "dk",
+      "day": "gün"
+    },
     "stat": {
       "notification_channels": "Bildirim Kanalı",
       "alert_rules": "Uyarı Kuralı",
@@ -1682,12 +1798,21 @@
       "intro_message": "SNMP poll sonuçlarına göre arayüz utilization veya hata eşiği aşıldığında bildirim gönderir.",
       "intro_desc": "Bildirim kanallarınızın 'Eşik Uyarısı (SNMP)' seçeneği etkin olmalıdır.",
       "col": {
-        "name": "Ad", "device": "Cihaz", "interface": "Interface",
-        "metric_threshold": "Metrik / Eşik", "consecutive_poll": "Ardışık Poll",
-        "severity": "Seviye", "enabled": "Aktif"
+        "name": "Ad",
+        "device": "Cihaz",
+        "interface": "Interface",
+        "metric_threshold": "Metrik / Eşik",
+        "consecutive_poll": "Ardışık Poll",
+        "severity": "Seviye",
+        "enabled": "Aktif"
       },
-      "popconfirm": { "delete_title": "Bu kural silinsin mi?" },
-      "modal": { "title_new": "Yeni Uyarı Kuralı", "title_edit": "Kuralı Düzenle" },
+      "popconfirm": {
+        "delete_title": "Bu kural silinsin mi?"
+      },
+      "modal": {
+        "title_new": "Yeni Uyarı Kuralı",
+        "title_edit": "Kuralı Düzenle"
+      },
       "form": {
         "name_label": "Kural Adı",
         "name_placeholder": "Örn: Core Switch Yüksek Utilization",
@@ -1720,13 +1845,19 @@
       "status_inactive": "Pasif",
       "tooltip_test_send": "Test gönder",
       "col": {
-        "name": "Ad", "type": "Tür", "triggers": "Tetikleyiciler", "status": "Durum"
+        "name": "Ad",
+        "type": "Tür",
+        "triggers": "Tetikleyiciler",
+        "status": "Durum"
       },
       "popconfirm": {
         "send_digest_title": "Haftalık özet gönderilsin mi?",
         "delete_title": "Kanal silinsin mi?"
       },
-      "modal": { "title_new": "Yeni Bildirim Kanalı", "title_edit": "Kanalı Düzenle" },
+      "modal": {
+        "title_new": "Yeni Bildirim Kanalı",
+        "title_edit": "Kanalı Düzenle"
+      },
       "form": {
         "name_label": "Kanal Adı",
         "type_label": "Tür",
@@ -1780,12 +1911,17 @@
       "empty": "Henüz profil yok",
       "intro_message": "Kimlik bilgileri Fernet şifrelemesiyle saklanır. Şifreler hiçbir zaman API yanıtında döndürülmez.",
       "intro_desc": "Cihazlara profil atayarak credential yönetimini merkezileştirin. Profil atanmış cihazlar SSH/SNMP bağlantılarında bu profili kullanır.",
-      "col": { "profile_name": "Profil Adı" },
+      "col": {
+        "profile_name": "Profil Adı"
+      },
       "popconfirm": {
         "delete_title": "Bu profil silinsin mi?",
         "delete_desc": "Profile atanmış cihazlar varsa silinemez."
       },
-      "modal": { "title_new": "Yeni Kimlik Profili", "title_edit": "Profili Düzenle" },
+      "modal": {
+        "title_new": "Yeni Kimlik Profili",
+        "title_edit": "Profili Düzenle"
+      },
       "form": {
         "name_label": "Profil Adı",
         "name_placeholder": "Örn: Cisco Core, Aruba Access, Read-Only",
@@ -1830,8 +1966,13 @@
         "devices": "{{count}} cihaz",
         "groups": "{{count}} grup"
       },
-      "popconfirm": { "delete_title": "Bu politikayı silmek istiyor musunuz?" },
-      "modal": { "title_new": "Yeni SLA Politikası", "title_edit": "SLA Politikasını Düzenle" },
+      "popconfirm": {
+        "delete_title": "Bu politikayı silmek istiyor musunuz?"
+      },
+      "modal": {
+        "title_new": "Yeni SLA Politikası",
+        "title_edit": "SLA Politikasını Düzenle"
+      },
       "form": {
         "name_label": "Politika Adı",
         "name_placeholder": "Kritik Altyapı SLA",
@@ -1856,7 +1997,9 @@
         "last_poll": "Son Poll",
         "not_yet": "Henüz yok"
       },
-      "col": { "device": "Cihaz" },
+      "col": {
+        "device": "Cihaz"
+      },
       "bulk_section_title": "Toplu SNMP Yapılandırma (SSH)",
       "alert_ruijie_title": "Ruijie community string kuralı",
       "alert_ruijie_desc": "Community string en az 3 karakter türü içermeli: büyük harf + küçük harf + rakam. Örnek: \"Charon1\"",
@@ -1907,7 +2050,9 @@
         "last_result": "Son Sonuç",
         "rotate_now": "Şimdi Döndür"
       },
-      "popconfirm": { "delete_title": "Rotasyon politikası silinsin mi?" },
+      "popconfirm": {
+        "delete_title": "Rotasyon politikası silinsin mi?"
+      },
       "modal": {
         "title_new": "Rotasyon Politikası Ekle",
         "title_edit": "Politikayı Düzenle",
@@ -1915,8 +2060,12 @@
         "last_result_title": "Son Rotasyon Sonucu",
         "executed_at": "{{date}} tarihinde çalıştırıldı"
       },
-      "form": { "interval_label": "Rotasyon Aralığı (Gün)" },
-      "toast": { "started": "Rotasyon başlatıldı" }
+      "form": {
+        "interval_label": "Rotasyon Aralığı (Gün)"
+      },
+      "toast": {
+        "started": "Rotasyon başlatıldı"
+      }
     },
     "maintenance": {
       "btn_new": "Bakım Penceresi Ekle",
@@ -1930,12 +2079,24 @@
         "end": "Bitiş",
         "scope": "Kapsam"
       },
-      "scope": { "selected_devices": "Seçili Cihazlar" },
+      "scope": {
+        "selected_devices": "Seçili Cihazlar"
+      },
       "day": {
-        "mon": "Pazartesi", "tue": "Salı", "wed": "Çarşamba", "thu": "Perşembe",
-        "fri": "Cuma", "sat": "Cumartesi", "sun": "Pazar",
-        "mon_short": "Pzt", "tue_short": "Sal", "wed_short": "Çar",
-        "thu_short": "Per", "fri_short": "Cum", "sat_short": "Cmt", "sun_short": "Paz"
+        "mon": "Pazartesi",
+        "tue": "Salı",
+        "wed": "Çarşamba",
+        "thu": "Perşembe",
+        "fri": "Cuma",
+        "sat": "Cumartesi",
+        "sun": "Pazar",
+        "mon_short": "Pzt",
+        "tue_short": "Sal",
+        "wed_short": "Çar",
+        "thu_short": "Per",
+        "fri_short": "Cum",
+        "sat_short": "Cmt",
+        "sun_short": "Paz"
       },
       "recurrence": {
         "section_title": "Tekrar (opsiyonel)",
@@ -1956,8 +2117,13 @@
         "max_count_label": "Maks. örnek sayısı (ops.)",
         "unlimited": "sınırsız"
       },
-      "popconfirm": { "delete_title": "Bu bakım penceresi silinsin mi?" },
-      "modal": { "title_new": "Yeni Bakım Penceresi", "title_edit": "Bakım Penceresini Düzenle" },
+      "popconfirm": {
+        "delete_title": "Bu bakım penceresi silinsin mi?"
+      },
+      "modal": {
+        "title_new": "Yeni Bakım Penceresi",
+        "title_edit": "Bakım Penceresini Düzenle"
+      },
       "form": {
         "name_label": "Bakım Adı",
         "name_placeholder": "Örn: Aylık Güncelleme — Core Katman",
@@ -2025,7 +2191,9 @@
       "api_key_placeholder_change": "{{name}} API Anahtarı (değiştirmek için yaz)",
       "model_placeholder": "Model seç",
       "ollama_section_title": "Ollama (Yerel Model)",
-      "toast": { "saved": "AI ayarları kaydedildi" }
+      "toast": {
+        "saved": "AI ayarları kaydedildi"
+      }
     },
     "system": {
       "page_title": "Sistem Ayarları",
@@ -2100,7 +2268,9 @@
         "expiry_tooltip": "Bu sürenin sonunda kullanıcı zorla şifre değiştirir. 0 = expire yok.",
         "force_change_label": "İlk login'de zorla şifre değiştir"
       },
-      "unit": { "password_short": "şifre" },
+      "unit": {
+        "password_short": "şifre"
+      },
       "tester_card_title": "Şifre Test Aracı",
       "tester_hint": "Bir şifrenin mevcut politikadan geçip geçmediğini görmek için aşağıya yazın.",
       "tester_placeholder": "Test edilecek şifre…",
@@ -2119,7 +2289,9 @@
       "enabled_desc": "Her girişte authenticator uygulamanızdan 6-haneli kod istenir.",
       "enrolled_at_label": "Kayıt",
       "methods_label": "YÖNTEMLER",
-      "method": { "authenticator": "Authenticator" },
+      "method": {
+        "authenticator": "Authenticator"
+      },
       "recovery_remaining_label": "KURTARMA KODU KALAN",
       "tag_running_out": "Azalıyor",
       "btn_regen_recovery": "Kurtarma kodlarını yenile",
