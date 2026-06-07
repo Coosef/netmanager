@@ -27,6 +27,16 @@ async def _authenticate_ws(websocket: WebSocket, token: Optional[str]) -> bool:
     return True
 
 
+_SSH_TERM_BANNER = (
+    "\r\n\x1b[31m"
+    "═══════════════════════════════════════════\r\n"
+    "  This terminal session was terminated by\r\n"
+    "  an administrator.\r\n"
+    "═══════════════════════════════════════════"
+    "\x1b[0m\r\n"
+)
+
+
 # SSH Session Termination — module-level for test access.
 async def _ssh_terminate_listener(
     my_session_id: str,
@@ -40,7 +50,8 @@ async def _ssh_terminate_listener(
       3. ``evt`` set — finally bloğunda exit_reason='force_closed' override
 
     Redis down / cancel: sessizce çıkar (tasarım §10.7), revalidator
-    veya kullanıcı kapama akışı devreye girer.
+    veya kullanıcı kapama akışı devreye girer. HOTFIX HF#3 sonrası bu
+    yetersiz olsa bile DB-poll fallback subscriber rolünü üstlenir.
     """
     from app.core.redis_client import get_redis
     pubsub = None
@@ -48,6 +59,12 @@ async def _ssh_terminate_listener(
         r = get_redis()
         pubsub = r.pubsub()
         await pubsub.subscribe("terminal:terminate")
+        log.debug(
+            "ssh-term: listener subscribe started",
+            extra={"event": "ssh_term_listener_subscribed",
+                   "session_id": my_session_id,
+                   "channel": "terminal:terminate"},
+        )
         async for msg in pubsub.listen():
             if msg.get("type") != "message":
                 continue
@@ -55,28 +72,48 @@ async def _ssh_terminate_listener(
                 payload = json.loads(msg.get("data") or "{}")
             except Exception:
                 continue
-            if payload.get("session_id") != my_session_id:
+            recv_sid = payload.get("session_id")
+            if recv_sid != my_session_id:
+                log.debug(
+                    "ssh-term: listener received non-matching session_id",
+                    extra={"event": "ssh_term_listener_mismatch",
+                           "my_session_id": my_session_id,
+                           "received_session_id": recv_sid},
+                )
                 continue
+            log.info(
+                "ssh-term: terminate message matched current session",
+                extra={"event": "ssh_term_listener_match",
+                       "session_id": my_session_id},
+            )
             evt.set()
             try:
-                await websocket.send_text(
-                    "\r\n\x1b[31m"
-                    "═══════════════════════════════════════════\r\n"
-                    "  This terminal session was terminated by\r\n"
-                    "  an administrator.\r\n"
-                    "═══════════════════════════════════════════"
-                    "\x1b[0m\r\n"
-                )
+                await websocket.send_text(_SSH_TERM_BANNER)
             except Exception:
                 pass
             try:
+                log.info(
+                    "ssh-term: websocket close requested (4000)",
+                    extra={"event": "ssh_term_ws_close",
+                           "session_id": my_session_id,
+                           "code": 4000, "source": "pubsub_listener"},
+                )
                 await websocket.close(code=4000)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning(
+                    "ssh-term: websocket close failed: %r", exc,
+                    extra={"event": "ssh_term_ws_close_failed",
+                           "session_id": my_session_id},
+                )
             return
     except asyncio.CancelledError:
         raise
-    except Exception:
+    except Exception as exc:
+        log.warning(
+            "ssh-term: Redis subscribe failed: %r", exc,
+            extra={"event": "ssh_term_subscribe_failed",
+                   "session_id": my_session_id},
+        )
         return
     finally:
         if pubsub is not None:
@@ -88,6 +125,99 @@ async def _ssh_terminate_listener(
                 await pubsub.aclose()
             except Exception:
                 pass
+
+
+# HOTFIX HF#3 — DB-poll fallback. Pub/sub mesajı listener'a ulaşmasa bile
+# (redis-py 5.x + uvloop birleşimindeki silent disconnect ihtimali için)
+# her N saniyede DB'ye sor — ended_at NOT NULL + exit_reason='force_closed'
+# ise WS'i kapat. Worst-case latency = poll interval (3sn).
+async def _ssh_termination_db_poll(
+    my_session_id: str,
+    websocket: WebSocket,
+    evt: asyncio.Event,
+    *,
+    session_factory=None,
+    interval: float = 3.0,
+) -> None:
+    """DB-poll fallback task. ``session_factory`` testte mock'lanabilir;
+    None ise app.core.database.AsyncSessionLocal default. ``interval``
+    saniye (production 3.0, test düşük değerler kullanır)."""
+    from sqlalchemy import select
+    from app.models.terminal_session_log import TerminalSessionLog
+    if session_factory is None:
+        from app.core.database import AsyncSessionLocal as session_factory  # type: ignore
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                async with session_factory() as db:
+                    # RLS bypass için super_admin bayrağı set (poll session log
+                    # kendi sahibinin org'unda, ama poll task user context'ine
+                    # bağlı değil — defensively super_admin scope kullan).
+                    from sqlalchemy import text as _sql_text
+                    dialect = db.bind.dialect.name if db.bind else "sqlite"
+                    if dialect == "postgresql":
+                        await db.execute(_sql_text(
+                            "SELECT set_config('app.is_super_admin','on',true)"
+                        ))
+                    row = (await db.execute(
+                        select(
+                            TerminalSessionLog.ended_at,
+                            TerminalSessionLog.exit_reason,
+                        ).where(
+                            TerminalSessionLog.session_id == my_session_id,
+                        )
+                    )).first()
+                if row is None:
+                    log.debug(
+                        "ssh-term: poll tick — session not found yet",
+                        extra={"event": "ssh_term_poll_tick",
+                               "session_id": my_session_id},
+                    )
+                    continue
+                ended_at, exit_reason = row
+                if ended_at is not None and exit_reason == "force_closed":
+                    log.info(
+                        "ssh-term: DB-poll detected force_closed",
+                        extra={"event": "ssh_term_poll_force_closed",
+                               "session_id": my_session_id},
+                    )
+                    evt.set()
+                    try:
+                        await websocket.send_text(_SSH_TERM_BANNER)
+                    except Exception:
+                        pass
+                    try:
+                        log.info(
+                            "ssh-term: websocket close requested (4000)",
+                            extra={"event": "ssh_term_ws_close",
+                                   "session_id": my_session_id,
+                                   "code": 4000, "source": "db_poll"},
+                        )
+                        await websocket.close(code=4000)
+                    except Exception as exc:
+                        log.warning(
+                            "ssh-term: websocket close failed: %r", exc,
+                            extra={"event": "ssh_term_ws_close_failed",
+                                   "session_id": my_session_id},
+                        )
+                    return
+                log.debug(
+                    "ssh-term: poll tick — session still active",
+                    extra={"event": "ssh_term_poll_tick",
+                           "session_id": my_session_id},
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.warning(
+                    "ssh-term: DB-poll exception: %r", exc,
+                    extra={"event": "ssh_term_poll_exception",
+                           "session_id": my_session_id},
+                )
+                # Devam et — geçici hata, sonraki tick tekrar dene
+    except asyncio.CancelledError:
+        raise
 
 
 @dataclass
@@ -519,6 +649,14 @@ async def ssh_terminal_ws(
     _terminate_task = asyncio.create_task(
         _ssh_terminate_listener(_term_logger.session_id, websocket, _terminate_evt)
     )
+    # HOTFIX HF#3 — DB-poll fallback paralel task. Pub/sub yetersizse
+    # 3sn'de bir DB'ye sor + force_closed gelmişse WS'i kapat.
+    _db_poll_task = asyncio.create_task(
+        _ssh_termination_db_poll(
+            _term_logger.session_id, websocket, _terminate_evt,
+            interval=3.0,
+        )
+    )
 
     if use_agent:
         await websocket.send_text(
@@ -575,7 +713,7 @@ async def ssh_terminal_ws(
             try: await websocket.close()
             except Exception: pass
             revalidator.cancel()
-            _terminate_task.cancel()
+            _terminate_task.cancel(); _db_poll_task.cancel()
             try:
                 await _term_logger.close(_AsyncSessionLocal, exit_reason="agent_scope_error")
             except Exception:
@@ -621,7 +759,7 @@ async def ssh_terminal_ws(
                 await _ag.send_shell_input(session_id, _input_bytes)
         finally:
             revalidator.cancel()
-            _terminate_task.cancel()
+            _terminate_task.cancel(); _db_poll_task.cancel()
             if session_id:
                 await _ag.close_shell_session(session_id)
             try: await websocket.close()
@@ -656,7 +794,7 @@ async def ssh_terminal_ws(
         await websocket.close()
         ssh_client.close()
         revalidator.cancel()
-        _terminate_task.cancel()
+        _terminate_task.cancel(); _db_poll_task.cancel()
         return
 
     channel = await loop.run_in_executor(None, lambda: ssh_client.invoke_shell(term="xterm-256color", width=cols, height=rows))
@@ -738,7 +876,7 @@ async def ssh_terminal_ws(
         pass
     finally:
         revalidator.cancel()
-        _terminate_task.cancel()
+        _terminate_task.cancel(); _db_poll_task.cancel()
         channel.close()
         ssh_client.close()
         try:
