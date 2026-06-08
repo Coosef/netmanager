@@ -103,14 +103,17 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     key: 'inventory',
     i18nKey: 'nav.group.inventory',
     tabs: [
-      { key: 'switch',    route: '/devices',        i18nKey: 'nav.tab.inventory.switch',    module: ['devices', 'view'] },
-      { key: 'topology',  route: '/topology',       i18nKey: 'nav.tab.inventory.topology',  feature: 'topology' },
-      { key: 'discovery', route: '/discovery',      i18nKey: 'nav.tab.inventory.discovery', minRole: 'org_admin' },
-      { key: 'ipam',      route: '/ipam',           i18nKey: 'nav.tab.inventory.ipam',      module: ['ipam', 'view'], feature: 'ipam' },
-      { key: 'vlan',      route: '/vlan',           i18nKey: 'nav.tab.inventory.vlan' },
-      { key: 'racks',     route: '/racks',          i18nKey: 'nav.tab.inventory.racks',     minRole: 'org_admin', feature: 'racks' },
-      { key: 'map',       route: '/floor-plan',     i18nKey: 'nav.tab.inventory.map',       minRole: 'org_admin' },
-      { key: 'lldp',      route: '/lldp-inventory', i18nKey: 'nav.tab.inventory.lldp' },
+      // HOTFIX 2026-06-08: 'lldp' ayrı tab kaldırıldı. Mevcut sistemde
+      // /lldp-inventory route'u yok; LldpInventoryPage zaten /discovery
+      // route'una bağlı. 'discovery' tab'ı "Keşif Envanteri" label'ıyla
+      // tek tab olarak Keşif/LLDP envanterini temsil eder.
+      { key: 'switch',    route: '/devices',     i18nKey: 'nav.tab.inventory.switch',    module: ['devices', 'view'] },
+      { key: 'topology',  route: '/topology',    i18nKey: 'nav.tab.inventory.topology',  feature: 'topology' },
+      { key: 'discovery', route: '/discovery',   i18nKey: 'nav.tab.inventory.discovery', minRole: 'org_admin' },
+      { key: 'ipam',      route: '/ipam',        i18nKey: 'nav.tab.inventory.ipam',      module: ['ipam', 'view'], feature: 'ipam' },
+      { key: 'vlan',      route: '/vlan',        i18nKey: 'nav.tab.inventory.vlan' },
+      { key: 'racks',     route: '/racks',       i18nKey: 'nav.tab.inventory.racks',     minRole: 'org_admin', feature: 'racks' },
+      { key: 'map',       route: '/floor-plan',  i18nKey: 'nav.tab.inventory.map',       minRole: 'org_admin' },
     ],
   },
   {

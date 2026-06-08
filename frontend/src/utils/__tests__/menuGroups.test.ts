@@ -111,7 +111,9 @@ describe('GROUP_DEFINITIONS — structural integrity', () => {
   })
 
   it('tab sayıları Excel hedefiyle uyumlu (Faz 1 karar matrisi)', () => {
-    expect(GROUP_BY_KEY.inventory.tabs).toHaveLength(8) // 7 Excel + 1 LldpInventory (karar 4)
+    // HOTFIX 2026-06-08: lldp tab silindi (sistemde /lldp-inventory route yok;
+    // LldpInventoryPage zaten /discovery'ye bağlı). 8 → 7.
+    expect(GROUP_BY_KEY.inventory.tabs).toHaveLength(7)
     expect(GROUP_BY_KEY.monitoring.tabs).toHaveLength(6)
     expect(GROUP_BY_KEY.alerts.tabs).toHaveLength(4)
     expect(GROUP_BY_KEY.config.tabs).toHaveLength(6)
@@ -147,7 +149,13 @@ describe('ROUTE_TO_GROUP lookup', () => {
     expect(ROUTE_TO_GROUP['/devices']).toBe('inventory')
     expect(ROUTE_TO_GROUP['/topology']).toBe('inventory')
     expect(ROUTE_TO_GROUP['/floor-plan']).toBe('inventory')
-    expect(ROUTE_TO_GROUP['/lldp-inventory']).toBe('inventory')
+    expect(ROUTE_TO_GROUP['/discovery']).toBe('inventory')
+  })
+
+  it('HOTFIX 2026-06-08: /lldp-inventory ROUTE_TO_GROUP\'ta YOK', () => {
+    // Sistemde /lldp-inventory route yok; LldpInventoryPage zaten /discovery
+    // route'una bağlı. Helper'da çift kayıt yanlıştı; silindi.
+    expect(ROUTE_TO_GROUP['/lldp-inventory']).toBeUndefined()
   })
 
   it('config tab\'ları → config (DriverTemplates dahil)', () => {
@@ -453,12 +461,15 @@ describe('Karar guardrail\'ları', () => {
     expect(mapTab!.route).toBe('/floor-plan')
   })
 
-  it('LldpInventory Ağ Envanteri içinde ayrı tab (karar 4)', () => {
+  it('HOTFIX 2026-06-08: Keşif Envanteri tek tab — lldp sil, discovery korunur', () => {
+    // Mevcut /discovery route'u LldpInventoryPage render ediyor. Helper'da
+    // çift kayıt (discovery + lldp) yanlıştı; tek 'discovery' tab kaldı.
     const lldpTab = GROUP_BY_KEY.inventory.tabs.find((t) => t.key === 'lldp')
-    expect(lldpTab).toBeDefined()
-    expect(lldpTab!.route).toBe('/lldp-inventory')
-    // Hiçbir başka grubun lldp route'u yok
-    expect(ROUTE_TO_GROUP['/lldp-inventory']).toBe('inventory')
+    expect(lldpTab).toBeUndefined() // silindi
+    const discoveryTab = GROUP_BY_KEY.inventory.tabs.find((t) => t.key === 'discovery')
+    expect(discoveryTab).toBeDefined()
+    expect(discoveryTab!.route).toBe('/discovery')
+    expect(discoveryTab!.minRole).toBe('org_admin')
   })
 
   it('Organizasyon Paneli /org-admin Platform Yönetimi 4. tab (karar 5)', () => {

@@ -25,15 +25,22 @@ const LAYOUT_CSS = `
     to   { opacity: 1; transform: translateY(0); }
   }
 
-  /* MenuGroupNav — sayfa içerik öncesi yatay tab strip (Faz 3). */
+  /* MenuGroupNav — sayfa içerik öncesi yatay tab strip (Faz 3).
+     HOTFIX 2026-06-08: TopologyPage gibi margin:-24 + minHeight:100vh
+     kullanan sayfaların MenuGroupNav'ı görsel olarak kaplamasını
+     engellemek için sticky + z-index + solid background. Sayfa
+     component'lerine dokunulmaz. */
   .nm-mg-nav {
+    position: sticky;
+    top: 0;
+    z-index: 5;
     display: flex;
     flex-wrap: nowrap;
     gap: 2px;
     overflow-x: auto;
     overflow-y: hidden;
     padding: 8px 14px 0;
-    background: transparent;
+    background: var(--bg-0);
     border-bottom: 1px solid var(--border-0);
     scrollbar-width: thin;
   }
