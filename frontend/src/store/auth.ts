@@ -20,6 +20,12 @@ interface AuthState {
   token: string | null
   user: AuthUser | null
   permissions: Permissions | null
+  // AUTH-REFRESH-HYDRATE-GUARD — Zustand v5 persist rehydration async olduğu
+  // için ProtectedRoute ilk render'da token=null görüp /login'e atıyordu.
+  // Bu flag onRehydrateStorage tamamlanınca true olur; ProtectedRoute ve
+  // App.tsx permission useEffect bunun tamamlanmasını bekler.
+  _hasHydrated: boolean
+  setHasHydrated: (v: boolean) => void
   setAuth: (token: string, user: AuthUser, permissions?: Permissions | null) => void
   logout: () => void
   // Permission-based checks
@@ -105,6 +111,9 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       user: null,
       permissions: null,
+      _hasHydrated: false,
+
+      setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setAuth: (token, user, permissions = null) =>
         set({ token, user: normalizeUser(user), permissions }),
@@ -187,10 +196,21 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'netmgr-auth',
+      // AUTH-REFRESH-HYDRATE-GUARD — yalnız tabloda kalıcı olması mantıklı
+      // 3 alanı persist et. Fonksiyonlar JSON.stringify'da zaten kaybolurdu,
+      // _hasHydrated transient runtime state (her boot'ta false başlamalı).
+      partialize: (state) => ({
+        token: state.token,
+        user: state.user,
+        permissions: state.permissions,
+      }),
       // Re-normalise persisted user once on rehydrate — old localStorage
-      // entries may still carry 'admin' / 'member' etc.
+      // entries may still carry 'admin' / 'member' etc. AUTH-REFRESH —
+      // ardından hydration flag'i true'ya çekerek ProtectedRoute'a "artık
+      // güvenli, redirect kararı verebilirsin" sinyali ver.
       onRehydrateStorage: () => (state) => {
         if (state?.user) state.user = normalizeUser(state.user)
+        state?.setHasHydrated(true)
       },
     },
   ),

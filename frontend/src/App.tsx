@@ -148,7 +148,12 @@ const LIGHT_TOKENS = {
 // alınır; yeni dil için App.tsx dokunulmaz.
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { token } = useAuthStore()
+  // AUTH-REFRESH-HYDRATE-GUARD — Zustand v5 persist async rehydrate eder.
+  // İlk mount'ta token vermeden önce localStorage okunmasını bekle; aksi
+  // hâlde refresh sonrası token=null görüp /login'e race ile atıyorduk.
+  const hydrated = useAuthStore((s) => s._hasHydrated)
+  const token = useAuthStore((s) => s.token)
+  if (!hydrated) return null
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 
@@ -228,14 +233,18 @@ function ThemedApp() {
   const { isDark } = useTheme()
   const [antdLocale, setAntdLocale] = useState(getAntdLocale(i18n.language))
   const { token, setAuth, user } = useAuthStore()
+  const hydrated = useAuthStore((s) => s._hasHydrated)
 
-  // Re-fetch permissions on every app load so stale/null localStorage entries get refreshed
+  // Re-fetch permissions on every app load so stale/null localStorage entries
+  // get refreshed. AUTH-REFRESH-HYDRATE-GUARD — rehydrate tamamlanmadan
+  // tetiklenmemeli; aksi hâlde token=null görüp atlanır ve persisted token
+  // okunduktan sonra yenisi tetiklenmez.
   useEffect(() => {
-    if (!token || !user) return
+    if (!hydrated || !token || !user) return
     authApi.myPermissions().then((res) => {
       setAuth(token, user, res.permissions)
     }).catch(() => {/* silently ignore — server unreachable */})
-  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, hydrated]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const handler = (lng: string) => {
