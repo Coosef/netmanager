@@ -252,7 +252,7 @@ html.charon-login, html.charon-login body {
 .cl-cb-row label { cursor: pointer; user-select: none; }
 
 .cl-btn-primary {
-  width: 100%; height: 46px;
+  width: 100%; max-width: 100%; box-sizing: border-box; height: 46px;
   background: linear-gradient(180deg, var(--c-ember) 0%, var(--c-gold-soft) 100%);
   border: 0; border-radius: 4px; color: #160f06;
   font-family: var(--c-font-tac); font-size: 11px; font-weight: 600;
@@ -296,8 +296,18 @@ html.charon-login, html.charon-login body {
 .cl-sso-btn svg { flex-shrink: 0; }
 
 /* OTP */
-.cl-otp-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; margin-bottom: 6px; }
+/* MFA-LOGIN-UI-HOTFIX (2026-06-08) — repeat(6,1fr) track'inde input
+   min-width: auto → min-content; box-sizing yok → 6 input + 5 gap kart
+   içerik bütçesini (~410px) aşıp .cl-auth-card overflow: hidden ile
+   sağ tarafta kırpılıyordu. minmax(0,1fr) + input min-width: 0 ile
+   grid track'leri 0'a kadar shrink edebilir. */
+.cl-otp-row {
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px; margin-bottom: 6px;
+  width: 100%; max-width: 100%; min-width: 0;
+}
 .cl-otp-input {
+  width: 100%; min-width: 0; box-sizing: border-box;
   height: 54px; background: rgba(6,5,3,0.7);
   border: 1px solid rgba(184,146,75,0.22); border-radius: 4px;
   color: var(--c-fg); font-family: var(--c-font-mono); font-size: 22px; font-weight: 500;
@@ -323,9 +333,12 @@ html.charon-login, html.charon-login body {
   background: rgba(6,5,3,0.5);
   border: 1px solid rgba(184,146,75,0.20);
   border-radius: 4px; padding: 3px;
+  /* MFA-LOGIN-UI-HOTFIX: defansif shrink (3 buton flex:1 → genişlik üst limit) */
+  width: 100%; min-width: 0; box-sizing: border-box;
 }
 .cl-mfa-seg button {
-  flex: 1; background: transparent; border: 0;
+  flex: 1 1 0; min-width: 0;
+  background: transparent; border: 0;
   color: var(--c-fg-dim); font-family: var(--c-font-mono);
   font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
   padding: 9px 6px; cursor: pointer; border-radius: 3px;
@@ -374,12 +387,27 @@ html.charon-login, html.charon-login body {
 }
 .cl-footer-line .sep { color: var(--c-gold-soft); margin: 0 12px; }
 
+/* MFA-LOGIN-UI-HOTFIX: MFA step (step === 2) wrapper'a flex-column
+   sırasıyla render güvenliği + min-width: 0 ile child overflow
+   absorbe. Box-sizing: border-box defansif. */
+.cl-mfa-step {
+  display: flex; flex-direction: column;
+  width: 100%; min-width: 0; box-sizing: border-box;
+}
 @media (max-width: 720px) {
   .cl-stage { padding: 26px 18px; }
   .cl-hud { display: none; }
   .cl-brand-name { font-size: 40px; letter-spacing: 0.30em; }
   .cl-brand-tagline { font-size: 8.5px; letter-spacing: 0.3em; }
   .cl-card-body { padding: 20px; }
+}
+/* MFA-LOGIN-UI-HOTFIX: 320-380px (oldest iPhone) için ek kompakt mod —
+   OTP input 54→48 (h) + font 22→18, card padding daralt; OTP grid 6
+   input + 5×8 gap ~282-320 viewport içine sığar. */
+@media (max-width: 380px) {
+  .cl-stage { padding: 20px 12px 40px; }
+  .cl-card-body { padding: 18px 14px; }
+  .cl-otp-input { height: 48px; font-size: 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .cl-scanbeam, .cl-btn-primary .sheen { animation: none; }
@@ -1057,7 +1085,7 @@ export default function LoginPage() {
               )}
 
               {step === 2 && (
-                <div>
+                <div className="cl-mfa-step">
                   <div className="cl-step-bar"><i className="done" /><i className="active" /></div>
                   <button type="button" className="cl-back-btn" onClick={() => { setStep(1); setError('') }}>
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
