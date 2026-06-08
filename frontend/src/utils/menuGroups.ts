@@ -210,14 +210,15 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     ],
   },
   {
+    // Sprint 1A-fix2 (2026-06-08): Platform Yönetimi yalnız super_admin'e
+    // görünür. organization tab silindi (org_admin için ayrı menü ileride);
+    // help tab buradan çıkarıldı (route hala açık, ileride ayrı menüye
+    // taşınacak); settings tab super_admin-only.
     key: 'admin_platform',
     i18nKey: 'nav.group.admin_platform',
     tabs: [
-      { key: 'platform',     route: '/superadmin', i18nKey: 'nav.tab.admin_platform.platform', minRole: 'super_admin' },
-      // Karar 5 (2026-06-08): /org-admin sadece org_admin görür, super_admin görmez
-      { key: 'organization', route: '/org-admin',  i18nKey: 'nav.tab.admin_platform.organization', minRole: 'org_admin', excludeSuperAdmin: true },
-      { key: 'settings',     route: '/settings',   i18nKey: 'nav.tab.admin_platform.settings',     module: ['settings', 'view'] },
-      { key: 'help',         route: '/help',       i18nKey: 'nav.tab.admin_platform.help' },
+      { key: 'platform', route: '/superadmin', i18nKey: 'nav.tab.admin_platform.platform', minRole: 'super_admin' },
+      { key: 'settings', route: '/settings',   i18nKey: 'nav.tab.admin_platform.settings', minRole: 'super_admin' },
     ],
   },
 ] as const

@@ -123,7 +123,9 @@ describe('GROUP_DEFINITIONS — structural integrity', () => {
     expect(GROUP_BY_KEY.tools.tabs).toHaveLength(2) // karar 3: IP Scanner kapsam dışı
     expect(GROUP_BY_KEY.admin_users.tabs).toHaveLength(4)
     expect(GROUP_BY_KEY.admin_audit.tabs).toHaveLength(2)
-    expect(GROUP_BY_KEY.admin_platform.tabs).toHaveLength(4) // karar 5: + Organizasyon Paneli
+    // Sprint 1A-fix2: admin_platform yalnız super_admin'e (platform +
+    // settings). organization tab + help tab kaldırıldı.
+    expect(GROUP_BY_KEY.admin_platform.tabs).toHaveLength(2)
   })
 
   it('i18n anahtarları nav.group.* veya nav.tab.<group>.* formatındadır', () => {
@@ -164,11 +166,12 @@ describe('ROUTE_TO_GROUP lookup', () => {
     expect(ROUTE_TO_GROUP['/backups']).toBe('config')
   })
 
-  it('admin_platform tab\'ları → admin_platform', () => {
+  it('admin_platform tab\'ları → admin_platform (Sprint 1A-fix2: 2 tab)', () => {
     expect(ROUTE_TO_GROUP['/superadmin']).toBe('admin_platform')
-    expect(ROUTE_TO_GROUP['/org-admin']).toBe('admin_platform')
     expect(ROUTE_TO_GROUP['/settings']).toBe('admin_platform')
-    expect(ROUTE_TO_GROUP['/help']).toBe('admin_platform')
+    // /org-admin ve /help admin_platform'dan çıkarıldı (ROUTE_TO_GROUP'ta yok)
+    expect(ROUTE_TO_GROUP['/org-admin']).toBeUndefined()
+    expect(ROUTE_TO_GROUP['/help']).toBeUndefined()
   })
 
   it('TerminalSessions read-only audit → admin_audit', () => {
@@ -254,10 +257,8 @@ describe('canSeeTab', () => {
     expect(canSeeTab(tab, ctxOA)).toBe(true)
   })
 
-  it('excludeSuperAdmin — /org-admin tab\'ı super_admin\'e gizli', () => {
-    const tab = GROUP_BY_KEY.admin_platform.tabs.find((t) => t.key === 'organization')!
-    expect(canSeeTab(tab, ctxSA)).toBe(false) // super_admin görmez
-    expect(canSeeTab(tab, ctxOA)).toBe(true)  // org_admin görür
+  it('Sprint 1A-fix2: organization tab kaldırıldı — admin_platform\'da yok', () => {
+    expect(GROUP_BY_KEY.admin_platform.tabs.find((t) => t.key === 'organization')).toBeUndefined()
   })
 
   it('Platform Paneli — sadece super_admin görür', () => {
@@ -268,12 +269,10 @@ describe('canSeeTab', () => {
     expect(canSeeTab(tab, ctxV)).toBe(false)
   })
 
-  it('Yardım — kısıt yok, herkes görür', () => {
-    const tab = GROUP_BY_KEY.admin_platform.tabs.find((t) => t.key === 'help')!
-    expect(canSeeTab(tab, ctxV)).toBe(true)
-    expect(canSeeTab(tab, ctxLA)).toBe(true)
-    expect(canSeeTab(tab, ctxOA)).toBe(true)
-    expect(canSeeTab(tab, ctxSA)).toBe(true)
+  it('Sprint 1A-fix2: Yardım tab admin_platform\'dan çıkarıldı — /help route hala açık', () => {
+    // Tab admin_platform'da artık yok; ama /help route App.tsx'te
+    // unchanged (guard yok), tüm kullanıcılar URL ile açabilir.
+    expect(GROUP_BY_KEY.admin_platform.tabs.find((t) => t.key === 'help')).toBeUndefined()
   })
 
   it('feature + minRole + module cascade — agents tüm kontrolleri geçer', () => {
@@ -330,8 +329,11 @@ describe('canSeeGroup', () => {
     expect(canSeeGroup(GROUP_BY_KEY.inventory, ctxFor('viewer'))).toBe(true)
   })
 
-  it('Platform Yönetimi — viewer için yalnız Yardım görünür → grup yine görünür', () => {
-    expect(canSeeGroup(GROUP_BY_KEY.admin_platform, ctxFor('viewer'))).toBe(true)
+  it('Sprint 1A-fix2: Platform Yönetimi yalnız super_admin\'e görünür', () => {
+    expect(canSeeGroup(GROUP_BY_KEY.admin_platform, ctxFor('super_admin'))).toBe(true)
+    expect(canSeeGroup(GROUP_BY_KEY.admin_platform, ctxFor('org_admin'))).toBe(false)
+    expect(canSeeGroup(GROUP_BY_KEY.admin_platform, ctxFor('location_admin'))).toBe(false)
+    expect(canSeeGroup(GROUP_BY_KEY.admin_platform, ctxFor('viewer'))).toBe(false)
   })
 })
 
@@ -340,9 +342,10 @@ describe('getVisibleGroups', () => {
     expect(getVisibleGroups(ctxFor('super_admin'))).toHaveLength(12)
   })
 
-  it('org_admin 12 grubu görür (Platform Paneli hariç sa-only tab, organization hariç sa-exclude)', () => {
-    // Tüm gruplarda en az 1 görünür tab → 12 grup hep görünür
-    expect(getVisibleGroups(ctxFor('org_admin'))).toHaveLength(12)
+  it('Sprint 1A-fix2: org_admin 11 grubu görür (admin_platform hariç super_admin-only)', () => {
+    const groups = getVisibleGroups(ctxFor('org_admin'))
+    expect(groups).toHaveLength(11)
+    expect(groups.find((g) => g.key === 'admin_platform')).toBeUndefined()
   })
 
   it('viewer en az Dashboard + birkaç grup görür', () => {
@@ -390,21 +393,10 @@ describe('getFirstVisibleTab', () => {
     expect(first!.key).toBe('topology')
   })
 
-  it('Platform Yönetimi — viewer için Settings (view-only) ilk gelir', () => {
-    // Tab sırası: platform (sa-only) → organization (sa-exclude+org_admin) →
-    // settings (settings:view) → help. Default ctx'te viewer 'view'
-    // action'larına izin verir → settings ilk yetkili.
+  it('Sprint 1A-fix2: Platform Yönetimi — viewer için yetkili tab yok', () => {
+    // admin_platform 2 tab (platform + settings) — her ikisi de super_admin-only.
     const first = getFirstVisibleTab(GROUP_BY_KEY.admin_platform, ctxFor('viewer'))
-    expect(first!.key).toBe('settings')
-  })
-
-  it('Platform Yönetimi — viewer + settings:view kapalı → Yardım kalır', () => {
-    const ctx: VisibilityContext = {
-      ...ctxFor('viewer'),
-      can: (mod, _action) => mod !== 'settings',
-    }
-    const first = getFirstVisibleTab(GROUP_BY_KEY.admin_platform, ctx)
-    expect(first!.key).toBe('help')
+    expect(first).toBeNull()
   })
 
   it('Platform Yönetimi — super_admin için Platform Paneli', () => {
@@ -412,9 +404,10 @@ describe('getFirstVisibleTab', () => {
     expect(first!.key).toBe('platform')
   })
 
-  it('Platform Yönetimi — org_admin için Organizasyon Paneli (excludeSuperAdmin doğru çalışıyor)', () => {
+  it('Sprint 1A-fix2: Platform Yönetimi — org_admin için yetkili tab yok', () => {
+    // organization tab kaldırıldı; kalan platform + settings super_admin-only.
     const first = getFirstVisibleTab(GROUP_BY_KEY.admin_platform, ctxFor('org_admin'))
-    expect(first!.key).toBe('organization')
+    expect(first).toBeNull()
   })
 })
 
@@ -476,12 +469,12 @@ describe('Karar guardrail\'ları', () => {
     expect(discoveryTab!.minRole).toBe('org_admin')
   })
 
-  it('Organizasyon Paneli /org-admin Platform Yönetimi 4. tab (karar 5)', () => {
-    const orgTab = GROUP_BY_KEY.admin_platform.tabs.find((t) => t.key === 'organization')
-    expect(orgTab).toBeDefined()
-    expect(orgTab!.route).toBe('/org-admin')
-    expect(orgTab!.excludeSuperAdmin).toBe(true)
-    expect(orgTab!.minRole).toBe('org_admin')
+  it('Sprint 1A-fix2: Karar 5 GERİ ALINDI — Organizasyon Paneli admin_platform\'dan çıkarıldı', () => {
+    // Karar 5 (2026-06-08): Organizasyon Paneli Platform Yönetimi 4. tab,
+    // org_admin'e açıktı. Sprint 1A-fix2 (manuel smoke sonrası): Platform
+    // Yönetimi yalnız super_admin; organization tab silindi.
+    expect(GROUP_BY_KEY.admin_platform.tabs.find((t) => t.key === 'organization')).toBeUndefined()
+    expect(ROUTE_TO_GROUP['/org-admin']).toBeUndefined()
   })
 
   it('DriverTemplates Config grubunda — içeriği dokunulmaz (karar 7)', () => {
