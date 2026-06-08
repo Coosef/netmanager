@@ -163,3 +163,44 @@ describe('hasPermission — defansif unknown-role guard', () => {
     expect(useAuthStore.getState().hasPermission('super_admin')).toBe(false)
   })
 })
+
+// ─── AUTH-REFRESH-HYDRATE-GUARD ─────────────────────────────────────────────
+//
+// Zustand v5 persist async rehydrate eder. ProtectedRoute eski sürümde ilk
+// render'da token=null görüp /login'e race ile atıyordu. _hasHydrated flag'i
+// + onRehydrateStorage hook'u ProtectedRoute'a "redirect kararı vermeden
+// önce bekle" sinyali verir. Aşağıdaki testler bu flag'in initial/setter
+// davranışını ve setAuth/logout ile etkileşimini sabitler.
+
+describe('hydration flag', () => {
+  it('_hasHydrated initial false', () => {
+    // beforeEach token/user/permissions null'lar; _hasHydrated default false
+    // (rehydrate hook'u test ortamında manuel set edilmeden çağrılmaz).
+    useAuthStore.setState({ _hasHydrated: false })
+    expect(useAuthStore.getState()._hasHydrated).toBe(false)
+  })
+
+  it('setHasHydrated(true) flag\'i sets', () => {
+    useAuthStore.setState({ _hasHydrated: false })
+    useAuthStore.getState().setHasHydrated(true)
+    expect(useAuthStore.getState()._hasHydrated).toBe(true)
+  })
+
+  it('setAuth _hasHydrated\'ı etkilemez (hidrasyon ve auth ayrı sinyal)', () => {
+    useAuthStore.setState({ _hasHydrated: true })
+    setUser('org_admin')
+    expect(useAuthStore.getState()._hasHydrated).toBe(true)
+    expect(useAuthStore.getState().token).toBe('test-token')
+    expect(useAuthStore.getState().user?.system_role).toBe('org_admin')
+  })
+
+  it('logout _hasHydrated\'ı etkilemez (sadece auth alanlarını temizler)', () => {
+    setUser('super_admin')
+    useAuthStore.setState({ _hasHydrated: true })
+    useAuthStore.getState().logout()
+    expect(useAuthStore.getState()._hasHydrated).toBe(true)
+    expect(useAuthStore.getState().token).toBeNull()
+    expect(useAuthStore.getState().user).toBeNull()
+    expect(useAuthStore.getState().permissions).toBeNull()
+  })
+})
