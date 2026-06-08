@@ -14,6 +14,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { CustomizeProvider } from '@/contexts/CustomizeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
+import type { SystemRole } from '@/types'
 import { authApi } from '@/api/auth'
 import AppLayout from '@/components/Layout/AppLayout'
 import LoginPage from '@/pages/Login'
@@ -151,18 +152,28 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
 
-// Role hierarchy order — same as auth store
-const ROLE_ORDER = [
-  'location_viewer', 'viewer', 'location_operator', 'operator',
-  'location_manager', 'org_viewer', 'admin', 'super_admin',
-] as const
-
-function RoleRoute({ children, minRole }: { children: React.ReactNode; minRole: string }) {
-  const { user } = useAuthStore()
-  const userIdx = ROLE_ORDER.indexOf((user?.role ?? 'viewer') as any)
-  const reqIdx  = ROLE_ORDER.indexOf(minRole as any)
-  if (userIdx < reqIdx) return <Navigate to="/" replace />
-  return <>{children}</>
+// Sprint 1A — RBAC canonical 4-role alignment. Legacy 8-rol ROLE_ORDER
+// kaldırıldı; tek doğruluk kaynağı `store/auth.ts` (hasPermission).
+//
+// `minRole`: minimum gerekli canonical rol (auth.ts SystemRole). Yazım
+// hatalı / legacy literal verilirse normalizeRole canonical'a çevirir,
+// indexOf=-1 kalırsa defansif guard fail-closed döner.
+//
+// `excludeRoles` (opsiyonel): canonical rolleri açıkça hariç tutar —
+// hiyerarşi gerekçesini bypass eder. /org-admin için super_admin URL'i
+// kapatmak amacıyla eklendi (menü zaten gizli); büyük refactor değil,
+// minimal prop.
+function RoleRoute({ children, minRole, excludeRoles }: {
+  children: React.ReactNode
+  minRole: SystemRole
+  excludeRoles?: SystemRole[]
+}) {
+  const hasPermission = useAuthStore((s) => s.hasPermission)
+  const systemRole = useAuthStore((s) => s.user?.system_role)
+  if (excludeRoles && systemRole && excludeRoles.includes(systemRole)) {
+    return <Navigate to="/" replace />
+  }
+  return hasPermission(minRole) ? <>{children}</> : <Navigate to="/" replace />
 }
 
 // Permission-based route guard — mirrors the sidebar MODULE_MAP check.
@@ -266,7 +277,7 @@ function ThemedApp() {
                 element={featureFlags.topologyV2Canonical ? <TopologyV2Page /> : <TopologyPage />} />
               <Route path="topology-classic" element={<TopologyPage />} />
               <Route path="topology-next" element={<TopologyV2Page />} />
-              <Route path="discovery" element={<RoleRoute minRole="admin"><LldpInventoryPage /></RoleRoute>} />
+              <Route path="discovery" element={<RoleRoute minRole="org_admin"><LldpInventoryPage /></RoleRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
               <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
@@ -282,41 +293,43 @@ function ThemedApp() {
                   gate yok; içerideki /users/me endpoint'leri zaten self-only. */}
               <Route path="profile" element={<ProfilePage />} />
               <Route path="playbooks" element={<PermRoute module="playbooks" action="view"><PlaybooksPage /></PermRoute>} />
-              <Route path="approvals" element={<RoleRoute minRole="location_manager"><ApprovalsPage /></RoleRoute>} />
+              <Route path="approvals" element={<RoleRoute minRole="location_admin"><ApprovalsPage /></RoleRoute>} />
               <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
               <Route path="ipam" element={<PermRoute module="ipam" action="view"><IpamPage /></PermRoute>} />
               <Route path="security-audit" element={<PermRoute module="monitoring" action="view"><SecurityAuditPage /></PermRoute>} />
               <Route path="asset-lifecycle" element={<PermRoute module="monitoring" action="view"><AssetLifecyclePage /></PermRoute>} />
-              <Route path="diagnostics" element={<RoleRoute minRole="operator"><DiagnosticsPage /></RoleRoute>} />
+              <Route path="diagnostics" element={<RoleRoute minRole="viewer"><DiagnosticsPage /></RoleRoute>} />
               <Route path="bandwidth" element={<PermRoute module="monitoring" action="view"><BandwidthMonitorPage /></PermRoute>} />
               <Route path="config-templates" element={<PermRoute module="driver_templates" action="view"><ConfigTemplatesPage /></PermRoute>} />
               <Route path="config-builder" element={<PermRoute module="config_backups" action="view"><ConfigBuilderPage /></PermRoute>} />
-              <Route path="poe" element={<RoleRoute minRole="org_viewer"><PoeDashboardPage /></RoleRoute>} />
+              <Route path="poe" element={<RoleRoute minRole="org_admin"><PoeDashboardPage /></RoleRoute>} />
               <Route path="firmware" element={<RoleRoute minRole="org_admin"><FirmwarePage /></RoleRoute>} />
-              <Route path="change-management" element={<RoleRoute minRole="location_manager"><ChangeManagementPage /></RoleRoute>} />
-              <Route path="sla" element={<RoleRoute minRole="org_viewer"><SlaReportPage /></RoleRoute>} />
-              <Route path="vlan" element={<RoleRoute minRole="org_viewer"><VlanManagementPage /></RoleRoute>} />
+              <Route path="change-management" element={<RoleRoute minRole="location_admin"><ChangeManagementPage /></RoleRoute>} />
+              <Route path="sla" element={<RoleRoute minRole="org_admin"><SlaReportPage /></RoleRoute>} />
+              <Route path="vlan" element={<RoleRoute minRole="org_admin"><VlanManagementPage /></RoleRoute>} />
               <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
-              <Route path="config-drift" element={<RoleRoute minRole="org_viewer"><ConfigDriftPage /></RoleRoute>} />
-              <Route path="intelligence" element={<RoleRoute minRole="org_viewer"><IntelligencePage /></RoleRoute>} />
-              <Route path="compliance" element={<RoleRoute minRole="location_manager"><ComplianceCheckPage /></RoleRoute>} />
-              <Route path="racks" element={<RoleRoute minRole="admin"><RacksPage /></RoleRoute>} />
+              <Route path="config-drift" element={<RoleRoute minRole="org_admin"><ConfigDriftPage /></RoleRoute>} />
+              <Route path="intelligence" element={<RoleRoute minRole="org_admin"><IntelligencePage /></RoleRoute>} />
+              <Route path="compliance" element={<RoleRoute minRole="location_admin"><ComplianceCheckPage /></RoleRoute>} />
+              <Route path="racks" element={<RoleRoute minRole="org_admin"><RacksPage /></RoleRoute>} />
               {/* M6 final drop — the standalone `/tenants` page is gone. */}
               <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
-              <Route path="floor-plan" element={<RoleRoute minRole="admin"><FloorPlanPage /></RoleRoute>} />
-              <Route path="alert-rules" element={<RoleRoute minRole="admin"><AlertRulesPage /></RoleRoute>} />
+              <Route path="floor-plan" element={<RoleRoute minRole="org_admin"><FloorPlanPage /></RoleRoute>} />
+              <Route path="alert-rules" element={<RoleRoute minRole="org_admin"><AlertRulesPage /></RoleRoute>} />
               <Route path="security-policies" element={<RoleRoute minRole="viewer"><SecurityPoliciesPage /></RoleRoute>} />
               <Route path="driver-templates" element={<PermRoute module="driver_templates" action="view"><DriverTemplatesPage /></PermRoute>} />
               <Route path="help" element={<HelpPage />} />
-              <Route path="services" element={<RoleRoute minRole="org_viewer"><ServicesPage /></RoleRoute>} />
-              <Route path="topology-twin" element={<RoleRoute minRole="location_manager"><TopologyTwinPage /></RoleRoute>} />
-              <Route path="ai-assistant" element={<RoleRoute minRole="admin"><AIAssistantPage /></RoleRoute>} />
+              <Route path="services" element={<RoleRoute minRole="org_admin"><ServicesPage /></RoleRoute>} />
+              <Route path="topology-twin" element={<RoleRoute minRole="location_admin"><TopologyTwinPage /></RoleRoute>} />
+              <Route path="ai-assistant" element={<RoleRoute minRole="org_admin"><AIAssistantPage /></RoleRoute>} />
               <Route path="superadmin" element={<RoleRoute minRole="super_admin"><SuperAdminPage /></RoleRoute>} />
-              <Route path="org-admin" element={<RoleRoute minRole="admin"><OrgAdminPage /></RoleRoute>} />
-              <Route path="permissions" element={<RoleRoute minRole="admin"><PermissionsPage /></RoleRoute>} />
+              {/* Sprint 1A — /org-admin sadece org_admin için; super_admin
+                  menüde gizli, route'ta da kapatılır (excludeRoles). */}
+              <Route path="org-admin" element={<RoleRoute minRole="org_admin" excludeRoles={['super_admin']}><OrgAdminPage /></RoleRoute>} />
+              <Route path="permissions" element={<RoleRoute minRole="org_admin"><PermissionsPage /></RoleRoute>} />
               <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
               <Route path="incidents" element={<PermRoute module="monitoring" action="view"><IncidentsPage /></PermRoute>} />
-              <Route path="escalation-rules" element={<RoleRoute minRole="admin"><EscalationRulesPage /></RoleRoute>} />
+              <Route path="escalation-rules" element={<RoleRoute minRole="org_admin"><EscalationRulesPage /></RoleRoute>} />
             </Route>
           </Routes>
         </BrowserRouter>

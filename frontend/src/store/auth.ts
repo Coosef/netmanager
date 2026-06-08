@@ -171,6 +171,9 @@ export const useAuthStore = create<AuthState>()(
         if (!user) return false
         const userRank = ROLE_ORDER.indexOf(user.system_role)
         const minRank = ROLE_ORDER.indexOf(normalizeRole(minRole))
+        // Sprint 1A — defansif fail-closed: unknown role yazılırsa
+        // (App.tsx'te legacy literal regresyonu, vb.) kazara-geçişi önle.
+        if (userRank === -1 || minRank === -1) return false
         return userRank >= minRank
       },
 

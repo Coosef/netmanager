@@ -219,12 +219,14 @@ describe('Sidebar grup tıklamasında ilk yetkili tab yönlendirme', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('MenuGroupNav permission filter', () => {
-  it('viewer config grubunda Firmware (org_admin) ve Backups (location_admin) gizli', () => {
+  it('viewer config grubunda Firmware/Backups/Drift gizli; templates görünür', () => {
+    // Sprint 1A: drift artık org_admin gerektirir (route guard ile hizalı).
     const visible = getVisibleTabs(GROUP_BY_KEY.config, ctxFor('viewer'))
     const visibleKeys = visible.map((t) => t.key)
     expect(visibleKeys).not.toContain('firmware')
     expect(visibleKeys).not.toContain('backups')
-    expect(visibleKeys).toContain('drift') // viewer drift'i görür
+    expect(visibleKeys).not.toContain('drift')
+    expect(visibleKeys).toContain('templates') // module: ['driver_templates','view']
   })
 
   it('feature off → ilgili tab gizli (ipam kapalı)', () => {

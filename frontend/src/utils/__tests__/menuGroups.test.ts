@@ -428,10 +428,14 @@ describe('getVisibleTabs', () => {
     expect(visible.find((t) => t.key === 'ipam')).toBeUndefined()
   })
 
-  it('viewer config grubunda Firmware (org_admin) gizli ama Config Drift görünür', () => {
+  it('viewer config grubunda Firmware ve Config Drift (org_admin) gizli; templates görünür', () => {
+    // Sprint 1A: drift artık org_admin gerektirir (route guard ile hizalı).
     const visible = getVisibleTabs(GROUP_BY_KEY.config, ctxFor('viewer'))
     expect(visible.find((t) => t.key === 'firmware')).toBeUndefined()
-    expect(visible.find((t) => t.key === 'drift')).toBeDefined()
+    expect(visible.find((t) => t.key === 'drift')).toBeUndefined()
+    // templates: module ['driver_templates','view'] — viewer can() default
+    // ctx ile view'a izin verir, dolayısıyla görünür kalır.
+    expect(visible.find((t) => t.key === 'templates')).toBeDefined()
   })
 })
 
