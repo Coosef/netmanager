@@ -288,7 +288,11 @@ function ThemedApp() {
                   (eski bookmark'lar kırılmaz). Gerçek Ports sekmesi içeriği C7.C'de gelecek. */}
               <Route path="devices/:deviceId/ports" element={<RedirectToPortsTab />} />
               <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
-              <Route path="settings" element={<PermRoute module="settings" action="view"><SettingsPage /></PermRoute>} />
+              {/* Sprint 1A-fix2 — /settings şimdilik super_admin-only.
+                  Kullanıcı-yönelik ayarlar ileride ayrı "Ayarlar" menüsüne
+                  taşınacak; o sprintte hangi alt-bölümler hangi role açılır
+                  yeniden tasarlanır. */}
+              <Route path="settings" element={<RoleRoute minRole="super_admin"><SettingsPage /></RoleRoute>} />
               {/* Profil — her authenticated kullanıcı kendi sayfası. Permission
                   gate yok; içerideki /users/me endpoint'leri zaten self-only. */}
               <Route path="profile" element={<ProfilePage />} />
@@ -323,9 +327,11 @@ function ThemedApp() {
               <Route path="topology-twin" element={<RoleRoute minRole="location_admin"><TopologyTwinPage /></RoleRoute>} />
               <Route path="ai-assistant" element={<RoleRoute minRole="org_admin"><AIAssistantPage /></RoleRoute>} />
               <Route path="superadmin" element={<RoleRoute minRole="super_admin"><SuperAdminPage /></RoleRoute>} />
-              {/* Sprint 1A — /org-admin sadece org_admin için; super_admin
-                  menüde gizli, route'ta da kapatılır (excludeRoles). */}
-              <Route path="org-admin" element={<RoleRoute minRole="org_admin" excludeRoles={['super_admin']}><OrgAdminPage /></RoleRoute>} />
+              {/* Sprint 1A-fix2 — /org-admin Platform Management altından
+                  kaldırıldı; route şimdilik super_admin-only (debug erişimi).
+                  Org admin için ayrı Organizasyon paneli ihtiyacı ileride
+                  ayrı tasarlanacak. */}
+              <Route path="org-admin" element={<RoleRoute minRole="super_admin"><OrgAdminPage /></RoleRoute>} />
               <Route path="permissions" element={<RoleRoute minRole="org_admin"><PermissionsPage /></RoleRoute>} />
               <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
               <Route path="incidents" element={<PermRoute module="monitoring" action="view"><IncidentsPage /></PermRoute>} />
