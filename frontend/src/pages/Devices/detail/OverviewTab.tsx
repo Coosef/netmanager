@@ -229,64 +229,75 @@ export default function OverviewTab({ device }: { device: Device }) {
         </div>
       </div>
 
-      {/* Wave 2 #2 F3 — Sistem Sağlığı (SNMP CPU/RAM + sparkline) */}
-      {device.snmp_enabled && (
-        <div className="nm-card" style={{
-          padding: 14, marginBottom: 16, border: '1px solid var(--line-soft)',
-          borderRadius: 8, background: 'var(--bg-1)',
-        }}>
-          <div style={{
-            fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.06,
-            color: 'var(--fg-3)', marginBottom: 10, fontWeight: 600,
+      {/* Wave 2 #2 F3 — Sistem Sağlığı (SNMP CPU/RAM + sparkline)
+          Sprint 2A (2026-06-08): Veri yoksa kart/widget gizlenir; 0 geçerli.
+          hasCpu/hasRam/hasRamBytes guard'ları null/undefined/NaN ele alır.
+          'cpu_ram_no_data' i18n key'i lokalde kalır (silinmedi, kullanım dışı). */}
+      {(() => {
+        if (!device.snmp_enabled) return null
+        const d = cpuRamQ.data
+        const hasCpu = d?.cpu_pct !== null && d?.cpu_pct !== undefined && Number.isFinite(d.cpu_pct)
+        const hasRam = d?.ram_pct !== null && d?.ram_pct !== undefined && Number.isFinite(d.ram_pct)
+        const hasRamBytes =
+          d?.ram_used_mb !== null && d?.ram_used_mb !== undefined &&
+          d?.ram_total_mb !== null && d?.ram_total_mb !== undefined &&
+          d.ram_total_mb > 0 &&
+          Number.isFinite(d.ram_used_mb) && Number.isFinite(d.ram_total_mb)
+        // Veri tamamen yoksa (ve hala loading değilse) kart hiç render edilmez.
+        if (!hasCpu && !hasRam && !cpuRamQ.isLoading) return null
+        return (
+          <div className="nm-card" style={{
+            padding: 14, marginBottom: 16, border: '1px solid var(--line-soft)',
+            borderRadius: 8, background: 'var(--bg-1)',
           }}>
-            {t('devices.detail.overview.system_health_snmp')}
-            {cpuRamQ.isFetching && (
-              <span style={{ marginLeft: 8, fontWeight: 400, fontSize: 10 }}>
-                {t('devices.detail.overview.refreshing_dot')}
-              </span>
-            )}
+            <div style={{
+              fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.06,
+              color: 'var(--fg-3)', marginBottom: 10, fontWeight: 600,
+            }}>
+              {t('devices.detail.overview.system_health_snmp')}
+              {cpuRamQ.isFetching && (
+                <span style={{ marginLeft: 8, fontWeight: 400, fontSize: 10 }}>
+                  {t('devices.detail.overview.refreshing_dot')}
+                </span>
+              )}
+            </div>
+            <div style={{
+              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12,
+            }}>
+              {hasCpu && (
+                <div className={`nm-stat ${healthClass(d!.cpu_pct)}`}
+                     style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="nm-stat-label">CPU</div>
+                    <div className="nm-stat-val">
+                      {d!.cpu_pct!.toFixed(0)}<small>%</small>
+                    </div>
+                    <div className="nm-stat-delta">{t('devices.detail.overview.last_n_samples', { count: cpuHistory.length })}</div>
+                  </div>
+                  <Sparkline data={cpuHistory} color="var(--accent, #22d3c5)" yMin={0} yMax={100} fill />
+                </div>
+              )}
+              {hasRam && (
+                <div className={`nm-stat ${healthClass(d!.ram_pct)}`}
+                     style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="nm-stat-label">RAM</div>
+                    <div className="nm-stat-val">
+                      {d!.ram_pct!.toFixed(0)}<small>%</small>
+                    </div>
+                    {hasRamBytes && (
+                      <div className="nm-stat-delta">
+                        {`${d!.ram_used_mb} / ${d!.ram_total_mb} MB`}
+                      </div>
+                    )}
+                  </div>
+                  <Sparkline data={ramHistory} color="var(--warn, #f59e0b)" yMin={0} yMax={100} fill />
+                </div>
+              )}
+            </div>
           </div>
-          <div style={{
-            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12,
-          }}>
-            <div className={`nm-stat ${healthClass(cpuRamQ.data?.cpu_pct)}`}
-                 style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ flex: 1 }}>
-                <div className="nm-stat-label">CPU</div>
-                <div className="nm-stat-val">
-                  {cpuRamQ.data?.cpu_pct !== null && cpuRamQ.data?.cpu_pct !== undefined
-                    ? <>{cpuRamQ.data.cpu_pct.toFixed(0)}<small>%</small></>
-                    : '—'}
-                </div>
-                <div className="nm-stat-delta">{t('devices.detail.overview.last_n_samples', { count: cpuHistory.length })}</div>
-              </div>
-              <Sparkline data={cpuHistory} color="var(--accent, #22d3c5)" yMin={0} yMax={100} fill />
-            </div>
-            <div className={`nm-stat ${healthClass(cpuRamQ.data?.ram_pct)}`}
-                 style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <div style={{ flex: 1 }}>
-                <div className="nm-stat-label">RAM</div>
-                <div className="nm-stat-val">
-                  {cpuRamQ.data?.ram_pct !== null && cpuRamQ.data?.ram_pct !== undefined
-                    ? <>{cpuRamQ.data.ram_pct.toFixed(0)}<small>%</small></>
-                    : '—'}
-                </div>
-                <div className="nm-stat-delta">
-                  {cpuRamQ.data?.ram_used_mb !== null && cpuRamQ.data?.ram_total_mb !== null
-                    ? `${cpuRamQ.data?.ram_used_mb} / ${cpuRamQ.data?.ram_total_mb} MB`
-                    : t('devices.detail.overview.no_usage_info')}
-                </div>
-              </div>
-              <Sparkline data={ramHistory} color="var(--warn, #f59e0b)" yMin={0} yMax={100} fill />
-            </div>
-          </div>
-          {!cpuRamQ.data?.cpu_pct && !cpuRamQ.isLoading && (
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--fg-3)' }}>
-              {t('devices.detail.overview.cpu_ram_no_data')}
-            </div>
-          )}
-        </div>
-      )}
+        )
+      })()}
 
       {/* Wave 2 #2 F3 — 24sa Olay Özeti */}
       <div className="nm-card" style={{
