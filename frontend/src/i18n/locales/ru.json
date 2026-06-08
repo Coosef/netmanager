@@ -61,12 +61,11 @@
       "inventory": {
         "switch": "Устройства",
         "topology": "Топология",
-        "discovery": "Обнаружение",
+        "discovery": "Инвентарь обнаружения",
         "ipam": "IPAM",
         "vlan": "VLAN",
         "racks": "Стойки",
-        "map": "Карта",
-        "lldp": "Инвентарь LLDP"
+        "map": "Карта"
       },
       "monitoring": {
         "alerts": "Оповещения",

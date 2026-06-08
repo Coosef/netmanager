@@ -61,12 +61,11 @@
       "inventory": {
         "switch": "Geräte",
         "topology": "Topologie",
-        "discovery": "Discovery",
+        "discovery": "Discovery-Inventar",
         "ipam": "IPAM",
         "vlan": "VLAN",
         "racks": "Racks",
-        "map": "Karte",
-        "lldp": "LLDP-Inventar"
+        "map": "Karte"
       },
       "monitoring": {
         "alerts": "Alarme",

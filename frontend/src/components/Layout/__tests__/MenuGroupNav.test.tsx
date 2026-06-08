@@ -125,7 +125,9 @@ describe('Route → aktif grup eşlemesi', () => {
     expect(getActiveGroup('/')).toBe('dashboard')
   })
 
-  it('Inventory route\'ları (8 tab) → inventory grubu', () => {
+  it('Inventory route\'ları (7 tab) → inventory grubu', () => {
+    // HOTFIX 2026-06-08: /lldp-inventory route sistemde yok; helper'dan
+    // çift kayıt silindi. 'discovery' tab'ı LldpInventoryPage'i temsil eder.
     expect(getActiveGroup('/devices')).toBe('inventory')
     expect(getActiveGroup('/topology')).toBe('inventory')
     expect(getActiveGroup('/discovery')).toBe('inventory')
@@ -133,7 +135,6 @@ describe('Route → aktif grup eşlemesi', () => {
     expect(getActiveGroup('/vlan')).toBe('inventory')
     expect(getActiveGroup('/racks')).toBe('inventory')
     expect(getActiveGroup('/floor-plan')).toBe('inventory')
-    expect(getActiveGroup('/lldp-inventory')).toBe('inventory')
   })
 
   it('Monitoring + Alerts + Config + Automation + Security + Reports route\'ları', () => {
@@ -253,8 +254,12 @@ describe('Faz 3 guardrail\'ları (kullanıcı karar uygulaması)', () => {
     expect(groups[0].key).toBe('dashboard')
   })
 
-  it('Karar 4: LLDP Envanteri Ağ Envanteri grubunda', () => {
-    expect(ROUTE_TO_GROUP['/lldp-inventory']).toBe('inventory')
+  it('HOTFIX 2026-06-08: Keşif Envanteri tek tab /discovery üzerinden', () => {
+    // /lldp-inventory route sistemde yoktu; çift kayıt silindi. Mevcut
+    // /discovery route LldpInventoryPage'i render eder; tab adı "Keşif
+    // Envanteri" olarak korunur (i18n).
+    expect(ROUTE_TO_GROUP['/lldp-inventory']).toBeUndefined()
+    expect(ROUTE_TO_GROUP['/discovery']).toBe('inventory')
   })
 
   it('Karar 5: Organizasyon Paneli Platform Yönetimi grubunda + excludeSuperAdmin', () => {

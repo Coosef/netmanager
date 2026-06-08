@@ -61,12 +61,11 @@
       "inventory": {
         "switch": "Cihazlar",
         "topology": "Topoloji",
-        "discovery": "Keşif",
+        "discovery": "Keşif Envanteri",
         "ipam": "IPAM",
         "vlan": "VLAN",
         "racks": "Kabinler",
-        "map": "Harita",
-        "lldp": "LLDP Envanteri"
+        "map": "Harita"
       },
       "monitoring": {
         "alerts": "Uyarılar",
