@@ -27,6 +27,8 @@ import { useEventStream } from '@/hooks/useEventStream'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSite } from '@/contexts/SiteContext'
 import { useCustomize, ALL_WIDGETS } from '@/contexts/CustomizeContext'
+import { useAuthStore } from '@/store/auth'
+import { useShallow } from 'zustand/react/shallow'
 import CountUp from '@/components/CountUp'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -150,6 +152,13 @@ export default function NocDashboard() {
   const { activeSite } = useSite()
   const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget, viewVariant } = useCustomize()
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
+  // DASHBOARD-REFRESH-LOGOUT-HOTFIX — useEventStream WebSocket'i auth
+  // rehydrate edilmeden başlatma. Aksi hâlde buildWsUrl token=null
+  // snapshot'ı alır → backend 1008 close → reconnect storm.
+  const { token, hydrated } = useAuthStore(
+    useShallow((s) => ({ token: s.token, hydrated: s._hasHydrated })),
+  )
+  const eventStreamEnabled = hydrated && !!token
 
   // Live polling: refetchInterval düşürüldü (30s → 10s on critical queries)
   // + refetchOnWindowFocus default true → kullanıcı sayfaya geri dönünce
@@ -168,6 +177,7 @@ export default function NocDashboard() {
   const { data: devicesData } = useQuery({ queryKey: ['dashboard-devices-vendors'], queryFn: () => devicesApi.list({ limit: 1000 }), refetchInterval: 60000 })
 
   useEventStream({
+    enabled: eventStreamEnabled,
     onEvent: (ev: NetworkEvent) => {
       setLiveEvents((prev) => [ev, ...prev].slice(0, 30))
       // Cihaz durumu değişen event'lerde stat query'lerini hemen invalidate

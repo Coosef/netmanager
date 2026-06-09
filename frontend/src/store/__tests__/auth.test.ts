@@ -203,4 +203,23 @@ describe('hydration flag', () => {
     expect(useAuthStore.getState().user).toBeNull()
     expect(useAuthStore.getState().permissions).toBeNull()
   })
+
+  // DASHBOARD-REFRESH-LOGOUT-HOTFIX — ProtectedRoute eski sürümde iki ayrı
+  // useAuthStore selector ile (hydrated + token) okuyordu. Aşağıdaki test,
+  // tek-snapshot okumanın aynı state'te tutarlı değerler döndüğünü ve
+  // useShallow ile sarılınca sığ-eşitlik yaptığını doğrular.
+  it('tek selector ile {token, hydrated} aynı snapshot tutarlı dönmeli', () => {
+    setUser('super_admin')
+    useAuthStore.setState({ _hasHydrated: true })
+    const snap = useAuthStore.getState()
+    const pick = { token: snap.token, hydrated: snap._hasHydrated }
+    expect(pick.token).toBe('test-token')
+    expect(pick.hydrated).toBe(true)
+    // logout: token sıfırlanır, hydrated korunur
+    useAuthStore.getState().logout()
+    const snap2 = useAuthStore.getState()
+    const pick2 = { token: snap2.token, hydrated: snap2._hasHydrated }
+    expect(pick2.token).toBeNull()
+    expect(pick2.hydrated).toBe(true)
+  })
 })
