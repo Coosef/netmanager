@@ -37,23 +37,24 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,svg,woff2}'],
-        navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            urlPattern: /^\/api\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              networkTimeoutSeconds: 10,
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 300,
-              },
-            },
-          },
-        ],
+        // PWA-CACHE-HOTFIX (2026-06-09) — Dashboard refresh logout sorununun
+        // kök nedeni: SW eski index.html'i cache'den servis ediyordu →
+        // eski bundle path → eski JS kodu (PR #41 fix yok) çalışıyordu.
+        // Ek olarak `api-cache` 5dk runtime cache /api/v1/auth/me/permissions
+        // ve /api/v1/context/current gibi auth-kritik response'ları stale
+        // tutuyordu. Minimal fix:
+        //   - HTML precache dışı → her zaman fresh index.html
+        //   - navigateFallback: null → SPA route'lar SW intercept etmez
+        //     (workbox default'u 'index.html' set eder; explicit null ile
+        //     NavigationRoute oluşturulmasını engelleriz)
+        //   - runtimeCaching boş → /api/* HİÇ cache'lenmez
+        //   - JS/CSS/woff2 hash'li → mevcut precache doğru çalışıyor
+        //   - PWA install (manifest + icon'lar) korunur
+        //   - cleanupOutdatedCaches: true ile eski cache'ler boşaltılır
+        globPatterns: ['**/*.{js,css,ico,svg,woff2}'],
+        navigateFallback: null,
+        runtimeCaching: [],
+        cleanupOutdatedCaches: true,
       },
       devOptions: {
         enabled: false,
