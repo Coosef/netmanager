@@ -1705,7 +1705,16 @@
     "col_action": "Действие",
     "col_resource": "Ресурс",
     "col_detail": "Детали",
-    "col_ip": "IP"
+    "col_ip": "IP",
+    "actionCategory": {
+      "auth": "Аутентификация",
+      "create": "Создание",
+      "update": "Обновление",
+      "delete": "Удаление",
+      "approve": "Утверждение",
+      "security": "Безопасность",
+      "neutral": "Прочее"
+    }
   },
   "terminal_sessions": {
     "crumb_security": "Безопасность",
