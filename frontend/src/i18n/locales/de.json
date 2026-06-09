@@ -1778,6 +1778,72 @@
       "type_organization": "Organisation",
       "type_config_template": "Konfigurationsvorlage",
       "type_unknown": "Sonstige"
+    },
+    "page": {
+      "crumb_root": "Verwaltung",
+      "title": "Audit-Protokoll",
+      "subtitle": "Vollständige Aufzeichnung aller Benutzeraktionen — wer, wann, welche Ressource, von welcher IP.",
+      "records_count": "{{n}} Einträge",
+      "failed_count": "{{n}} fehlgeschlagen",
+      "download_csv": "CSV herunterladen"
+    },
+    "stat": {
+      "total": "Einträge gesamt",
+      "success": "Erfolgreich",
+      "failure": "Fehlgeschlagen",
+      "unique_users": "Eindeutige Benutzer",
+      "page": "Seite",
+      "displayed": "Angezeigt"
+    },
+    "column": {
+      "time": "Zeit",
+      "user": "Benutzer",
+      "action": "Aktion",
+      "resource": "Ressource",
+      "ip": "IP (real)",
+      "client": "Client",
+      "status": "Status",
+      "has_diff_tooltip": "Before/After-Änderung vorhanden",
+      "duration_tooltip": "Vorgangsdauer"
+    },
+    "filter": {
+      "quick_label": "Schnell",
+      "preset_1h": "Letzte Stunde",
+      "preset_24h": "Letzte 24 Stunden",
+      "preset_7d": "Letzte 7 Tage",
+      "preset_30d": "Letzte 30 Tage",
+      "preset_custom": "Benutzerdefiniert",
+      "search_user": "Benutzer suchen...",
+      "search_action": "Aktion suchen...",
+      "search_ip": "IP suchen...",
+      "resource_type_placeholder": "Ressourcentyp",
+      "status_placeholder": "Status",
+      "reset": "Filter zurücksetzen",
+      "active_count": "{{n}} Filter aktiv"
+    },
+    "status": {
+      "success": "Erfolgreich",
+      "failure": "Fehlgeschlagen"
+    },
+    "empty": {
+      "no_data_title": "Noch keine Audit-Einträge",
+      "no_data_desc": "Sobald Aktionen im System erfolgen, erscheinen sie hier.",
+      "no_match_title": "Keine Einträge gefunden",
+      "no_match_desc": "Keine Audit-Einträge entsprechen den aktuellen Filtern.",
+      "reset_cta": "Filter zurücksetzen"
+    },
+    "csv": {
+      "id": "ID",
+      "time": "Zeit",
+      "user": "Benutzer",
+      "role": "Rolle",
+      "action": "Aktion",
+      "resource_type": "Ressourcentyp",
+      "resource": "Ressource",
+      "ip": "IP",
+      "duration_ms": "Dauer(ms)",
+      "status": "Status",
+      "client": "Client"
     }
   },
   "terminal_sessions": {

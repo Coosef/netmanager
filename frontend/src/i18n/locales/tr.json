@@ -1778,6 +1778,72 @@
       "type_organization": "Organizasyon",
       "type_config_template": "Yapılandırma Şablonu",
       "type_unknown": "Diğer"
+    },
+    "page": {
+      "crumb_root": "Yönetim",
+      "title": "Denetim Kaydı",
+      "subtitle": "Tüm kullanıcı aksiyonlarının denetim kaydı — kim, ne zaman, hangi kaynağa, hangi IP'den.",
+      "records_count": "{{n}} kayıt",
+      "failed_count": "{{n}} başarısız",
+      "download_csv": "CSV İndir"
+    },
+    "stat": {
+      "total": "Toplam Kayıt",
+      "success": "Başarılı",
+      "failure": "Başarısız",
+      "unique_users": "Benzersiz Kullanıcı",
+      "page": "Sayfa",
+      "displayed": "Görüntülenen"
+    },
+    "column": {
+      "time": "Zaman",
+      "user": "Kullanıcı",
+      "action": "Aksiyon",
+      "resource": "Kaynak",
+      "ip": "IP (gerçek)",
+      "client": "İstemci",
+      "status": "Durum",
+      "has_diff_tooltip": "Before/After değişiklik mevcut",
+      "duration_tooltip": "İşlem süresi"
+    },
+    "filter": {
+      "quick_label": "Hızlı",
+      "preset_1h": "Son 1 saat",
+      "preset_24h": "Son 24 saat",
+      "preset_7d": "Son 7 gün",
+      "preset_30d": "Son 30 gün",
+      "preset_custom": "Özel",
+      "search_user": "Kullanıcı ara...",
+      "search_action": "Aksiyon ara...",
+      "search_ip": "IP ara...",
+      "resource_type_placeholder": "Kaynak tipi",
+      "status_placeholder": "Durum",
+      "reset": "Filtreleri Sıfırla",
+      "active_count": "{{n}} filtre aktif"
+    },
+    "status": {
+      "success": "Başarılı",
+      "failure": "Başarısız"
+    },
+    "empty": {
+      "no_data_title": "Henüz audit log kaydı yok",
+      "no_data_desc": "Sistemde aksiyonlar gerçekleştiğinde buradan görüntülenecek.",
+      "no_match_title": "Kayıt bulunamadı",
+      "no_match_desc": "Mevcut filtrelerle eşleşen denetim kaydı yok.",
+      "reset_cta": "Filtreleri Sıfırla"
+    },
+    "csv": {
+      "id": "ID",
+      "time": "Zaman",
+      "user": "Kullanıcı",
+      "role": "Rol",
+      "action": "Aksiyon",
+      "resource_type": "Kaynak Tipi",
+      "resource": "Kaynak",
+      "ip": "IP",
+      "duration_ms": "Süre(ms)",
+      "status": "Durum",
+      "client": "İstemci"
     }
   },
   "terminal_sessions": {
