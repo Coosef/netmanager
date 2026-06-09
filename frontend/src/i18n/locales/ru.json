@@ -1725,7 +1725,8 @@
       "client": "Браузер / Клиент",
       "summary_title": "Сводка",
       "diff_title": "Изменения",
-      "advanced": "Расширенно / Исходные данные"
+      "advanced": "Расширенно / Исходные данные",
+      "resource": "Ресурс"
     },
     "diff": {
       "no_state": "Для этой записи нет изменений состояния.",
@@ -1761,6 +1762,22 @@
         "security": "Событие безопасности <b>{{action}}</b> зафиксировано (пользователь: {{actor}}).",
         "neutral": "<b>{{action}}</b> выполнено пользователем <b>{{actor}}</b>."
       }
+    },
+    "resource": {
+      "no_route": "Нет страницы деталей для этого типа ресурса",
+      "no_id_for_detail": "ID ресурса отсутствует для просмотра деталей",
+      "no_permission": "Нет прав доступа",
+      "type_device": "Устройство",
+      "type_user": "Пользователь",
+      "type_task": "Задача",
+      "type_agent": "Агент",
+      "type_ipam": "IPAM",
+      "type_security_audit": "Аудит безопасности",
+      "type_terminal_session": "Терминальная сессия",
+      "type_asset_lifecycle": "Жизненный цикл актива",
+      "type_organization": "Организация",
+      "type_config_template": "Шаблон конфигурации",
+      "type_unknown": "Прочее"
     }
   },
   "terminal_sessions": {

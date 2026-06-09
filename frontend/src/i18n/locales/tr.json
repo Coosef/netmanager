@@ -1725,7 +1725,8 @@
       "client": "Tarayıcı / İstemci",
       "summary_title": "Özet",
       "diff_title": "Değişiklik",
-      "advanced": "Gelişmiş / Raw Data"
+      "advanced": "Gelişmiş / Raw Data",
+      "resource": "Kaynak"
     },
     "diff": {
       "no_state": "Bu kayıt için durum değişikliği yok.",
@@ -1761,6 +1762,22 @@
         "security": "<b>{{action}}</b> güvenlik olayı kaydedildi (kullanıcı: {{actor}}).",
         "neutral": "<b>{{actor}}</b> tarafından <b>{{action}}</b> işlemi gerçekleştirildi."
       }
+    },
+    "resource": {
+      "no_route": "Bu kaynak türü için detay sayfası yok",
+      "no_id_for_detail": "Detay için kaynak kimliği eksik",
+      "no_permission": "Erişim yetkisi yok",
+      "type_device": "Cihaz",
+      "type_user": "Kullanıcı",
+      "type_task": "Görev",
+      "type_agent": "Agent",
+      "type_ipam": "IPAM",
+      "type_security_audit": "Güvenlik Denetimi",
+      "type_terminal_session": "Terminal Oturumu",
+      "type_asset_lifecycle": "Yaşam Döngüsü",
+      "type_organization": "Organizasyon",
+      "type_config_template": "Yapılandırma Şablonu",
+      "type_unknown": "Diğer"
     }
   },
   "terminal_sessions": {

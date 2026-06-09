@@ -1725,7 +1725,8 @@
       "client": "Browser / Client",
       "summary_title": "Summary",
       "diff_title": "Changes",
-      "advanced": "Advanced / Raw Data"
+      "advanced": "Advanced / Raw Data",
+      "resource": "Resource"
     },
     "diff": {
       "no_state": "No state change for this record.",
@@ -1761,6 +1762,22 @@
         "security": "Security event <b>{{action}}</b> recorded (user: {{actor}}).",
         "neutral": "<b>{{action}}</b> performed by <b>{{actor}}</b>."
       }
+    },
+    "resource": {
+      "no_route": "No detail page for this resource type",
+      "no_id_for_detail": "Resource ID missing for detail view",
+      "no_permission": "No access permission",
+      "type_device": "Device",
+      "type_user": "User",
+      "type_task": "Task",
+      "type_agent": "Agent",
+      "type_ipam": "IPAM",
+      "type_security_audit": "Security Audit",
+      "type_terminal_session": "Terminal Session",
+      "type_asset_lifecycle": "Asset Lifecycle",
+      "type_organization": "Organization",
+      "type_config_template": "Config Template",
+      "type_unknown": "Other"
     }
   },
   "terminal_sessions": {

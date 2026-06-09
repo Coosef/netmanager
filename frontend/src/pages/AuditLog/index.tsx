@@ -14,6 +14,7 @@ import { tasksApi } from '@/api/tasks'
 import type { AuditLog } from '@/types'
 import AuditActionChip from './AuditActionChip'
 import AuditDetailDrawer from './AuditDetailDrawer'
+import AuditResourceLink from './AuditResourceLink'
 
 const { Text } = Typography
 
@@ -297,9 +298,17 @@ export default function AuditLogPage() {
             },
             {
               title: 'Kaynak',
-              render: (_, r) => r.resource_type
-                ? <Text style={{ fontSize: 12, color: C.text }}>{r.resource_type}/{r.resource_name || r.resource_id}</Text>
-                : <Text style={{ color: C.dim }}>—</Text>,
+              // Audit Log v2 PR 3 — düz text yerine AuditResourceLink.
+              // Permission + route resolution + tooltip + truncate component
+              // tarafında ele alınır. compact=true ile tablo içi kısa render.
+              render: (_, r) => (
+                <AuditResourceLink
+                  type={r.resource_type}
+                  id={r.resource_id}
+                  name={r.resource_name}
+                  compact
+                />
+              ),
             },
             {
               title: 'IP (gerçek)',
