@@ -28,7 +28,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useSite } from '@/contexts/SiteContext'
 import { useCustomize, ALL_WIDGETS } from '@/contexts/CustomizeContext'
 import { useAuthStore } from '@/store/auth'
-import { useShallow } from 'zustand/react/shallow'
+import { useHasHydrated } from '@/hooks/useHasHydrated'
 import CountUp from '@/components/CountUp'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -152,12 +152,11 @@ export default function NocDashboard() {
   const { activeSite } = useSite()
   const { editMode, widgetHidden, widgetOrder, setWidgetOrder, toggleWidget, viewVariant } = useCustomize()
   const [liveEvents, setLiveEvents] = useState<NetworkEvent[]>([])
-  // DASHBOARD-REFRESH-LOGOUT-HOTFIX — useEventStream WebSocket'i auth
-  // rehydrate edilmeden başlatma. Aksi hâlde buildWsUrl token=null
-  // snapshot'ı alır → backend 1008 close → reconnect storm.
-  const { token, hydrated } = useAuthStore(
-    useShallow((s) => ({ token: s.token, hydrated: s._hasHydrated })),
-  )
+  // DASHBOARD-REFRESH-LOGOUT-HOTFIX (PR #41) + AUTH-PERSIST-HYDRATION-HOTFIX
+  // (PR #47) — useEventStream WebSocket'i auth rehydrate edilmeden başlatma.
+  // `hydrated` artık Zustand persist'in kendi flag'inden okunur.
+  const hydrated = useHasHydrated()
+  const token = useAuthStore((s) => s.token)
   const eventStreamEnabled = hydrated && !!token
 
   // Live polling: refetchInterval düşürüldü (30s → 10s on critical queries)

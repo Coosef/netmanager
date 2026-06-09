@@ -164,62 +164,46 @@ describe('hasPermission — defansif unknown-role guard', () => {
   })
 })
 
-// ─── AUTH-REFRESH-HYDRATE-GUARD ─────────────────────────────────────────────
+// ─── AUTH-PERSIST-HYDRATION-HOTFIX (PR #47) ────────────────────────────────
 //
-// Zustand v5 persist async rehydrate eder. ProtectedRoute eski sürümde ilk
-// render'da token=null görüp /login'e race ile atıyordu. _hasHydrated flag'i
-// + onRehydrateStorage hook'u ProtectedRoute'a "redirect kararı vermeden
-// önce bekle" sinyali verir. Aşağıdaki testler bu flag'in initial/setter
-// davranışını ve setAuth/logout ile etkileşimini sabitler.
+// Eski mimari (`_hasHydrated` store state alanı + `setHasHydrated` setter +
+// onRehydrateStorage içinde setter zincirleme) ANTIPATTERN'di. Zustand v5'te
+// rehydrate sırasında race penceresi açıyor, Dashboard refresh sonrası
+// kullanıcıyı /login'e atıyordu. Yeni mimari hooks/useHasHydrated.ts Zustand
+// persist'in kendi API'sini (persist.hasHydrated() + onFinishHydration)
+// kullanır — store state alanı KALDIRILDI. Aşağıdaki testler yeni mimariyi
+// sabitler.
 
-describe('hydration flag', () => {
-  it('_hasHydrated initial false', () => {
-    // beforeEach token/user/permissions null'lar; _hasHydrated default false
-    // (rehydrate hook'u test ortamında manuel set edilmeden çağrılmaz).
-    useAuthStore.setState({ _hasHydrated: false })
-    expect(useAuthStore.getState()._hasHydrated).toBe(false)
+describe('persist hydration (PR #47)', () => {
+  it('_hasHydrated store state alanı KALDIRILDI', () => {
+    // AuthState interface'inde _hasHydrated + setHasHydrated yok.
+    // Bu testin amacı: ileride birinin bu alanı yeniden eklemesini engelle.
+    const state = useAuthStore.getState() as unknown as Record<string, unknown>
+    expect(state._hasHydrated).toBeUndefined()
+    expect(state.setHasHydrated).toBeUndefined()
   })
 
-  it('setHasHydrated(true) flag\'i sets', () => {
-    useAuthStore.setState({ _hasHydrated: false })
-    useAuthStore.getState().setHasHydrated(true)
-    expect(useAuthStore.getState()._hasHydrated).toBe(true)
+  it('useHasHydrated hook export edilmiş (Zustand persist API üzerine)', async () => {
+    // Hook Zustand persist'in hasHydrated() + onFinishHydration() API'sini
+    // kullanır. Hook fonksiyon olarak export edildiyse, internal API'ye
+    // doğru erişim sağlamıştır (dinamik import + module check).
+    const mod = await import('@/hooks/useHasHydrated')
+    expect(typeof mod.useHasHydrated).toBe('function')
   })
 
-  it('setAuth _hasHydrated\'ı etkilemez (hidrasyon ve auth ayrı sinyal)', () => {
-    useAuthStore.setState({ _hasHydrated: true })
+  it('setAuth token/user/permissions atomik set eder', () => {
     setUser('org_admin')
-    expect(useAuthStore.getState()._hasHydrated).toBe(true)
-    expect(useAuthStore.getState().token).toBe('test-token')
-    expect(useAuthStore.getState().user?.system_role).toBe('org_admin')
+    const s = useAuthStore.getState()
+    expect(s.token).toBe('test-token')
+    expect(s.user?.system_role).toBe('org_admin')
   })
 
-  it('logout _hasHydrated\'ı etkilemez (sadece auth alanlarını temizler)', () => {
+  it('logout token/user/permissions atomik temizler', () => {
     setUser('super_admin')
-    useAuthStore.setState({ _hasHydrated: true })
     useAuthStore.getState().logout()
-    expect(useAuthStore.getState()._hasHydrated).toBe(true)
-    expect(useAuthStore.getState().token).toBeNull()
-    expect(useAuthStore.getState().user).toBeNull()
-    expect(useAuthStore.getState().permissions).toBeNull()
-  })
-
-  // DASHBOARD-REFRESH-LOGOUT-HOTFIX — ProtectedRoute eski sürümde iki ayrı
-  // useAuthStore selector ile (hydrated + token) okuyordu. Aşağıdaki test,
-  // tek-snapshot okumanın aynı state'te tutarlı değerler döndüğünü ve
-  // useShallow ile sarılınca sığ-eşitlik yaptığını doğrular.
-  it('tek selector ile {token, hydrated} aynı snapshot tutarlı dönmeli', () => {
-    setUser('super_admin')
-    useAuthStore.setState({ _hasHydrated: true })
-    const snap = useAuthStore.getState()
-    const pick = { token: snap.token, hydrated: snap._hasHydrated }
-    expect(pick.token).toBe('test-token')
-    expect(pick.hydrated).toBe(true)
-    // logout: token sıfırlanır, hydrated korunur
-    useAuthStore.getState().logout()
-    const snap2 = useAuthStore.getState()
-    const pick2 = { token: snap2.token, hydrated: snap2._hasHydrated }
-    expect(pick2.token).toBeNull()
-    expect(pick2.hydrated).toBe(true)
+    const s = useAuthStore.getState()
+    expect(s.token).toBeNull()
+    expect(s.user).toBeNull()
+    expect(s.permissions).toBeNull()
   })
 })

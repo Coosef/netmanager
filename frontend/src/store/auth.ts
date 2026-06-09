@@ -20,12 +20,12 @@ interface AuthState {
   token: string | null
   user: AuthUser | null
   permissions: Permissions | null
-  // AUTH-REFRESH-HYDRATE-GUARD — Zustand v5 persist rehydration async olduğu
-  // için ProtectedRoute ilk render'da token=null görüp /login'e atıyordu.
-  // Bu flag onRehydrateStorage tamamlanınca true olur; ProtectedRoute ve
-  // App.tsx permission useEffect bunun tamamlanmasını bekler.
-  _hasHydrated: boolean
-  setHasHydrated: (v: boolean) => void
+  // AUTH-PERSIST-HYDRATION-HOTFIX (2026-06-09) — eski `_hasHydrated` state
+  // alanı ve setHasHydrated action KALDIRILDI. Zustand v5'te
+  // onRehydrateStorage callback içinde set çağrısı zincirlemesi antipattern;
+  // ProtectedRoute içinde `_hasHydrated=true && token=null` race penceresi
+  // oluşturuyordu. Yeni: hooks/useHasHydrated.ts Zustand persist'in kendi
+  // API'sini (persist.hasHydrated() + onFinishHydration) kullanır.
   setAuth: (token: string, user: AuthUser, permissions?: Permissions | null) => void
   logout: () => void
   // Permission-based checks
@@ -111,9 +111,6 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       user: null,
       permissions: null,
-      _hasHydrated: false,
-
-      setHasHydrated: (v) => set({ _hasHydrated: v }),
 
       setAuth: (token, user, permissions = null) =>
         set({ token, user: normalizeUser(user), permissions }),
@@ -204,13 +201,17 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         permissions: state.permissions,
       }),
-      // Re-normalise persisted user once on rehydrate — old localStorage
-      // entries may still carry 'admin' / 'member' etc. AUTH-REFRESH —
-      // ardından hydration flag'i true'ya çekerek ProtectedRoute'a "artık
-      // güvenli, redirect kararı verebilirsin" sinyali ver.
+      // AUTH-PERSIST-HYDRATION-HOTFIX (2026-06-09) — eski callback iki
+      // antipattern içeriyordu: (1) state.user = normalizeUser(state.user)
+      // direct mutation Zustand state'ini immutable kuralını ihlal ediyordu;
+      // (2) state.setHasHydrated(true) setter zincirlemesi persist rehydrate
+      // sırasında race yaratıyordu. Yeni: normalize işlemi setState ile
+      // atomic; hidrasyon state alanı tamamen kaldırıldı (hooks/useHasHydrated
+      // Zustand persist.onFinishHydration API'sini kullanır).
       onRehydrateStorage: () => (state) => {
-        if (state?.user) state.user = normalizeUser(state.user)
-        state?.setHasHydrated(true)
+        if (state?.user) {
+          useAuthStore.setState({ user: normalizeUser(state.user) })
+        }
       },
     },
   ),

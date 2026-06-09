@@ -14,7 +14,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { CustomizeProvider } from '@/contexts/CustomizeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
-import { useShallow } from 'zustand/react/shallow'
+import { useHasHydrated } from '@/hooks/useHasHydrated'
 import type { SystemRole } from '@/types'
 import { authApi } from '@/api/auth'
 import AppLayout from '@/components/Layout/AppLayout'
@@ -149,13 +149,14 @@ const LIGHT_TOKENS = {
 // alınır; yeni dil için App.tsx dokunulmaz.
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  // AUTH-REFRESH-HYDRATE-GUARD — Zustand v5 persist async rehydrate eder.
-  // DASHBOARD-REFRESH-LOGOUT-HOTFIX — iki ayrı selector aynı tick'te
-  // tutarsız snapshot verebiliyordu (`hydrated=true && token=null` mikro
-  // saniye); tek bir selector ile aynı snapshot'tan oku.
-  const { token, hydrated } = useAuthStore(
-    useShallow((s) => ({ token: s.token, hydrated: s._hasHydrated })),
-  )
+  // AUTH-PERSIST-HYDRATION-HOTFIX (2026-06-09) — eski `useShallow` ile tek
+  // selector hâlâ race açıyordu çünkü `_hasHydrated` store state alanı
+  // onRehydrateStorage callback'inde setter zincirleme ile set ediliyordu.
+  // Yeni: Zustand persist'in `hasHydrated()` + `onFinishHydration()` API'si
+  // ile rehydrate state'i persist middleware'in internal flag'inden okunur;
+  // token store state alanı ile ayrı subscribe, race penceresi yok.
+  const hydrated = useHasHydrated()
+  const token = useAuthStore((s) => s.token)
   if (!hydrated) return null
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
@@ -236,12 +237,11 @@ function ThemedApp() {
   const { isDark } = useTheme()
   const [antdLocale, setAntdLocale] = useState(getAntdLocale(i18n.language))
   const { token, setAuth, user } = useAuthStore()
-  const hydrated = useAuthStore((s) => s._hasHydrated)
+  const hydrated = useHasHydrated()
 
   // Re-fetch permissions on every app load so stale/null localStorage entries
-  // get refreshed. AUTH-REFRESH-HYDRATE-GUARD — rehydrate tamamlanmadan
-  // tetiklenmemeli; aksi hâlde token=null görüp atlanır ve persisted token
-  // okunduktan sonra yenisi tetiklenmez.
+  // get refreshed. AUTH-PERSIST-HYDRATION-HOTFIX — `hydrated` artık Zustand
+  // persist'in kendi flag'inden okunur, store state alanı race açmaz.
   useEffect(() => {
     if (!hydrated || !token || !user) return
     authApi.myPermissions().then((res) => {
