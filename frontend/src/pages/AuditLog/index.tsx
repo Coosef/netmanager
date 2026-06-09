@@ -12,6 +12,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import dayjs from 'dayjs'
 import { tasksApi } from '@/api/tasks'
 import type { AuditLog } from '@/types'
+import AuditActionChip from './AuditActionChip'
 
 const { Text } = Typography
 
@@ -425,12 +426,13 @@ export default function AuditLogPage() {
               title: 'Aksiyon',
               dataIndex: 'action',
               render: (v, r) => {
-                const hex = ACTION_HEX[v] || '#64748b'
+                // Audit Log v2 PR 1 — kategori-bazlı chip (ikon + renk + label).
+                // status=failure görsel ayrımı chip içinde işlenir.
+                // ACTION_HEX map eski tek-renk fallback — şimdilik dosyada kalıyor
+                // (PR 2/3/4'te tamamen kaldırılacak), bu kolonda kullanılmıyor.
                 return (
                   <Space size={4}>
-                    <Tag style={{ fontSize: 11, color: hex, borderColor: hex + '50', background: hex + '18' }}>
-                      {v}
-                    </Tag>
+                    <AuditActionChip action={v} status={r.status} compact />
                     {(r.before_state || r.after_state) && (
                       <Tooltip title="Before/After değişiklik mevcut">
                         <CodeOutlined style={{ color: '#3b82f6', fontSize: 12 }} />

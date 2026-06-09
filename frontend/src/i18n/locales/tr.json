@@ -1705,7 +1705,16 @@
     "col_action": "Eylem",
     "col_resource": "Kaynak",
     "col_detail": "Detay",
-    "col_ip": "IP"
+    "col_ip": "IP",
+    "actionCategory": {
+      "auth": "Kimlik",
+      "create": "Oluşturma",
+      "update": "Güncelleme",
+      "delete": "Silme",
+      "approve": "Onay",
+      "security": "Güvenlik",
+      "neutral": "Diğer"
+    }
   },
   "terminal_sessions": {
     "crumb_security": "Güvenlik",
