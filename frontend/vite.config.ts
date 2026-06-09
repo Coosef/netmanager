@@ -2,64 +2,28 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
-import { VitePWA } from 'vite-plugin-pwa'
+
+// SW KILL-SWITCH (2026-06-09) — VitePWA plugin TAMAMEN DEVRE DIŞI.
+//
+// Sebep: Stale Workbox SW + cached old precache manifest bazı kullanıcı
+// profillerinde "siyah ekran" yaşatıyor (rollback sonrası dahi devam etti).
+// Kök nedeni nginx /sw.js için `Cache-Control: max-age=31536000, immutable`
+// veriyordu (yanlış); browser eski sw.js'i 1 yıl tutuyordu, yeni sw.js'i
+// fetch etmiyordu. Eski SW eski JS hash'lerini istiyor → 404 → React mount
+// edemiyor → siyah ekran.
+//
+// Çözüm: VitePWA'yı tamamen kapat. `public/sw.js` artık kill-switch dosyası
+// (cache temizler + unregister eder + reload). Vite build sırasında public/
+// → dist/ olduğu gibi kopyalanır, ek workbox-*.js veya precache manifest
+// üretilmez. Nginx config'i /sw.js için no-store header'ı verecek şekilde
+// düzeltildi (nginx/nginx.conf).
+//
+// İçe alma: `vite-plugin-pwa` devDependency olarak package.json'da kalır
+// (gelecekte yeniden enable etmek için); import bilerek kaldırıldı.
 
 export default defineConfig({
   plugins: [
     react(),
-    VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['network-icon.svg', 'icon-192.svg', 'icon-512.svg'],
-      manifest: {
-        name: 'NetManager',
-        short_name: 'NetManager',
-        description: 'Çok Satıcılı Ağ Yönetim Platformu — Cisco, Aruba, Ruijie',
-        theme_color: '#0f172a',
-        background_color: '#0f172a',
-        display: 'standalone',
-        orientation: 'any',
-        scope: '/',
-        start_url: '/',
-        lang: 'tr',
-        categories: ['productivity', 'utilities'],
-        icons: [
-          {
-            src: 'icon-192.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml',
-          },
-          {
-            src: 'icon-512.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
-          },
-        ],
-      },
-      workbox: {
-        // PWA-CACHE-HOTFIX (2026-06-09) — Dashboard refresh logout sorununun
-        // kök nedeni: SW eski index.html'i cache'den servis ediyordu →
-        // eski bundle path → eski JS kodu (PR #41 fix yok) çalışıyordu.
-        // Ek olarak `api-cache` 5dk runtime cache /api/v1/auth/me/permissions
-        // ve /api/v1/context/current gibi auth-kritik response'ları stale
-        // tutuyordu. Minimal fix:
-        //   - HTML precache dışı → her zaman fresh index.html
-        //   - navigateFallback: null → SPA route'lar SW intercept etmez
-        //     (workbox default'u 'index.html' set eder; explicit null ile
-        //     NavigationRoute oluşturulmasını engelleriz)
-        //   - runtimeCaching boş → /api/* HİÇ cache'lenmez
-        //   - JS/CSS/woff2 hash'li → mevcut precache doğru çalışıyor
-        //   - PWA install (manifest + icon'lar) korunur
-        //   - cleanupOutdatedCaches: true ile eski cache'ler boşaltılır
-        globPatterns: ['**/*.{js,css,ico,svg,woff2}'],
-        navigateFallback: null,
-        runtimeCaching: [],
-        cleanupOutdatedCaches: true,
-      },
-      devOptions: {
-        enabled: false,
-      },
-    }),
   ],
   resolve: {
     alias: {
