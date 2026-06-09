@@ -244,7 +244,53 @@
     "login_btn": "Login",
     "error": "Invalid username or password",
     "username_required": "Username is required",
-    "password_required": "Password is required"
+    "password_required": "Password is required",
+    "step1": {
+      "badge": "Step 1 / 2 · Authentication",
+      "title": "Authenticate to continue",
+      "subtitle": "Enter your credentials to access the network operations center.",
+      "username_label": "Username",
+      "password_label": "Password",
+      "forgot": "Forgot?",
+      "remember": "Remember me on this device",
+      "submit": "Continue",
+      "submitting": "SIGNING IN…"
+    },
+    "step2": {
+      "back": "Back",
+      "badge": "Step 2 / 2 · Multi-Factor Authentication",
+      "title": "Verify your identity",
+      "hint_totp": "Enter the <1>6-digit code</1> from your authenticator app.",
+      "hint_email_pre": "Click the button below to send a verification code to your email.",
+      "hint_email_post": "Enter the <1>6-digit code</1> sent to your email.",
+      "hint_recovery": "Enter your one-time <1>recovery code</1> (XXXXX-XXXXX).",
+      "tab_totp": "Auth App",
+      "tab_email": "Email",
+      "tab_recovery": "Recovery",
+      "timer_totp": "Code refreshes every 30s.",
+      "email_sent_to": "Email sent · {{email}}",
+      "resend": "RESEND",
+      "send_email": "SEND CODE TO EMAIL",
+      "sending_email": "SENDING…"
+    },
+    "method": {
+      "totp_label": "Authenticator",
+      "email_label": "Email",
+      "recovery_label": "Recovery code",
+      "totp_sub": "Google · Microsoft · Authy · 1Password",
+      "email_sub_default": "Sent to your registered email address",
+      "recovery_sub": "One-time use · provided during MFA enrollment"
+    },
+    "step3": {
+      "title": "Access granted",
+      "subtitle": "Connecting to the network operations center."
+    },
+    "err": {
+      "no_challenge": "No verification session — please sign in again",
+      "email_send_failed": "Failed to send email",
+      "expired": "Verification expired — please sign in again",
+      "invalid_code": "Invalid code"
+    }
   },
   "sidebar": {
     "health_status": "System Status",

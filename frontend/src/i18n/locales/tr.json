@@ -244,7 +244,53 @@
     "login_btn": "Giriş Yap",
     "error": "Kullanıcı adı veya şifre hatalı",
     "username_required": "Kullanıcı adı gerekli",
-    "password_required": "Şifre gerekli"
+    "password_required": "Şifre gerekli",
+    "step1": {
+      "badge": "Adım 1 / 2 · Kimlik Doğrulama",
+      "title": "Geçiş için kimlik doğrulayın",
+      "subtitle": "Ağ komuta merkezine erişmek için kimlik bilgilerinizi girin.",
+      "username_label": "Kullanıcı",
+      "password_label": "Şifre",
+      "forgot": "Unuttunuz mu?",
+      "remember": "Bu cihazda beni hatırla",
+      "submit": "Devam Et",
+      "submitting": "GİRİŞ YAPILIYOR…"
+    },
+    "step2": {
+      "back": "Geri",
+      "badge": "Adım 2 / 2 · Çok Faktörlü Doğrulama",
+      "title": "Kimliğinizi doğrulayın",
+      "hint_totp": "Authenticator uygulamanızdaki <1>6 haneli kodu</1> girin.",
+      "hint_email_pre": "Doğrulama kodunu e-postanıza göndermek için aşağıdaki butona basın.",
+      "hint_email_post": "E-postanıza gönderilen <1>6 haneli kodu</1> girin.",
+      "hint_recovery": "Tek-kullanımlık <1>kurtarma kodunuzu</1> girin (XXXXX-XXXXX).",
+      "tab_totp": "Authenticator",
+      "tab_email": "E-posta",
+      "tab_recovery": "Kurtarma",
+      "timer_totp": "Kod 30 sn’de bir yenilenir.",
+      "email_sent_to": "E-posta gönderildi · {{email}}",
+      "resend": "YENİDEN YOLLA",
+      "send_email": "KODU E-POSTAYA GÖNDER",
+      "sending_email": "GÖNDERİLİYOR…"
+    },
+    "method": {
+      "totp_label": "Authenticator",
+      "email_label": "E-posta",
+      "recovery_label": "Kurtarma kodu",
+      "totp_sub": "Google · Microsoft · Authy · 1Password",
+      "email_sub_default": "Kayıtlı e-posta adresinize gönderilir",
+      "recovery_sub": "Tek kullanımlık · MFA kayıt sırasında verildi"
+    },
+    "step3": {
+      "title": "Geçiş onaylandı",
+      "subtitle": "Ağ komuta merkezine bağlanılıyor."
+    },
+    "err": {
+      "no_challenge": "Doğrulama oturumu yok — tekrar giriş yapın",
+      "email_send_failed": "E-posta gönderilemedi",
+      "expired": "Doğrulama süresi doldu — tekrar giriş yapın",
+      "invalid_code": "Geçersiz kod"
+    }
   },
   "sidebar": {
     "health_status": "Sistem Durumu",
