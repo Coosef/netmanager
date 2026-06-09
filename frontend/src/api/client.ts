@@ -26,10 +26,18 @@ client.interceptors.request.use((config) => {
   return config
 })
 
+// DASHBOARD-REFRESH-LOGOUT-HOTFIX — 401 debounce. Dashboard mount'unda 10
+// paralel auth-required istek atılır; bir tanesi 401 dönerse interceptor
+// logout+redirect zincirleme tetiklenmesin (paralel 10 redirect = race).
+// Network/abort/cancel hataları (error.response undefined) zaten logout
+// tetiklemez — controlled 401 davranışı korunur.
+let _logoutInFlight = false
 client.interceptors.response.use(
   (res) => res,
   (error) => {
     if (error.response?.status === 401 && window.location.pathname !== '/login') {
+      if (_logoutInFlight) return Promise.reject(error)
+      _logoutInFlight = true
       useAuthStore.getState().logout()
       window.location.href = '/login'
     }

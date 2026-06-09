@@ -14,6 +14,7 @@ import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { CustomizeProvider } from '@/contexts/CustomizeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
+import { useShallow } from 'zustand/react/shallow'
 import type { SystemRole } from '@/types'
 import { authApi } from '@/api/auth'
 import AppLayout from '@/components/Layout/AppLayout'
@@ -149,10 +150,12 @@ const LIGHT_TOKENS = {
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   // AUTH-REFRESH-HYDRATE-GUARD — Zustand v5 persist async rehydrate eder.
-  // İlk mount'ta token vermeden önce localStorage okunmasını bekle; aksi
-  // hâlde refresh sonrası token=null görüp /login'e race ile atıyorduk.
-  const hydrated = useAuthStore((s) => s._hasHydrated)
-  const token = useAuthStore((s) => s.token)
+  // DASHBOARD-REFRESH-LOGOUT-HOTFIX — iki ayrı selector aynı tick'te
+  // tutarsız snapshot verebiliyordu (`hydrated=true && token=null` mikro
+  // saniye); tek bir selector ile aynı snapshot'tan oku.
+  const { token, hydrated } = useAuthStore(
+    useShallow((s) => ({ token: s.token, hydrated: s._hasHydrated })),
+  )
   if (!hydrated) return null
   return token ? <>{children}</> : <Navigate to="/login" replace />
 }
