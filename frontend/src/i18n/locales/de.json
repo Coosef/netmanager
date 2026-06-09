@@ -1705,7 +1705,16 @@
     "col_action": "Aktion",
     "col_resource": "Ressource",
     "col_detail": "Detail",
-    "col_ip": "IP"
+    "col_ip": "IP",
+    "actionCategory": {
+      "auth": "Anmeldung",
+      "create": "Erstellen",
+      "update": "Aktualisieren",
+      "delete": "Löschen",
+      "approve": "Genehmigung",
+      "security": "Sicherheit",
+      "neutral": "Sonstige"
+    }
   },
   "terminal_sessions": {
     "crumb_security": "Sicherheit",
