@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
 import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
-import { useShallow } from 'zustand/react/shallow'
+import { useHasHydrated } from '@/hooks/useHasHydrated'
 import { useTranslation } from 'react-i18next'
 
 const CSS = `
@@ -461,13 +461,13 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
 
-  // AUTH-LOGIN-REDIRECT-HOTFIX (2026-06-09) — authenticated kullanıcı
-  // /login ekranına düşerse (ProtectedRoute mikro-race ile redirect ettiyse
-  // veya kullanıcı manuel URL yazdıysa) Dashboard'a otomatik dön. Token
-  // localStorage'da kalmasına rağmen form'da takılı kalmasını önler.
-  const { token: existingToken, hydrated } = useAuthStore(
-    useShallow((s) => ({ token: s.token, hydrated: s._hasHydrated })),
-  )
+  // AUTH-LOGIN-REDIRECT-HOTFIX (PR #45) + AUTH-PERSIST-HYDRATION-HOTFIX
+  // (PR #47) — authenticated kullanıcı /login ekranına düşerse Dashboard'a
+  // otomatik dön. `hydrated` artık Zustand persist'in kendi internal
+  // flag'inden okunur (useHasHydrated), token store state alanı ayrı
+  // subscribe — race penceresi yok.
+  const hydrated = useHasHydrated()
+  const existingToken = useAuthStore((s) => s.token)
   useEffect(() => {
     if (hydrated && existingToken) {
       navigate('/', { replace: true })
