@@ -1778,6 +1778,72 @@
       "type_organization": "Организация",
       "type_config_template": "Шаблон конфигурации",
       "type_unknown": "Прочее"
+    },
+    "page": {
+      "crumb_root": "Управление",
+      "title": "Журнал аудита",
+      "subtitle": "Полный журнал действий пользователей — кто, когда, какой ресурс, с какого IP.",
+      "records_count": "{{n}} записей",
+      "failed_count": "{{n}} неуспешно",
+      "download_csv": "Скачать CSV"
+    },
+    "stat": {
+      "total": "Всего записей",
+      "success": "Успешно",
+      "failure": "Неуспешно",
+      "unique_users": "Уникальные пользователи",
+      "page": "Страница",
+      "displayed": "Отображено"
+    },
+    "column": {
+      "time": "Время",
+      "user": "Пользователь",
+      "action": "Действие",
+      "resource": "Ресурс",
+      "ip": "IP (реальный)",
+      "client": "Клиент",
+      "status": "Статус",
+      "has_diff_tooltip": "Доступно изменение Before/After",
+      "duration_tooltip": "Длительность операции"
+    },
+    "filter": {
+      "quick_label": "Быстрый",
+      "preset_1h": "Последний 1 час",
+      "preset_24h": "Последние 24 часа",
+      "preset_7d": "Последние 7 дней",
+      "preset_30d": "Последние 30 дней",
+      "preset_custom": "Произвольный",
+      "search_user": "Поиск пользователя...",
+      "search_action": "Поиск действия...",
+      "search_ip": "Поиск IP...",
+      "resource_type_placeholder": "Тип ресурса",
+      "status_placeholder": "Статус",
+      "reset": "Сбросить фильтры",
+      "active_count": "{{n}} фильтр активен"
+    },
+    "status": {
+      "success": "Успешно",
+      "failure": "Неуспешно"
+    },
+    "empty": {
+      "no_data_title": "Записей аудита пока нет",
+      "no_data_desc": "Когда в системе произойдут действия, они появятся здесь.",
+      "no_match_title": "Записи не найдены",
+      "no_match_desc": "Нет записей аудита, соответствующих текущим фильтрам.",
+      "reset_cta": "Сбросить фильтры"
+    },
+    "csv": {
+      "id": "ID",
+      "time": "Время",
+      "user": "Пользователь",
+      "role": "Роль",
+      "action": "Действие",
+      "resource_type": "Тип ресурса",
+      "resource": "Ресурс",
+      "ip": "IP",
+      "duration_ms": "Длительность(мс)",
+      "status": "Статус",
+      "client": "Клиент"
     }
   },
   "terminal_sessions": {

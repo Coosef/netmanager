@@ -1,20 +1,24 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
-  Table, Tag, Input, Select, Space, Typography,
-  Badge, Tooltip, Button, DatePicker,
+  Table, Tag, Space, Typography,
+  Badge, Tooltip, Button,
 } from 'antd'
 import {
   InfoCircleOutlined, ClockCircleOutlined, GlobalOutlined, CodeOutlined,
-  DownloadOutlined, UserOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 import { tasksApi } from '@/api/tasks'
 import type { AuditLog } from '@/types'
 import AuditActionChip from './AuditActionChip'
 import AuditDetailDrawer from './AuditDetailDrawer'
 import AuditResourceLink from './AuditResourceLink'
+import AuditFilterBar from './AuditFilterBar'
+import AuditEmptyState from './AuditEmptyState'
+import { countActiveFilters } from './auditDatePresets'
 
 const { Text } = Typography
 
@@ -31,10 +35,6 @@ const AUDIT_CSS = `
 .audit-row-fail:hover td { background: rgba(239,68,68,0.07) !important; }
 .audit-row-success:hover td { background: rgba(34,197,94,0.03) !important; }
 `
-
-// Audit Log v2 PR 2 — eski ACTION_HEX legacy map KALDIRILDI.
-// AuditActionChip (PR 1) + AuditDetailDrawer (PR 2) artık tüm action
-// renk/ikon kararlarını auditActionCategory üzerinden yapıyor.
 
 const ROLE_COLOR: Record<string, string> = {
   super_admin: '#ef4444', admin: '#f97316', operator: '#3b82f6',
@@ -65,23 +65,25 @@ function mkC(isDark: boolean) {
   }
 }
 
-const RESOURCE_TYPES = [
-  { label: 'Cihaz', value: 'device' },
-  { label: 'Kullanıcı', value: 'user' },
-  { label: 'Görev', value: 'task' },
-  { label: 'Playbook', value: 'playbook' },
-  { label: 'Approval', value: 'approval' },
-  { label: 'Agent', value: 'agent' },
-]
-
-// Audit Log v2 PR 2 — inline StateDiff + DetailModal KALDIRILDI.
-// Yeni: AuditDetailDrawer.tsx (Modal → Drawer, ÖZET + DİFF + Raw)
-//       AuditDiffViewer.tsx (field-level diff + add/change/remove)
-//       auditFormatters.ts (action-spesifik human-readable summary)
-
-
-function exportCSV(items: AuditLog[]) {
-  const headers = ['ID', 'Zaman', 'Kullanıcı', 'Rol', 'Aksiyon', 'Kaynak Tipi', 'Kaynak', 'IP', 'Süre(ms)', 'Durum', 'UA']
+// Audit Log v2 PR 4 — exportCSV t() ile çağrıldı, header'lar locale'e göre üretilir.
+// Kolon sırası KORUNUR (11 sütun); sadece header text dil bazlı.
+function exportCSV(
+  items: AuditLog[],
+  t: (key: string) => string,
+) {
+  const headers = [
+    t('audit.csv.id'),
+    t('audit.csv.time'),
+    t('audit.csv.user'),
+    t('audit.csv.role'),
+    t('audit.csv.action'),
+    t('audit.csv.resource_type'),
+    t('audit.csv.resource'),
+    t('audit.csv.ip'),
+    t('audit.csv.duration_ms'),
+    t('audit.csv.status'),
+    t('audit.csv.client'),
+  ]
   const rows = items.map(l => [
     l.id,
     dayjs(l.created_at).format('DD.MM.YYYY HH:mm:ss'),
@@ -108,6 +110,7 @@ function exportCSV(items: AuditLog[]) {
 }
 
 export default function AuditLogPage() {
+  const { t } = useTranslation()
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
   const [actionFilter, setActionFilter] = useState('')
@@ -137,90 +140,83 @@ export default function AuditLogPage() {
   })
 
   const successCount = (data?.total ?? 0) - (data?.failure_count ?? 0)
+
+  // Audit Log v2 PR 4 — Reset Filters callback.
+  // Tüm filter state'lerini sıfırlar + sayfa 1'e döner.
+  const handleResetFilters = () => {
+    setSearch('')
+    setActionFilter('')
+    setIpFilter('')
+    setResourceType(undefined)
+    setStatusFilter(undefined)
+    setDateRange(null)
+    setPage(1)
+  }
+
+  // Empty state mode — filtre var mı, yok mu
+  const activeCount = useMemo(
+    () => countActiveFilters({ search, actionFilter, ipFilter, resourceType, statusFilter, dateRange }),
+    [search, actionFilter, ipFilter, resourceType, statusFilter, dateRange],
+  )
+  const emptyMode: 'no_data' | 'no_match' = activeCount > 0 ? 'no_match' : 'no_data'
+
   return (
     <div className="nm-page" style={{ padding: '4px 2px' }}>
       <style>{AUDIT_CSS}</style>
 
       <div className="nm-page-hd">
         <div className="title-block">
-          <div className="nm-crumbs"><span>Yönetim</span><span>Denetim Kaydı</span></div>
+          <div className="nm-crumbs">
+            <span>{t('audit.page.crumb_root')}</span>
+            <span>{t('audit.page.title')}</span>
+          </div>
           <h1 className="nm-page-title">
-            Denetim Kaydı
-            <span className="nm-pill mono">{data?.total ?? 0} kayıt</span>
-            {(data?.failure_count ?? 0) > 0 && <span className="nm-pill crit">{data?.failure_count} başarısız</span>}
+            {t('audit.page.title')}
+            <span className="nm-pill mono">
+              {t('audit.page.records_count', { n: data?.total ?? 0 })}
+            </span>
+            {(data?.failure_count ?? 0) > 0 && (
+              <span className="nm-pill crit">
+                {t('audit.page.failed_count', { n: data?.failure_count ?? 0 })}
+              </span>
+            )}
           </h1>
-          <div className="nm-page-sub">Tüm kullanıcı aksiyonlarının denetim kaydı — kim, ne zaman, hangi kaynağa, hangi IP'den.</div>
+          <div className="nm-page-sub">{t('audit.page.subtitle')}</div>
         </div>
         <div className="nm-page-actions">
-          <button className="nm-btn primary" onClick={() => data?.items && exportCSV(data.items)} disabled={!data?.items?.length}>
-            <DownloadOutlined /> CSV İndir
+          <button className="nm-btn primary" onClick={() => data?.items && exportCSV(data.items, t)} disabled={!data?.items?.length}>
+            <DownloadOutlined /> {t('audit.page.download_csv')}
           </button>
         </div>
       </div>
 
       <div className="nm-statbar">
-        <div className="nm-stat"><div className="nm-stat-label">Toplam Kayıt</div><div className="nm-stat-val">{data?.total ?? 0}</div></div>
-        <div className="nm-stat ok"><div className="nm-stat-label">Başarılı</div><div className="nm-stat-val">{successCount}</div></div>
-        <div className="nm-stat crit"><div className="nm-stat-label">Başarısız</div><div className="nm-stat-val">{data?.failure_count ?? 0}</div></div>
-        <div className="nm-stat"><div className="nm-stat-label">Benzersiz Kullanıcı</div><div className="nm-stat-val">{data?.unique_users ?? 0}</div></div>
-        <div className="nm-stat"><div className="nm-stat-label">Sayfa</div><div className="nm-stat-val">{page}</div><div className="nm-stat-delta">/ {Math.max(1, Math.ceil((data?.total ?? 0) / 50))}</div></div>
-        <div className="nm-stat"><div className="nm-stat-label">Görüntülenen</div><div className="nm-stat-val">{data?.items?.length ?? 0}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">{t('audit.stat.total')}</div><div className="nm-stat-val">{data?.total ?? 0}</div></div>
+        <div className="nm-stat ok"><div className="nm-stat-label">{t('audit.stat.success')}</div><div className="nm-stat-val">{successCount}</div></div>
+        <div className="nm-stat crit"><div className="nm-stat-label">{t('audit.stat.failure')}</div><div className="nm-stat-val">{data?.failure_count ?? 0}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">{t('audit.stat.unique_users')}</div><div className="nm-stat-val">{data?.unique_users ?? 0}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">{t('audit.stat.page')}</div><div className="nm-stat-val">{page}</div><div className="nm-stat-delta">/ {Math.max(1, Math.ceil((data?.total ?? 0) / 50))}</div></div>
+        <div className="nm-stat"><div className="nm-stat-label">{t('audit.stat.displayed')}</div><div className="nm-stat-val">{data?.items?.length ?? 0}</div></div>
       </div>
 
-      {/* Filter card */}
-      <div style={{ background: 'var(--bg-1)', border: '1px solid var(--line)', borderRadius: 8, padding: '10px 12px', marginBottom: 12 }}>
-        <Space wrap>
-          <Input.Search
-            placeholder="Kullanıcı ara..."
-            style={{ width: 150 }}
-            allowClear
-            onSearch={setSearch}
-            onChange={(e) => !e.target.value && setSearch('')}
-            prefix={<UserOutlined style={{ color: C.dim }} />}
-          />
-          <Input.Search
-            placeholder="Aksiyon ara..."
-            style={{ width: 150 }}
-            allowClear
-            onSearch={setActionFilter}
-            onChange={(e) => !e.target.value && setActionFilter('')}
-          />
-          <Input.Search
-            placeholder="IP ara..."
-            style={{ width: 140 }}
-            allowClear
-            onSearch={setIpFilter}
-            onChange={(e) => !e.target.value && setIpFilter('')}
-            prefix={<GlobalOutlined style={{ color: C.dim }} />}
-          />
-          <Select
-            placeholder="Kaynak tipi"
-            allowClear
-            style={{ width: 130 }}
-            onChange={setResourceType}
-            options={RESOURCE_TYPES}
-          />
-          <Select
-            placeholder="Durum"
-            allowClear
-            style={{ width: 110 }}
-            onChange={setStatusFilter}
-            options={[
-              { label: 'Başarılı', value: 'success' },
-              { label: 'Başarısız', value: 'failure' },
-            ]}
-          />
-          <DatePicker.RangePicker
-            showTime={{ format: 'HH:mm' }}
-            format="DD.MM.YY HH:mm"
-            style={{ width: 310 }}
-            onChange={(range) => {
-              setDateRange(range as [dayjs.Dayjs | null, dayjs.Dayjs | null] | null)
-              setPage(1)
-            }}
-          />
-        </Space>
-      </div>
+      {/* Audit Log v2 PR 4 — Filter Card → AuditFilterBar component.
+          State management parent'ta, callback'lerle update edilir.
+          Quick presets + Reset + active count chip dahil. */}
+      <AuditFilterBar
+        search={search}
+        onSearchChange={(v) => { setSearch(v); setPage(1) }}
+        actionFilter={actionFilter}
+        onActionChange={(v) => { setActionFilter(v); setPage(1) }}
+        ipFilter={ipFilter}
+        onIpChange={(v) => { setIpFilter(v); setPage(1) }}
+        resourceType={resourceType}
+        onResourceTypeChange={(v) => { setResourceType(v); setPage(1) }}
+        statusFilter={statusFilter}
+        onStatusFilterChange={(v) => { setStatusFilter(v); setPage(1) }}
+        dateRange={dateRange}
+        onDateRangeChange={(range) => { setDateRange(range); setPage(1) }}
+        onReset={handleResetFilters}
+      />
 
       <div style={{ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden' }}>
         <Table<AuditLog>
@@ -235,18 +231,29 @@ export default function AuditLogPage() {
               animation: 'auditRowIn 0.2s ease-out',
             },
           })}
+          /* Audit Log v2 PR 4 — Custom empty state.
+             mode: aktif filter var mı → 'no_match' (reset CTA görünür)
+                   yok → 'no_data' (gerçek empty, CTA yok) */
+          locale={{
+            emptyText: (
+              <AuditEmptyState
+                mode={emptyMode}
+                onReset={emptyMode === 'no_match' ? handleResetFilters : undefined}
+              />
+            ),
+          }}
           pagination={{
             total: data?.total,
             pageSize,
             current: page,
             onChange: setPage,
-            showTotal: (n) => <span style={{ color: C.muted }}>{n} kayıt</span>,
+            showTotal: (n) => <span style={{ color: C.muted }}>{t('audit.page.records_count', { n })}</span>,
             showSizeChanger: false,
             style: { padding: '8px 16px' },
           }}
           columns={[
             {
-              title: 'Zaman',
+              title: t('audit.column.time'),
               dataIndex: 'created_at',
               width: 145,
               render: (v) => (
@@ -256,7 +263,7 @@ export default function AuditLogPage() {
               ),
             },
             {
-              title: 'Kullanıcı',
+              title: t('audit.column.user'),
               dataIndex: 'username',
               width: 130,
               render: (v, r) => (
@@ -277,30 +284,21 @@ export default function AuditLogPage() {
               ),
             },
             {
-              title: 'Aksiyon',
+              title: t('audit.column.action'),
               dataIndex: 'action',
-              render: (v, r) => {
-                // Audit Log v2 PR 1 — kategori-bazlı chip (ikon + renk + label).
-                // status=failure görsel ayrımı chip içinde işlenir.
-                // ACTION_HEX map eski tek-renk fallback — şimdilik dosyada kalıyor
-                // (PR 2/3/4'te tamamen kaldırılacak), bu kolonda kullanılmıyor.
-                return (
-                  <Space size={4}>
-                    <AuditActionChip action={v} status={r.status} compact />
-                    {(r.before_state || r.after_state) && (
-                      <Tooltip title="Before/After değişiklik mevcut">
-                        <CodeOutlined style={{ color: '#3b82f6', fontSize: 12 }} />
-                      </Tooltip>
-                    )}
-                  </Space>
-                )
-              },
+              render: (v, r) => (
+                <Space size={4}>
+                  <AuditActionChip action={v} status={r.status} compact />
+                  {(r.before_state || r.after_state) && (
+                    <Tooltip title={t('audit.column.has_diff_tooltip')}>
+                      <CodeOutlined style={{ color: '#3b82f6', fontSize: 12 }} />
+                    </Tooltip>
+                  )}
+                </Space>
+              ),
             },
             {
-              title: 'Kaynak',
-              // Audit Log v2 PR 3 — düz text yerine AuditResourceLink.
-              // Permission + route resolution + tooltip + truncate component
-              // tarafında ele alınır. compact=true ile tablo içi kısa render.
+              title: t('audit.column.resource'),
               render: (_, r) => (
                 <AuditResourceLink
                   type={r.resource_type}
@@ -311,7 +309,7 @@ export default function AuditLogPage() {
               ),
             },
             {
-              title: 'IP (gerçek)',
+              title: t('audit.column.ip'),
               dataIndex: 'client_ip',
               width: 130,
               render: (v) => v
@@ -322,7 +320,7 @@ export default function AuditLogPage() {
                 : <Text style={{ color: C.dim }}>—</Text>,
             },
             {
-              title: 'İstemci',
+              title: t('audit.column.client'),
               dataIndex: 'user_agent',
               width: 80,
               render: (v) => (
@@ -332,7 +330,7 @@ export default function AuditLogPage() {
               ),
             },
             {
-              title: <Tooltip title="İşlem süresi"><ClockCircleOutlined /></Tooltip>,
+              title: <Tooltip title={t('audit.column.duration_tooltip')}><ClockCircleOutlined /></Tooltip>,
               dataIndex: 'duration_ms',
               width: 70,
               render: (v) => v != null
@@ -340,7 +338,7 @@ export default function AuditLogPage() {
                 : <Text style={{ color: C.dim, fontSize: 11 }}>—</Text>,
             },
             {
-              title: 'Durum',
+              title: t('audit.column.status'),
               dataIndex: 'status',
               width: 90,
               render: (v) => (

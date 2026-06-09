@@ -1778,6 +1778,72 @@
       "type_organization": "Organization",
       "type_config_template": "Config Template",
       "type_unknown": "Other"
+    },
+    "page": {
+      "crumb_root": "Management",
+      "title": "Audit Log",
+      "subtitle": "Complete audit trail of user actions — who, when, what resource, from which IP.",
+      "records_count": "{{n}} records",
+      "failed_count": "{{n}} failed",
+      "download_csv": "Download CSV"
+    },
+    "stat": {
+      "total": "Total Records",
+      "success": "Successful",
+      "failure": "Failed",
+      "unique_users": "Unique Users",
+      "page": "Page",
+      "displayed": "Displayed"
+    },
+    "column": {
+      "time": "Time",
+      "user": "User",
+      "action": "Action",
+      "resource": "Resource",
+      "ip": "IP (real)",
+      "client": "Client",
+      "status": "Status",
+      "has_diff_tooltip": "Before/After change available",
+      "duration_tooltip": "Operation duration"
+    },
+    "filter": {
+      "quick_label": "Quick",
+      "preset_1h": "Last 1 hour",
+      "preset_24h": "Last 24 hours",
+      "preset_7d": "Last 7 days",
+      "preset_30d": "Last 30 days",
+      "preset_custom": "Custom",
+      "search_user": "Search user...",
+      "search_action": "Search action...",
+      "search_ip": "Search IP...",
+      "resource_type_placeholder": "Resource type",
+      "status_placeholder": "Status",
+      "reset": "Reset Filters",
+      "active_count": "{{n}} filter active"
+    },
+    "status": {
+      "success": "Successful",
+      "failure": "Failed"
+    },
+    "empty": {
+      "no_data_title": "No audit log records yet",
+      "no_data_desc": "When actions occur in the system, they will appear here.",
+      "no_match_title": "No records found",
+      "no_match_desc": "No audit records match the current filters.",
+      "reset_cta": "Reset Filters"
+    },
+    "csv": {
+      "id": "ID",
+      "time": "Time",
+      "user": "User",
+      "role": "Role",
+      "action": "Action",
+      "resource_type": "Resource Type",
+      "resource": "Resource",
+      "ip": "IP",
+      "duration_ms": "Duration(ms)",
+      "status": "Status",
+      "client": "Client"
     }
   },
   "terminal_sessions": {
