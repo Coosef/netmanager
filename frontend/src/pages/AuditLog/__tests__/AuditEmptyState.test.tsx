@@ -25,7 +25,8 @@ describe('AuditEmptyState — module smoke', () => {
     const el = createElement(mod.default, { mode: 'no_match', onReset })
     expect(el.props.mode).toBe('no_match')
     expect(typeof el.props.onReset).toBe('function')
-    el.props.onReset()
+    const cb = el.props.onReset
+    if (cb) cb()
     expect(called).toBe(1)
   })
 
