@@ -1714,6 +1714,53 @@
       "approve": "Утверждение",
       "security": "Безопасность",
       "neutral": "Прочее"
+    },
+    "detail": {
+      "user": "Пользователь",
+      "date": "Дата",
+      "ip": "IP (реальный)",
+      "duration": "Длительность",
+      "status": "Статус",
+      "request_id": "ID запроса",
+      "client": "Браузер / Клиент",
+      "summary_title": "Сводка",
+      "diff_title": "Изменения",
+      "advanced": "Расширенно / Исходные данные"
+    },
+    "diff": {
+      "no_state": "Для этой записи нет изменений состояния.",
+      "no_change": "Все поля идентичны, изменений нет.",
+      "col_field": "Поле",
+      "col_before": "До",
+      "col_after": "После",
+      "count_added": "+{{n}} добавлено",
+      "count_changed": "{{n}} изменено",
+      "count_removed": "{{n}} удалено",
+      "only_changed": "Только изменённые",
+      "sensitive_badge": "чувствительно"
+    },
+    "summary": {
+      "login": "<b>{{user}}</b> успешно вошёл в систему.",
+      "login_failed": "Попытка входа для <b>{{user}}</b> не удалась (IP: {{ip}}).",
+      "logout": "<b>{{user}}</b> вышел из системы.",
+      "mfa_enabled": "Двухфакторная аутентификация включена для <b>{{user}}</b>.",
+      "mfa_disabled": "Двухфакторная аутентификация отключена для <b>{{user}}</b>.",
+      "password_changed": "<b>{{user}}</b> сменил пароль.",
+      "user_created": "<b>{{actor}}</b> создал пользователя <b>{{target}}</b>.",
+      "user_updated": "<b>{{actor}}</b> обновил пользователя <b>{{target}}</b> ({{changes}} полей изменено).",
+      "device_created": "<b>{{actor}}</b> создал устройство <b>{{device}}</b>.",
+      "device_updated": "<b>{{actor}}</b> обновил устройство <b>{{device}}</b> ({{changes}} полей изменено).",
+      "device_deleted": "<b>{{actor}}</b> удалил устройство <b>{{device}}</b>.",
+      "config_template_pushed": "<b>{{actor}}</b> отправил шаблон конфигурации на устройство <b>{{device}}</b>.",
+      "category": {
+        "auth": "Действие сессии от <b>{{actor}}</b>: <b>{{action}}</b>.",
+        "create": "<b>{{actor}}</b> создал новую запись через <b>{{action}}</b> на <b>{{target}}</b>.",
+        "update": "<b>{{actor}}</b> выполнил обновление через <b>{{action}}</b> на <b>{{target}}</b>.",
+        "delete": "<b>{{actor}}</b> выполнил удаление через <b>{{action}}</b> на <b>{{target}}</b>.",
+        "approve": "<b>{{actor}}</b> выполнил действие утверждения через <b>{{action}}</b> на <b>{{target}}</b>.",
+        "security": "Событие безопасности <b>{{action}}</b> зафиксировано (пользователь: {{actor}}).",
+        "neutral": "<b>{{action}}</b> выполнено пользователем <b>{{actor}}</b>."
+      }
     }
   },
   "terminal_sessions": {

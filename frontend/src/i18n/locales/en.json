@@ -1714,6 +1714,53 @@
       "approve": "Approval",
       "security": "Security",
       "neutral": "Other"
+    },
+    "detail": {
+      "user": "User",
+      "date": "Date",
+      "ip": "IP (real)",
+      "duration": "Duration",
+      "status": "Status",
+      "request_id": "Request ID",
+      "client": "Browser / Client",
+      "summary_title": "Summary",
+      "diff_title": "Changes",
+      "advanced": "Advanced / Raw Data"
+    },
+    "diff": {
+      "no_state": "No state change for this record.",
+      "no_change": "All fields identical, no changes.",
+      "col_field": "Field",
+      "col_before": "Before",
+      "col_after": "After",
+      "count_added": "+{{n}} added",
+      "count_changed": "{{n}} changed",
+      "count_removed": "{{n}} removed",
+      "only_changed": "Only changed",
+      "sensitive_badge": "sensitive"
+    },
+    "summary": {
+      "login": "<b>{{user}}</b> signed in successfully.",
+      "login_failed": "Login attempt failed for <b>{{user}}</b> (IP: {{ip}}).",
+      "logout": "<b>{{user}}</b> signed out.",
+      "mfa_enabled": "Multi-factor authentication enabled for <b>{{user}}</b>.",
+      "mfa_disabled": "Multi-factor authentication disabled for <b>{{user}}</b>.",
+      "password_changed": "<b>{{user}}</b> changed their password.",
+      "user_created": "<b>{{actor}}</b> created user <b>{{target}}</b>.",
+      "user_updated": "<b>{{actor}}</b> updated user <b>{{target}}</b> ({{changes}} fields changed).",
+      "device_created": "<b>{{actor}}</b> created device <b>{{device}}</b>.",
+      "device_updated": "<b>{{actor}}</b> updated device <b>{{device}}</b> ({{changes}} fields changed).",
+      "device_deleted": "<b>{{actor}}</b> deleted device <b>{{device}}</b>.",
+      "config_template_pushed": "<b>{{actor}}</b> pushed config template to device <b>{{device}}</b>.",
+      "category": {
+        "auth": "Session action by <b>{{actor}}</b>: <b>{{action}}</b>.",
+        "create": "<b>{{actor}}</b> created a new record via <b>{{action}}</b> on <b>{{target}}</b>.",
+        "update": "<b>{{actor}}</b> performed an update via <b>{{action}}</b> on <b>{{target}}</b>.",
+        "delete": "<b>{{actor}}</b> performed a delete via <b>{{action}}</b> on <b>{{target}}</b>.",
+        "approve": "<b>{{actor}}</b> performed an approval action via <b>{{action}}</b> on <b>{{target}}</b>.",
+        "security": "Security event <b>{{action}}</b> recorded (user: {{actor}}).",
+        "neutral": "<b>{{action}}</b> performed by <b>{{actor}}</b>."
+      }
     }
   },
   "terminal_sessions": {

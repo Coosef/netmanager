@@ -1714,6 +1714,53 @@
       "approve": "Genehmigung",
       "security": "Sicherheit",
       "neutral": "Sonstige"
+    },
+    "detail": {
+      "user": "Benutzer",
+      "date": "Datum",
+      "ip": "IP (real)",
+      "duration": "Dauer",
+      "status": "Status",
+      "request_id": "Anfrage-ID",
+      "client": "Browser / Client",
+      "summary_title": "Zusammenfassung",
+      "diff_title": "Änderungen",
+      "advanced": "Erweitert / Rohdaten"
+    },
+    "diff": {
+      "no_state": "Keine Zustandsänderung für diesen Eintrag.",
+      "no_change": "Alle Felder identisch, keine Änderungen.",
+      "col_field": "Feld",
+      "col_before": "Vorher",
+      "col_after": "Nachher",
+      "count_added": "+{{n}} hinzugefügt",
+      "count_changed": "{{n}} geändert",
+      "count_removed": "{{n}} entfernt",
+      "only_changed": "Nur geänderte",
+      "sensitive_badge": "sensibel"
+    },
+    "summary": {
+      "login": "<b>{{user}}</b> hat sich erfolgreich angemeldet.",
+      "login_failed": "Anmeldung fehlgeschlagen für <b>{{user}}</b> (IP: {{ip}}).",
+      "logout": "<b>{{user}}</b> hat sich abgemeldet.",
+      "mfa_enabled": "Zwei-Faktor-Authentifizierung für <b>{{user}}</b> aktiviert.",
+      "mfa_disabled": "Zwei-Faktor-Authentifizierung für <b>{{user}}</b> deaktiviert.",
+      "password_changed": "<b>{{user}}</b> hat das Passwort geändert.",
+      "user_created": "<b>{{actor}}</b> hat Benutzer <b>{{target}}</b> erstellt.",
+      "user_updated": "<b>{{actor}}</b> hat Benutzer <b>{{target}}</b> aktualisiert ({{changes}} Felder geändert).",
+      "device_created": "<b>{{actor}}</b> hat Gerät <b>{{device}}</b> erstellt.",
+      "device_updated": "<b>{{actor}}</b> hat Gerät <b>{{device}}</b> aktualisiert ({{changes}} Felder geändert).",
+      "device_deleted": "<b>{{actor}}</b> hat Gerät <b>{{device}}</b> gelöscht.",
+      "config_template_pushed": "<b>{{actor}}</b> hat Konfigurationsvorlage an Gerät <b>{{device}}</b> gesendet.",
+      "category": {
+        "auth": "Sitzungsaktion von <b>{{actor}}</b>: <b>{{action}}</b>.",
+        "create": "<b>{{actor}}</b> hat neuen Eintrag erstellt: <b>{{action}}</b> auf <b>{{target}}</b>.",
+        "update": "<b>{{actor}}</b> hat eine Aktualisierung durchgeführt: <b>{{action}}</b> auf <b>{{target}}</b>.",
+        "delete": "<b>{{actor}}</b> hat eine Löschung durchgeführt: <b>{{action}}</b> auf <b>{{target}}</b>.",
+        "approve": "<b>{{actor}}</b> hat eine Genehmigungsaktion durchgeführt: <b>{{action}}</b> auf <b>{{target}}</b>.",
+        "security": "Sicherheitsereignis <b>{{action}}</b> aufgezeichnet (Benutzer: {{actor}}).",
+        "neutral": "<b>{{action}}</b> durchgeführt von <b>{{actor}}</b>."
+      }
     }
   },
   "terminal_sessions": {
