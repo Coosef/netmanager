@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
 import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
+import { useShallow } from 'zustand/react/shallow'
 import { useTranslation } from 'react-i18next'
 
 const CSS = `
@@ -459,6 +460,19 @@ export default function LoginPage() {
   const { setAuth } = useAuthStore()
   const navigate = useNavigate()
   const { t } = useTranslation()
+
+  // AUTH-LOGIN-REDIRECT-HOTFIX (2026-06-09) — authenticated kullanıcı
+  // /login ekranına düşerse (ProtectedRoute mikro-race ile redirect ettiyse
+  // veya kullanıcı manuel URL yazdıysa) Dashboard'a otomatik dön. Token
+  // localStorage'da kalmasına rağmen form'da takılı kalmasını önler.
+  const { token: existingToken, hydrated } = useAuthStore(
+    useShallow((s) => ({ token: s.token, hydrated: s._hasHydrated })),
+  )
+  useEffect(() => {
+    if (hydrated && existingToken) {
+      navigate('/', { replace: true })
+    }
+  }, [hydrated, existingToken, navigate])
 
   // Fontları yükle + .charon-login class
   useEffect(() => {
