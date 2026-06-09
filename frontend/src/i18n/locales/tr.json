@@ -1714,6 +1714,53 @@
       "approve": "Onay",
       "security": "Güvenlik",
       "neutral": "Diğer"
+    },
+    "detail": {
+      "user": "Kullanıcı",
+      "date": "Tarih",
+      "ip": "IP (gerçek)",
+      "duration": "Süre",
+      "status": "Durum",
+      "request_id": "İstek ID",
+      "client": "Tarayıcı / İstemci",
+      "summary_title": "Özet",
+      "diff_title": "Değişiklik",
+      "advanced": "Gelişmiş / Raw Data"
+    },
+    "diff": {
+      "no_state": "Bu kayıt için durum değişikliği yok.",
+      "no_change": "Tüm alanlar aynı, değişiklik yok.",
+      "col_field": "Alan",
+      "col_before": "Önce",
+      "col_after": "Sonra",
+      "count_added": "+{{n}} eklendi",
+      "count_changed": "{{n}} değişti",
+      "count_removed": "{{n}} silindi",
+      "only_changed": "Sadece değişenler",
+      "sensitive_badge": "hassas"
+    },
+    "summary": {
+      "login": "<b>{{user}}</b> sisteme başarıyla giriş yaptı.",
+      "login_failed": "<b>{{user}}</b> kullanıcısı için giriş denemesi başarısız oldu (IP: {{ip}}).",
+      "logout": "<b>{{user}}</b> çıkış yaptı.",
+      "mfa_enabled": "<b>{{user}}</b> için çok-faktörlü doğrulama etkinleştirildi.",
+      "mfa_disabled": "<b>{{user}}</b> için çok-faktörlü doğrulama devre dışı bırakıldı.",
+      "password_changed": "<b>{{user}}</b> şifresini değiştirdi.",
+      "user_created": "<b>{{actor}}</b>, <b>{{target}}</b> kullanıcısını oluşturdu.",
+      "user_updated": "<b>{{actor}}</b>, <b>{{target}}</b> kullanıcısını güncelledi ({{changes}} alan değişti).",
+      "device_created": "<b>{{actor}}</b>, <b>{{device}}</b> cihazını oluşturdu.",
+      "device_updated": "<b>{{actor}}</b>, <b>{{device}}</b> cihazını güncelledi ({{changes}} alan değişti).",
+      "device_deleted": "<b>{{actor}}</b>, <b>{{device}}</b> cihazını sildi.",
+      "config_template_pushed": "<b>{{actor}}</b>, <b>{{device}}</b> cihazına config şablonu gönderdi.",
+      "category": {
+        "auth": "<b>{{actor}}</b> tarafından oturum aksiyonu gerçekleştirildi: <b>{{action}}</b>.",
+        "create": "<b>{{actor}}</b>, <b>{{target}}</b> üzerinde <b>{{action}}</b> ile yeni kayıt oluşturdu.",
+        "update": "<b>{{actor}}</b>, <b>{{target}}</b> üzerinde <b>{{action}}</b> ile güncelleme yaptı.",
+        "delete": "<b>{{actor}}</b>, <b>{{target}}</b> üzerinde <b>{{action}}</b> ile silme yaptı.",
+        "approve": "<b>{{actor}}</b>, <b>{{target}}</b> üzerinde <b>{{action}}</b> onay aksiyonu gerçekleştirdi.",
+        "security": "<b>{{action}}</b> güvenlik olayı kaydedildi (kullanıcı: {{actor}}).",
+        "neutral": "<b>{{actor}}</b> tarafından <b>{{action}}</b> işlemi gerçekleştirildi."
+      }
     }
   },
   "terminal_sessions": {

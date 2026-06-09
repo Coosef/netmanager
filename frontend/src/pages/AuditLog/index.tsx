@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import {
-  Table, Tag, Input, Select, Space, Typography, Modal, Descriptions,
-  Badge, Tooltip, Button, DatePicker, Collapse,
+  Table, Tag, Input, Select, Space, Typography,
+  Badge, Tooltip, Button, DatePicker,
 } from 'antd'
 import {
   InfoCircleOutlined, ClockCircleOutlined, GlobalOutlined, CodeOutlined,
@@ -13,6 +13,7 @@ import dayjs from 'dayjs'
 import { tasksApi } from '@/api/tasks'
 import type { AuditLog } from '@/types'
 import AuditActionChip from './AuditActionChip'
+import AuditDetailDrawer from './AuditDetailDrawer'
 
 const { Text } = Typography
 
@@ -30,15 +31,9 @@ const AUDIT_CSS = `
 .audit-row-success:hover td { background: rgba(34,197,94,0.03) !important; }
 `
 
-const ACTION_HEX: Record<string, string> = {
-  login: '#22c55e', login_failed: '#ef4444',
-  device_created: '#3b82f6', device_deleted: '#f97316', device_updated: '#06b6d4',
-  user_created: '#a855f7', user_deleted: '#ef4444',
-  task_created: '#6366f1', cli_command: '#f59e0b',
-  approval_requested: '#eab308', approval_approved: '#22c55e', approval_rejected: '#ef4444',
-  playbook_run: '#a855f7', config_backup: '#06b6d4',
-  password_changed: '#eab308',
-}
+// Audit Log v2 PR 2 — eski ACTION_HEX legacy map KALDIRILDI.
+// AuditActionChip (PR 1) + AuditDetailDrawer (PR 2) artık tüm action
+// renk/ikon kararlarını auditActionCategory üzerinden yapıyor.
 
 const ROLE_COLOR: Record<string, string> = {
   super_admin: '#ef4444', admin: '#f97316', operator: '#3b82f6',
@@ -78,153 +73,11 @@ const RESOURCE_TYPES = [
   { label: 'Agent', value: 'agent' },
 ]
 
-function StateDiff({ before, after, isDark }: {
-  before?: Record<string, unknown> | null
-  after?: Record<string, unknown> | null
-  isDark: boolean
-}) {
-  if (!before && !after) return null
-  const C = mkC(isDark)
-  const keys = Array.from(new Set([...Object.keys(before || {}), ...Object.keys(after || {})]))
-  return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-      <thead>
-        <tr>
-          <th style={{ textAlign: 'left', padding: '4px 8px', background: C.bg2, width: 160, color: C.muted }}>Alan</th>
-          <th style={{ textAlign: 'left', padding: '4px 8px', background: isDark ? 'rgba(239,68,68,0.08)' : '#fff1f0', width: '50%', color: C.muted }}>Önce</th>
-          <th style={{ textAlign: 'left', padding: '4px 8px', background: isDark ? 'rgba(34,197,94,0.08)' : '#f6ffed', color: C.muted }}>Sonra</th>
-        </tr>
-      </thead>
-      <tbody>
-        {keys.map((key) => {
-          const bv = before?.[key]
-          const av = after?.[key]
-          const changed = JSON.stringify(bv) !== JSON.stringify(av)
-          return (
-            <tr key={key} style={{ borderBottom: `1px solid ${C.border}` }}>
-              <td style={{ padding: '3px 8px', fontFamily: 'monospace', color: C.dim }}>{key}</td>
-              <td style={{ padding: '3px 8px', color: changed ? '#ef4444' : C.muted, fontFamily: 'monospace', fontSize: 11 }}>
-                {bv === null || bv === undefined ? <em style={{ opacity: 0.4 }}>—</em> : String(bv)}
-              </td>
-              <td style={{ padding: '3px 8px', color: changed ? '#22c55e' : C.muted, fontFamily: 'monospace', fontSize: 11 }}>
-                {av === null || av === undefined ? <em style={{ opacity: 0.4 }}>—</em> : String(av)}
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
-  )
-}
+// Audit Log v2 PR 2 — inline StateDiff + DetailModal KALDIRILDI.
+// Yeni: AuditDetailDrawer.tsx (Modal → Drawer, ÖZET + DİFF + Raw)
+//       AuditDiffViewer.tsx (field-level diff + add/change/remove)
+//       auditFormatters.ts (action-spesifik human-readable summary)
 
-function DetailModal({ record, onClose, isDark }: { record: AuditLog; onClose: () => void; isDark: boolean }) {
-  const C = mkC(isDark)
-  const hasStateChange = record.before_state || record.after_state
-  const hasDetails = record.details && Object.keys(record.details).length > 0
-  const accentHex = ACTION_HEX[record.action] || '#64748b'
-
-  return (
-    <Modal
-      open
-      title={
-        <Space>
-          <div style={{
-            width: 8, height: 8, borderRadius: '50%',
-            background: accentHex, boxShadow: `0 0 6px ${accentHex}`,
-          }} />
-          <Tag style={{ color: accentHex, borderColor: accentHex + '60', background: accentHex + '18', fontSize: 12 }}>
-            {record.action}
-          </Tag>
-          <Text style={{ fontSize: 13, color: C.text }}>{record.resource_name || record.resource_id || ''}</Text>
-        </Space>
-      }
-      onCancel={onClose}
-      footer={null}
-      width={700}
-      styles={{
-        content: { background: C.bg, border: `1px solid ${C.border}` },
-        header: { background: C.bg, borderBottom: `1px solid ${C.border}` },
-      }}
-    >
-      <Descriptions size="small" column={2} bordered style={{ marginBottom: 16 }}
-        styles={{ label: { background: C.bg2, color: C.muted }, content: { background: C.bg, color: C.text } }}
-      >
-        <Descriptions.Item label="Kullanıcı">
-          <Space size={4}>
-            {record.username}
-            {record.user_role && (
-              <Tag style={{
-                fontSize: 10, lineHeight: '16px', padding: '0 5px',
-                color: ROLE_COLOR[record.user_role] || '#64748b',
-                borderColor: (ROLE_COLOR[record.user_role] || '#64748b') + '50',
-                background: (ROLE_COLOR[record.user_role] || '#64748b') + '15',
-              }}>
-                {record.user_role}
-              </Tag>
-            )}
-          </Space>
-        </Descriptions.Item>
-        <Descriptions.Item label="Tarih">
-          {dayjs(record.created_at).format('DD.MM.YYYY HH:mm:ss')}
-        </Descriptions.Item>
-        <Descriptions.Item label="IP (gerçek)">
-          <Text copyable style={{ fontFamily: 'monospace', fontSize: 12 }}>
-            {record.client_ip || '—'}
-          </Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Süre">
-          {record.duration_ms != null ? (
-            <Text style={{ color: record.duration_ms > 5000 ? '#ef4444' : C.text }}>
-              {record.duration_ms.toFixed(0)} ms
-            </Text>
-          ) : '—'}
-        </Descriptions.Item>
-        <Descriptions.Item label="Durum">
-          <Badge status={record.status === 'success' ? 'success' : 'error'} text={record.status} />
-        </Descriptions.Item>
-        <Descriptions.Item label="Request ID">
-          <Text copyable style={{ fontSize: 11, fontFamily: 'monospace', color: C.muted }}>
-            {record.request_id || '—'}
-          </Text>
-        </Descriptions.Item>
-        <Descriptions.Item label="Tarayıcı / İstemci" span={2}>
-          <Text style={{ fontSize: 11, color: C.dim }}>{record.user_agent || '—'}</Text>
-        </Descriptions.Item>
-      </Descriptions>
-
-      {hasStateChange && (
-        <Collapse
-          defaultActiveKey={['diff']}
-          style={{ background: C.bg2, border: `1px solid ${C.border}` }}
-          items={[{
-            key: 'diff',
-            label: <span style={{ color: C.text }}>Değişiklik (Before → After)</span>,
-            children: <StateDiff before={record.before_state} after={record.after_state} isDark={isDark} />,
-          }]}
-        />
-      )}
-
-      {hasDetails && (
-        <Collapse
-          style={{ marginTop: 8, background: C.bg2, border: `1px solid ${C.border}` }}
-          items={[{
-            key: 'details',
-            label: <span style={{ color: C.text }}>Detaylar (JSON)</span>,
-            children: (
-              <pre style={{
-                fontSize: 12, margin: 0, maxHeight: 300, overflow: 'auto',
-                background: '#0f172a', color: '#94a3b8',
-                padding: '10px 14px', borderRadius: 6,
-              }}>
-                {JSON.stringify(record.details, null, 2)}
-              </pre>
-            ),
-          }]}
-        />
-      )}
-    </Modal>
-  )
-}
 
 function exportCSV(items: AuditLog[]) {
   const headers = ['ID', 'Zaman', 'Kullanıcı', 'Rol', 'Aksiyon', 'Kaynak Tipi', 'Kaynak', 'IP', 'Süre(ms)', 'Durum', 'UA']
@@ -504,7 +357,9 @@ export default function AuditLogPage() {
         />
       </div>
 
-      {selected && <DetailModal record={selected} onClose={() => setSelected(null)} isDark={isDark} />}
+      {/* Audit Log v2 PR 2 — DetailModal → AuditDetailDrawer dönüşümü. */}
+      <AuditDetailDrawer record={selected} onClose={() => setSelected(null)} />
+
     </div>
   )
 }
