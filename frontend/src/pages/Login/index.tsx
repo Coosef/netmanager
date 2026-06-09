@@ -8,7 +8,7 @@ import { authApi } from '@/api/auth'
 import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { useHasHydrated } from '@/hooks/useHasHydrated'
-import { useTranslation } from 'react-i18next'
+import { useTranslation, Trans } from 'react-i18next'
 
 const CSS = `
 :root.charon-login {
@@ -884,7 +884,7 @@ export default function LoginPage() {
 
   const sendEmailCode = async () => {
     if (!mfa.challengeToken) {
-      setError('Doğrulama oturumu yok — tekrar giriş yapın'); return
+      setError(t('login.err.no_challenge')); return
     }
     setLoading(true); setEmailError('')
     try {
@@ -893,17 +893,17 @@ export default function LoginPage() {
       setMfa((m) => ({ ...m, maskedEmail: res.email_masked || m.maskedEmail }))
     } catch (err: any) {
       const detail = err?.response?.data?.detail
-      setEmailError(detail || 'Email gönderilemedi')
+      setEmailError(detail || t('login.err.email_send_failed'))
     } finally { setLoading(false) }
   }
 
   const submitStep2 = async () => {
-    if (!mfa.challengeToken) { setError('Doğrulama oturumu yok — tekrar giriş yapın'); return }
+    if (!mfa.challengeToken) { setError(t('login.err.no_challenge')); return }
     const code = useRecovery ? recoveryCode.trim() : otp.join('')
     const method: 'totp' | 'recovery' | 'email' =
       useEmail ? 'email' : (useRecovery ? 'recovery' : 'totp')
-    if (!useRecovery && code.length !== 6) { setError('6 haneli kod girin'); return }
-    if (useRecovery && code.replace(/[-\s]/g, '').length < 8) { setError('Kurtarma kodunu eksiksiz girin'); return }
+    if (!useRecovery && code.length !== 6) { setError(t('login.err.invalid_code')); return }
+    if (useRecovery && code.replace(/[-\s]/g, '').length < 8) { setError(t('login.err.invalid_code')); return }
     setLoading(true); setError('')
     try {
       const res = await authApi.verifyMfa(mfa.challengeToken, code, method)
@@ -912,11 +912,11 @@ export default function LoginPage() {
       const status = err?.response?.status
       const detail = err?.response?.data?.detail
       if (status === 401 && detail?.toLowerCase?.().includes('challenge')) {
-        setError('Doğrulama süresi doldu — tekrar giriş yapın')
+        setError(t('login.err.expired'))
         setStep(1)
         setMfa({ required: false })
       } else {
-        setError(detail || 'Geçersiz kod')
+        setError(detail || t('login.err.invalid_code'))
         if (!useRecovery) setOtp(['', '', '', '', '', ''])
       }
     } finally { setLoading(false) }
@@ -932,13 +932,16 @@ export default function LoginPage() {
     if (e.key === 'Backspace' && !otp[i] && i > 0) otpRefs.current[i - 1]?.focus()
   }
 
-  const methodLabel = useEmail ? 'E-posta'
-    : useRecovery ? 'Kurtarma Kodu' : 'Authenticator App'
-  const methodSub = useEmail
-    ? (mfa.maskedEmail || 'Kayıtlı email adresinize gönderilir')
+  const methodLabel = useEmail
+    ? t('login.method.email_label')
     : useRecovery
-      ? 'Tek kullanımlık · MFA kayıt sırasında verildi'
-      : 'Google · Microsoft · Authy · 1Password'
+      ? t('login.method.recovery_label')
+      : t('login.method.totp_label')
+  const methodSub = useEmail
+    ? (mfa.maskedEmail || t('login.method.email_sub_default'))
+    : useRecovery
+      ? t('login.method.recovery_sub')
+      : t('login.method.totp_sub')
 
   return (
     <>
@@ -1031,14 +1034,14 @@ export default function LoginPage() {
               {step === 1 && (
                 <form onSubmit={submitStep1}>
                   <div className="cl-step-bar"><i className="active" /><i /></div>
-                  <div className="cl-step-label">Adım 1 / 2 · Kimlik Doğrulama</div>
-                  <h2 className="cl-title">Geçiş için kimlik doğrulayın</h2>
-                  <p className="cl-sub">Ağ komuta merkezine erişmek için kimlik bilgilerinizi girin.</p>
+                  <div className="cl-step-label">{t('login.step1.badge')}</div>
+                  <h2 className="cl-title">{t('login.step1.title')}</h2>
+                  <p className="cl-sub">{t('login.step1.subtitle')}</p>
 
                   {error && <div className="cl-err">{error}</div>}
 
                   <div className="cl-field">
-                    <div className="cl-field-label"><span>Kullanıcı</span></div>
+                    <div className="cl-field-label"><span>{t('login.step1.username_label')}</span></div>
                     <div className="cl-input-wrap">
                       <span className="ico">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
@@ -1053,8 +1056,8 @@ export default function LoginPage() {
 
                   <div className="cl-field">
                     <div className="cl-field-label">
-                      <span>Şifre</span>
-                      <a href="#" onClick={(e) => e.preventDefault()}>Unuttunuz mu?</a>
+                      <span>{t('login.step1.password_label')}</span>
+                      <a href="#" onClick={(e) => e.preventDefault()}>{t('login.step1.forgot')}</a>
                     </div>
                     <div className="cl-input-wrap">
                       <span className="ico">
@@ -1083,12 +1086,12 @@ export default function LoginPage() {
                         </svg>
                       )}
                     </span>
-                    <label onClick={() => setRemember(!remember)}>Bu cihazda beni hatırla</label>
+                    <label onClick={() => setRemember(!remember)}>{t('login.step1.remember')}</label>
                   </div>
 
                   <button type="submit" className="cl-btn-primary" disabled={loading}>
                     <span className="sheen" />
-                    {loading ? 'GİRİŞ YAPILIYOR…' : 'Devam Et'}
+                    {loading ? t('login.step1.submitting') : t('login.step1.submit')}
                     {!loading && (
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round">
                         <path d="M5 12h14M13 6l6 6-6 6" />
@@ -1105,15 +1108,24 @@ export default function LoginPage() {
                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                       <path d="M19 12H5M11 18l-6-6 6-6" />
                     </svg>
-                    Geri
+                    {t('login.step2.back')}
                   </button>
-                  <div className="cl-step-label">Adım 2 / 2 · Çok Faktörlü Doğrulama</div>
-                  <h2 className="cl-title">Kimliğinizi doğrulayın</h2>
+                  <div className="cl-step-label">{t('login.step2.badge')}</div>
+                  <h2 className="cl-title">{t('login.step2.title')}</h2>
                   <p className="cl-sub">
-                    {!useRecovery && !useEmail && <>Authenticator uygulamanızdaki <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
-                    {useEmail && !emailSent && <>Doğrulama kodunu emailinize göndermek için aşağıdaki butona basın.</>}
-                    {useEmail && emailSent && <>Email'inize gönderilen <strong style={{ color: 'var(--c-fg)' }}>6 haneli kodu</strong> girin.</>}
-                    {useRecovery && <>Tek-kullanımlık <strong style={{ color: 'var(--c-fg)' }}>kurtarma kodunuzu</strong> girin (XXXXX-XXXXX).</>}
+                    {!useRecovery && !useEmail && (
+                      <Trans i18nKey="login.step2.hint_totp"
+                        components={{ 1: <strong style={{ color: 'var(--c-fg)' }} /> }} />
+                    )}
+                    {useEmail && !emailSent && t('login.step2.hint_email_pre')}
+                    {useEmail && emailSent && (
+                      <Trans i18nKey="login.step2.hint_email_post"
+                        components={{ 1: <strong style={{ color: 'var(--c-fg)' }} /> }} />
+                    )}
+                    {useRecovery && (
+                      <Trans i18nKey="login.step2.hint_recovery"
+                        components={{ 1: <strong style={{ color: 'var(--c-fg)' }} /> }} />
+                    )}
                   </p>
 
                   {(error || emailError) && <div className="cl-err">{error || emailError}</div>}
@@ -1136,7 +1148,7 @@ export default function LoginPage() {
                               <rect x="5" y="2" width="14" height="20" rx="2" />
                               <path d="M9 7h6M12 18v.01" />
                             </svg>
-                            Auth App
+                            {t('login.step2.tab_totp')}
                           </button>
                         )}
                         {hasEmail && (
@@ -1147,7 +1159,7 @@ export default function LoginPage() {
                               <rect x="3" y="5" width="18" height="14" rx="2" />
                               <path d="M3 8l9 6 9-6" />
                             </svg>
-                            E-posta
+                            {t('login.step2.tab_email')}
                           </button>
                         )}
                         {hasRecovery && (
@@ -1157,7 +1169,7 @@ export default function LoginPage() {
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
                               <path d="M12 2l3 6 6 1-4.5 4.5L18 20l-6-3-6 3 1.5-6.5L3 9l6-1z" />
                             </svg>
-                            Kurtarma
+                            {t('login.step2.tab_recovery')}
                           </button>
                         )}
                       </div>
@@ -1195,7 +1207,7 @@ export default function LoginPage() {
                     <button type="button" className="cl-btn-primary"
                       disabled={loading} onClick={sendEmailCode} style={{ marginBottom: 12 }}>
                       <span className="sheen" />
-                      {loading ? 'GÖNDERİLİYOR…' : 'KODU EMAİL\'E GÖNDER'}
+                      {loading ? t('login.step2.sending_email') : t('login.step2.send_email')}
                     </button>
                   ) : !useRecovery ? (
                     <div className="cl-otp-row">
@@ -1219,14 +1231,14 @@ export default function LoginPage() {
 
                   {!useRecovery && !useEmail && (
                     <div className="cl-resend-row">
-                      <span>Kod 30 sn'de bir yenilenir.</span>
+                      <span>{t('login.step2.timer_totp')}</span>
                       {timer > 0 && <span className="timer">{`00:${String(timer).padStart(2, '0')}`}</span>}
                     </div>
                   )}
                   {useEmail && emailSent && (
                     <div className="cl-resend-row">
-                      <span>Email gönderildi · {mfa.maskedEmail || ''}</span>
-                      <span className="timer clickable" onClick={sendEmailCode}>YENİDEN YOLLA</span>
+                      <span>{t('login.step2.email_sent_to', { email: mfa.maskedEmail || '' })}</span>
+                      <span className="timer clickable" onClick={sendEmailCode}>{t('login.step2.resend')}</span>
                     </div>
                   )}
                   {useRecovery && <div style={{ height: 12 }} />}
@@ -1256,8 +1268,8 @@ export default function LoginPage() {
                       <path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="10" />
                     </svg>
                   </div>
-                  <h2 className="cl-title">Geçiş onaylandı</h2>
-                  <p className="cl-sub">Ağ komuta merkezine bağlanılıyor.</p>
+                  <h2 className="cl-title">{t('login.step3.title')}</h2>
+                  <p className="cl-sub">{t('login.step3.subtitle')}</p>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontFamily: 'var(--c-font-mono)', fontSize: 10.5, color: 'var(--c-gold)', marginTop: 16, letterSpacing: '0.18em' }}>
                     <span className="cl-live-dot" /> yönlendiriliyor…
                   </div>
