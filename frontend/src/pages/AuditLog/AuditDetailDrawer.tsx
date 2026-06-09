@@ -4,6 +4,7 @@ import dayjs from 'dayjs'
 import type { AuditLog } from '@/types'
 import AuditActionChip from './AuditActionChip'
 import AuditDiffViewer from './AuditDiffViewer'
+import AuditResourceLink from './AuditResourceLink'
 import { formatAuditAction, isSensitiveField, type AuditSummaryTone } from './auditFormatters'
 
 const { Text } = Typography
@@ -107,6 +108,15 @@ export default function AuditDetailDrawer({ record, onClose }: Props) {
         </Descriptions.Item>
         <Descriptions.Item label={t('audit.detail.client')} span={2}>
           <Text style={{ fontSize: 11, color: 'var(--fg-3)' }}>{record.user_agent || '—'}</Text>
+        </Descriptions.Item>
+        {/* Audit Log v2 PR 3 — Kaynak satırı (AuditResourceLink). Permission
+            + route resolution component'te ele alınır. */}
+        <Descriptions.Item label={t('audit.detail.resource')} span={2}>
+          <AuditResourceLink
+            type={record.resource_type}
+            id={record.resource_id}
+            name={record.resource_name}
+          />
         </Descriptions.Item>
       </Descriptions>
 
