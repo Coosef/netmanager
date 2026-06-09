@@ -244,7 +244,53 @@
     "login_btn": "Anmelden",
     "error": "Benutzername oder Passwort falsch",
     "username_required": "Benutzername erforderlich",
-    "password_required": "Passwort erforderlich"
+    "password_required": "Passwort erforderlich",
+    "step1": {
+      "badge": "Schritt 1 / 2 · Authentifizierung",
+      "title": "Authentifizieren, um fortzufahren",
+      "subtitle": "Geben Sie Ihre Zugangsdaten ein, um auf das Netzwerk-Kontrollzentrum zuzugreifen.",
+      "username_label": "Benutzername",
+      "password_label": "Passwort",
+      "forgot": "Vergessen?",
+      "remember": "Auf diesem Gerät merken",
+      "submit": "Weiter",
+      "submitting": "ANMELDUNG…"
+    },
+    "step2": {
+      "back": "Zurück",
+      "badge": "Schritt 2 / 2 · Zwei-Faktor-Authentifizierung",
+      "title": "Identität bestätigen",
+      "hint_totp": "Geben Sie den <1>6-stelligen Code</1> aus Ihrer Authenticator-App ein.",
+      "hint_email_pre": "Klicken Sie auf die Schaltfläche unten, um einen Bestätigungscode an Ihre E-Mail zu senden.",
+      "hint_email_post": "Geben Sie den <1>6-stelligen Code</1> aus Ihrer E-Mail ein.",
+      "hint_recovery": "Geben Sie Ihren einmaligen <1>Wiederherstellungscode</1> ein (XXXXX-XXXXX).",
+      "tab_totp": "Auth App",
+      "tab_email": "E-Mail",
+      "tab_recovery": "Wiederherstellung",
+      "timer_totp": "Code wird alle 30 Sek. erneuert.",
+      "email_sent_to": "E-Mail gesendet · {{email}}",
+      "resend": "ERNEUT SENDEN",
+      "send_email": "CODE PER E-MAIL SENDEN",
+      "sending_email": "WIRD GESENDET…"
+    },
+    "method": {
+      "totp_label": "Authenticator",
+      "email_label": "E-Mail",
+      "recovery_label": "Wiederherstellungscode",
+      "totp_sub": "Google · Microsoft · Authy · 1Password",
+      "email_sub_default": "An Ihre registrierte E-Mail-Adresse gesendet",
+      "recovery_sub": "Einmalig · bei MFA-Registrierung bereitgestellt"
+    },
+    "step3": {
+      "title": "Zugriff gewährt",
+      "subtitle": "Verbindung zum Netzwerk-Kontrollzentrum wird hergestellt."
+    },
+    "err": {
+      "no_challenge": "Keine Bestätigungssitzung — bitte erneut anmelden",
+      "email_send_failed": "E-Mail-Versand fehlgeschlagen",
+      "expired": "Bestätigung abgelaufen — bitte erneut anmelden",
+      "invalid_code": "Ungültiger Code"
+    }
   },
   "sidebar": {
     "health_status": "Systemstatus",
