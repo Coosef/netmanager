@@ -1725,7 +1725,8 @@
       "client": "Browser / Client",
       "summary_title": "Zusammenfassung",
       "diff_title": "Änderungen",
-      "advanced": "Erweitert / Rohdaten"
+      "advanced": "Erweitert / Rohdaten",
+      "resource": "Ressource"
     },
     "diff": {
       "no_state": "Keine Zustandsänderung für diesen Eintrag.",
@@ -1761,6 +1762,22 @@
         "security": "Sicherheitsereignis <b>{{action}}</b> aufgezeichnet (Benutzer: {{actor}}).",
         "neutral": "<b>{{action}}</b> durchgeführt von <b>{{actor}}</b>."
       }
+    },
+    "resource": {
+      "no_route": "Keine Detailseite für diesen Ressourcentyp",
+      "no_id_for_detail": "Ressourcen-ID für Detailansicht fehlt",
+      "no_permission": "Keine Zugriffsberechtigung",
+      "type_device": "Gerät",
+      "type_user": "Benutzer",
+      "type_task": "Aufgabe",
+      "type_agent": "Agent",
+      "type_ipam": "IPAM",
+      "type_security_audit": "Sicherheitsprüfung",
+      "type_terminal_session": "Terminalsitzung",
+      "type_asset_lifecycle": "Asset-Lebenszyklus",
+      "type_organization": "Organisation",
+      "type_config_template": "Konfigurationsvorlage",
+      "type_unknown": "Sonstige"
     }
   },
   "terminal_sessions": {
