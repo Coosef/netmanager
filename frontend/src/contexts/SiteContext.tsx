@@ -13,6 +13,7 @@ import {
   type CurrentContext,
 } from '@/api/context'
 import { useAuthStore } from '@/store/auth'
+import { useHasHydrated } from '@/hooks/useHasHydrated'
 import { ACTIVE_LOCATION_KEY } from '@/api/client'
 
 /**
@@ -92,6 +93,13 @@ const SiteContext = createContext<SiteCtx>({
 
 export function SiteProvider({ children }: { children: ReactNode }) {
   const { token } = useAuthStore()
+  // DASHBOARD-INIT-ROUTER-FIX (2026-06-10) — Zustand persist hidrasyon
+  // tamamlanmadan `token` selector eski/null değer dönebiliyor. Hidrasyon
+  // pencerisinde useQuery fire ederse interceptor `getState().token` null
+  // okuyor → 401. Sonraki refetch staleTime: 60sn'ye takılı kalıyor, ctx
+  // undefined → LocationGate/Dashboard render hattı boş. Hydrated guard
+  // ile query hidrasyon tamamlanana kadar bekler.
+  const hydrated = useHasHydrated()
   const queryClient = useQueryClient()
 
   const [activeLocationId, setActiveLocationIdState] = useState<number | null>(() => {
@@ -102,11 +110,20 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // Faz 8 Phase E — the location list + scope come from /context/current,
   // which derives them from user_locations. The query key carries the
   // active location so a switch refetches the context under the new scope.
+  //
+  // DASHBOARD-INIT-ROUTER-FIX (2026-06-10):
+  //   · `enabled` artık `hydrated` ALSO gerektiriyor — token race penceresi
+  //     kapatıldı. Hidrasyon tamam + token mevcut → query çalışır.
+  //   · `retry: 1` + `retryDelay: 500` — transient 401 (token interceptor
+  //     race veya backend network jitter) recover edilir. Stuck `ctx`
+  //     undefined senaryosu kırılır.
   const { data: ctx, isLoading: sitesLoading } = useQuery({
     queryKey: ['context', 'current', activeLocationId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
-    enabled: !!token,
+    enabled: !!token && hydrated,
+    retry: 1,
+    retryDelay: 500,
   })
   const locations: AccessibleLocation[] = ctx?.locations ?? []
   const allowedLocationIds: number[] = ctx?.allowed_location_ids ?? []
