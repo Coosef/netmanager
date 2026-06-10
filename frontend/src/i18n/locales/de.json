@@ -2720,7 +2720,10 @@
   "location_gate": {
     "resolving": "Standortkontext wird aufgelöst…",
     "no_access_title": "Kein zugewiesener Standort",
-    "no_access_desc": "Ihrem Konto ist noch kein Standort zugewiesen. Ohne Standortzugriff können Geräte-, Topologie- und Überwachungsdaten nicht angezeigt werden. Bitte wenden Sie sich an einen Administrator."
+    "no_access_desc": "Ihrem Konto ist noch kein Standort zugewiesen. Ohne Standortzugriff können Geräte-, Topologie- und Überwachungsdaten nicht angezeigt werden. Bitte wenden Sie sich an einen Administrator.",
+    "error_title": "Verbindungsproblem",
+    "error_desc": "Standortdaten konnten nicht geladen werden. Bitte erneut versuchen.",
+    "retry": "Erneut versuchen"
   },
   "location_selector": {
     "no_access_tooltip": "Ihrem Konto ist kein Standort zugewiesen",

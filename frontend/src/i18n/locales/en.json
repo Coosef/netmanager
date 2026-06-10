@@ -2756,7 +2756,10 @@
   "location_gate": {
     "resolving": "Resolving location context…",
     "no_access_title": "No assigned location",
-    "no_access_desc": "Your account has no location assigned yet. Without a location, device, topology and monitoring data cannot be displayed. Please contact an administrator."
+    "no_access_desc": "Your account has no location assigned yet. Without a location, device, topology and monitoring data cannot be displayed. Please contact an administrator.",
+    "error_title": "Connection problem",
+    "error_desc": "Location data could not be loaded. Please try again.",
+    "retry": "Retry"
   },
   "location_selector": {
     "no_access_tooltip": "Your account has no assigned location",
