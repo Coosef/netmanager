@@ -146,7 +146,7 @@ return <Navigate to="/login" replace />
 | null | false | görünür `<Spin>` (eskiden null) |
 | null | true | /login |
 
-**5 yıl boyunca yapılan 5 hotfix (PR #39/#41/#43/#45/#47) bu kök sorunun kısmi semptomlarını çözmüştü; tam çözüm bu PR ile sağlandı.**
+**Birden fazla hotfix boyunca devam eden bu sorunda (PR #39/#41/#43/#45/#47) ardışık hotfix'ler kök sorunun kısmi semptomlarını çözmüştü; tam çözüm bu PR ile sağlandı.**
 
 ### Korunan tamamlayıcı düzeltmeler
 
