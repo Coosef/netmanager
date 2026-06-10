@@ -1763,10 +1763,23 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
     p_id  = _psq(agent_id)
     p_key = _psq(agent_key)
     p_url = _psq(backend_url)
+    # PS-5.1-COMPAT (2026-06-10) — Windows default PowerShell 5.1 hedefte
+    # PowerShell 7 kurulu olmuyor. PS 7-only syntax (?., ??, ternary ?:,
+    # ForEach-Object -Parallel) script'te bulunmamalı. Aksi takdirde
+    # PS 5.1 parser syntax error veriyor (`?.Source` "operator expected"
+    # üretir). Bu üretici hem PS 5.1 hem PS 7 ile parse edilebilir output
+    # döndürmek zorunda; aşağıdaki tüm null-check'ler `if ($cmd) { ... }`
+    # pattern'iyle yazılı.
+    #
+    # Ek: TLS 1.2 enforce. PS 5.1 default'u Windows Server 2016/2019'da
+    # SystemDefault'a bağlı, bazı kurumsal ortamlarda hâlâ TLS 1.0/1.1
+    # üzerinden istek yapıyor. Cloudflare Faz 0 sonrası edge TLS 1.2 min,
+    # Invoke-WebRequest fail edebilir. Script başında explicit set.
     return textwrap.dedent(f"""\
         # NetManager Proxy Agent — Windows Kurulum Betiği
         # Oluşturulma: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
         # Agent ID: {agent_id}
+        # Hedef: Windows PowerShell 5.1 (default) ve PowerShell 7 uyumlu.
 
         $AgentId   = {p_id}
         $AgentKey  = {p_key}
@@ -1775,18 +1788,29 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         $ServiceName = "NetManagerAgent"
         $PythonExe = ""
 
+        # PS 5.1 default SystemDefault TLS edge'in min 1.2 ile uyumsuz olabilir.
+        # Explicit Tls12 set ederek Invoke-WebRequest'in fail etmesini engelle.
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
         if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")) {{
             Write-Host "Lütfen Yönetici olarak çalıştırın" -ForegroundColor Red
             pause; exit 1
         }}
 
         Write-Host "[1/5] Python kontrol ediliyor..."
-        $PythonExe = (Get-Command python -ErrorAction SilentlyContinue)?.Source
+        # PS 5.1 compat: ?. operatörü yok, if-else pattern kullan.
+        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+        if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }} else {{ $PythonExe = $null }}
         if (-not $PythonExe) {{
+            Write-Host "Python bulunamadı, winget ile kuruluyor..." -ForegroundColor Yellow
             winget install Python.Python.3.12 --silent --accept-package-agreements
             $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            $PythonExe = (Get-Command python -ErrorAction SilentlyContinue)?.Source
-            if (-not $PythonExe) {{ Write-Host "Python kurulumu başarısız." -ForegroundColor Red; pause; exit 1 }}
+            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+            if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }} else {{ $PythonExe = $null }}
+            if (-not $PythonExe) {{
+                Write-Host "Python kurulumu başarısız. Lütfen Python 3.12 manuel kurun ve tekrar deneyin." -ForegroundColor Red
+                pause; exit 1
+            }}
         }}
 
         Write-Host "[2/5] Kurulum dizini oluşturuluyor..."
