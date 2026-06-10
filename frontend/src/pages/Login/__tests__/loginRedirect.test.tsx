@@ -26,11 +26,17 @@ describe('Login redirect — `/dashboard` hedefi (P0 loop fix sözleşmesi)', ()
     expect(LOGIN_SOURCE).toMatch(/navigate\(['"]\/dashboard['"],\s*\{\s*replace:\s*true\s*\}\)/)
   })
 
-  it("finalizeSession — 800ms setTimeout sonrası `/dashboard`'a navigate", () => {
-    // Eski: window.setTimeout(() => navigate('/'), 800)
-    // Yeni: window.setTimeout(() => navigate('/dashboard', ...), 800)
-    expect(LOGIN_SOURCE).toMatch(
-      /setTimeout\(\(\)\s*=>\s*navigate\(['"]\/dashboard['"]/,
+  it("finalizeSession — setTimeout(navigate, 800) KALDIRILDI (race fix)", () => {
+    // DASHBOARD-INIT-ROUTER-FIX (2026-06-10): setTimeout(() => navigate(...), 800)
+    // race üretiyordu. setAuth() useEffect'i (471) HEMEN tetikler ve
+    // navigate('/dashboard', replace) yapar. setTimeout redündan + cleanup
+    // yoktu → unmount sonrası timer fire ediyor, SiteContext mid-fetch
+    // kesintiye uğruyordu.
+    expect(LOGIN_SOURCE).not.toMatch(
+      /setTimeout\(\s*\(\)\s*=>\s*navigate\(['"]\/dashboard['"]/,
+    )
+    expect(LOGIN_SOURCE).not.toMatch(
+      /window\.setTimeout\(\s*\(\)\s*=>\s*navigate\b/,
     )
   })
 
@@ -42,6 +48,13 @@ describe('Login redirect — `/dashboard` hedefi (P0 loop fix sözleşmesi)', ()
 
   it("kaynak kodda `setTimeout(.., navigate('/'), 800)` legacy pattern YOK", () => {
     expect(LOGIN_SOURCE).not.toMatch(/setTimeout\(\(\)\s*=>\s*navigate\(['"]\/['"]\),\s*800\)/)
+  })
+
+  it("useEffect navigate hala /dashboard (replace) hedefi koruyor", () => {
+    // setTimeout kaldırıldı; useEffect (471) artık tek navigate yolu
+    expect(LOGIN_SOURCE).toMatch(
+      /navigate\(['"]\/dashboard['"],\s*\{\s*replace:\s*true\s*\}\)/,
+    )
   })
 })
 
