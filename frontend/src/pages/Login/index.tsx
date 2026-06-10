@@ -462,15 +462,18 @@ export default function LoginPage() {
   const { t } = useTranslation()
 
   // AUTH-LOGIN-REDIRECT-HOTFIX (PR #45) + AUTH-PERSIST-HYDRATION-HOTFIX
-  // (PR #47) — authenticated kullanıcı /login ekranına düşerse Dashboard'a
-  // otomatik dön. `hydrated` artık Zustand persist'in kendi internal
-  // flag'inden okunur (useHasHydrated), token store state alanı ayrı
-  // subscribe — race penceresi yok.
+  // (PR #47) + LOGIN-AUTH-LOOP-FIX (2026-06-10) — authenticated kullanıcı
+  // /login ekranına düşerse Dashboard'a otomatik dön. Önceki '/' route
+  // RootRedirect aracısı oluşturmuyordu; doğrudan Dashboard render ediyordu.
+  // Bu yeni iterasyonda hedef explicit `/dashboard` — `/` üzerinden geçmek
+  // page-reload döngüsünü tetikleyebiliyordu (bkz. nginx access log: 1 sn'de
+  // 6 GET /). `hydrated` Zustand persist'in kendi internal flag'inden okunur
+  // (useHasHydrated), token store state alanı ayrı subscribe — race yok.
   const hydrated = useHasHydrated()
   const existingToken = useAuthStore((s) => s.token)
   useEffect(() => {
     if (hydrated && existingToken) {
-      navigate('/', { replace: true })
+      navigate('/dashboard', { replace: true })
     }
   }, [hydrated, existingToken, navigate])
 
@@ -845,8 +848,12 @@ export default function LoginPage() {
       res.permissions,
     )
     setStep(3)
-    // Kısa "Geçiş onaylandı" gösterimi sonrası yönlendir
-    window.setTimeout(() => navigate('/'), 800)
+    // Kısa "Geçiş onaylandı" gösterimi sonrası yönlendir.
+    // LOGIN-AUTH-LOOP-FIX (2026-06-10) — '/' yerine '/dashboard'.
+    // `/` artık RootRedirect; setAuth sonrası mevcut `existingToken`
+    // useEffect'i tetiklerse de o da '/dashboard'a gider — çift gönderim
+    // riski yok (her ikisi aynı route, ikincisi no-op).
+    window.setTimeout(() => navigate('/dashboard', { replace: true }), 800)
   }
 
   const submitStep1 = async (e?: React.FormEvent) => {

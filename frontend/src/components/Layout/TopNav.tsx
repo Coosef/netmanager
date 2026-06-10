@@ -18,7 +18,7 @@ export default function TopNav() {
   return (
     <div className="nm-topnav">
       {/* Brand */}
-      <div className="nm-brand" onClick={() => navigate('/')} style={{ cursor: 'pointer' }}>
+      <div className="nm-brand" onClick={() => navigate('/dashboard')} style={{ cursor: 'pointer' }}>
         <CharonLogo size={26} glow={false} />
         <div className="nm-brand-name" style={{ fontWeight: 600, fontSize: 14, color: 'var(--fg-0)' }}>
           Charon
