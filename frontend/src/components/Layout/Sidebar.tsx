@@ -26,7 +26,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
 
   const nav = (
     <aside className="nm-sidebar" style={{ height: '100%' }}>
-      <div className="nm-brand" onClick={() => { navigate('/'); if (isMobile) onMobileClose?.() }} style={{ cursor: 'pointer' }}>
+      <div className="nm-brand" onClick={() => { navigate('/dashboard'); if (isMobile) onMobileClose?.() }} style={{ cursor: 'pointer' }}>
         <CharonLogo size={32} />
         <div className="nm-brand-name">
           Charon
