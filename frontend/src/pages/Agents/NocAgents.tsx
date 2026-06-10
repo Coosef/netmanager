@@ -14,6 +14,13 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import AgentDetailModal from './AgentDetailModal'
+import {
+  buildLinuxInstallCmd,
+  buildWindowsInstallCmd,
+  isValidWindowsInstallerScript,
+  SAFE_DOWNLOAD_ERROR_MESSAGE_TR,
+  SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR,
+} from './installCmd'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -273,25 +280,71 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
   const base = serverUrl.trim().replace(/\/$/, '') || window.location.origin
   // T8.4 F3 — agent_key URL'de değil, X-Agent-Key header'da. UI installer
   // komutu da curl/iwr ile header gönderir; URL'de key görünmez.
+  //
+  // 2026-06-11 — Windows komutu helper'a taşındı (`./installCmd.ts`):
+  //  · PS 5.1 uyumlu multiline + backtick line-continuation
+  //  · TLS 1.2 enforce satırı en başta
+  //  · Tek satır `$h=@{...}` quoting bug'ı engellendi
+  //  · Linux komutu (curl pipe sudo bash) helper içinde, davranış aynı
+  //  · serverUrl modal'da değişirse downloadUrl yeniden hesaplanır → komut
+  //    otomatik güncellenir (state-driven render)
   const downloadUrl = platform
     ? `${base}${agentsApi.downloadInstallerUrl(agent.id, platform, base)}`
     : null
-  const installCmd = platform === 'linux'
-    ? `curl -fsSL -H 'X-Agent-Key: ${agent.agent_key}' '${downloadUrl}' | sudo bash`
-    : platform === 'windows'
-    ? `powershell -ExecutionPolicy Bypass -c "$h=@{'X-Agent-Key'='${agent.agent_key}'}; iwr -useb -Headers $h '${downloadUrl}' | iex"`
+  const installCmd = platform === 'linux' && downloadUrl
+    ? buildLinuxInstallCmd(agent.agent_key, downloadUrl)
+    : platform === 'windows' && downloadUrl
+    ? buildWindowsInstallCmd(agent.agent_key, downloadUrl)
     : null
   const [downloading, setDownloading] = useState(false)
   const handleDownload = async () => {
     if (!platform || !agent.agent_key) return
+    if (downloading) return  // Concurrent download guard
     setDownloading(true)
     try {
-      await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
+      if (platform === 'windows') {
+        // Windows: fetch + script validation + Blob anchor.
+        // Linux'tan AYRI yol çünkü Windows için script içeriği PS 5.1
+        // uyumluluğunu doğrulamak ZORUNLU (backend response yanlışsa
+        // kullanıcı sessizce bozuk dosya indirmesin).
+        const url = `/api/v1/agents/${agent.id}/download/windows${
+          base ? `?server_url=${encodeURIComponent(base)}` : ''
+        }`
+        const res = await fetch(url, {
+          headers: { 'X-Agent-Key': agent.agent_key },
+        })
+        if (!res.ok) {
+          // Backend response body veya HTTP status DETAYI kullanıcıya
+          // gösterilmez (sızıntı koruması). Generic mesaj.
+          throw new Error('http')
+        }
+        const text = await res.text()
+        if (!isValidWindowsInstallerScript(text)) {
+          throw new Error('validation')
+        }
+        // Validation geçti → Blob anchor ile indir
+        const blob = new Blob([text], { type: 'application/octet-stream' })
+        const a = document.createElement('a')
+        a.href = URL.createObjectURL(blob)
+        a.download = `netmanager-agent-${agent.id}-installer.ps1`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(a.href)
+      } else {
+        // Linux: mevcut downloadInstallerFile davranışı korundu.
+        await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
+      }
     } catch (e: any) {
-      // Modal'ı kapatmadan kullanıcıya hatayı göster — antd message alternatif
-      // (parent App içinde). Şimdilik alert.
+      // Hata mesajı kullanıcıya GENERIC — backend response body, agent key,
+      // sunucu detayları LOG/UI/TOAST'a sızmaz.
+      const tag = e?.message
+      const friendly =
+        tag === 'validation'
+          ? SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR
+          : SAFE_DOWNLOAD_ERROR_MESSAGE_TR
       // eslint-disable-next-line no-alert
-      alert('İndirme başarısız: ' + (e?.message || 'bilinmeyen'))
+      alert(friendly)
     } finally {
       setDownloading(false)
     }
