@@ -848,12 +848,14 @@ export default function LoginPage() {
       res.permissions,
     )
     setStep(3)
-    // Kısa "Geçiş onaylandı" gösterimi sonrası yönlendir.
-    // LOGIN-AUTH-LOOP-FIX (2026-06-10) — '/' yerine '/dashboard'.
-    // `/` artık RootRedirect; setAuth sonrası mevcut `existingToken`
-    // useEffect'i tetiklerse de o da '/dashboard'a gider — çift gönderim
-    // riski yok (her ikisi aynı route, ikincisi no-op).
-    window.setTimeout(() => navigate('/dashboard', { replace: true }), 800)
+    // DASHBOARD-INIT-ROUTER-FIX (2026-06-10) — eski setTimeout(navigate, 800)
+    // KALDIRILDI. Sebep: setAuth() çağrısı `existingToken` selector'ını
+    // tetikler ve useEffect (471-475) ANINDA `navigate('/dashboard', replace)`
+    // yapar. setTimeout 800ms sonra YİNE navigate çağırıyordu → çift gönderim
+    // + cleanup yoktu → component unmount sonrası bile timer fire ediyor,
+    // SiteContext mid-fetch'i kesintiye uğratıyordu. useEffect yeterli;
+    // navigate burada gereksiz. Step 3 UI'sı bir sonraki render'da görünür,
+    // ardından useEffect navigate'i tetikleyince Dashboard'a geçer.
   }
 
   const submitStep1 = async (e?: React.FormEvent) => {
