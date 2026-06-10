@@ -65,18 +65,17 @@ describe('RootRedirect — MemoryRouter integration', () => {
     cleanup()
   })
 
-  it('hidrasyon false → Spin render (Navigate çağrılmaz)', () => {
+  it('1) token YOK + hidrasyon FALSE → görünür Spin (Navigate çağrılmaz)', () => {
     vi.mocked(useHasHydrated).mockReturnValue(false)
     setToken(null)
     const { container } = renderApp('/')
-    // Spin görünür (data-testid)
     expect(screen.getByTestId('root-redirect-loading')).toBeTruthy()
     expect(screen.queryByTestId('login-page')).toBeNull()
     expect(screen.queryByTestId('dashboard-page')).toBeNull()
     expect(container.firstChild).toBeTruthy()
   })
 
-  it('/ + hidrasyon tamam + token YOK → /login render', () => {
+  it('2) token YOK + hidrasyon TRUE → /login render', () => {
     vi.mocked(useHasHydrated).mockReturnValue(true)
     setToken(null)
     renderApp('/')
@@ -84,7 +83,7 @@ describe('RootRedirect — MemoryRouter integration', () => {
     expect(screen.queryByTestId('dashboard-page')).toBeNull()
   })
 
-  it('/ + hidrasyon tamam + token VAR → /dashboard render', () => {
+  it('3) token VAR + hidrasyon TRUE → /dashboard render', () => {
     vi.mocked(useHasHydrated).mockReturnValue(true)
     setToken('fake-jwt-token')
     renderApp('/')
@@ -92,13 +91,16 @@ describe('RootRedirect — MemoryRouter integration', () => {
     expect(screen.queryByTestId('login-page')).toBeNull()
   })
 
-  it('hidrasyon false + token VAR → race penceresinde Spin (Navigate YOK, loop guard)', () => {
+  it('4) token VAR + hidrasyon FALSE → /dashboard render (TOKEN-FIRST, blank YOK)', () => {
+    // KRİTİK senaryo: AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10)
+    // Eski: hidrasyon false ise Spin (Navigate YOK). Bu, hidrasyon kalıcı
+    // false kalırsa kullanıcıyı blank/spinner'da kilitlerdi.
+    // Yeni: token mevcutsa hidrasyon flag'inden BAĞIMSIZ /dashboard.
     vi.mocked(useHasHydrated).mockReturnValue(false)
     setToken('fake-jwt-token')
     renderApp('/')
-    // Hidrasyon tamamlanmadan navigate olmaz — race koruması
-    expect(screen.getByTestId('root-redirect-loading')).toBeTruthy()
-    expect(screen.queryByTestId('dashboard-page')).toBeNull()
+    expect(screen.getByTestId('dashboard-page')).toBeTruthy()
+    expect(screen.queryByTestId('root-redirect-loading')).toBeNull()
     expect(screen.queryByTestId('login-page')).toBeNull()
   })
 

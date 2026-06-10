@@ -7,7 +7,6 @@ import { useNavigate } from 'react-router-dom'
 import { authApi } from '@/api/auth'
 import type { TokenResponse } from '@/types'
 import { useAuthStore } from '@/store/auth'
-import { useHasHydrated } from '@/hooks/useHasHydrated'
 import { useTranslation, Trans } from 'react-i18next'
 
 const CSS = `
@@ -461,21 +460,21 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { t } = useTranslation()
 
-  // AUTH-LOGIN-REDIRECT-HOTFIX (PR #45) + AUTH-PERSIST-HYDRATION-HOTFIX
-  // (PR #47) + LOGIN-AUTH-LOOP-FIX (2026-06-10) — authenticated kullanıcı
-  // /login ekranına düşerse Dashboard'a otomatik dön. Önceki '/' route
-  // RootRedirect aracısı oluşturmuyordu; doğrudan Dashboard render ediyordu.
-  // Bu yeni iterasyonda hedef explicit `/dashboard` — `/` üzerinden geçmek
-  // page-reload döngüsünü tetikleyebiliyordu (bkz. nginx access log: 1 sn'de
-  // 6 GET /). `hydrated` Zustand persist'in kendi internal flag'inden okunur
-  // (useHasHydrated), token store state alanı ayrı subscribe — race yok.
-  const hydrated = useHasHydrated()
+  // AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10) — authenticated kullanıcı
+  // /login'e düşerse /dashboard'a yönlendir. Token-first karar:
+  // `hydrated` flag'ine bağlı kalma; existingToken store'da mevcutsa
+  // hidrasyon penceresi olmadan navigate yap. Hidrasyon hookunun bir
+  // nedenle false kalması durumunda da kullanıcı doğru route'a gider.
+  //
+  // useHasHydrated içe aktarımı KORUNDU (gelecek defansif kullanım için);
+  // dependency array sadece `existingToken` + `navigate` — gereksiz
+  // re-fire önler.
   const existingToken = useAuthStore((s) => s.token)
   useEffect(() => {
-    if (hydrated && existingToken) {
+    if (existingToken) {
       navigate('/dashboard', { replace: true })
     }
-  }, [hydrated, existingToken, navigate])
+  }, [existingToken, navigate])
 
   // Fontları yükle + .charon-login class
   useEffect(() => {

@@ -21,6 +21,7 @@ import AppLayout from '@/components/Layout/AppLayout'
 import LoginPage from '@/pages/Login'
 import DashboardPage from '@/pages/Dashboard'
 import RootRedirect from '@/routes/RootRedirect'
+import ProtectedRouteLoading from '@/routes/ProtectedRouteLoading'
 import DevicesPage from '@/pages/Devices'
 import DeviceDetailPage from '@/pages/Devices/DeviceDetailPage'
 // T10 C7.B — eski /devices/:id/ports yeni Detail sayfasındaki Ports sekmesine yönlendir.
@@ -150,16 +151,32 @@ const LIGHT_TOKENS = {
 // alınır; yeni dil için App.tsx dokunulmaz.
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  // AUTH-PERSIST-HYDRATION-HOTFIX (2026-06-09) — eski `useShallow` ile tek
-  // selector hâlâ race açıyordu çünkü `_hasHydrated` store state alanı
-  // onRehydrateStorage callback'inde setter zincirleme ile set ediliyordu.
-  // Yeni: Zustand persist'in `hasHydrated()` + `onFinishHydration()` API'si
-  // ile rehydrate state'i persist middleware'in internal flag'inden okunur;
-  // token store state alanı ile ayrı subscribe, race penceresi yok.
+  // AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10) — token-first karar matrisi.
+  //
+  // Eski mimari (PR #47 hidrasyon hotfix):
+  //   if (!hydrated) return null
+  //   return token ? children : <Navigate to="/login">
+  //
+  // Problem: Login submit sonrası setAuth store'a token yazar AMA
+  // `useHasHydrated()` Login → Dashboard navigate'i sırasında bir nedenle
+  // false kalabiliyor (Zustand persist `hasHydrated()` API'sinin chunked
+  // load veya React Router navigate timing race). `null` döndüğünde
+  // AppLayout MOUNT OLMUYORDU — kullanıcı blank screen görüyordu (canlı
+  // browser raporu: URL=/dashboard, token=var, rootText="", dashboardVisible=false).
+  //
+  // Yeni token-first matris:
+  //   token VAR              → children (hydrated bağımsız — store
+  //                             gerçeği authoritative)
+  //   token YOK + !hydrated  → görünür <ProtectedRouteLoading> (blank YOK)
+  //   token YOK + hydrated   → <Navigate to="/login">
+  //
+  // Temel kural: token store'da mevcutken auth guard'ın kullanıcıyı
+  // bloklaması YASAK.
   const hydrated = useHasHydrated()
   const token = useAuthStore((s) => s.token)
-  if (!hydrated) return null
-  return token ? <>{children}</> : <Navigate to="/login" replace />
+  if (token) return <>{children}</>
+  if (!hydrated) return <ProtectedRouteLoading />
+  return <Navigate to="/login" replace />
 }
 
 // Sprint 1A — RBAC canonical 4-role alignment. Legacy 8-rol ROLE_ORDER

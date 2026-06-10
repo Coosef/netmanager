@@ -101,8 +101,12 @@ vi.mock('@/store/auth', () => ({
   ),
 }))
 
+// AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10): useHasHydrated FALSE mock
+// edilir — production bug'ı simüle eder. Token-first ProtectedRoute
+// mantığı sayesinde test başarılı olmalı (token store'a yazılınca
+// AppLayout mount eder, hidrasyon flag'ine bağlı değil).
 vi.mock('@/hooks/useHasHydrated', () => ({
-  useHasHydrated: () => true,
+  useHasHydrated: () => false,
 }))
 
 vi.mock('react-i18next', () => ({

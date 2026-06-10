@@ -228,7 +228,7 @@ export default function NocDashboard() {
 
   // Default: workspace variant — mevcut nm-grid widget düzeni
   return (
-    <div style={{ padding: 2 }}>
+    <div style={{ padding: 2 }} data-testid="dashboard-page">
       {/* live ticker — sürekli akan ticker (noc.css nm-tick animation),
           olay olduğunda kaydırır; yoksa sabit "olay yok" mesajı. */}
       <div className="nm-ticker">
@@ -1000,7 +1000,7 @@ function MissionVariant({ ctx }: { ctx: WidgetRenderCtx }) {
   const unacked = anom?.unacked ?? 0
   const critIncidents = impact?.critical_count ?? 0
   return (
-    <div className="variant-mission" style={{ height: '100%' }}>
+    <div className="variant-mission" style={{ height: '100%' }} data-testid="dashboard-page">
       <div className="nm-mc-grid" style={{
         display: 'grid', gridTemplateColumns: '360px 1fr 320px', height: '100%', minHeight: 600,
       }}>
@@ -1156,7 +1156,7 @@ function EditorialVariant({ ctx }: { ctx: WidgetRenderCtx }) {
   const criticalEvents = anom?.total ?? 0
   const offlinePct = total > 0 ? Math.round((offline / total) * 100 * 10) / 10 : 0
   return (
-    <div className="variant-editorial" style={{ height: '100%' }}>
+    <div className="variant-editorial" style={{ height: '100%' }} data-testid="dashboard-page">
       <div className="nm-edit-wrap" style={{
         display: 'grid', gridTemplateColumns: '1fr 1px 1fr 1px 1fr', gap: 24,
         padding: '28px 32px', height: '100%', overflow: 'auto', alignItems: 'start',
