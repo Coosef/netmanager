@@ -134,11 +134,67 @@ async def get_current_user(
     return user
 
 
+# ── Pentest Finding 1 (HIGH) — must_change_password enforcement ─────────────
+#
+# `must_change_password=True` olan kullanıcılar, başarılı login + MFA verify
+# sonrası geçerli bir bearer token elde eder. Bu noktada pentest raporundaki
+# bulguya göre token TÜM authenticated business API'lerine erişebiliyordu —
+# ki bu, "password change ZORUNLU" politikasını fiili olarak baypaslıyor.
+#
+# Çözüm: `get_current_active_user` (tüm authenticated endpoint'lerin geçtiği
+# merkezi nokta) içinde flag kontrolü. Whitelist sadece self-info,
+# permissions, logout ve password-change endpoint'leri için izin verir;
+# diğer her şey 403 + sabit `code: "PASSWORD_CHANGE_REQUIRED"` döner.
+#
+# Whitelist neden bu spesifik 4 endpoint:
+#   /api/v1/auth/me              — kullanıcının kendi profilini (username,
+#                                  must_change_password flag dahil) bilmesi
+#                                  için. Frontend bu endpoint'le kullanıcının
+#                                  password change ekranına yönlendirileceğini
+#                                  anlar.
+#   /api/v1/auth/me/permissions  — frontend menü/UI render etmek için (yalnız
+#                                  kullanıcının kendi permission setini döner,
+#                                  yan etkisi yok).
+#   /api/v1/auth/logout          — kullanıcı password değiştirmek istemiyorsa
+#                                  çıkış yapabilmeli (lockout senaryosu).
+#   /api/v1/users/me/change-password  — gerçek password change endpoint'i;
+#                                  başarılı çağrı sonrası flag false olur
+#                                  ve normal akış başlar.
+#
+# MFA endpoint'leri whitelist'te DEĞIL: bu enforcement noktasına gelen
+# token ZATEN MFA'yı tamamlamış (login flow login → mfa/verify → final token).
+# MFA endpoint'leri yalnız geçici challenge token'la (mfa_pending=True) çağrı
+# kabul eder; bu noktada flow geri tetiklenmez.
+PASSWORD_CHANGE_ALLOWED_PATHS: frozenset[str] = frozenset({
+    "/api/v1/auth/me",
+    "/api/v1/auth/me/permissions",
+    "/api/v1/auth/logout",
+    "/api/v1/users/me/change-password",
+})
+
+
 async def get_current_active_user(
+    request: Request,
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
     if not current_user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+
+    # Pentest Finding 1 — must_change_password enforcement.
+    # Whitelist dışı endpoint'ler için 403; password change tamamlanınca
+    # `password_policy_service.register_password_change` flag'i False'a
+    # çekiyor ve normal erişim açılıyor.
+    if getattr(current_user, "must_change_password", False):
+        path = request.url.path
+        if path not in PASSWORD_CHANGE_ALLOWED_PATHS:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "PASSWORD_CHANGE_REQUIRED",
+                    "message": "Password change required",
+                },
+            )
+
     return current_user
 
 
