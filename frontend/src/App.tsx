@@ -20,6 +20,7 @@ import { authApi } from '@/api/auth'
 import AppLayout from '@/components/Layout/AppLayout'
 import LoginPage from '@/pages/Login'
 import DashboardPage from '@/pages/Dashboard'
+import RootRedirect from '@/routes/RootRedirect'
 import DevicesPage from '@/pages/Devices'
 import DeviceDetailPage from '@/pages/Devices/DeviceDetailPage'
 // T10 C7.B — eski /devices/:id/ports yeni Detail sayfasındaki Ports sekmesine yönlendir.
@@ -273,7 +274,13 @@ function ThemedApp() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<DashboardPage />} />
+              {/* P0 LOGIN-AUTH-LOOP-FIX (2026-06-10) — `/` artık doğrudan
+                  Dashboard render etmiyor; RootRedirect auth+hidrasyona
+                  göre `/dashboard` veya `/login`'e güvenli navigate yapar.
+                  Login success direkt `/dashboard`'a gider, `/` üzerinden
+                  geçmez — page-reload döngüsü kırılır. */}
+              <Route index element={<RootRedirect />} />
+              <Route path="dashboard" element={<DashboardPage />} />
               <Route path="devices" element={<DevicesPage />} />
               {/* T10 C7.B — kalıcı Device Detail sayfası (sekmeli). */}
               <Route path="devices/:deviceId" element={<RoleRoute minRole="viewer"><DeviceDetailPage /></RoleRoute>} />
