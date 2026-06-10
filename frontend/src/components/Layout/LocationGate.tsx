@@ -20,7 +20,12 @@ import { useAuthStore } from '@/store/auth'
  *   * otherwise → the routed page.
  */
 export default function LocationGate({ children }: { children: ReactNode }) {
-  const { sitesLoading, sitesError, refetchSite, hasLocationAccess } = useSite()
+  const {
+    sitesLoading,
+    refetchSite,
+    hasLocationAccess,
+    hasContextFailure,
+  } = useSite()
   const { t } = useTranslation()
 
   if (sitesLoading) {
@@ -41,13 +46,15 @@ export default function LocationGate({ children }: { children: ReactNode }) {
   }
 
   // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — `/context/current` fetch
-  // gerçekten fail oldu + ctx hâlâ yok durumunda blank screen yerine
-  // görünür error + Yenile butonu. retry mekanizması SiteContext'te
-  // (retry: 1) zaten var; bu fallback son recovery noktası.
-  // i18n locale dosyalarına dokunmamak için (widening Δ=0) metin inline TR
-  // — gelecekte common.network_error + common.retry key'leri 4 dilde
-  // eklenebilir.
-  if (sitesError) {
+  // gerçekten fail oldu YA DA query idle/settled olmasına rağmen ctx
+  // hâlâ undefined ise blank screen yerine görünür error + Yenile butonu.
+  // Davranış matrisi:
+  //   · sitesLoading=true              → Spin (yukarıdaki blok)
+  //   · ctx mevcut                     → children render (aşağıdaki blok)
+  //   · sitesError=true && !ctx        → bu blok (görünür error)
+  //   · !sitesLoading && !ctx          → bu blok (görünür error, idle stuck)
+  // SiteContext.hasContextFailure bu iki durumu birleştirir.
+  if (hasContextFailure) {
     return (
       <div
         style={{
@@ -60,15 +67,15 @@ export default function LocationGate({ children }: { children: ReactNode }) {
       >
         <Result
           status="warning"
-          title="Bağlantı sorunu"
-          subTitle="Lokasyon bilgisi yüklenemedi. Lütfen yeniden deneyin."
+          title={t('location_gate.error_title')}
+          subTitle={t('location_gate.error_desc')}
           extra={
             <Button
               type="primary"
               icon={<ReloadOutlined />}
               onClick={() => refetchSite()}
             >
-              Yenile
+              {t('location_gate.retry')}
             </Button>
           }
         />

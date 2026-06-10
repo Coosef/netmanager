@@ -78,6 +78,12 @@ interface SiteCtx {
    * fonksiyonu LocationGate'in görünür error/retry fallback'i render
    * etmesini sağlar (blank screen → görünür "Bağlantı sorunu" + Yenile). */
   sitesError: boolean
+  /** Birleşik failure flag — `sitesError || (!sitesLoading && !ctx)`.
+   * Tek başına `sitesError` kontrolü yetersiz çünkü query idle/settled
+   * olmasına rağmen ctx undefined kalabiliyor (örn. enabled false'tan
+   * true'ya geçiş anı veya queryClient.clear() sonrası). LocationGate
+   * bu flag ile her iki durumu da görünür fallback'e yönlendirir. */
+  hasContextFailure: boolean
   refetchSite: () => void
   /** Backward-compat: the active location's NAME, and the name list. */
   activeSite: string | null
@@ -95,6 +101,7 @@ const SiteContext = createContext<SiteCtx>({
   features: {},
   sitesLoading: false,
   sitesError: false,
+  hasContextFailure: false,
   refetchSite: () => {},
   activeSite: null,
   setSite: () => {},
@@ -139,6 +146,12 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // gerçekten fail oldu + ctx hala yok" durumunda true. retry sonrası 200
   // gelirse `isError: false`. Stale cache sırasında error false kalır.
   const sitesError: boolean = isError && !ctx
+  // Birleşik failure flag — sitesError OR (idle/settled + ctx undefined).
+  // Tek başına sitesError yeterli değil çünkü query enabled false'tan
+  // true'ya geçiş anı veya queryClient.clear() sonrası `isLoading: false`,
+  // `isError: false`, `ctx: undefined` durumu kısa süreli görülebilir.
+  // LocationGate her iki durumu da görünür fallback'e yönlendirir.
+  const hasContextFailure: boolean = sitesError || (!sitesLoading && !ctx && !!token && hydrated)
   const refetchSite = () => { refetch() }
   const locations: AccessibleLocation[] = ctx?.locations ?? []
   const allowedLocationIds: number[] = ctx?.allowed_location_ids ?? []
@@ -224,6 +237,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         features,
         sitesLoading,
         sitesError,
+        hasContextFailure,
         refetchSite,
         activeSite,
         setSite,

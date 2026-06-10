@@ -22,19 +22,25 @@ const SRC = readFileSync(
 
 
 describe('LocationGate — error fallback sözleşmesi', () => {
-  it('useSite\'tan sitesError + refetchSite alıyor', () => {
-    expect(SRC).toMatch(/sitesError/)
+  it('useSite\'tan refetchSite + hasContextFailure alıyor', () => {
     expect(SRC).toMatch(/refetchSite/)
+    expect(SRC).toMatch(/hasContextFailure/)
     expect(SRC).toMatch(
-      /const\s*\{[^}]*sitesError[^}]*refetchSite[^}]*\}\s*=\s*useSite\(\)/,
+      /const\s*\{[\s\S]*?hasContextFailure[\s\S]*?\}\s*=\s*useSite\(\)/,
     )
   })
 
-  it('sitesError true ise görünür Result render edilir (blank YOK)', () => {
-    expect(SRC).toMatch(/if\s*\(sitesError\)/)
+  it('hasContextFailure true ise görünür Result render edilir (blank YOK)', () => {
+    expect(SRC).toMatch(/if\s*\(hasContextFailure\)/)
     expect(SRC).toContain('<Result')
     expect(SRC).toContain('status="warning"')
     expect(SRC).toContain('data-testid="location-gate-error"')
+  })
+
+  it('error metin i18n key kullanır (locale dosyalarında 4 dilde mevcut)', () => {
+    expect(SRC).toContain("t('location_gate.error_title')")
+    expect(SRC).toContain("t('location_gate.error_desc')")
+    expect(SRC).toContain("t('location_gate.retry')")
   })
 
   it('refetchSite Yenile butonuna bağlı', () => {
@@ -87,7 +93,14 @@ describe('SiteContext — sitesError + refetchSite expose', () => {
     expect(SITE_SRC).toMatch(/refetchSite:\s*\(\)\s*=>\s*void/)
   })
 
-  it('Provider value sitesError + refetchSite expose ediyor', () => {
-    expect(SITE_SRC).toMatch(/sitesError,\s*\n\s*refetchSite,/)
+  it('Provider value sitesError + hasContextFailure + refetchSite expose ediyor', () => {
+    expect(SITE_SRC).toMatch(/sitesError,/)
+    expect(SITE_SRC).toMatch(/hasContextFailure,/)
+    expect(SITE_SRC).toMatch(/refetchSite,/)
+  })
+
+  it('hasContextFailure birleşik flag: sitesError || (!sitesLoading && !ctx && ...)', () => {
+    expect(SITE_SRC).toMatch(/hasContextFailure[^=]*=\s*sitesError\s*\|\|/)
+    expect(SITE_SRC).toMatch(/!sitesLoading\s*&&\s*!ctx/)
   })
 })

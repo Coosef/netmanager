@@ -2865,7 +2865,10 @@
   "location_gate": {
     "resolving": "Lokasyon bağlamı çözümleniyor…",
     "no_access_title": "Atanmış lokasyon yok",
-    "no_access_desc": "Hesabınıza henüz bir lokasyon atanmamış. Lokasyon erişimi olmadan cihaz, topoloji ve izleme verileri görüntülenemez. Lütfen bir yöneticiyle iletişime geçin."
+    "no_access_desc": "Hesabınıza henüz bir lokasyon atanmamış. Lokasyon erişimi olmadan cihaz, topoloji ve izleme verileri görüntülenemez. Lütfen bir yöneticiyle iletişime geçin.",
+    "error_title": "Bağlantı sorunu",
+    "error_desc": "Lokasyon bilgisi yüklenemedi. Lütfen yeniden deneyin.",
+    "retry": "Yenile"
   },
   "location_selector": {
     "no_access_tooltip": "Hesabınıza atanmış bir lokasyon yok",
