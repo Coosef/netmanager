@@ -68,5 +68,10 @@ export default defineConfig({
   // own runner (`npx playwright test --config=perf/playwright.config.ts`).
   test: {
     exclude: ['**/node_modules/**', '**/dist/**', 'perf/**'],
+    // Default `node` env — mevcut testler localStorage/Zustand persist
+    // pattern'inde stable. Router/DOM entegrasyon testleri dosya başında
+    // `// @vitest-environment jsdom` directive ile opt-in eder.
+    // (jsdom env globally zustand persist localStorage uyumsuzluğu yaratıyor.)
+    environment: 'node',
   },
 })

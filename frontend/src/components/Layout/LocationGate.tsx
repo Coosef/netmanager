@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Result, Button, Spin } from 'antd'
-import { EnvironmentOutlined } from '@ant-design/icons'
+import { EnvironmentOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
@@ -20,7 +20,12 @@ import { useAuthStore } from '@/store/auth'
  *   * otherwise → the routed page.
  */
 export default function LocationGate({ children }: { children: ReactNode }) {
-  const { sitesLoading, hasLocationAccess } = useSite()
+  const {
+    sitesLoading,
+    refetchSite,
+    hasLocationAccess,
+    hasContextFailure,
+  } = useSite()
   const { t } = useTranslation()
 
   if (sitesLoading) {
@@ -36,6 +41,44 @@ export default function LocationGate({ children }: { children: ReactNode }) {
         <Spin size="large" tip={t('location_gate.resolving')}>
           <div style={{ padding: 48 }} />
         </Spin>
+      </div>
+    )
+  }
+
+  // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — `/context/current` fetch
+  // gerçekten fail oldu YA DA query idle/settled olmasına rağmen ctx
+  // hâlâ undefined ise blank screen yerine görünür error + Yenile butonu.
+  // Davranış matrisi:
+  //   · sitesLoading=true              → Spin (yukarıdaki blok)
+  //   · ctx mevcut                     → children render (aşağıdaki blok)
+  //   · sitesError=true && !ctx        → bu blok (görünür error)
+  //   · !sitesLoading && !ctx          → bu blok (görünür error, idle stuck)
+  // SiteContext.hasContextFailure bu iki durumu birleştirir.
+  if (hasContextFailure) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '70vh',
+        }}
+        data-testid="location-gate-error"
+      >
+        <Result
+          status="warning"
+          title={t('location_gate.error_title')}
+          subTitle={t('location_gate.error_desc')}
+          extra={
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              onClick={() => refetchSite()}
+            >
+              {t('location_gate.retry')}
+            </Button>
+          }
+        />
       </div>
     )
   }

@@ -50,8 +50,17 @@ describe('Login redirect — `/dashboard` hedefi (P0 loop fix sözleşmesi)', ()
     expect(LOGIN_SOURCE).not.toMatch(/setTimeout\(\(\)\s*=>\s*navigate\(['"]\/['"]\),\s*800\)/)
   })
 
-  it("useEffect navigate hala /dashboard (replace) hedefi koruyor", () => {
-    // setTimeout kaldırıldı; useEffect (471) artık tek navigate yolu
+  it("finalizeSession DOĞRUDAN navigate('/dashboard', { replace: true }) çağırır (PR #72)", () => {
+    // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10): setAuth + setStep(3) sonrası
+    // useEffect'e bırakmadan doğrudan navigate. Race önler. POST 200 sonrası
+    // step 3 UI ("Yönlendiriliyor…") stuck kalmaz.
+    // finalizeSession bloğunda en az 1 navigate('/dashboard', replace) çağrısı.
+    expect(LOGIN_SOURCE).toMatch(
+      /const finalizeSession[\s\S]*?navigate\(['"]\/dashboard['"],\s*\{\s*replace:\s*true\s*\}\)[\s\S]*?\n  \}/,
+    )
+  })
+
+  it("useEffect navigate hala /dashboard (replace) hedefi koruyor (idempotent fallback)", () => {
     expect(LOGIN_SOURCE).toMatch(
       /navigate\(['"]\/dashboard['"],\s*\{\s*replace:\s*true\s*\}\)/,
     )
