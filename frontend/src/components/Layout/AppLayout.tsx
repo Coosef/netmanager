@@ -124,7 +124,11 @@ function AppLayoutInner() {
   return (
     // T8.4 — NOC design shell. `:root` (noc.css) is dark by default; the
     // `.theme-light` class flips the design CSS variables for light mode.
-    <div className={`nm-app-shell ${isDark ? '' : 'theme-light'}`} style={{ height: '100vh', overflow: 'hidden' }}>
+    <div
+      className={`nm-app-shell ${isDark ? '' : 'theme-light'}`}
+      style={{ height: '100vh', overflow: 'hidden' }}
+      data-testid="app-layout"
+    >
       <style>{LAYOUT_CSS}</style>
       <div className={`nm-root menu-${menuPosition}`}>
         {/* menu=side iken Sidebar (sol), menu=top iken Sidebar gizleniyor

@@ -38,9 +38,16 @@ import { useHasHydrated } from '@/hooks/useHasHydrated'
  *     `_hasHydrated` race penceresi yok — bkz. `hooks/useHasHydrated.ts`).
  */
 export default function RootRedirect() {
+  // AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10) — ProtectedRoute ile aynı
+  // matrise hizalandı (bkz. App.tsx ProtectedRoute):
+  //   token VAR              → /dashboard (hydrated bağımsız)
+  //   token YOK + !hydrated  → görünür <Spin> (blank YOK)
+  //   token YOK + hydrated   → /login
+  // Hidrasyon kalıcı false kalsa bile token mevcutsa kullanıcı bloklanmaz.
   const hydrated = useHasHydrated()
   const token = useAuthStore((s) => s.token)
 
+  if (token) return <Navigate to="/dashboard" replace />
   if (!hydrated) {
     return (
       <div
@@ -56,8 +63,5 @@ export default function RootRedirect() {
       </div>
     )
   }
-
-  return token
-    ? <Navigate to="/dashboard" replace />
-    : <Navigate to="/login" replace />
+  return <Navigate to="/login" replace />
 }

@@ -22,13 +22,26 @@ export const useHasHydrated = (): boolean => {
   )
 
   useEffect(() => {
+    // Mount sonrası immediate recheck — rehydrate zaten tamamlanmış olabilir
+    // (özellikle hızlı navigation veya SPA içi geçişlerde).
+    setHydrated(useAuthStore.persist.hasHydrated())
+
+    // AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10) — `onHydrate` listener
+    // eklendi. Rehydration BAŞLADIĞINDA flag false'a çekilir; FINISH
+    // callback ile true'ya geçer. Daha defansif lifecycle:
+    //   start → hydrated: false
+    //   finish → hydrated: true
+    // ProtectedRoute token-first karar matrisi sayesinde bu hook'un
+    // false dönmesi blank screen üretmez (token mevcutsa children
+    // render edilir).
+    const unsubStart = useAuthStore.persist.onHydrate(() => {
+      setHydrated(false)
+    })
     const unsubFinish = useAuthStore.persist.onFinishHydration(() => {
       setHydrated(true)
     })
-    // Edge: mount sırasında rehydrate zaten tamamlanmış olabilir
-    // (özellikle hızlı navigation veya SPA içi geçişlerde).
-    setHydrated(useAuthStore.persist.hasHydrated())
     return () => {
+      unsubStart()
       unsubFinish()
     }
   }, [])
