@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Result, Button, Spin } from 'antd'
-import { EnvironmentOutlined } from '@ant-design/icons'
+import { EnvironmentOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
@@ -20,7 +20,7 @@ import { useAuthStore } from '@/store/auth'
  *   * otherwise → the routed page.
  */
 export default function LocationGate({ children }: { children: ReactNode }) {
-  const { sitesLoading, hasLocationAccess } = useSite()
+  const { sitesLoading, sitesError, refetchSite, hasLocationAccess } = useSite()
   const { t } = useTranslation()
 
   if (sitesLoading) {
@@ -36,6 +36,42 @@ export default function LocationGate({ children }: { children: ReactNode }) {
         <Spin size="large" tip={t('location_gate.resolving')}>
           <div style={{ padding: 48 }} />
         </Spin>
+      </div>
+    )
+  }
+
+  // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — `/context/current` fetch
+  // gerçekten fail oldu + ctx hâlâ yok durumunda blank screen yerine
+  // görünür error + Yenile butonu. retry mekanizması SiteContext'te
+  // (retry: 1) zaten var; bu fallback son recovery noktası.
+  // i18n locale dosyalarına dokunmamak için (widening Δ=0) metin inline TR
+  // — gelecekte common.network_error + common.retry key'leri 4 dilde
+  // eklenebilir.
+  if (sitesError) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '70vh',
+        }}
+        data-testid="location-gate-error"
+      >
+        <Result
+          status="warning"
+          title="Bağlantı sorunu"
+          subTitle="Lokasyon bilgisi yüklenemedi. Lütfen yeniden deneyin."
+          extra={
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              onClick={() => refetchSite()}
+            >
+              Yenile
+            </Button>
+          }
+        />
       </div>
     )
   }

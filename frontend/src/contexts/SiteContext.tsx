@@ -71,6 +71,14 @@ interface SiteCtx {
    * = açık (opt-out). Nav filtresi bunu okur. */
   features: Record<string, boolean>
   sitesLoading: boolean
+  /** LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — `/context/current` fetch
+   * başarısız olduğunda `ctx` undefined kalıyor + LocationGate defansif
+   * `?? true` ile children render ediyordu. Bug: features:{} ile bazı
+   * widget'lar gizleniyor, kullanıcı blank algılıyor. Error expose + refetch
+   * fonksiyonu LocationGate'in görünür error/retry fallback'i render
+   * etmesini sağlar (blank screen → görünür "Bağlantı sorunu" + Yenile). */
+  sitesError: boolean
+  refetchSite: () => void
   /** Backward-compat: the active location's NAME, and the name list. */
   activeSite: string | null
   setSite: (site: string | null) => void
@@ -86,6 +94,8 @@ const SiteContext = createContext<SiteCtx>({
   isOrgWide: false,
   features: {},
   sitesLoading: false,
+  sitesError: false,
+  refetchSite: () => {},
   activeSite: null,
   setSite: () => {},
   sites: [],
@@ -117,7 +127,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   //   · `retry: 1` + `retryDelay: 500` — transient 401 (token interceptor
   //     race veya backend network jitter) recover edilir. Stuck `ctx`
   //     undefined senaryosu kırılır.
-  const { data: ctx, isLoading: sitesLoading } = useQuery({
+  const { data: ctx, isLoading: sitesLoading, isError, refetch } = useQuery({
     queryKey: ['context', 'current', activeLocationId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
@@ -125,6 +135,11 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     retry: 1,
     retryDelay: 500,
   })
+  // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — error state'i sadece "fetch
+  // gerçekten fail oldu + ctx hala yok" durumunda true. retry sonrası 200
+  // gelirse `isError: false`. Stale cache sırasında error false kalır.
+  const sitesError: boolean = isError && !ctx
+  const refetchSite = () => { refetch() }
   const locations: AccessibleLocation[] = ctx?.locations ?? []
   const allowedLocationIds: number[] = ctx?.allowed_location_ids ?? []
   const hasLocationAccess: boolean = ctx?.has_location_access ?? true
@@ -208,6 +223,8 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         isOrgWide,
         features,
         sitesLoading,
+        sitesError,
+        refetchSite,
         activeSite,
         setSite,
         sites,

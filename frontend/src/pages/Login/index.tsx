@@ -848,14 +848,20 @@ export default function LoginPage() {
       res.permissions,
     )
     setStep(3)
-    // DASHBOARD-INIT-ROUTER-FIX (2026-06-10) — eski setTimeout(navigate, 800)
-    // KALDIRILDI. Sebep: setAuth() çağrısı `existingToken` selector'ını
-    // tetikler ve useEffect (471-475) ANINDA `navigate('/dashboard', replace)`
-    // yapar. setTimeout 800ms sonra YİNE navigate çağırıyordu → çift gönderim
-    // + cleanup yoktu → component unmount sonrası bile timer fire ediyor,
-    // SiteContext mid-fetch'i kesintiye uğratıyordu. useEffect yeterli;
-    // navigate burada gereksiz. Step 3 UI'sı bir sonraki render'da görünür,
-    // ardından useEffect navigate'i tetikleyince Dashboard'a geçer.
+    // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — backend POST /auth/login 200
+    // gözlemlenmesine rağmen kullanıcı "Yönlendiriliyor…" stuck'a düşüyordu.
+    // PR #70 setTimeout'u kaldırıp navigate'i sadece useEffect (471-475)'e
+    // bırakmıştı. Pratikte bu navigate güvenilir tetiklenmiyor — Zustand
+    // selector race / dependency comparison / persist hidrasyon sırasında
+    // useEffect skip olabiliyor. Backend log son trace: POST 200 sonrası
+    // GET /dashboard YOK.
+    //
+    // Çözüm: setAuth + setStep sonrası DOĞRUDAN navigate. React Router
+    // history API çağrısı store update'ten BAĞIMSIZ çalışır — Routes match
+    // anında `/login` -> `/dashboard` geçer, Login unmount, AppLayout +
+    // Dashboard mount. useEffect (471-475) idempotent fallback olarak
+    // KORUNDU (no-op aynı route'a navigate).
+    navigate('/dashboard', { replace: true })
   }
 
   const submitStep1 = async (e?: React.FormEvent) => {
