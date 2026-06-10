@@ -2783,6 +2783,9 @@
     "next": "Weiter",
     "exit": "Beenden"
   },
+  "auth_guard": {
+    "loading": "Wird geladen…"
+  },
   "location_gate": {
     "resolving": "Standortkontext wird aufgelöst…",
     "no_access_title": "Kein zugewiesener Standort",

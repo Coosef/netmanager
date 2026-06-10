@@ -2819,6 +2819,9 @@
     "next": "Next",
     "exit": "Exit"
   },
+  "auth_guard": {
+    "loading": "Loading…"
+  },
   "location_gate": {
     "resolving": "Resolving location context…",
     "no_access_title": "No assigned location",

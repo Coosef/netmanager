@@ -37,8 +37,14 @@ describe('RootRedirect — sözleşme kaynak düzeyinde sabit', () => {
     expect(SRC).toMatch(/useAuthStore\(\(s\)\s*=>\s*s\.token\)/)
   })
 
-  it('hidrasyon tamamlanmadan Spin döner (blank screen YOK)', () => {
-    // `if (!hydrated)` guard'ı, Spin render
+  it('token-first karar matrisi: token VAR ise hidrasyon kontrolünden ÖNCE /dashboard', () => {
+    // AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10): token kontrolü ilk sırada
+    expect(SRC).toMatch(
+      /if\s*\(token\)\s*return\s*<Navigate\s+to="\/dashboard"\s+replace\s*\/>[\s\S]*?if\s*\(!hydrated\)/,
+    )
+  })
+
+  it('token YOK + !hydrated → görünür Spin (blank YOK)', () => {
     expect(SRC).toMatch(/if\s*\(!hydrated\)/)
     expect(SRC).toContain('Spin')
     expect(SRC).toContain("data-testid=\"root-redirect-loading\"")
