@@ -1,0 +1,2016 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+"""
+NetManager Proxy Agent v1.3
+Yerel ağa kurulur, NetManager backend'e WebSocket ile bağlanır.
+SSH komutlarını ağ cihazlarına iletir ve sonuçları döner.
+
+Güvenlik ve yeni özellikler (v1.3.0):
+  - Sunucu tarafından gönderilen komut whitelist/blacklist politikası
+  - Agent tarafında komut doğrulama (çift katmanlı koruma)
+  - Key rotasyon desteği (env dosyasını otomatik günceller)
+  - Güvenlik ihlali bildirim mesajları
+  - SSH Connection Pool (F1)
+  - Offline Command Queue (F3)
+  - Proactive Device Health Monitoring (F2)
+  - SNMP via Agent (F4)
+  - Auto Device Discovery (F5)
+  - Syslog Collector (F6)
+  - Command Result Streaming (F7)
+  - Secure Credential Vault (F8)
+"""
+import asyncio
+import json
+import logging
+import os
+import platform
+import socket
+import sys
+import threading
+import time
+import uuid
+from collections import deque
+from datetime import datetime, timezone
+import ipaddress
+import concurrent.futures
+import base64
+
+try:
+    import websockets
+except ImportError:
+    print("Eksik paket: pip install websockets", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    from netmiko import ConnectHandler
+    from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
+except ImportError:
+    print("Eksik paket: pip install netmiko", file=sys.stderr)
+    sys.exit(1)
+
+try:
+    import psutil
+    _HAS_PSUTIL = True
+except ImportError:
+    _HAS_PSUTIL = False
+
+try:
+    import puresnmp
+    from puresnmp import Client as SnmpClient
+    from puresnmp.credentials import V2C
+    _HAS_SNMP = True
+except ImportError:
+    _HAS_SNMP = False
+
+try:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    _HAS_CRYPTO = True
+except ImportError:
+    _HAS_CRYPTO = False
+
+VERSION = "1.4.1"
+BACKEND_URL = os.environ.get("NETMANAGER_URL", "http://localhost:8000").rstrip("/")
+AGENT_ID    = os.environ.get("NETMANAGER_AGENT_ID", "")
+AGENT_KEY   = os.environ.get("NETMANAGER_AGENT_KEY", "")
+HEARTBEAT_INTERVAL = 15
+
+# Try to find the env file path for key rotation
+_ENV_FILE_CANDIDATES = [
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "agent.env"),
+    "/opt/netmanager-agent/agent.env",
+    os.path.expanduser("~/.netmanager-agent/agent.env"),
+    r"C:\ProgramData\NetManagerAgent\config.env",
+]
+_ENV_FILE = next((p for p in _ENV_FILE_CANDIDATES if os.path.exists(p)), None)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    stream=sys.stderr,
+)
+log = logging.getLogger("netmanager-agent")
+
+# ── Security policy (updated by server via security_config message) ────────
+_security = {
+    "command_mode": "all",        # 'all' | 'whitelist' | 'blacklist'
+    "allowed_commands": [],       # list of prefixes
+}
+
+_SAFE_PREFIXES = (
+    "show ", "display ", "ping ", "traceroute ", "trace-route ",
+    "get ", "sh ",
+)
+
+# ── Command stats ──────────────────────────────────────────────────────────
+_stats = {
+    "cmd_success": 0,
+    "cmd_fail": 0,
+    "cmd_total_ms": 0,
+    "cmd_blocked": 0,
+}
+
+_restart_requested = False
+
+# ── Sprint 14C: Edge Intelligence ─────────────────────────────────────────
+# SSH sliding window error rate (last 20 commands)
+_ssh_window: deque = deque(maxlen=20)
+# SNMP latency tracking (rolling 10-sample EMA, milliseconds)
+_snmp_ema_ms: float = 0.0
+_snmp_ema_count: int = 0
+_SNMP_LATENCY_THRESHOLD_MS: float = 5000.0  # fire anomaly if avg > 5 s
+_SSH_ERROR_RATE_THRESHOLD: float = 0.5       # fire anomaly if >50% fail
+
+# ── Feature 1: SSH Connection Pool ────────────────────────────────────────
+# QF-5 (2026-06-03) — entry shape extended with per-entry threading.Lock so
+# concurrent ssh_command calls to the SAME (host, port, username) serialize on
+# the shared netmiko connection. _pool_lock continues to guard dict access only;
+# entry["lock"] guards the connection's read/write buffer (netmiko ConnectHandler
+# is NOT thread-safe). Different devices remain parallel.
+_ssh_pool: dict = {}          # key: (device_ip, port, username) -> {"conn", "last_used", "lock"}
+_pool_lock = threading.Lock()
+_POOL_TTL = 300               # 5 minutes
+
+# ── Feature 3: Offline Command Queue ─────────────────────────────────────
+_result_queue: deque = deque(maxlen=100)
+
+# ── Monitoring Event Offline Queue (SQLite WAL) ───────────────────────────
+try:
+    from agent_queue import AgentEventQueue as _AgentEventQueue
+    _event_queue = _AgentEventQueue()
+except Exception as _eq_err:
+    log.warning("AgentEventQueue yuklenemedi: {} — monitoring events offline buffer'lanmayacak".format(_eq_err))
+    _event_queue = None
+
+# ── Feature 2: Proactive Device Health Monitoring ────────────────────────
+_device_list: list = []
+_health_check_interval = 60
+
+# Smart health monitoring state
+_device_fail_count: dict = {}   # device_id -> consecutive failure count
+_device_last_status: dict = {}  # device_id -> last reported reachable (bool)
+_device_flap_history: dict = {} # device_id -> deque[(timestamp, reachable)]
+_CONFIRM_FAILURES = 2           # consecutive failures required before reporting down
+_FLAP_WINDOW_SEC = 600          # 10-minute window for flap detection
+_FLAP_THRESHOLD = 3             # status transitions within window = flapping
+_HEALTH_PARALLELISM = 10        # max concurrent TCP probes
+
+# ── Feature 6: Syslog Collector ──────────────────────────────────────────
+_syslog_enabled = False
+_syslog_port = 514
+
+# ── D4: SNMP Trap Receiver ────────────────────────────────────────────────
+_snmp_trap_enabled = False
+_snmp_trap_port = 162
+
+# ── Feature 8: Secure Credential Vault ───────────────────────────────────
+_vault: dict = {}             # keyed by credential_id / device_id
+_vault_key: bytes = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Security helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _is_command_allowed(command: str) -> tuple:
+    """Returns (allowed, reason) based on current security policy."""
+    mode = _security["command_mode"]
+    if mode == "all":
+        return True, ""
+
+    cmd_lower = command.strip().lower()
+    allowed_commands = _security["allowed_commands"]
+
+    if mode == "whitelist":
+        if not allowed_commands:
+            for prefix in _SAFE_PREFIXES:
+                if cmd_lower.startswith(prefix):
+                    return True, ""
+            return False, "whitelist bos; sadece salt-okunur komutlar izinli"
+        for prefix in allowed_commands:
+            if cmd_lower.startswith(prefix.lower()):
+                return True, ""
+        return False, "komut whitelist'te yok: {}".format(command[:60])
+
+    if mode == "blacklist":
+        for prefix in allowed_commands:
+            if cmd_lower.startswith(prefix.lower()):
+                return False, "komut blacklist'te engellendi: {}".format(command[:60])
+        return True, ""
+
+    return True, ""
+
+
+def _update_env_file(new_key):
+    """Update NETMANAGER_AGENT_KEY in the env file after key rotation."""
+    global _ENV_FILE
+    if not _ENV_FILE:
+        log.warning("Env dosyasi bulunamadi - key env degiskeni olarak guncelleniyor")
+        os.environ["NETMANAGER_AGENT_KEY"] = new_key
+        return
+
+    try:
+        with open(_ENV_FILE) as f:
+            lines = f.readlines()
+
+        new_lines = []
+        updated = False
+        for line in lines:
+            if line.startswith("NETMANAGER_AGENT_KEY="):
+                new_lines.append("NETMANAGER_AGENT_KEY={}\n".format(new_key))
+                updated = True
+            else:
+                new_lines.append(line)
+
+        if not updated:
+            new_lines.append("NETMANAGER_AGENT_KEY={}\n".format(new_key))
+
+        with open(_ENV_FILE, "w") as f:
+            f.writelines(new_lines)
+
+        os.environ["NETMANAGER_AGENT_KEY"] = new_key
+        log.info("Agent key guncellendi: {}".format(_ENV_FILE))
+    except Exception as e:
+        log.error("Env dosyasi guncellenemedi: {}".format(e))
+        os.environ["NETMANAGER_AGENT_KEY"] = new_key
+
+
+def _record_result(result):
+    ok = bool(result.get("success"))
+    if ok:
+        _stats["cmd_success"] += 1
+    else:
+        _stats["cmd_fail"] += 1
+    _stats["cmd_total_ms"] += result.get("duration_ms", 0)
+    _ssh_window.append(ok)
+
+
+def _record_snmp_latency_ms(ms: float):
+    global _snmp_ema_ms, _snmp_ema_count
+    _snmp_ema_count += 1
+    if _snmp_ema_count == 1:
+        _snmp_ema_ms = ms
+    else:
+        _snmp_ema_ms = 0.8 * _snmp_ema_ms + 0.2 * ms
+
+
+async def _maybe_send_anomaly(ws, anomaly_type: str, title: str,
+                               message: str, details: dict = None):
+    """Fire a local_anomaly event to the backend — deduplicated per type per 30 min."""
+    key = "anomaly_ts_{}".format(anomaly_type)
+    last = _stats.get(key, 0.0)
+    now = time.monotonic()
+    if now - last < 1800:  # 30 minute cooldown per type
+        return
+    _stats[key] = now
+    try:
+        await ws.send(json.dumps({
+            "type":         "local_anomaly",
+            "agent_id":     AGENT_ID,
+            "anomaly_type": anomaly_type,
+            "severity":     "warning",
+            "title":        title,
+            "message":      message,
+            "details":      details or {},
+            "timestamp":    datetime.now(timezone.utc).isoformat(),
+        }))
+        log.warning("[edge] Local anomaly: {} — {}".format(anomaly_type, message))
+    except Exception as e:
+        log.debug("[edge] Anomaly send failed: {}".format(e))
+
+
+def _get_local_ip() -> str:
+    """Return the primary local IP used for outbound connections."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        try:
+            return socket.gethostbyname(socket.gethostname())
+        except Exception:
+            return ""
+
+
+def _get_metrics():
+    with _pool_lock:
+        pool_size = len(_ssh_pool)
+        pool_active_hosts = [
+            k[0] for k, v in _ssh_pool.items()
+            if v["conn"].is_alive()
+        ] if _ssh_pool else []
+
+    metrics = {
+        "cmd_success": _stats["cmd_success"],
+        "cmd_fail": _stats["cmd_fail"],
+        "cmd_total_ms": _stats["cmd_total_ms"],
+        "cmd_blocked": _stats["cmd_blocked"],
+        "python_version": platform.python_version(),
+        "pool_size": pool_size,
+        "pool_active_hosts": pool_active_hosts,
+        "queue_size": len(_result_queue),
+    }
+    if _HAS_PSUTIL:
+        try:
+            metrics["cpu_percent"] = psutil.cpu_percent(interval=0.1)
+            mem = psutil.virtual_memory()
+            metrics["memory_percent"] = mem.percent
+            metrics["memory_used_mb"] = round(mem.used / 1024 / 1024)
+            metrics["memory_total_mb"] = round(mem.total / 1024 / 1024)
+        except Exception:
+            pass
+    return metrics
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 1: SSH Connection Pool helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _pool_acquire(msg):
+    """Return a pooled SSH entry {"conn", "last_used", "lock"}; reconnect if stale.
+
+    QF-5 — caller MUST use ``with entry["lock"]:`` around any conn.send_* call
+    to serialize same-device commands. _pool_lock here covers only dict access
+    (lookup/insert/delete), NOT the connection's I/O buffer.
+    """
+    params = _build_params(msg)
+    key = (params["host"], params["port"], params["username"])
+
+    with _pool_lock:
+        entry = _ssh_pool.get(key)
+        if entry is not None:
+            conn = entry["conn"]
+            try:
+                alive = conn.is_alive()
+            except Exception:
+                alive = False
+
+            if alive:
+                entry["last_used"] = time.time()
+                # Backward-compat: entries from older pool layout may lack lock
+                if "lock" not in entry:
+                    entry["lock"] = threading.Lock()
+                return entry
+            else:
+                # Stale connection — close and reconnect
+                try:
+                    conn.disconnect()
+                except Exception:
+                    pass
+                del _ssh_pool[key]
+
+        # Open a fresh connection and store it (with per-entry lock)
+        conn = _get_connection(msg)
+        entry = {"conn": conn, "last_used": time.time(), "lock": threading.Lock()}
+        _ssh_pool[key] = entry
+        return entry
+
+
+# Backward-compat shim for any caller still expecting a bare conn (none in tree).
+def _pool_get(msg):
+    return _pool_acquire(msg)["conn"]
+
+
+def _pool_evict_idle():
+    """Evict connections idle longer than _POOL_TTL. Runs synchronously.
+
+    QF-5 — skip entries whose lock is held by another thread (in-flight
+    command); otherwise disconnect would happen mid-read and corrupt netmiko's
+    buffer for the running command. Skipped entries are picked up on the next
+    eviction cycle once the command finishes.
+    """
+    now = time.time()
+    with _pool_lock:
+        stale_keys = [
+            k for k, v in _ssh_pool.items()
+            if (now - v["last_used"]) > _POOL_TTL
+        ]
+        for k in stale_keys:
+            entry = _ssh_pool[k]
+            entry_lock = entry.get("lock")
+            if entry_lock is not None and not entry_lock.acquire(blocking=False):
+                # Busy — leave for next cycle; refresh last_used so we don't
+                # spin-evict every minute on a long-running command.
+                entry["last_used"] = now
+                log.debug("Pool: skipping eviction (busy) for {}".format(k[0]))
+                continue
+            try:
+                entry["conn"].disconnect()
+            except Exception:
+                pass
+            finally:
+                if entry_lock is not None:
+                    try:
+                        entry_lock.release()
+                    except Exception:
+                        pass
+            del _ssh_pool[k]
+            log.debug("Pool: evicted idle connection to {}".format(k[0]))
+
+
+async def _pool_evict_loop():
+    """Coroutine: periodically evict idle pool connections."""
+    loop = asyncio.get_event_loop()
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await loop.run_in_executor(None, _pool_evict_idle)
+        except Exception as e:
+            log.debug("Pool evict hatasi: {}".format(e))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SSH helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _ParamikoDirectConn:
+    """Raw paramiko channel for devices with non-standard SSH auth (e.g. Grandstream allowed_types=[''])."""
+
+    def __init__(self, transport, channel):
+        import select as _sel
+        self._transport = transport
+        self._channel = channel
+        self._sel = _sel
+        self._channel.settimeout(120)
+        time.sleep(2)
+        self._drain()
+
+    def _drain(self):
+        try:
+            while self._channel.recv_ready():
+                self._channel.recv(65535)
+        except Exception:
+            pass
+
+    def _read_until_idle(self, timeout):
+        output = b""
+        deadline = time.time() + timeout
+        last_data = time.time()
+        while time.time() < deadline:
+            r, _, _ = self._sel.select([self._channel], [], [], 0.2)
+            if r:
+                chunk = self._channel.recv(65535)
+                if not chunk:
+                    break
+                output += chunk
+                last_data = time.time()
+            elif output and time.time() - last_data > 1.5:
+                break
+        return output.decode("utf-8", errors="replace")
+
+    @staticmethod
+    def _clean(text: str) -> str:
+        import re as _re
+        # Strip ANSI escape sequences and control chars
+        text = _re.sub(r"\x1b\[[0-9;]*[mGKHFJA-Z]", "", text)
+        text = _re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+        return text
+
+    def send_command(self, command, read_timeout=120, **kwargs):
+        self._drain()
+        self._channel.send(command + "\n")
+        time.sleep(0.3)
+        raw = self._clean(self._read_until_idle(read_timeout))
+        # Strip echoed command (first line) and trailing prompt lines
+        lines = raw.splitlines()
+        if lines and command.strip().lower() in lines[0].lower():
+            lines = lines[1:]
+        while lines and (not lines[-1].strip() or lines[-1].strip().rstrip(" \t").endswith(("#", ">", "$"))):
+            lines.pop()
+        return "\n".join(lines) if lines else raw
+
+    def send_command_timing(self, command, read_timeout=120, **kwargs):
+        return self.send_command(command, read_timeout=read_timeout)
+
+    def send_config_set(self, commands, read_timeout=120, **kwargs):
+        if isinstance(commands, str):
+            commands = [commands]
+        output = ""
+        for cmd in commands:
+            output += self.send_command(cmd, read_timeout=30)
+        return output
+
+    def save_config(self):
+        return self.send_command("write", read_timeout=15)
+
+    def is_alive(self):
+        try:
+            return self._transport.is_active() and not self._channel.closed
+        except Exception:
+            return False
+
+    def disconnect(self):
+        try:
+            self._channel.close()
+        except Exception:
+            pass
+        try:
+            self._transport.close()
+        except Exception:
+            pass
+
+
+# ── Interactive SSH shell (Faz T8.5 — terminal agent-relay) ────────────────
+# Backend WS endpoint artık doğrudan paramiko yerine agent'a relay yapıyor;
+# agent her aktif terminal için bir paramiko interactive shell tutar ve
+# tuşlamaları/çıktıyı backend ile çift yönlü taşır.
+#   session_id (backend tarafından üretilir) → {ssh, chan, reader_task}
+# Browser kapanırsa backend "ssh_shell_close" yollar; agent host kapansa
+# WS tarafı handle eder (reader task cancel + paramiko close finally'de).
+_shells: dict = {}
+
+
+def _shell_open_sync(msg: dict):
+    """Paramiko ile cihaza bağlan + invoke_shell. Sync (executor'da çağrılır).
+    Net hata mesajı için NetmikoAuthenticationException benzeri sınıflandırma
+    yapılmıyor — exception string'i backend'e olduğu gibi gider."""
+    import paramiko
+    host = msg["device_ip"]
+    port = int(msg.get("ssh_port") or 22)
+    username = msg["ssh_username"]
+    password = msg.get("ssh_password", "")
+    cols = int(msg.get("cols") or 80)
+    rows = int(msg.get("rows") or 24)
+
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.connect(
+        host, port=port, username=username, password=password,
+        timeout=15, look_for_keys=False, allow_agent=False,
+    )
+    # xterm-256color: renkli prompt + vim/htop için uygun
+    chan = ssh.invoke_shell(term="xterm-256color", width=cols, height=rows)
+    # Non-blocking read; reader_task recv_ready() ile poll eder
+    chan.settimeout(0.0)
+    return ssh, chan
+
+
+async def _shell_reader(session_id: str, channel, ws, loop):
+    """Per-shell background reader. channel.recv → backend'e ssh_shell_output
+    (base64 binary safe). Channel kapanırsa veya recv 0 dönerse temizlik
+    yapıp ssh_shell_closed bildirimi gönderir."""
+    try:
+        while not channel.closed:
+            if channel.recv_ready():
+                try:
+                    data = await loop.run_in_executor(None, lambda: channel.recv(4096))
+                except Exception:
+                    break
+                if not data:
+                    break
+                try:
+                    await ws.send(json.dumps({
+                        "type": "ssh_shell_output",
+                        "session_id": session_id,
+                        "data": base64.b64encode(data).decode("ascii"),
+                    }))
+                except Exception:
+                    # WS koptu — reader'ı bitir, finally cleanup eder
+                    break
+            else:
+                await asyncio.sleep(0.05)
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        log.warning("shell reader [{}] hata: {}".format(session_id[:8], exc))
+    finally:
+        try:
+            await ws.send(json.dumps({
+                "type": "ssh_shell_closed",
+                "session_id": session_id,
+            }))
+        except Exception:
+            pass
+        s = _shells.pop(session_id, None)
+        if s:
+            try: s["chan"].close()
+            except Exception: pass
+            try: s["ssh"].close()
+            except Exception: pass
+
+
+def _connect_keyboard_interactive(params: dict) -> _ParamikoDirectConn:
+    """Exhaustive auth fallback for devices that return allowed_types=[''] (e.g. Grandstream)."""
+    import paramiko
+    password = params["password"]
+    username = params["username"]
+    host = params["host"]
+    port = int(params.get("port", 22))
+    timeout = int(params.get("timeout", 30))
+
+    t = paramiko.Transport((host, port))
+    t.start_client(timeout=timeout)
+
+    def _kbd_handler(title, instructions, prompt_list):
+        # Return password for every prompt; empty list if no prompts
+        return [password] * len(prompt_list) if prompt_list else []
+
+    # Try auth methods in order; check is_authenticated() after each one
+    # because some buggy servers raise BadAuthenticationType but auth anyway
+    for auth_fn in (
+        lambda: t.auth_none(username),
+        lambda: t.auth_password(username, password),
+        lambda: t.auth_interactive_dumb(username, _kbd_handler),
+        lambda: t.auth_interactive(username, _kbd_handler),
+    ):
+        try:
+            auth_fn()
+        except (paramiko.BadAuthenticationType, paramiko.AuthenticationException):
+            pass
+        except Exception:
+            pass
+        if t.is_authenticated():
+            break
+    else:
+        t.close()
+        raise NetmikoAuthenticationException(
+            "SSH kimlik dogrulama basarisiz (tum yontemler denendi). "
+            "Lutfen cihazin SSH kullanici adi ve sifresini kontrol edin."
+        )
+
+    chan = t.open_session()
+    chan.get_pty(term="vt100", width=200, height=48)
+    chan.invoke_shell()
+    return _ParamikoDirectConn(t, chan)
+
+
+def _build_params(msg):
+    """Build netmiko ConnectHandler params, using vault credentials if available."""
+    os_type = msg.get("os_type", "cisco_ios")
+
+    # Feature 8: vault credential lookup
+    credential_id = msg.get("credential_id")
+    if credential_id and credential_id in _vault:
+        creds = _vault[credential_id]
+        ssh_username = creds.get("username", msg.get("ssh_username", ""))
+        ssh_password = creds.get("password", msg.get("ssh_password", ""))
+        enable_secret = creds.get("enable_secret", msg.get("enable_secret", ""))
+    else:
+        ssh_username = msg.get("ssh_username", "")
+        ssh_password = msg.get("ssh_password", "")
+        enable_secret = msg.get("enable_secret", "")
+
+    # generic devices often have non-standard SSH auth (allowed_types=['']);
+    # linux driver + look_for_keys/allow_agent=False avoids paramiko auth confusion.
+    effective_type = "linux" if os_type == "generic" else os_type
+    params = {
+        "device_type":        effective_type,
+        "host":               msg["device_ip"],
+        "username":           ssh_username,
+        "password":           ssh_password,
+        "port":               int(msg.get("ssh_port", 22)),
+        "timeout":            60,
+        "auth_timeout":       30,
+        "session_timeout":    120,
+        "banner_timeout":     30,
+        "blocking_timeout":   40,
+        "fast_cli":           False,
+        "global_delay_factor": 3,
+        "use_keys":           False,
+        "allow_agent":        False,
+    }
+    if enable_secret:
+        params["secret"] = enable_secret
+    return params
+
+
+def _get_connection(msg):
+    """Open SSH connection with device-type-specific handling.
+
+    ruijie_os driver calls enable() automatically in session_preparation.
+    When no enable_secret is provided we bypass that to avoid 'Failed to
+    enter enable mode' errors (user may have privilege 15 already, or the
+    device may accept enable without a password in a non-standard way).
+    """
+    params = _build_params(msg)
+    os_type = params["device_type"]
+    enable_secret = params.get("secret", "")
+
+    try:
+        if os_type == "ruijie_os" and not enable_secret:
+            # Use auto_connect=False so we can skip the automatic enable() call
+            conn = ConnectHandler(**{**params, "auto_connect": False})
+            conn.establish_connection()
+            conn.set_base_prompt()
+            try:
+                conn.disable_paging(command="terminal length 0")
+            except Exception:
+                pass
+            conn.clear_buffer()
+        else:
+            conn = ConnectHandler(**params)
+            # For non-Ruijie devices the driver doesn't auto-enable; call explicitly
+            if enable_secret and os_type != "ruijie_os":
+                conn.enable()
+    except NetmikoAuthenticationException as exc:
+        # Grandstream and some embedded devices return allowed_types=[''] which
+        # means they use keyboard-interactive but don't advertise it.
+        if "allowed types: ['']" in str(exc):
+            conn = _connect_keyboard_interactive(params)
+        else:
+            raise
+
+    return conn
+
+
+def _ssh_test(msg):
+    """Always uses a fresh connection — never pooled."""
+    t0 = time.time()
+    try:
+        conn = _get_connection(msg)
+        conn.disconnect()
+        return {"success": True, "output": "Baglanti basarili", "duration_ms": round((time.time() - t0) * 1000)}
+    except NetmikoAuthenticationException as e:
+        return {"success": False, "error": "Kimlik dogrulama hatasi: {}".format(e), "duration_ms": round((time.time() - t0) * 1000)}
+    except NetmikoTimeoutException as e:
+        return {"success": False, "error": "Baglanti zaman asimi: {}".format(e), "duration_ms": round((time.time() - t0) * 1000)}
+    except Exception as e:
+        return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
+
+
+def _ssh_command(msg):
+    """Uses pooled connection. QF-5 — per-entry lock serializes same-device commands."""
+    t0 = time.time()
+    try:
+        entry = _pool_acquire(msg)
+        with entry["lock"]:                       # QF-5 — netmiko conn not thread-safe
+            output = entry["conn"].send_command(msg["command"], read_timeout=120)
+        return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
+    except Exception as e:
+        # On error, remove from pool so next call gets a fresh connection
+        params = _build_params(msg)
+        key = (params["host"], params["port"], params["username"])
+        with _pool_lock:
+            _ssh_pool.pop(key, None)
+        return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
+
+
+def _ssh_config(msg):
+    """Uses pooled connection. QF-5 — per-entry lock serializes same-device commands."""
+    t0 = time.time()
+    try:
+        entry = _pool_acquire(msg)
+        with entry["lock"]:                       # QF-5
+            output = entry["conn"].send_config_set(msg["commands"], read_timeout=120)
+            entry["conn"].save_config()
+        return {"success": True, "output": str(output), "duration_ms": round((time.time() - t0) * 1000)}
+    except Exception as e:
+        params = _build_params(msg)
+        key = (params["host"], params["port"], params["username"])
+        with _pool_lock:
+            _ssh_pool.pop(key, None)
+        return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 7: Command Result Streaming
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ssh_command_stream_sync(msg, chunk_queue, main_loop):
+    """Run SSH command and push ~512B chunks into chunk_queue via main_loop.
+
+    QF-5 — per-entry lock held across send_command_timing so chunk production
+    cannot interleave with a concurrent ssh_command on the same pooled conn.
+    """
+    CHUNK_SIZE = 512
+    try:
+        entry = _pool_acquire(msg)
+        with entry["lock"]:                       # QF-5
+            output = entry["conn"].send_command_timing(msg["command"], read_timeout=120)
+        # Split output into chunks (outside lock — chunking is pure str ops)
+        for i in range(0, max(len(output), 1), CHUNK_SIZE):
+            chunk = output[i:i + CHUNK_SIZE]
+            main_loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+    except Exception as e:
+        main_loop.call_soon_threadsafe(chunk_queue.put_nowait, {"__error__": str(e)})
+    finally:
+        # Sentinel to signal end of stream
+        main_loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 4: SNMP via Agent
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _snmp_get_sync(msg):
+    """Synchronously run async SNMP get using a dedicated event loop."""
+    if not _HAS_SNMP:
+        return {"success": False, "error": "puresnmp not installed"}
+
+    host = msg.get("device_ip", "")
+    community = msg.get("community", "public")
+    oid = msg.get("oid", "")
+    port = int(msg.get("snmp_port", 161))
+
+    async def _do_get():
+        try:
+            async with SnmpClient(host, V2C(community), port=port) as client:
+                result = await client.get(oid)
+            return {"success": True, "data": {oid: str(result)}}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    t0 = time.monotonic()
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(_do_get())
+        _record_snmp_latency_ms((time.monotonic() - t0) * 1000)
+        return result
+    finally:
+        loop.close()
+
+
+def _snmp_walk_sync(msg):
+    """Synchronously run async SNMP walk using a dedicated event loop."""
+    if not _HAS_SNMP:
+        return {"success": False, "error": "puresnmp not installed"}
+
+    host = msg.get("device_ip", "")
+    community = msg.get("community", "public")
+    oid = msg.get("oid", "")
+    port = int(msg.get("snmp_port", 161))
+
+    async def _do_walk():
+        try:
+            result_data = {}
+            async with SnmpClient(host, V2C(community), port=port) as client:
+                async for varbind in client.walk(oid):
+                    result_data[str(varbind.oid)] = str(varbind.value)
+            return {"success": True, "data": result_data}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(_do_walk())
+    finally:
+        loop.close()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 5: Auto Device Discovery
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _ssh_banner_grab(ip: str, port: int, timeout: float = 2.0) -> str:
+    """TCP connect to ip:port, send \\r\\n, read up to 256 bytes, return banner string."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout) as s:
+            s.sendall(b"\r\n")
+            banner = s.recv(256)
+            return banner.decode("utf-8", errors="replace").strip()
+    except Exception:
+        return ""
+
+
+def _probe_host(ip: str, ports: list) -> dict | None:
+    """Try each port; collect open_ports and banners. Return dict or None if all closed."""
+    open_ports = []
+    banners = {}
+    for port in ports:
+        banner = _ssh_banner_grab(ip, port)
+        if banner is not None and banner != "":
+            open_ports.append(port)
+            banners[port] = banner
+        else:
+            # Still check if port is open even without banner
+            try:
+                with socket.create_connection((ip, port), timeout=2.0):
+                    open_ports.append(port)
+                    banners[port] = ""
+            except Exception:
+                pass
+
+    if open_ports:
+        return {"ip": ip, "open_ports": open_ports, "banners": banners}
+    return None
+
+
+def _discover_subnet(msg: dict) -> dict:
+    """Parse CIDR range, probe up to 1024 hosts in parallel."""
+    cidr = msg.get("subnet", "")
+    ports = msg.get("ports", [22, 23, 80, 443])
+    try:
+        network = ipaddress.ip_network(cidr, strict=False)
+    except ValueError as e:
+        return {"success": False, "error": "Gecersiz CIDR: {}".format(e)}
+
+    hosts = list(network.hosts())
+    if len(hosts) > 1024:
+        hosts = hosts[:1024]
+
+    scanned = len(hosts)
+    discovered = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+        futures = {executor.submit(_probe_host, str(ip), ports): str(ip) for ip in hosts}
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    discovered.append(result)
+            except Exception:
+                pass
+
+    return {"success": True, "hosts": discovered, "scanned": scanned}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 6: Syslog Collector
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _parse_syslog(data: bytes, addr: tuple) -> dict:
+    """Minimal RFC 3164 syslog parser."""
+    source_ip = addr[0] if addr else ""
+    try:
+        raw = data.decode("utf-8", errors="replace").strip()
+    except Exception:
+        raw = str(data)
+
+    facility = 0
+    severity = 0
+    message = raw
+
+    # Try to parse PRI field: <PRI>...
+    if raw.startswith("<"):
+        try:
+            end = raw.index(">")
+            pri = int(raw[1:end])
+            facility = pri >> 3
+            severity = pri & 0x07
+            message = raw[end + 1:].strip()
+        except (ValueError, IndexError):
+            pass
+
+    return {
+        "facility": facility,
+        "severity": severity,
+        "message": message,
+        "source_ip": source_ip,
+    }
+
+
+class SyslogProtocol(asyncio.DatagramProtocol):
+    def __init__(self, ws, loop):
+        self._ws = ws
+        self._loop = loop
+
+    def datagram_received(self, data: bytes, addr: tuple):
+        parsed = _parse_syslog(data, addr)
+        payload = json.dumps({
+            "type": "syslog_event",
+            "agent_id": AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **parsed,
+        })
+
+        async def _do_send():
+            try:
+                await self._ws.send(payload)
+            except Exception as e:
+                log.debug("Syslog gonderilemedi: {}".format(e))
+                if _event_queue is not None:
+                    _event_queue.push(json.loads(payload))
+
+        asyncio.ensure_future(_do_send(), loop=self._loop)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# D4: SNMP Trap Receiver helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+# OID → (trap_name, severity)
+_SNMP_TRAP_OID_MAP = {
+    "1.3.6.1.6.3.1.1.5.1": ("coldStart",   "warning"),
+    "1.3.6.1.6.3.1.1.5.2": ("warmStart",   "warning"),
+    "1.3.6.1.6.3.1.1.5.3": ("linkDown",    "critical"),
+    "1.3.6.1.6.3.1.1.5.4": ("linkUp",      "info"),
+    "1.3.6.1.6.3.1.1.5.5": ("authFailure", "warning"),
+}
+# v1 generic-trap integer → OID string
+_V1_GENERIC_TRAP_MAP = {
+    0: "1.3.6.1.6.3.1.1.5.1",
+    1: "1.3.6.1.6.3.1.1.5.2",
+    2: "1.3.6.1.6.3.1.1.5.3",
+    3: "1.3.6.1.6.3.1.1.5.4",
+    4: "1.3.6.1.6.3.1.1.5.5",
+}
+_SNMP_TRAP_OID_VARBIND = "1.3.6.1.6.3.1.1.4.1.0"  # snmpTrapOID.0
+
+
+def _ber_decode_length(data: bytes, offset: int):
+    b = data[offset]
+    offset += 1
+    if b < 0x80:
+        return b, offset
+    num_octets = b & 0x7F
+    length = 0
+    for _ in range(num_octets):
+        length = (length << 8) | data[offset]
+        offset += 1
+    return length, offset
+
+
+def _ber_decode_tlv(data: bytes, offset: int):
+    tag = data[offset]
+    offset += 1
+    length, offset = _ber_decode_length(data, offset)
+    value = data[offset:offset + length]
+    return tag, value, offset + length
+
+
+def _ber_decode_int(value: bytes) -> int:
+    if not value:
+        return 0
+    return int.from_bytes(value, "big", signed=True)
+
+
+def _ber_decode_oid(value: bytes) -> str:
+    if not value:
+        return ""
+    parts = [value[0] // 40, value[0] % 40]
+    idx = 1
+    while idx < len(value):
+        subid = 0
+        while idx < len(value):
+            b = value[idx]
+            idx += 1
+            subid = (subid << 7) | (b & 0x7F)
+            if not (b & 0x80):
+                break
+        parts.append(subid)
+    return ".".join(str(p) for p in parts)
+
+
+def _parse_snmp_trap(data: bytes, addr: tuple) -> dict:
+    """Minimal SNMP v1/v2c trap BER parser."""
+    source_ip = addr[0] if addr else ""
+    result = {
+        "source_ip": source_ip,
+        "version": "unknown",
+        "community": "",
+        "trap_oid": "",
+        "trap_name": "unknown",
+        "severity": "warning",
+        "varbinds": [],
+    }
+    try:
+        # Outer SEQUENCE wrapper
+        tag, seq_data, _ = _ber_decode_tlv(data, 0)
+        if tag != 0x30:
+            return result
+        data = seq_data
+        offset = 0
+
+        # Version INTEGER
+        tag, val, offset = _ber_decode_tlv(data, offset)
+        if tag != 0x02:
+            return result
+        version = _ber_decode_int(val)
+        result["version"] = "v{}".format(version + 1)
+
+        # Community OCTET STRING
+        tag, val, offset = _ber_decode_tlv(data, offset)
+        if tag == 0x04:
+            result["community"] = val.decode("ascii", errors="replace")
+
+        # PDU
+        tag, pdu_data, _ = _ber_decode_tlv(data, offset)
+
+        if tag == 0xA4:  # SNMPv1 Trap-PDU
+            pdu_off = 0
+            # enterprise OID
+            t, v, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            enterprise = _ber_decode_oid(v) if t == 0x06 else ""
+            # agent-addr (skip)
+            _, _, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            # generic-trap
+            t, v, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            generic = _ber_decode_int(v) if t == 0x02 else -1
+            # specific-trap
+            t, v, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            specific = _ber_decode_int(v) if t == 0x02 else 0
+            trap_oid = _V1_GENERIC_TRAP_MAP.get(generic, "{}.0.{}".format(enterprise, specific))
+            result["trap_oid"] = trap_oid
+            name, sev = _SNMP_TRAP_OID_MAP.get(trap_oid, ("generic_trap_{}".format(generic), "warning"))
+            result["trap_name"] = name
+            result["severity"] = sev
+
+        elif tag == 0xA7:  # SNMPv2c Trap-PDU
+            pdu_off = 0
+            # skip request-id, error-status, error-index
+            for _ in range(3):
+                _, _, pdu_off = _ber_decode_tlv(pdu_data, pdu_off)
+            # VarBindList
+            t, vbl, _ = _ber_decode_tlv(pdu_data, pdu_off)
+            if t == 0x30:
+                vb_off = 0
+                while vb_off < len(vbl):
+                    try:
+                        t2, vb, vb_off = _ber_decode_tlv(vbl, vb_off)
+                        if t2 != 0x30:
+                            break
+                        vi = 0
+                        t3, oid_v, vi = _ber_decode_tlv(vb, vi)
+                        oid_str = _ber_decode_oid(oid_v) if t3 == 0x06 else ""
+                        t4, obj_v, _ = _ber_decode_tlv(vb, vi)
+                        if t4 == 0x06:
+                            obj_str = _ber_decode_oid(obj_v)
+                        elif t4 == 0x04:
+                            obj_str = obj_v.decode("ascii", errors="replace")
+                        else:
+                            obj_str = str(_ber_decode_int(obj_v))
+                        if oid_str == _SNMP_TRAP_OID_VARBIND and t4 == 0x06:
+                            result["trap_oid"] = obj_str
+                            name, sev = _SNMP_TRAP_OID_MAP.get(obj_str, ("unknown", "warning"))
+                            result["trap_name"] = name
+                            result["severity"] = sev
+                        result["varbinds"].append({"oid": oid_str, "value": obj_str})
+                    except Exception:
+                        break
+    except Exception as e:
+        log.debug("SNMP trap parse hatasi: {}".format(e))
+    return result
+
+
+class SnmpTrapProtocol(asyncio.DatagramProtocol):
+    def __init__(self, ws, loop):
+        self._ws = ws
+        self._loop = loop
+
+    def datagram_received(self, data: bytes, addr: tuple):
+        parsed = _parse_snmp_trap(data, addr)
+        payload = json.dumps({
+            "type":      "snmp_trap",
+            "agent_id":  AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **parsed,
+        })
+
+        async def _do_send():
+            try:
+                await self._ws.send(payload)
+            except Exception as e:
+                log.debug("SNMP trap gonderilemedi: {}".format(e))
+                if _event_queue is not None:
+                    _event_queue.push(json.loads(payload))
+
+        asyncio.ensure_future(_do_send(), loop=self._loop)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 8: Secure Credential Vault helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _vault_decrypt(ciphertext_b64: str, key: bytes) -> dict:
+    """Decrypt AES-GCM encrypted credential. Returns plaintext dict."""
+    raw = base64.b64decode(ciphertext_b64)
+    nonce = raw[:12]
+    ciphertext = raw[12:]
+    aesgcm = AESGCM(key)
+    plaintext = aesgcm.decrypt(nonce, ciphertext, None)
+    return json.loads(plaintext.decode("utf-8"))
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Feature 2: Proactive Device Health Monitoring
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _tcp_probe(ip: str, port: int, timeout: float = 3.0) -> bool:
+    """Blocking TCP reachability check — designed to run in an executor."""
+    try:
+        with socket.create_connection((ip, port), timeout=timeout):
+            return True
+    except Exception:
+        return False
+
+
+async def _health_check(ws, loop):
+    """Periodically TCP-probe all devices with:
+    - Parallel probes (up to _HEALTH_PARALLELISM concurrent)
+    - N-out-of-M confirmation (_CONFIRM_FAILURES before reporting down)
+    - Flap detection (_FLAP_THRESHOLD transitions in _FLAP_WINDOW_SEC)
+    - Delta reporting (only changed devices sent to backend)
+    """
+    sem = asyncio.Semaphore(_HEALTH_PARALLELISM)
+
+    async def _probe(device):
+        ip = device.get("device_ip") or device.get("ip", "")
+        port = int(device.get("ssh_port", 22))
+        device_id = device.get("id") or device.get("device_id") or ip
+        async with sem:
+            reachable = await loop.run_in_executor(None, _tcp_probe, ip, port, 3.0)
+        return device_id, ip, reachable
+
+    while True:
+        await asyncio.sleep(_health_check_interval)
+        if not _device_list:
+            continue
+
+        tasks = [_probe(d) for d in _device_list]
+        raw = await asyncio.gather(*tasks, return_exceptions=True)
+
+        changed = []
+        now = time.time()
+
+        for item in raw:
+            if isinstance(item, Exception):
+                continue
+            device_id, ip, reachable = item
+
+            # N-out-of-M: accumulate consecutive failures before reporting down
+            if not reachable:
+                _device_fail_count[device_id] = _device_fail_count.get(device_id, 0) + 1
+            else:
+                _device_fail_count[device_id] = 0
+
+            fail_count = _device_fail_count[device_id]
+
+            # Silence single failures — wait for confirmation
+            if not reachable and fail_count < _CONFIRM_FAILURES:
+                continue
+
+            # Delta: skip if status hasn't changed since last report
+            last_status = _device_last_status.get(device_id)
+            if last_status is not None and last_status == reachable:
+                continue
+
+            # Flap detection: count status transitions in the sliding window
+            hist = _device_flap_history.setdefault(device_id, deque(maxlen=30))
+            hist.append((now, reachable))
+            transitions = sum(
+                1 for i in range(1, len(hist))
+                if hist[i][1] != hist[i - 1][1] and now - hist[i][0] < _FLAP_WINDOW_SEC
+            )
+            is_flapping = transitions >= _FLAP_THRESHOLD
+
+            _device_last_status[device_id] = reachable
+            changed.append({
+                "device_id": device_id,
+                "ip": ip,
+                "reachable": reachable,
+                "flapping": is_flapping,
+                "checked_at": datetime.now(timezone.utc).isoformat(),
+            })
+
+        if not changed:
+            continue  # Delta reporting: nothing to send
+
+        status_payload = {
+            "type": "device_status_report",
+            "agent_id": AGENT_ID,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "results": changed,
+        }
+        try:
+            await ws.send(json.dumps(status_payload))
+        except Exception as e:
+            log.debug("Health check raporu gonderilemedi: {}".format(e))
+            if _event_queue is not None:
+                _event_queue.push(status_payload)
+                log.debug("Health check raporu offline queue'ya eklendi ({} bekliyor)".format(
+                    _event_queue.pending_count()))
+            break
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WebSocket message handler
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def handle_message(ws, msg, loop):
+    global _restart_requested, _device_list, _syslog_enabled, _syslog_port
+    global _snmp_trap_enabled, _snmp_trap_port
+    global _vault, _vault_key
+
+    t = msg.get("type")
+    rid = msg.get("request_id", "")
+
+    # Security policy update from server
+    if t == "security_config":
+        _security["command_mode"] = msg.get("command_mode", "all")
+        _security["allowed_commands"] = msg.get("allowed_commands", [])
+        log.info("Guvenlik politikasi guncellendi: mod={}, kural sayisi={}".format(
+            _security["command_mode"], len(_security["allowed_commands"])
+        ))
+        return
+
+    # Key rotation
+    if t == "key_rotate":
+        new_key = msg.get("new_key", "")
+        if new_key:
+            log.info("Key rotasyon istegi alindi - env dosyasi guncelleniyor...")
+            _update_env_file(new_key)
+            await ws.send(json.dumps({"type": "key_rotate_ack", "agent_id": AGENT_ID}))
+        return
+
+    # Feature 3: _send helper — enqueues on failure if request_id present
+    async def _send(payload):
+        """Send a message; enqueue if connection closed and payload has request_id."""
+        try:
+            await ws.send(json.dumps(payload))
+        except Exception as exc:
+            log.warning("Sonuc gonderilemedi (baglanti kapali): {}".format(exc))
+            if payload.get("request_id"):
+                _result_queue.append(payload)
+
+    # Feature 2: device sync
+    if t == "device_sync":
+        _device_list.clear()
+        _device_list.extend(msg.get("devices", []))
+        log.info("Cihaz listesi guncellendi: {} cihaz".format(len(_device_list)))
+        return
+
+    # Feature 6: syslog config
+    if t == "syslog_config":
+        _syslog_enabled = msg.get("enabled", False)
+        _syslog_port = int(msg.get("port", 514))
+        log.info("Syslog konfig guncellendi: enabled={}, port={}".format(_syslog_enabled, _syslog_port))
+        return
+
+    # D4: SNMP Trap config
+    if t == "trap_config":
+        _snmp_trap_enabled = msg.get("enabled", False)
+        _snmp_trap_port = int(msg.get("port", 162))
+        log.info("SNMP Trap konfig guncellendi: enabled={}, port={}".format(_snmp_trap_enabled, _snmp_trap_port))
+        return
+
+    # Ping check — lightweight reachability probe (used by backend poller)
+    if t == "ping_check":
+        ip = msg.get("ip", "")
+        timeout = int(msg.get("timeout", 3))
+        req_id = msg.get("req_id", rid)
+
+        async def _do_ping():
+            try:
+                flag = "-n" if sys.platform == "win32" else "-c"
+                w_flag = ["-w", str(timeout * 1000)] if sys.platform == "win32" else ["-W", str(timeout)]
+                proc = await asyncio.create_subprocess_exec(
+                    "ping", flag, "1", *w_flag, ip,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
+                reachable = proc.returncode == 0
+            except Exception:
+                reachable = False
+            await _send({"type": "ping_result", "req_id": req_id, "ip": ip, "reachable": reachable})
+
+        asyncio.ensure_future(_do_ping())
+        return
+
+    # Synthetic probe — icmp / tcp / dns / http (Faz 3B)
+    if t == "synthetic_probe":
+        req_id   = msg.get("req_id", rid)
+        ptype    = msg.get("probe_type", "icmp")
+        target   = msg.get("target", "")
+        timeout  = float(msg.get("timeout", 5))
+
+        async def _do_synthetic():
+            import time as _time
+            import socket as _sock
+            t0 = _time.time()
+            success = False
+            detail  = ""
+            try:
+                if ptype == "icmp":
+                    flag   = "-n" if sys.platform == "win32" else "-c"
+                    w_flag = (["-w", str(int(timeout * 1000))] if sys.platform == "win32"
+                              else ["-W", str(int(timeout))])
+                    proc = await asyncio.create_subprocess_exec(
+                        "ping", flag, "1", *w_flag, target,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await asyncio.wait_for(proc.communicate(), timeout=timeout + 1)
+                    success = proc.returncode == 0
+                    detail  = "reachable" if success else "unreachable"
+
+                elif ptype == "tcp":
+                    port   = int(msg.get("port", 80))
+                    loop_  = asyncio.get_event_loop()
+                    success = await loop_.run_in_executor(None, _tcp_probe, target, port, timeout)
+                    detail  = f"tcp:{port} {'open' if success else 'refused/timeout'}"
+
+                elif ptype == "dns":
+                    rec   = msg.get("dns_record_type", "A")
+                    loop_ = asyncio.get_event_loop()
+                    def _resolve():
+                        _sock.getaddrinfo(target, None)
+                        return True
+                    try:
+                        success = await loop_.run_in_executor(None, _resolve)
+                        detail  = f"dns:{rec} resolved"
+                    except Exception as exc:
+                        success = False
+                        detail  = f"dns:{rec} failed: {str(exc)[:80]}"
+
+                elif ptype == "http":
+                    import urllib.request as _ur
+                    url             = msg.get("url", f"http://{target}")
+                    method          = msg.get("http_method", "GET")
+                    expected_status = int(msg.get("expected_status", 200))
+                    loop_           = asyncio.get_event_loop()
+                    def _http():
+                        req = _ur.Request(url, method=method)
+                        try:
+                            with _ur.urlopen(req, timeout=timeout) as resp:
+                                ok = resp.status == expected_status
+                                return ok, f"HTTP {resp.status}"
+                        except Exception as exc:
+                            return False, str(exc)[:80]
+                    success, detail = await loop_.run_in_executor(None, _http)
+
+                else:
+                    detail = f"unknown probe_type: {ptype}"
+
+            except Exception as exc:
+                success = False
+                detail  = str(exc)[:80]
+
+            latency_ms = round((_time.time() - t0) * 1000, 2)
+            await _send({
+                "type":       "synthetic_probe_result",
+                "req_id":     req_id,
+                "success":    success,
+                "latency_ms": latency_ms,
+                "detail":     detail,
+            })
+
+        asyncio.ensure_future(_do_synthetic())
+        return
+
+    # Feature 8: credential bundle
+    if t == "credential_bundle":
+        new_key_b64 = msg.get("vault_key", "")
+        credentials = msg.get("credentials", [])
+        if new_key_b64:
+            try:
+                _vault_key = base64.b64decode(new_key_b64)
+            except Exception as e:
+                log.error("Vault key decode hatasi: {}".format(e))
+                await _send({"type": "vault_ack", "agent_id": AGENT_ID, "success": False, "error": str(e)})
+                return
+
+        stored = 0
+        errors = []
+        for cred in credentials:
+            cred_id = cred.get("id")
+            ciphertext = cred.get("data")
+            if not cred_id or not ciphertext:
+                continue
+            if _vault_key and _HAS_CRYPTO:
+                try:
+                    decrypted = _vault_decrypt(ciphertext, _vault_key)
+                    _vault[cred_id] = decrypted
+                    stored += 1
+                except Exception as e:
+                    errors.append({"id": cred_id, "error": str(e)})
+            else:
+                # No crypto — store as-is (plaintext fallback, server decides)
+                _vault[cred_id] = cred.get("plaintext", {})
+                stored += 1
+
+        log.info("Vault guncellendi: {} credential saklanadi".format(stored))
+        await _send({
+            "type": "vault_ack",
+            "agent_id": AGENT_ID,
+            "success": True,
+            "stored": stored,
+            "errors": errors,
+        })
+        return
+
+    if t == "ssh_test":
+        ip        = msg.get("device_ip", "")
+        port      = int(msg.get("ssh_port", 22))
+        full_auth = msg.get("full_auth", False)
+        if full_auth:
+            # User-triggered test: full SSH auth to verify credentials
+            log.info("SSH test -> {}".format(ip))
+            result = await loop.run_in_executor(None, _ssh_test, msg)
+        else:
+            # Monitoring poll: lightweight TCP probe — no SSH handshake/auth
+            log.info("TCP probe -> {}:{}".format(ip, port))
+            t0 = time.time()
+            reachable = await loop.run_in_executor(None, _tcp_probe, ip, port, 5.0)
+            result = {
+                "success": reachable,
+                "output": "Erisim basarili" if reachable else "",
+                "error":  "" if reachable else "Erisim saglanamadi",
+                "duration_ms": round((time.time() - t0) * 1000),
+            }
+        _record_result(result)
+        await _send({"type": "ssh_result", "request_id": rid, **result})
+
+    elif t == "ssh_command":
+        command = msg.get("command", "")
+
+        # Apply server-sent policy (overrides local cache for this call)
+        if "command_mode" in msg:
+            _security["command_mode"] = msg["command_mode"]
+            _security["allowed_commands"] = msg.get("allowed_commands", [])
+
+        allowed, reason = _is_command_allowed(command)
+        if not allowed:
+            log.warning("Komut engellendi (agent politikasi): {} - {}".format(command[:60], reason))
+            _stats["cmd_blocked"] += 1
+            await _send({
+                "type": "security_blocked",
+                "request_id": rid,
+                "command": command,
+                "reason": reason,
+            })
+            return
+
+        log.info("SSH komut -> {} : {}".format(msg.get("device_ip"), command[:60]))
+        result = await loop.run_in_executor(None, _ssh_command, msg)
+        _record_result(result)
+        await _send({"type": "ssh_result", "request_id": rid, **result})
+
+    elif t == "ssh_config":
+        commands = msg.get("commands", [])
+
+        if "command_mode" in msg:
+            _security["command_mode"] = msg["command_mode"]
+            _security["allowed_commands"] = msg.get("allowed_commands", [])
+
+        # Validate each config command
+        if _security["command_mode"] != "all":
+            for cmd in commands:
+                allowed, reason = _is_command_allowed(cmd)
+                if not allowed:
+                    log.warning("Config komutu engellendi: {} - {}".format(cmd[:60], reason))
+                    _stats["cmd_blocked"] += 1
+                    await _send({
+                        "type": "security_blocked",
+                        "request_id": rid,
+                        "command": cmd,
+                        "reason": reason,
+                    })
+                    return
+
+        log.info("SSH config -> {} ({} komut)".format(msg.get("device_ip"), len(commands)))
+        result = await loop.run_in_executor(None, _ssh_config, msg)
+        _record_result(result)
+        await _send({"type": "ssh_result", "request_id": rid, **result})
+
+    # Feature 7: Command Result Streaming
+    elif t == "ssh_command_stream":
+        command = msg.get("command", "")
+
+        if "command_mode" in msg:
+            _security["command_mode"] = msg["command_mode"]
+            _security["allowed_commands"] = msg.get("allowed_commands", [])
+
+        allowed, reason = _is_command_allowed(command)
+        if not allowed:
+            log.warning("Stream komutu engellendi: {} - {}".format(command[:60], reason))
+            _stats["cmd_blocked"] += 1
+            await _send({
+                "type": "security_blocked",
+                "request_id": rid,
+                "command": command,
+                "reason": reason,
+            })
+            return
+
+        log.info("SSH stream -> {} : {}".format(msg.get("device_ip"), command[:60]))
+
+        chunk_queue: asyncio.Queue = asyncio.Queue()
+        main_loop = loop
+
+        async def _stream_task():
+            # Run the blocking SSH part in executor
+            await loop.run_in_executor(
+                None, _ssh_command_stream_sync, msg, chunk_queue, main_loop
+            )
+            # Read chunks from queue and send
+            seq = 0
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    # End of stream sentinel
+                    break
+                if isinstance(chunk, dict) and "__error__" in chunk:
+                    await _send({
+                        "type": "ssh_stream_end",
+                        "request_id": rid,
+                        "success": False,
+                        "error": chunk["__error__"],
+                    })
+                    return
+                await _send({
+                    "type": "ssh_stream_chunk",
+                    "request_id": rid,
+                    "seq": seq,
+                    "data": chunk,
+                })
+                seq += 1
+
+            await _send({
+                "type": "ssh_stream_end",
+                "request_id": rid,
+                "success": True,
+                "total_chunks": seq,
+            })
+
+        asyncio.create_task(_stream_task())
+
+    # Faz T8.5 — Interactive SSH terminal (agent-relay)
+    # Backend WS endpoint /ws/ssh/{device_id} artık paramiko'yu kendisi
+    # açmıyor; bu cihaza erişimi olan agent'a şu mesajları gönderiyor:
+    #   ssh_shell_open    → bu agent paramiko bağlanır, channel açar
+    #   ssh_shell_input   → tuşlamaları channel'a yazar
+    #   ssh_shell_resize  → terminal boyutu değiştir
+    #   ssh_shell_close   → session kapanır
+    # Agent her şey için tek WS bağlantısı kullanır; output base64 binary-safe.
+    elif t == "ssh_shell_open":
+        session_id = msg.get("session_id") or rid
+        log.info("shell open -> {}:{} (session={})".format(
+            msg.get("device_ip"), msg.get("ssh_port", 22), session_id[:8]))
+        try:
+            ssh, chan = await loop.run_in_executor(None, _shell_open_sync, msg)
+            reader = asyncio.create_task(_shell_reader(session_id, chan, ws, loop))
+            _shells[session_id] = {"ssh": ssh, "chan": chan, "reader": reader}
+            await _send({
+                "type": "ssh_shell_opened",
+                "session_id": session_id,
+                "request_id": rid,
+                "success": True,
+            })
+        except Exception as exc:
+            log.warning("shell open hata: {}".format(exc))
+            await _send({
+                "type": "ssh_shell_opened",
+                "session_id": session_id,
+                "request_id": rid,
+                "success": False,
+                "error": str(exc)[:300],
+            })
+
+    elif t == "ssh_shell_input":
+        session_id = msg.get("session_id", "")
+        s = _shells.get(session_id)
+        if s and not s["chan"].closed:
+            try:
+                data = base64.b64decode(msg.get("data", ""))
+                # channel.sendall blocking → executor
+                await loop.run_in_executor(None, s["chan"].sendall, data)
+            except Exception as exc:
+                log.warning("shell input hata (session={}): {}".format(session_id[:8], exc))
+
+    elif t == "ssh_shell_resize":
+        session_id = msg.get("session_id", "")
+        s = _shells.get(session_id)
+        if s and not s["chan"].closed:
+            try:
+                s["chan"].resize_pty(
+                    width=int(msg.get("cols", 80)),
+                    height=int(msg.get("rows", 24)),
+                )
+            except Exception:
+                pass
+
+    elif t == "ssh_shell_close":
+        session_id = msg.get("session_id", "")
+        s = _shells.pop(session_id, None)
+        if s:
+            try: s["reader"].cancel()
+            except Exception: pass
+            try: s["chan"].close()
+            except Exception: pass
+            try: s["ssh"].close()
+            except Exception: pass
+            log.info("shell closed (session={})".format(session_id[:8]))
+
+    # Feature 4: SNMP
+    elif t == "snmp_get":
+        log.info("SNMP get -> {} OID: {}".format(msg.get("device_ip"), msg.get("oid")))
+        result = await loop.run_in_executor(None, _snmp_get_sync, msg)
+        await _send({"type": "snmp_result", "request_id": rid, "operation": "get", **result})
+
+    elif t == "snmp_walk":
+        log.info("SNMP walk -> {} OID: {}".format(msg.get("device_ip"), msg.get("oid")))
+        result = await loop.run_in_executor(None, _snmp_walk_sync, msg)
+        await _send({"type": "snmp_result", "request_id": rid, "operation": "walk", **result})
+
+    # Feature 5: Auto Device Discovery
+    elif t == "discover_request":
+        subnet = msg.get("subnet", "")
+        log.info("Subnet discovery basladi: {}".format(subnet))
+        result = await loop.run_in_executor(None, _discover_subnet, msg)
+        await _send({"type": "discover_result", "request_id": rid, **result})
+
+    elif t == "ping":
+        await _send({"type": "pong"})
+
+    elif t == "update_available":
+        server_version = msg.get("current_version", "?")
+        script_path_remote = msg.get("script_path", "/api/v1/agents/script")
+        script_content_b64 = msg.get("script_content")
+        log.info("Guncelleme mevcut: {} -> {}. Yukleniyor...".format(VERSION, server_version))
+        try:
+            import ast as _ast
+            import shutil
+
+            script_file = os.path.abspath(__file__)
+            tmp_file = script_file + ".new"
+
+            if script_content_b64:
+                # Preferred: use content delivered directly via WebSocket
+                _decoded = base64.b64decode(script_content_b64)
+                with open(tmp_file, "wb") as _f:
+                    _f.write(_decoded)
+            else:
+                # Fallback: HTTP download with agent credentials
+                import urllib.request
+                dl_url = BACKEND_URL.rstrip("/") + script_path_remote
+                _req = urllib.request.Request(
+                    dl_url,
+                    headers={
+                        "User-Agent": "NetManager-Agent/{}".format(VERSION),
+                        "X-Agent-ID": AGENT_ID,
+                        "X-Agent-Key": os.environ.get("NETMANAGER_AGENT_KEY", AGENT_KEY),
+                    },
+                )
+                with urllib.request.urlopen(_req, timeout=30) as _resp:
+                    with open(tmp_file, "wb") as _f:
+                        _f.write(_resp.read())
+
+            # Validate syntax before replacing
+            with open(tmp_file, encoding="utf-8") as _f:
+                _ast.parse(_f.read())
+
+            # Backup and replace
+            shutil.copy2(script_file, script_file + ".bak")
+            shutil.move(tmp_file, script_file)
+
+            log.info("Script guncellendi. Yeniden baslatiliyor...")
+            await _send({"type": "update_ack", "agent_id": AGENT_ID, "new_version": server_version})
+            await asyncio.sleep(0.5)
+
+            # Restart: spawn new process then exit
+            import subprocess
+            subprocess.Popen([sys.executable, script_file] + sys.argv[1:])
+            sys.exit(0)
+        except Exception as _e:
+            log.error("Guncelleme basarisiz: {}".format(_e))
+            await _send({"type": "update_failed", "agent_id": AGENT_ID, "error": str(_e)})
+
+    elif t == "restart":
+        log.info("Yeniden baslatma istegi alindi - cikiliyor...")
+        await _send({"type": "restart_ack", "agent_id": AGENT_ID})
+        _restart_requested = True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Main run loop
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def run():
+    import random
+    ws_base = BACKEND_URL.replace("https://", "wss://").replace("http://", "ws://")
+    delay   = 5
+    loop    = asyncio.get_event_loop()
+    _disconnect_count = 0
+    _last_anomaly_disconnect = 0.0
+
+    log.info("NetManager Agent v{} baslatiliyor - ID: {}".format(VERSION, AGENT_ID))
+
+    while True:
+        # Always use the most recent key (may have been rotated)
+        current_key = os.environ.get("NETMANAGER_AGENT_KEY", AGENT_KEY)
+        ws_url = "{}/api/v1/agents/ws/{}?key={}".format(ws_base, AGENT_ID, current_key)
+
+        syslog_transport = None
+        trap_transport = None
+
+        try:
+            log.info("Baglaniliyor: {}/api/v1/agents/ws/{}".format(ws_base, AGENT_ID))
+            async with websockets.connect(
+                ws_url,
+                ping_interval=30,
+                ping_timeout=20,
+                open_timeout=30,
+                close_timeout=10,
+                max_size=10 * 1024 * 1024,
+            ) as ws:
+                log.info("Backend'e baglandi")
+                delay = 5
+
+                await ws.send(json.dumps({
+                    "type":          "hello",
+                    "agent_id":      AGENT_ID,
+                    "version":       VERSION,
+                    "platform":      platform.system().lower(),
+                    "hostname":      platform.node(),
+                    "local_ip":      _get_local_ip(),
+                    "python_version": platform.python_version(),
+                    "has_psutil":    _HAS_PSUTIL,
+                    "has_snmp":      _HAS_SNMP,
+                    "has_crypto":    _HAS_CRYPTO,
+                    "vault_support": True,
+                }))
+
+                # Feature 3: flush offline queue after reconnect
+                if _result_queue:
+                    queued = list(_result_queue)
+                    _result_queue.clear()
+                    try:
+                        await ws.send(json.dumps({
+                            "type":     "queued_results",
+                            "agent_id": AGENT_ID,
+                            "count":    len(queued),
+                            "results":  queued,
+                        }))
+                        log.info("Kuyruklanmis {} sonuc gonderildi".format(len(queued)))
+                    except Exception as e:
+                        log.warning("Kuyruk gonderilemedi: {}".format(e))
+                        # Put them back if send fails
+                        for item in queued:
+                            _result_queue.append(item)
+
+                # Monitoring event offline queue flush
+                if _event_queue is not None:
+                    pending = _event_queue.pending_count()
+                    if pending > 0:
+                        log.info("Monitoring event queue flush: {} event bekliyor".format(pending))
+                        while True:
+                            batch = _event_queue.pop_batch()
+                            if not batch:
+                                break
+                            ids, payloads = zip(*batch)
+                            try:
+                                await ws.send(json.dumps({
+                                    "type":     "queued_events",
+                                    "agent_id": AGENT_ID,
+                                    "count":    len(payloads),
+                                    "events":   list(payloads),
+                                }))
+                                _event_queue.ack(list(ids))
+                                log.info("Monitoring queue: {} event gonderildi".format(len(ids)))
+                            except Exception as flush_err:
+                                log.warning("Monitoring queue flush hatasi: {}".format(flush_err))
+                                break
+                        _event_queue.prune()
+
+                async def _heartbeat():
+                    # Send immediately on connect so backend refreshes Redis TTL right away
+                    try:
+                        await ws.send(json.dumps({
+                            "type":      "heartbeat",
+                            "agent_id":  AGENT_ID,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "metrics":   _get_metrics(),
+                        }))
+                    except Exception:
+                        return
+                    while True:
+                        await asyncio.sleep(HEARTBEAT_INTERVAL)
+                        try:
+                            payload = {
+                                "type":      "heartbeat",
+                                "agent_id":  AGENT_ID,
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                                "metrics":   _get_metrics(),
+                            }
+                            await ws.send(json.dumps(payload))
+                        except Exception:
+                            break
+
+                # Sprint 14C: Edge anomaly detector — runs every 5 min
+                async def _edge_anomaly_check():
+                    while True:
+                        await asyncio.sleep(300)
+                        try:
+                            # SSH error rate
+                            if len(_ssh_window) >= 5:
+                                fail_rate = _ssh_window.count(False) / len(_ssh_window)
+                                if fail_rate >= _SSH_ERROR_RATE_THRESHOLD:
+                                    await _maybe_send_anomaly(
+                                        ws,
+                                        "ssh_error_rate",
+                                        "Yüksek SSH Hata Oranı",
+                                        "Son {} komutun {:.0%} başarısız oldu".format(
+                                            len(_ssh_window), fail_rate),
+                                        {"fail_rate": round(fail_rate, 2),
+                                         "window_size": len(_ssh_window)},
+                                    )
+                            # SNMP latency
+                            if _snmp_ema_count >= 3 and _snmp_ema_ms > _SNMP_LATENCY_THRESHOLD_MS:
+                                await _maybe_send_anomaly(
+                                    ws,
+                                    "snmp_latency",
+                                    "Yüksek SNMP Yanıt Süresi",
+                                    "Ortalama SNMP yanıt {:.0f} ms (eşik: {:.0f} ms)".format(
+                                        _snmp_ema_ms, _SNMP_LATENCY_THRESHOLD_MS),
+                                    {"ema_ms": round(_snmp_ema_ms, 1),
+                                     "threshold_ms": _SNMP_LATENCY_THRESHOLD_MS},
+                                )
+                        except Exception:
+                            pass
+
+                # Start background tasks
+                hb   = asyncio.create_task(_heartbeat())
+                evict = asyncio.create_task(_pool_evict_loop())
+                hc   = asyncio.create_task(_health_check(ws, loop))
+                edge = asyncio.create_task(_edge_anomaly_check())
+
+                # Feature 6: Start syslog UDP server if enabled
+                if _syslog_enabled:
+                    try:
+                        transport, _protocol = await loop.create_datagram_endpoint(
+                            lambda: SyslogProtocol(ws, loop),
+                            local_addr=("0.0.0.0", _syslog_port),
+                        )
+                        syslog_transport = transport
+                        log.info("Syslog UDP sunucusu basladi: port={}".format(_syslog_port))
+                    except Exception as e:
+                        log.warning("Syslog sunucusu baslatılamadi: {}".format(e))
+
+                # D4: Start SNMP trap listener if enabled
+                if _snmp_trap_enabled:
+                    try:
+                        transport, _protocol = await loop.create_datagram_endpoint(
+                            lambda: SnmpTrapProtocol(ws, loop),
+                            local_addr=("0.0.0.0", _snmp_trap_port),
+                        )
+                        trap_transport = transport
+                        log.info("SNMP Trap dinleyicisi basladi: port={}".format(_snmp_trap_port))
+                    except Exception as e:
+                        log.warning("SNMP Trap dinleyicisi baslatılamadi: {}".format(e))
+
+                try:
+                    async for raw in ws:
+                        try:
+                            msg = json.loads(raw)
+                            asyncio.create_task(handle_message(ws, msg, loop))
+                        except json.JSONDecodeError:
+                            pass
+                        if _restart_requested:
+                            break
+                finally:
+                    hb.cancel()
+                    evict.cancel()
+                    hc.cancel()
+                    edge.cancel()
+                    if syslog_transport is not None:
+                        syslog_transport.close()
+                        syslog_transport = None
+                    if trap_transport is not None:
+                        trap_transport.close()
+                        trap_transport = None
+
+            if _restart_requested:
+                log.info("Yeniden baslatiliyor...")
+                sys.exit(0)
+
+        except Exception as exc:
+            if syslog_transport is not None:
+                try:
+                    syslog_transport.close()
+                except Exception:
+                    pass
+                syslog_transport = None
+            if trap_transport is not None:
+                try:
+                    trap_transport.close()
+                except Exception:
+                    pass
+                trap_transport = None
+
+            # Handle specific WS close codes
+            err_str = str(exc)
+            if "4001" in err_str:
+                log.error("Kimlik dogrulama hatasi (gecersiz key). Key'i kontrol edin.")
+                await asyncio.sleep(60)
+                delay = 60
+            elif "4029" in err_str:
+                log.error("Cok fazla basarisiz girisim - agent kilitlendi. Yoneticiyle iletisime gecin.")
+                await asyncio.sleep(300)
+                delay = 300
+            elif "4003" in err_str:
+                log.error("Baglanti reddedildi - bu sunucu IP'si agent'a guvenilmez olarak isaretlen.")
+                await asyncio.sleep(120)
+                delay = 120
+            else:
+                log.warning("Baglanti kesildi: {}. {}s sonra tekrar denenecek...".format(exc, delay))
+                _disconnect_count += 1
+                # Sprint 14C: fire local_anomaly on repeated disconnects (>= 3 in a row)
+                if _disconnect_count >= 3:
+                    now_m = time.monotonic()
+                    if now_m - _last_anomaly_disconnect > 1800:
+                        _last_anomaly_disconnect = now_m
+                        log.warning("[edge] Disconnect anomaly: {} kesinti".format(_disconnect_count))
+                        # We can't send via ws here (disconnected) — log only
+                        # The backend will detect offline agent via heartbeat timeout
+                jitter = random.uniform(0, min(delay, 5))
+                await asyncio.sleep(delay + jitter)
+                delay = min(delay * 2, 300)
+
+
+if __name__ == "__main__":
+    if not AGENT_ID or not AGENT_KEY:
+        print("HATA: NETMANAGER_AGENT_ID ve NETMANAGER_AGENT_KEY gerekli.", file=sys.stderr)
+        sys.exit(1)
+    asyncio.run(run())
