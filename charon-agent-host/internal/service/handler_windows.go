@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -64,12 +65,28 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 	)
 	h.Evt.Info(logging.EventServiceStarted, "Service starting: "+h.Cfg.ServiceName)
 
-	// Wire stdout/stderr capture to rotating files.
-	h.Log.Info("opening child stdout/stderr log writers")
-	stdoutLog := logging.NewRotatingWriter(h.Cfg.LogDir, "agent.stdout", ".log")
-	stderrLog := logging.NewRotatingWriter(h.Cfg.LogDir, "agent.stderr", ".log")
-	defer stdoutLog.Close()
-	defer stderrLog.Close()
+	// Wire stdout/stderr capture to plain *os.File handles. Direct
+	// kernel-handle inheritance is the only path that does not block
+	// exec.Cmd.Start in a Windows session-0 service (see process.go
+	// for the gory details). Size-rotated child output is deferred to
+	// MVP-1; for now the agent.std{out,err}.log files grow append-only.
+	if err := os.MkdirAll(h.Cfg.LogDir, 0o755); err != nil {
+		h.Log.Error("mkdir log dir failed", "err", err.Error())
+	}
+	stdoutPath := filepath.Join(h.Cfg.LogDir, "agent.stdout.log")
+	stderrPath := filepath.Join(h.Cfg.LogDir, "agent.stderr.log")
+	stdoutFile, err := os.OpenFile(stdoutPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		h.Log.Warn("opening agent.stdout.log failed", "err", err.Error())
+	} else {
+		defer stdoutFile.Close()
+	}
+	stderrFile, err := os.OpenFile(stderrPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		h.Log.Warn("opening agent.stderr.log failed", "err", err.Error())
+	} else {
+		defer stderrFile.Close()
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -83,8 +100,8 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 		Args:    h.Cfg.ChildArgs,
 		WorkDir: h.Cfg.WorkDir,
 		Env:     env,
-		Stdout:  stdoutLog,
-		Stderr:  stderrLog,
+		Stdout:  stdoutFile,
+		Stderr:  stderrFile,
 	}
 
 	h.Log.Info("calling proc.Start")

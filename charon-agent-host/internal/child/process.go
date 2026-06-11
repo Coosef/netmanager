@@ -3,7 +3,6 @@ package child
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"sync"
@@ -21,8 +20,11 @@ type Process struct {
 	Args    []string
 	WorkDir string
 	Env     []string
-	Stdout  io.Writer
-	Stderr  io.Writer
+	// Stdout / Stderr — see Start() doc. MUST be *os.File or nil; an
+	// arbitrary io.Writer would force the Go runtime into a goroutine-
+	// based pump that deadlocks under SCM session 0.
+	Stdout *os.File
+	Stderr *os.File
 
 	mu        sync.Mutex
 	cmd       *exec.Cmd
@@ -52,25 +54,28 @@ func (p *Process) Start(ctx context.Context) error {
 	cmd.Dir = p.WorkDir
 	cmd.Env = p.Env
 
-	// Wire stdout/stderr directly to the rotating writers. The earlier
-	// implementation used cmd.StdoutPipe / cmd.StderrPipe + a copyLines
-	// goroutine; that was buying nothing (the writer already serializes)
-	// and was introducing latency on Start because pipe creation has to
-	// allocate kernel objects for both ends. The Go runtime can hand
-	// the writer to the child as an inherited stdout/stderr handle in
-	// one go, which is significantly cheaper.
+	// Wire stdout/stderr. Two important Windows constraints:
 	//
-	// If the caller passed nil for either writer (e.g. --console mode
-	// without separate capture) we inherit the host's stdio.
+	//  1. If cmd.Stdout / cmd.Stderr is an arbitrary io.Writer (e.g. a
+	//     RotatingWriter), the Go runtime creates a pipe + a goroutine
+	//     to copy from the pipe to the writer. Under a Windows service
+	//     running as LocalSystem in session 0, that pipe-handle dance
+	//     can block exec.Cmd.Start indefinitely — the failure mode the
+	//     integration tests have been hitting.
+	//
+	//  2. If cmd.Stdout / cmd.Stderr is a concrete *os.File, the OS
+	//     handle is inherited directly with no Go-side goroutine. This
+	//     is the only path that has been observed to keep cmd.Start
+	//     responsive in CI.
+	//
+	// So the contract changed: callers can pass an *os.File (preferred)
+	// or nil. An arbitrary io.Writer is no longer accepted — handler
+	// owns the file lifecycle and we no longer reinvent the wheel.
 	if p.Stdout != nil {
 		cmd.Stdout = p.Stdout
-	} else {
-		cmd.Stdout = os.Stdout
 	}
 	if p.Stderr != nil {
 		cmd.Stderr = p.Stderr
-	} else {
-		cmd.Stderr = os.Stderr
 	}
 
 	// Platform-specific SysProcAttr (see process_windows.go).
