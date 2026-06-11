@@ -52,13 +52,17 @@ func uniqueServiceName() string {
 // The PID file is the test's only handle on "is the child the same
 // instance or did the supervisor relaunch it" — comparing two
 // successive reads tells us a restart happened.
-const fakeChildScript = `
-  $pidFile = $env:CHARON_TEST_PID_FILE
-  if ($pidFile) {
-    [System.IO.File]::WriteAllText($pidFile, $PID.ToString())
-  }
-  while ($true) { Start-Sleep -Seconds 1 }
-`
+// fakeChildScript is the PowerShell payload the fake child runs. It
+// is intentionally kept as ONE LINE because Windows SCM stores the
+// service ImagePath as a single string and newlines inside an argv
+// element are split on by the command-line parser when SCM relaunches
+// the binary — multi-line payloads come back to the supervisor as a
+// truncated `-Command` argument and the child fails to start.
+//
+// Semantics: write $PID to the file pointed at by CHARON_TEST_PID_FILE
+// (set on the child's environment via the agent env file) and then
+// sleep forever.
+const fakeChildScript = `$f=$env:CHARON_TEST_PID_FILE; if($f){[IO.File]::WriteAllText($f,$PID.ToString())}; while($true){Start-Sleep 1}`
 
 // scaffold builds a Config + helper functions for an integration
 // test. The caller's t.Cleanup hook is registered so even a panic
