@@ -249,10 +249,72 @@ def test_host_binary_download_section_present():
     assert "Get-FileHash" in s
 
 
-def test_host_binary_sha_mismatch_aborts():
+def test_host_binary_downloads_to_staging_not_final():
+    """P0 #1: Direct -OutFile to $HostExe would refuse on Windows
+    file-lock if the existing service has the binary open, AND
+    a download/SHA failure would destroy the previous working
+    binary. Force staging download path."""
     s = _gen()
-    assert "$actualSha -ne $expectedSha" in s
-    assert "Remove-Item $HostExe -Force" in s
+    assert "$HostStage" in s
+    assert "charon-agent-host.exe.new" in s
+    assert "-OutFile $HostStage" in s
+    # The forbidden direct-overwrite must not appear:
+    assert "-OutFile $HostExe" not in s, \
+        "host download must target $HostStage, never $HostExe directly"
+
+
+def test_sha_check_runs_on_stage_file():
+    s = _gen()
+    assert "Get-FileHash -LiteralPath $HostStage" in s
+    # Mismatch must clean only the stage, never touch $HostExe
+    assert "Remove-Item -LiteralPath $HostStage" in s
+    # Sequence: integrity-fail message followed by stage-remove,
+    # NOT followed by $HostExe removal
+    fail_window = re.search(
+        r"integrity check failed[\s\S]{0,400}",
+        s,
+    )
+    assert fail_window is not None
+    assert "Remove-Item -LiteralPath $HostExe" not in fail_window.group(0), \
+        "SHA mismatch path must not delete $HostExe"
+
+
+def test_atomic_move_stage_to_final():
+    s = _gen()
+    assert "Move-Item -LiteralPath $HostStage -Destination $HostExe -Force" in s
+
+
+def test_existing_host_backed_up_before_replace():
+    """The previous host binary is moved to $HostBackup before the
+    staged binary takes its place — that backup enables rollback in
+    [9/9] if 10s/30s status fails."""
+    s = _gen()
+    assert "$HostBackup" in s
+    assert "charon-agent-host.exe.bak" in s
+    assert "Move-Item -LiteralPath $HostExe -Destination $HostBackup -Force" in s
+
+
+def test_rollback_on_install_or_status_failure():
+    """install / start / 10s status / 30s status — any failure
+    AFTER the move must roll the .bak back into place."""
+    s = _gen()
+    assert "$rollbackAvailable" in s
+    # rollback move appears multiple times (install/start/10s/30s)
+    rollback_moves = s.count(
+        "Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force"
+    )
+    assert rollback_moves >= 4, \
+        f"expected ≥4 rollback move sites (install/start/10s/30s), got {rollback_moves}"
+
+
+def test_no_remove_item_on_host_exe_direct():
+    """Old fail pattern: Remove-Item $HostExe -Force on SHA failure
+    would destroy the working binary. The new path only ever
+    removes $HostStage, $HostBackup, or moves $HostBackup → $HostExe."""
+    s = _gen()
+    bad = re.search(r"Remove-Item\s+-?[A-Za-z]*\s*\$HostExe\b", s)
+    assert bad is None, \
+        f"forbidden Remove-Item against $HostExe: {bad.group(0)!r}"
 
 
 def test_host_binary_url_built_from_agent_id():
@@ -262,9 +324,7 @@ def test_host_binary_url_built_from_agent_id():
 
 def test_agent_key_in_host_download_header_not_url():
     s = _gen()
-    # Header form OK
     assert '"X-Agent-Key" = $AgentKey' in s
-    # URL form must not appear
     bad_url_pat = re.search(r"download/host[^\"\n]*\?[^\"\n]*agent_key=", s)
     assert bad_url_pat is None, f"agent_key in URL: {bad_url_pat.group(0)}"
 
@@ -399,9 +459,71 @@ def test_tls_12_enforced():
     assert "Tls12" in s
 
 
-def test_installer_self_cleanup():
+def test_installer_self_cleanup_uses_literal_path():
+    """P0 #2: -LiteralPath is required so a path containing PowerShell
+    wildcard chars (`[`, `]`, `?`, `*`) cannot accidentally expand and
+    delete other files."""
     s = _gen()
-    assert "Remove-Item $PSCommandPath" in s
+    assert "Remove-Item -LiteralPath $PSCommandPath" in s
+
+
+def test_all_path_cleanup_via_try_finally():
+    """P0 #2: The elevated execution body MUST be wrapped in a
+    try { ... } finally { cleanup } so the installer file (which
+    embeds the agent key in its header) is removed regardless of
+    success, ACL fail, download fail, SHA fail, install fail or
+    status fail."""
+    s = _gen()
+    # The body opens with a top-level `try {{` and the matching
+    # `finally {{` lives near the end.
+    assert "try {" in s
+    assert "finally {" in s
+    # Mirror invariants from the elevated body to the finally:
+    finally_idx = s.rfind("finally {")
+    assert finally_idx > 0
+    finally_tail = s[finally_idx:]
+    assert "$AgentKey = $null" in finally_tail
+    assert "Remove-Item -LiteralPath $PSCommandPath" in finally_tail
+
+
+def test_agent_key_zeroed_in_finally():
+    """Defensive: zero the in-memory $AgentKey before exit so a
+    crash dump cannot recover it."""
+    s = _gen()
+    finally_idx = s.rfind("finally {")
+    assert finally_idx > 0
+    assert "$AgentKey = $null" in s[finally_idx:]
+
+
+def test_self_elevation_parent_waits_for_child():
+    """P0 #2 corollary: the non-admin parent process MUST Wait for
+    the elevated child to finish before cleaning the installer.
+    Otherwise the parent races the child's open-file handle and
+    cleanup fails — leaving the agent-key-bearing installer on disk."""
+    s = _gen()
+    assert "Start-Process" in s
+    assert "-Wait" in s
+    assert "-PassThru" in s
+    # Parent must capture ExitCode
+    assert "$proc.ExitCode" in s
+
+
+def test_self_elevation_parent_cleans_on_uac_failure():
+    """If UAC is denied or Start-Process throws, the parent must
+    STILL remove the installer (its own header contains the agent
+    key as a single-quoted literal)."""
+    s = _gen()
+    # The parent block has its own try/catch/finally pair around
+    # Start-Process; the finally must contain the cleanup.
+    parent_block = re.search(
+        r"if \(-not \$isAdmin\) \{[\s\S]+?exit \$childExit\s*\}",
+        s,
+    )
+    assert parent_block is not None, "self-elevation parent block not found"
+    body = parent_block.group(0)
+    # Inside parent's finally
+    assert "finally" in body
+    assert "Remove-Item -LiteralPath $PSCommandPath" in body
 
 
 # ── Agent key never in command line / log ──────────────────────────────────
