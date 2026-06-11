@@ -614,6 +614,13 @@ jobs:
 
           Write-Host "[OK] reinstall lifecycle integration PASS"
 
+          # The last external command in this script left $LASTEXITCODE
+          # = 18 (the status-probe-returns-not-found path that ended
+          # the cleanup drain). PowerShell otherwise propagates that
+          # to the runner as the step exit code, which would fail the
+          # job despite every assertion passing. Force a clean zero.
+          exit 0
+
       - name: Test cleanup (best effort)
         if: always()
         shell: powershell
