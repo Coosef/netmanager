@@ -37,64 +37,59 @@ def _settings():
 # ── Integrity check unit tests (no FastAPI / no HTTP) ──────────────────────
 
 
+VALID_VERSION = "2.0.0-mvp0+gabc123def456"
+
+
 @pytest.fixture
 def host_bin(tmp_path, monkeypatch):
-    """Write a fake host binary + sidecar at a temp path and monkeypatch
-    the agents endpoint's path constants."""
+    """Write a fake host binary + sha + version sidecars at a temp
+    path and monkeypatch the agents endpoint's path constants."""
     bin_path = tmp_path / "charon-agent-host-windows-amd64.exe"
     sha_path = tmp_path / "charon-agent-host-windows-amd64.exe.sha256"
+    ver_path = tmp_path / "charon-agent-host-windows-amd64.exe.version"
     # 2 MB filler so the size check passes
     data = b"\x00" * (2 * 1024 * 1024)
     bin_path.write_bytes(data)
     sidecar = hashlib.sha256(data).hexdigest()
     sha_path.write_text(sidecar)
+    ver_path.write_text(VALID_VERSION)
 
     monkeypatch.setattr(_agents_mod(), "_HOST_BIN_PATH", str(bin_path))
     monkeypatch.setattr(_agents_mod(), "_HOST_SHA_PATH", str(sha_path))
-    # Reset memoised cache so each test gets a fresh check
+    monkeypatch.setattr(_agents_mod(), "_HOST_VERSION_PATH", str(ver_path))
     monkeypatch.setattr(_agents_mod(), "_HOST_INTEGRITY_CACHE", None)
-    return bin_path, sha_path, sidecar, data
+    return bin_path, sha_path, ver_path, sidecar, data
 
 
-def test_integrity_ok_with_version(host_bin, monkeypatch):
-    bin_path, sha_path, sidecar, data = host_bin
-    # Stub subprocess.run so 'strings' returns a versioned token
-    import subprocess as _sp
-
-    class _FakeProc:
-        stdout = "garbage\n2.0.0-mvp0+gabc123def456\nmore garbage\n"
-
-    monkeypatch.setattr(_sp, "run", lambda *a, **kw: _FakeProc())
+def test_integrity_ok_with_version(host_bin):
+    bin_path, sha_path, ver_path, sidecar, data = host_bin
     result = _agents_mod()._read_host_integrity()
     assert result.ok is True
     assert result.sha256 == sidecar
-    assert result.version == "2.0.0-mvp0+gabc123def456"
+    assert result.version == VALID_VERSION
     assert result.size == len(data)
 
 
-def test_integrity_rejects_dev_sentinel(host_bin, monkeypatch):
-    """A binary built with HOST_VERSION=dev (no --build-arg override)
-    must be refused — production never serves a dev artefact."""
-    import subprocess as _sp
-
-    class _FakeProc:
-        stdout = "garbage\n2.0.0-mvp0+ge9becfe42252\n"
-
-    # Patch the search loop so it locks onto 'dev' first
-    def fake_run(*a, **kw):
-        f = _FakeProc()
-        f.stdout = "dev\nother\n"
-        return f
-
-    monkeypatch.setattr(_sp, "run", fake_run)
-    # 'dev' won't pass the `startswith("2.0.0-mvp0+g")` filter so
-    # version stays None. The integrity result is still ok=True with
-    # version="unknown" — production discipline relies on the CI gate
-    # rebuilding with a real HOST_VERSION. We test the documented
-    # behaviour: missing version string → ok=True, version=None.
+@pytest.mark.parametrize("bad_version", [
+    "dev",
+    "",
+    "2.0.0-mvp0+gABCDEF123456",       # uppercase
+    "2.0.0-mvp0+gabcdef",             # too short
+    "2.0.0-mvp0+gabcdef1234567",      # too long
+    "2.0.0-mvp0+g0123456789aZ",       # non-hex
+    "1.0.0-mvp0+gabcdef123456",       # wrong major
+    "v2.0.0-mvp0+gabcdef123456",      # leading 'v'
+    "2.0.0-mvp0+gabcdef123456 extra", # trailing garbage
+])
+def test_integrity_rejects_malformed_version(host_bin, bad_version):
+    bin_path, sha_path, ver_path, _, _ = host_bin
+    ver_path.write_text(bad_version)
     result = _agents_mod()._read_host_integrity()
-    assert result.ok is True
+    assert result.ok is False
     assert result.version is None
+    assert "version" in result.error, (
+        f"{bad_version!r}: expected version-flavoured error, got {result.error!r}"
+    )
 
 
 def test_integrity_missing_binary(tmp_path, monkeypatch):
@@ -105,28 +100,33 @@ def test_integrity_missing_binary(tmp_path, monkeypatch):
     assert "missing" in result.error
 
 
-def test_integrity_missing_sidecar(host_bin, monkeypatch):
-    bin_path, sha_path, sidecar, _ = host_bin
+def test_integrity_missing_sha_sidecar(host_bin):
+    bin_path, sha_path, ver_path, _, _ = host_bin
     sha_path.unlink()
-    monkeypatch.setattr(_agents_mod(), "_HOST_INTEGRITY_CACHE", None)
     result = _agents_mod()._read_host_integrity()
     assert result.ok is False
-    assert "sidecar" in result.error
+    assert "sha sidecar missing" in result.error
 
 
-def test_integrity_sha_mismatch(host_bin, monkeypatch):
-    bin_path, sha_path, _, _ = host_bin
+def test_integrity_missing_version_sidecar(host_bin):
+    bin_path, sha_path, ver_path, _, _ = host_bin
+    ver_path.unlink()
+    result = _agents_mod()._read_host_integrity()
+    assert result.ok is False
+    assert "version sidecar missing" in result.error
+
+
+def test_integrity_sha_mismatch(host_bin):
+    bin_path, sha_path, ver_path, _, _ = host_bin
     sha_path.write_text("0" * 64)
-    monkeypatch.setattr(_agents_mod(), "_HOST_INTEGRITY_CACHE", None)
     result = _agents_mod()._read_host_integrity()
     assert result.ok is False
     assert "mismatch" in result.error
 
 
-def test_integrity_sidecar_format_invalid(host_bin, monkeypatch):
-    bin_path, sha_path, _, _ = host_bin
+def test_integrity_sha_sidecar_format_invalid(host_bin):
+    bin_path, sha_path, ver_path, _, _ = host_bin
     sha_path.write_text("not-a-sha")
-    monkeypatch.setattr(_agents_mod(), "_HOST_INTEGRITY_CACHE", None)
     result = _agents_mod()._read_host_integrity()
     assert result.ok is False
     assert "format" in result.error
@@ -135,10 +135,13 @@ def test_integrity_sidecar_format_invalid(host_bin, monkeypatch):
 def test_integrity_size_too_small(tmp_path, monkeypatch):
     bin_path = tmp_path / "tiny.exe"
     sha_path = tmp_path / "tiny.exe.sha256"
+    ver_path = tmp_path / "tiny.exe.version"
     bin_path.write_bytes(b"x")  # 1 byte
     sha_path.write_text(hashlib.sha256(b"x").hexdigest())
+    ver_path.write_text(VALID_VERSION)
     monkeypatch.setattr(_agents_mod(), "_HOST_BIN_PATH", str(bin_path))
     monkeypatch.setattr(_agents_mod(), "_HOST_SHA_PATH", str(sha_path))
+    monkeypatch.setattr(_agents_mod(), "_HOST_VERSION_PATH", str(ver_path))
     monkeypatch.setattr(_agents_mod(), "_HOST_INTEGRITY_CACHE", None)
     result = _agents_mod()._read_host_integrity()
     assert result.ok is False
@@ -148,14 +151,17 @@ def test_integrity_size_too_small(tmp_path, monkeypatch):
 def test_integrity_size_too_large(tmp_path, monkeypatch):
     bin_path = tmp_path / "huge.exe"
     sha_path = tmp_path / "huge.exe.sha256"
+    ver_path = tmp_path / "huge.exe.version"
     # 60 MB is above the 50 MB sanity ceiling — write a sparse file
     f = bin_path.open("wb")
     f.seek(60 * 1024 * 1024 - 1)
     f.write(b"\x00")
     f.close()
     sha_path.write_text(hashlib.sha256(bin_path.read_bytes()).hexdigest())
+    ver_path.write_text(VALID_VERSION)
     monkeypatch.setattr(_agents_mod(), "_HOST_BIN_PATH", str(bin_path))
     monkeypatch.setattr(_agents_mod(), "_HOST_SHA_PATH", str(sha_path))
+    monkeypatch.setattr(_agents_mod(), "_HOST_VERSION_PATH", str(ver_path))
     monkeypatch.setattr(_agents_mod(), "_HOST_INTEGRITY_CACHE", None)
     result = _agents_mod()._read_host_integrity()
     assert result.ok is False

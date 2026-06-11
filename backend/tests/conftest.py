@@ -23,50 +23,6 @@ os.environ.setdefault("LOG_LEVEL", "WARNING")
 os.environ.setdefault("LOG_FORMAT", "console")
 os.environ.setdefault("PROMETHEUS_MULTIPROC_DIR", "")
 
-
-# ---------------------------------------------------------------------------
-# WIN-INTEGRATE — SQLAlchemy + aiosqlite kwargs shim.
-#
-# app.core.database creates its engines at module-import time with
-# pool_size + max_overflow. SQLAlchemy 2.0.36 refuses those kwargs
-# when the URL resolves to SQLite (NullPool combination → TypeError).
-# We don't actually use those engines in unit tests, so wrap the
-# constructors so SQLite URLs strip incompatible kwargs.
-# ---------------------------------------------------------------------------
-import sqlalchemy as _sa
-import sqlalchemy.ext.asyncio as _sa_async
-
-_INCOMPATIBLE_SQLITE_KW = ("pool_size", "max_overflow", "pool_pre_ping")
-
-
-def _strip_sqlite_kwargs(url, kwargs):
-    url_str = str(url) if url is not None else ""
-    if "sqlite" in url_str:
-        for k in _INCOMPATIBLE_SQLITE_KW:
-            kwargs.pop(k, None)
-    return kwargs
-
-
-_orig_create_engine = _sa.create_engine
-_orig_create_async_engine = _sa_async.create_async_engine
-
-
-def _safe_create_engine(url, *args, **kwargs):
-    return _orig_create_engine(url, *args, **_strip_sqlite_kwargs(url, kwargs))
-
-
-def _safe_create_async_engine(url, *args, **kwargs):
-    return _orig_create_async_engine(url, *args, **_strip_sqlite_kwargs(url, kwargs))
-
-
-_sa.create_engine = _safe_create_engine
-_sa_async.create_async_engine = _safe_create_async_engine
-
-# Re-export under app.core.database's namespace too, since that module
-# does `from sqlalchemy import create_engine` (binds before we patched).
-# We patch through here by reaching into the module after the wrapper
-# above is installed; any later import sees the safe variant.
-
 import pytest
 
 

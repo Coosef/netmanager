@@ -715,20 +715,31 @@ async def download_installer(
 # WIN-INTEGRATE — Windows agent host (Go binary) download
 # ─────────────────────────────────────────────────────────────────────
 
-_HOST_BIN_PATH = "/opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe"
-_HOST_SHA_PATH = _HOST_BIN_PATH + ".sha256"
-_HOST_SIZE_MIN = 1 * 1024 * 1024        # 1 MB lower sanity bound
-_HOST_SIZE_MAX = 50 * 1024 * 1024       # 50 MB upper sanity bound
+_HOST_BIN_PATH     = "/opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe"
+_HOST_SHA_PATH     = _HOST_BIN_PATH + ".sha256"
+_HOST_VERSION_PATH = _HOST_BIN_PATH + ".version"
+_HOST_SIZE_MIN     = 1 * 1024 * 1024        # 1 MB lower sanity bound
+_HOST_SIZE_MAX     = 50 * 1024 * 1024       # 50 MB upper sanity bound
+
+# Authoritative version contract — the build pipeline writes the
+# .version sidecar after validating HOST_VERSION against this regex.
+# The 12-char SHA is the git short hash of the source commit. The
+# previous default sentinel `dev` and any malformed value
+# (uppercase, non-hex, wrong length) fail this match and are
+# rejected at integrity check time rather than served as "unknown".
+import re as _agent_re_module
+_HOST_VERSION_RE = _agent_re_module.compile(r"^2\.0\.0-mvp0\+g[0-9a-f]{12}$")
 
 
 class _HostBinaryIntegrity:
     """Cached integrity result for the embedded Windows host binary.
 
     Read once per backend process boot. A bad result (binary missing,
-    SHA mismatch, version sentinel) is a permanent "host endpoint
-    unavailable" — flipping it requires an image rebuild, which means
-    a process restart and re-read. Linux endpoints, login, dashboard
-    and the rest of the backend stay up regardless.
+    SHA mismatch, version sidecar missing or malformed) is a
+    permanent "host endpoint unavailable" — flipping it requires an
+    image rebuild, which means a process restart and re-read. Linux
+    endpoints, login, dashboard and the rest of the backend stay up
+    regardless.
     """
     ok: bool = False
     sha256: str | None = None
@@ -738,16 +749,29 @@ class _HostBinaryIntegrity:
 
 
 def _read_host_integrity() -> _HostBinaryIntegrity:
-    """Validate the embedded host binary + sidecar. Never raises."""
+    """Validate the embedded host binary + sidecars. Never raises.
+
+    Sidecars are written by the multi-stage Dockerfile build:
+      <bin>.sha256   — 64-hex SHA-256 of <bin>
+      <bin>.version  — `2.0.0-mvp0+g<12-hex>` produced from the
+                       source git short SHA, validated against
+                       _HOST_VERSION_RE at build time.
+
+    The version sidecar is the AUTHORITATIVE source of truth for
+    the binary's version — no `strings` probe, no subprocess. A
+    missing, unreadable, or malformed version sidecar is a hard
+    integrity failure (NOT "unknown" — production never serves a
+    binary whose version we cannot prove).
+    """
     out = _HostBinaryIntegrity()
     import os
     import hashlib
     import logging
-    import subprocess
 
     log = logging.getLogger("netmanager.security")
 
     try:
+        # ── binary file ───────────────────────────────────────────
         if not os.path.isfile(_HOST_BIN_PATH):
             out.error = "binary file missing"
             return out
@@ -757,13 +781,14 @@ def _read_host_integrity() -> _HostBinaryIntegrity:
             return out
         out.size = size
 
+        # ── SHA-256 sidecar ───────────────────────────────────────
         if not os.path.isfile(_HOST_SHA_PATH):
-            out.error = "sidecar missing"
+            out.error = "sha sidecar missing"
             return out
         with open(_HOST_SHA_PATH, "r") as f:
             sidecar = f.read().strip().split()[0]
         if len(sidecar) != 64 or not all(c in "0123456789abcdef" for c in sidecar):
-            out.error = "sidecar format invalid"
+            out.error = "sha sidecar format invalid"
             return out
 
         h = hashlib.sha256()
@@ -773,31 +798,36 @@ def _read_host_integrity() -> _HostBinaryIntegrity:
         actual = h.hexdigest()
         if actual != sidecar:
             out.error = "sha256 mismatch"
+            log.error("host binary integrity: sha mismatch")
             return out
 
-        # Probe the version string embedded by -ldflags. Best-effort:
-        # `strings` is part of the slim image's binutils on most Debian
-        # bases; if absent, we still mark integrity OK but leave the
-        # version unknown so the X-Host-Version header reports "unknown".
+        # ── version sidecar (authoritative) ───────────────────────
+        if not os.path.isfile(_HOST_VERSION_PATH):
+            out.error = "version sidecar missing"
+            log.error("host binary integrity: version sidecar missing")
+            return out
         try:
-            sproc = subprocess.run(
-                ["strings", _HOST_BIN_PATH],
-                capture_output=True, text=True, timeout=5,
-            )
-            for line in sproc.stdout.splitlines():
-                if line.startswith("2.0.0-mvp0+g") and len(line) <= 32:
-                    out.version = line.strip()
-                    break
-        except Exception:
-            pass
+            with open(_HOST_VERSION_PATH, "r") as f:
+                raw_version = f.read().strip()
+        except OSError:
+            out.error = "version sidecar unreadable"
+            log.error("host binary integrity: version sidecar unreadable")
+            return out
 
-        if out.version == "dev":
-            out.error = "binary built with default 'dev' HOST_VERSION (rebuild with --build-arg)"
-            log.error("host binary integrity: dev sentinel detected")
+        if not _HOST_VERSION_RE.match(raw_version):
+            # Catches: "dev", "", uppercase, non-hex, wrong length,
+            # missing prefix — all reject.
+            out.error = "version sidecar malformed"
+            log.error(
+                "host binary integrity: version sidecar malformed "
+                "(length=%d does-not-match-regex)",
+                len(raw_version),
+            )
             return out
 
         out.ok = True
         out.sha256 = actual
+        out.version = raw_version
         return out
     except Exception as e:
         out.error = f"integrity check exception: {type(e).__name__}"
@@ -882,7 +912,9 @@ async def download_agent_host(
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
             "X-Content-Type-Options": "nosniff",
-            "X-Host-Version": integ.version or "unknown",
+            # integ.ok is True here, which means _read_host_integrity
+            # passed the version regex — version is never None.
+            "X-Host-Version": integ.version,
             "X-Host-SHA256": integ.sha256 or "",
         },
     )
@@ -2057,6 +2089,12 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             New-Item -ItemType Directory -Force -Path $d | Out-Null
         }}
 
+        # FAIL-CLOSED: config.env writes the agent key in stage [5/9].
+        # If we cannot prove the install directory is restricted to
+        # SYSTEM + Administrators, we MUST NOT continue — every local
+        # user would be able to read the key. Write the technical
+        # exception to a secret-free local log for support diagnostics
+        # and abort with a generic user message.
         try {{
             $systemSid = New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'
             $adminSid  = New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'
@@ -2075,7 +2113,19 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             Set-Acl $InstallDir $acl
             Write-Host "[OK] ACL hardened (SYSTEM + Administrators only, inheritance disabled)." -ForegroundColor Green
         }} catch {{
-            Write-Host "[WARNING] ACL hardening failed: $($_.Exception.Message)" -ForegroundColor Yellow
+            $err = $_.Exception
+            try {{
+                $logPath = Join-Path $LogDir "installer-acl.log"
+                $ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+                # Log technical exception WITHOUT echoing agent key /
+                # config.env / any localized account name back to the
+                # console.
+                Add-Content -Path $logPath -Value "$ts ACL failure: $($err.GetType().FullName)"
+            }} catch {{}}
+            Write-Host "[ERROR] Install directory ACL could not be secured." -ForegroundColor Red
+            Write-Host "[ERROR] Installation aborted before any credential was written." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
 
         # ==========================================================
@@ -2221,14 +2271,58 @@ exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
         # ==========================================================
         # [8/9] Install + start Windows service via host CLI
         # ==========================================================
-        # Remove any pre-existing service registration before install
-        # (the host's install command refuses if the service already
-        # exists; this lets re-runs work).
+        # If a previous registration exists, uninstall it first. The
+        # Go host CLI exit-code contract (charon-agent-host/internal/
+        # cli/subcommands.go::uninstallCmd) is:
+        #
+        #   0  → service deleted AND SCM finished unregistration
+        #   18 → ErrServiceNotFound (already gone — benign)
+        #   19 → ErrDeletePending  (Delete() succeeded; SCM still
+        #                           asynchronously reaping the
+        #                           registration → soft warning,
+        #                           poll until status reports
+        #                           not-found, then proceed)
+        #   1  → real failure
+        #   2  → argv parse error
+        #
+        # We never blindly Start-Sleep — a fixed 2-second wait gave
+        # the SCM cleanup race that bit PR #76. Poll status until it
+        # reports "not-found" (exit 18) for up to 30 seconds.
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
         if ($existingSvc) {{
             Write-Host "[INFO] Existing service detected, removing first..." -ForegroundColor Yellow
             & $HostExe uninstall --service-name $ServiceName | Out-Null
-            Start-Sleep -Seconds 2
+            $uninstallExit = $LASTEXITCODE
+            if ($uninstallExit -eq 0) {{
+                Write-Host "[OK] Previous service uninstalled." -ForegroundColor Green
+            }} elseif ($uninstallExit -eq 18) {{
+                Write-Host "[INFO] Previous service was already gone." -ForegroundColor Yellow
+            }} elseif ($uninstallExit -eq 19) {{
+                Write-Host "[INFO] Previous service delete pending, polling for cleanup..." -ForegroundColor Yellow
+            }} else {{
+                Write-Host "[ERROR] Previous service uninstall failed (exit $uninstallExit)." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+
+            # Bounded poll: keep asking the host CLI for status until
+            # it reports "not-found" (exit 18). Hard ceiling 30s.
+            $svcGoneDeadline = (Get-Date).AddSeconds(30)
+            $svcGone = $false
+            while ((Get-Date) -lt $svcGoneDeadline) {{
+                & $HostExe status --service-name $ServiceName 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 18) {{
+                    $svcGone = $true
+                    break
+                }}
+                Start-Sleep -Milliseconds 500
+            }}
+            if (-not $svcGone) {{
+                Write-Host "[ERROR] Previous service registration did not clear within 30s." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            Write-Host "[OK] Previous service registration fully cleared." -ForegroundColor Green
         }}
 
         Write-Host "[8/9] Installing Windows service via host CLI..." -ForegroundColor Cyan

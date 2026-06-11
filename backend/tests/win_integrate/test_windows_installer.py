@@ -183,6 +183,44 @@ def test_acl_inheritance_disabled():
     assert "SetAccessRuleProtection" in s
 
 
+def test_acl_failure_is_fail_closed():
+    """ACL hardening failure must abort the installer BEFORE config.env
+    is written. The catch block must exit 1 — no warning + continue."""
+    s = _gen()
+    match = re.search(
+        r"Set-Acl \$InstallDir \$acl[\s\S]+?\}\s*catch\s*\{([\s\S]+?)\n\s*\}\s*\n",
+        s,
+    )
+    assert match, "ACL try/catch block not found"
+    catch_body = match.group(1)
+    assert "exit 1" in catch_body, \
+        f"ACL catch body must exit 1, got: {catch_body!r}"
+    assert "[ERROR]" in catch_body, \
+        "ACL catch body must surface a user-facing [ERROR] line"
+    # No warning-and-continue path
+    assert "[WARNING] ACL hardening failed" not in catch_body, \
+        "ACL catch must NOT log warning + continue"
+
+
+def test_acl_catch_does_not_echo_raw_exception_to_user():
+    """The post-CI review explicitly bans echoing the localized raw
+    exception message to the user (could leak 'Yoneticiler' or other
+    locale-specific account names). Technical detail belongs in an
+    internal log file, not Write-Host."""
+    s = _gen()
+    match = re.search(
+        r"Set-Acl \$InstallDir \$acl[\s\S]+?\}\s*catch\s*\{([\s\S]+?)\n\s*\}\s*\n",
+        s,
+    )
+    assert match
+    catch_body = match.group(1)
+    # Forbid raw exception interpolation into the console
+    assert "$($_.Exception.Message)" not in catch_body, \
+        "ACL catch must not echo raw $_.Exception.Message to console"
+    assert "$AgentKey" not in catch_body
+    assert "$AgentId" not in catch_body
+
+
 # ── BOM-less config + run wrapper ──────────────────────────────────────────
 
 
@@ -254,6 +292,55 @@ def test_host_install_command_contract():
 def test_host_start_command():
     s = _gen()
     assert "& $HostExe start --service-name $ServiceName" in s
+
+
+# ── Reinstall race: uninstall exit-code handling + bounded poll ───────────
+
+
+def test_uninstall_exit_codes_are_checked():
+    """The pre-install uninstall step MUST distinguish exit codes per
+    the Go host CLI contract:
+        0  → fully cleaned up
+        18 → ErrServiceNotFound (already gone — benign)
+        19 → ErrDeletePending (poll until cleared)
+        other → hard fail
+    The previous `& $HostExe uninstall | Out-Null; Start-Sleep 2`
+    pattern is forbidden — the sleep was a guess and PR #76 already
+    saw an SCM cleanup race in that window."""
+    s = _gen()
+    # uninstall exit code captured + each contract code handled
+    assert "$uninstallExit = $LASTEXITCODE" in s
+    assert "$uninstallExit -eq 0" in s
+    assert "$uninstallExit -eq 18" in s
+    assert "$uninstallExit -eq 19" in s
+    # Fall-through must abort (no silent continue)
+    assert "[ERROR] Previous service uninstall failed" in s
+
+
+def test_uninstall_bounded_poll_replaces_fixed_sleep():
+    """Replace the static `Start-Sleep -Seconds 2` race with a
+    bounded poll that exits as soon as `status` reports
+    ErrServiceNotFound (exit 18). Ceiling at 30s."""
+    s = _gen()
+    assert "& $HostExe status --service-name $ServiceName" in s
+    assert "$LASTEXITCODE -eq 18" in s
+    # Loop must have a deadline
+    assert "AddSeconds(30)" in s
+    # Forbid the immediate post-uninstall Start-Sleep 2 race
+    bad = re.search(
+        r"& \$HostExe uninstall[^\n]*\n[^\n]*Start-Sleep\s+-Seconds\s+2(?!\d)",
+        s,
+    )
+    assert bad is None, \
+        f"old fixed-sleep race pattern still present near uninstall: {bad.group(0)!r}"
+
+
+def test_uninstall_poll_failure_aborts():
+    """If the bounded poll exhausts its deadline without seeing
+    ErrServiceNotFound, the installer must abort with a clear
+    message rather than silently proceeding."""
+    s = _gen()
+    assert "Previous service registration did not clear within 30s" in s
 
 
 def test_host_install_exit_code_check():

@@ -32,27 +32,23 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install backend requirements (only what tests need)
+      - name: Install backend requirements
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          # Tests only need pydantic-settings + a few stdlib helpers; we
-          # install the full backend requirements so future tests that
-          # touch more app modules don't have to special-case CI.
           pip install -r requirements.txt
 
       - name: Pytest WIN-INTEGRATE suite
         working-directory: backend
         run: |
-          python -m pytest -q \
-            tests/test_agents_windows_installer_win_integrate.py \
-            tests/test_agents_host_binary_endpoint.py \
-            tests/test_agents_linux_isolation.py
+          python -m pytest -v tests/win_integrate/
 
   # ────────────────────────────────────────────────────────────────
   # Backend Docker build — proves the multi-stage build embeds the
-  # host binary correctly. This is the single CI gate that catches
-  # context regressions, missing files, broken multi-arch builds, etc.
+  # host binary correctly. The source SHA is read directly from
+  # github.event.pull_request.head.sha so the embedded HOST_VERSION
+  # is derived from the BRANCH HEAD, not the synthetic
+  # pull_request merge ref that actions/checkout produces.
   # ────────────────────────────────────────────────────────────────
   backend-image:
     name: Backend Docker image
@@ -61,88 +57,125 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Compute HOST_VERSION
-        id: ver
+      - name: Resolve source SHA
+        id: src
         run: |
-          echo "HOST_VERSION=2.0.0-mvp0+g$(git rev-parse --short=12 HEAD)" >> "$GITHUB_OUTPUT"
+          # On pull_request runs, actions/checkout fetches a synthetic
+          # merge ref by default — `git rev-parse HEAD` then points at
+          # the merge commit, not the branch tip. Read the head SHA
+          # from the event payload instead so the embedded HOST_VERSION
+          # matches the PR branch's actual HEAD commit.
+          if [ -n "${{ github.event.pull_request.head.sha }}" ]; then
+            SOURCE_SHA="${{ github.event.pull_request.head.sha }}"
+            SOURCE_KIND="pull_request.head.sha"
+          else
+            SOURCE_SHA="${{ github.sha }}"
+            SOURCE_KIND="github.sha"
+          fi
+          SHORT="${SOURCE_SHA:0:12}"
+          HOST_VERSION="2.0.0-mvp0+g${SHORT}"
+          echo "SOURCE_SHA=${SOURCE_SHA}"      | tee -a "$GITHUB_OUTPUT"
+          echo "SOURCE_SHORT=${SHORT}"          | tee -a "$GITHUB_OUTPUT"
+          echo "SOURCE_KIND=${SOURCE_KIND}"     | tee -a "$GITHUB_OUTPUT"
+          echo "HOST_VERSION=${HOST_VERSION}"   | tee -a "$GITHUB_OUTPUT"
+          echo "MERGE_SHA=${GITHUB_SHA}"        | tee -a "$GITHUB_OUTPUT"
+          echo "::notice ::source_sha=${SOURCE_SHA} (${SOURCE_KIND}); merge_sha=${GITHUB_SHA}; HOST_VERSION=${HOST_VERSION}"
 
       - name: docker compose config sanity
         run: |
-          # Surface compose / dockerfile path issues before we build a
-          # 400 MB image and discover it 5 minutes in. Compose reads
-          # .env for variable interpolation — write a minimal one so
-          # the config command doesn't bail on "file not found".
+          # Compose reads .env for variable interpolation — write a
+          # minimal one so the config command doesn't bail on "file
+          # not found". Runtime config provides real secrets via
+          # env_file at deploy, not here.
           touch .env
           docker compose config -q
 
-      - name: Build backend image only
+      - name: Build backend image (HOST_VERSION pinned to source SHA)
         env:
-          HOST_VERSION: ${{ steps.ver.outputs.HOST_VERSION }}
+          HOST_VERSION: ${{ steps.src.outputs.HOST_VERSION }}
         run: |
           # docker compose build on GitHub runners delegates to buildx,
-          # which by default produces a multi-platform attestation image
-          # that never lands in the local docker image store. Subsequent
-          # `docker run switch-backend:latest` then fails with "Unable
-          # to find image". Use plain `docker build` against the same
-          # Dockerfile + context so the result is a regular local image
-          # — and so this CI gate also exercises the exact COPY paths
-          # the compose-driven build would.
+          # which by default emits a multi-platform attestation image
+          # that never lands in the local docker image store. Plain
+          # `docker build` against the same Dockerfile + context
+          # produces a regular local image.
           docker build \
             --build-arg HOST_VERSION="${HOST_VERSION}" \
             -f backend/Dockerfile \
             -t switch-backend:latest \
             .
 
-      - name: Embedded host binary present + sidecar match
+      - name: Embedded host binary + sha + version sidecars present
         run: |
           IMG=switch-backend:latest
           docker run --rm "$IMG" ls -lh /opt/netmanager/agent-bins/
+          docker run --rm "$IMG" test -f /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe
+          docker run --rm "$IMG" test -f /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe.sha256
+          docker run --rm "$IMG" test -f /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe.version
+
+      - name: SHA-256 sidecar matches the binary
+        run: |
+          IMG=switch-backend:latest
           ACTUAL=$(docker run --rm "$IMG" sha256sum /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe | awk '{print $1}')
           SIDE=$(docker run --rm "$IMG" cat /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe.sha256 | tr -d '[:space:]')
           echo "actual=$ACTUAL"
           echo "sidecar=$SIDE"
           test "$ACTUAL" = "$SIDE"
 
+      - name: Version sidecar equals source SHA HOST_VERSION
+        env:
+          HOST_VERSION: ${{ steps.src.outputs.HOST_VERSION }}
+        run: |
+          IMG=switch-backend:latest
+          VER=$(docker run --rm "$IMG" cat /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe.version)
+          echo "sidecar version: $VER"
+          echo "expected      : $HOST_VERSION"
+          test "$VER" = "$HOST_VERSION"
+          # Also verify the version matches the production regex —
+          # the Dockerfile already does this at build time but we
+          # re-verify here to catch any future regression in the
+          # build step.
+          echo "$VER" | grep -E '^2\.0\.0-mvp0\+g[0-9a-f]{12}$'
+
       - name: Binary is PE32+ x86-64
         run: |
           IMG=switch-backend:latest
-          docker run --rm "$IMG" sh -c \
-            'apt-get update -qq && apt-get install -qq -y file >/dev/null && file /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe' \
-            | tee /tmp/file.out
+          # Use `file` from the runner host (binutils is no longer
+          # installed inside the runtime image — we don't need it,
+          # the version comes from the .version sidecar above).
+          docker run --rm "$IMG" cat /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe > /tmp/host.exe
+          file /tmp/host.exe | tee /tmp/file.out
           grep -q 'PE32+ executable .* x86-64' /tmp/file.out
 
       - name: Binary contains NO UPX magic
         run: |
-          IMG=switch-backend:latest
-          # `! grep` returns 0 when the pattern is absent — the
-          # success path is: UPX magic not found.
-          docker run --rm "$IMG" sh -c \
-            '! grep -aqE "UPX!" /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe'
+          # Tested from the runner host so we don't depend on grep
+          # being present in the slim production image.
+          if grep -aE "UPX!" /tmp/host.exe >/dev/null 2>&1; then
+            echo "UPX magic detected"
+            exit 1
+          fi
+          echo "no UPX magic"
 
-      - name: Binary embeds HOST_VERSION (not "dev")
+      - name: Report binary size + final source/version mapping
         env:
-          HOST_VERSION: ${{ steps.ver.outputs.HOST_VERSION }}
+          SOURCE_SHA:   ${{ steps.src.outputs.SOURCE_SHA }}
+          MERGE_SHA:    ${{ steps.src.outputs.MERGE_SHA }}
+          SOURCE_KIND:  ${{ steps.src.outputs.SOURCE_KIND }}
+          HOST_VERSION: ${{ steps.src.outputs.HOST_VERSION }}
         run: |
-          IMG=switch-backend:latest
-          # The runtime image is python:3.12-slim — needs `apt-get update`
-          # before binutils install. Pull strings to /tmp on the host and
-          # use the host's grep, since the image's apt lists may be empty
-          # after the slim base's cleanup step.
-          docker run --rm "$IMG" sh -c \
-            "apt-get update -qq >/dev/null 2>&1 && apt-get install -qq -y binutils >/dev/null 2>&1 && strings /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe" \
-            > /tmp/host-strings.txt
-          grep -F "${HOST_VERSION}" /tmp/host-strings.txt
-
-      - name: Report binary size
-        run: |
-          IMG=switch-backend:latest
-          docker run --rm "$IMG" stat -c '%s bytes' /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe
+          echo "── source provenance ──"
+          echo "SOURCE_SHA   (${SOURCE_KIND}) : ${SOURCE_SHA}"
+          echo "MERGE_SHA    (github.sha)     : ${MERGE_SHA}"
+          echo "HOST_VERSION                  : ${HOST_VERSION}"
+          echo "── binary ──"
+          ls -l /tmp/host.exe
 
   # ────────────────────────────────────────────────────────────────
-  # Windows PowerShell 5.1 — real powershell.exe (not pwsh) parses the
-  # generated installer. The byte-level invariants (BOM, CRLF, ASCII)
-  # are checked here against a freshly generated installer so any
-  # response wrapper regression also fails fast.
+  # Windows PowerShell 5.1 — real powershell.exe (not pwsh) parses
+  # the generated installer. Byte-level + Go-host + reinstall race
+  # invariants. Build context not needed; we only generate the
+  # installer string from the Python source.
   # ────────────────────────────────────────────────────────────────
   installer-ps51:
     name: Installer PS 5.1 (windows-2022)
@@ -172,19 +205,15 @@ jobs:
         shell: bash
         working-directory: backend
         env:
-          # postgresql+asyncpg URLs avoid the SQLite + pool_size conflict
-          # in app.core.database (we never actually open a connection;
-          # the URL just needs to be NOT-SQLite to bypass the kwargs
-          # filter shim that conftest.py installs for pytest).
+          # postgresql+asyncpg URLs avoid the SQLite + pool_size
+          # conflict in app.core.database. The driver is in
+          # requirements.txt; no real connection is opened.
           DATABASE_URL: postgresql+asyncpg://x:y@localhost/db
           SYNC_DATABASE_URL: postgresql+psycopg2://x:y@localhost/db
           SECRET_KEY: testing
         run: |
-          # CREDENTIAL_ENCRYPTION_KEY must be a valid Fernet key.
           export CREDENTIAL_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-          # Generate the response BODY exactly as the endpoint would:
-          # BOM + CRLF + UTF-8 encoded script. Write directly into
-          # $RUNNER_TEMP — Windows runners don't have /tmp.
+          # Write installer into $RUNNER_TEMP — Windows runners don't have /tmp.
           DEST="${RUNNER_TEMP//\\//}/installer.ps1"
           python - "$DEST" <<'PY'
           import sys
@@ -250,10 +279,6 @@ jobs:
           if ($content -notmatch '--child-arg') {
             throw "Go host CLI install section missing"
           }
-          # status assignment + comparison live on different lines:
-          #   $status10 = (& $HostExe status ...).Trim()
-          #   if ($exit10 -ne 0 -or $status10 -ne "Running") { ... }
-          # Check both halves separately.
           if ($content -notmatch '\$status10\s*=.*\.Trim\(\)') {
             throw "10s status assignment with .Trim() missing"
           }
@@ -267,3 +292,59 @@ jobs:
             throw "30s exact-match status check missing"
           }
           Write-Host "[OK] All invariant patterns present / removed as required"
+
+      - name: ACL fail-closed invariant
+        shell: powershell
+        run: |
+          $content = [System.IO.File]::ReadAllText($env:INSTALLER_PATH)
+          # The Set-Acl try must be paired with a catch that exits 1.
+          # We do a coarse structural check: the FIRST catch block
+          # AFTER `Set-Acl $InstallDir $acl` must contain `exit 1`
+          # before the closing brace.
+          $idx = $content.IndexOf('Set-Acl $InstallDir $acl')
+          if ($idx -lt 0) { throw "Set-Acl call not found" }
+          $tail = $content.Substring($idx)
+          $catchIdx = $tail.IndexOf('catch')
+          if ($catchIdx -lt 0) { throw "catch block after Set-Acl not found" }
+          $catchTail = $tail.Substring($catchIdx)
+          # Find the matching `}`. Cheap heuristic: look at the first
+          # 4000 chars of the catch tail and require `exit 1` AND no
+          # `[WARNING] ACL hardening failed` (the old fail-open path).
+          $window = $catchTail.Substring(0, [Math]::Min(4000, $catchTail.Length))
+          if ($window -notmatch 'exit 1') {
+            throw "ACL catch block must `exit 1`"
+          }
+          if ($window -match '\[WARNING\] ACL hardening failed') {
+            throw "ACL catch block still uses the old warning + continue path"
+          }
+          if ($window -match '\$\(\$_\.Exception\.Message\)') {
+            throw "ACL catch block must not echo raw `$_.Exception.Message` to console"
+          }
+          Write-Host "[OK] ACL fail-closed enforced"
+
+      - name: Uninstall exit-code + bounded poll invariant
+        shell: powershell
+        run: |
+          $content = [System.IO.File]::ReadAllText($env:INSTALLER_PATH)
+          # The reinstall race fix: capture LASTEXITCODE, branch on
+          # 0/18/19/other, poll bounded by 30s for ErrServiceNotFound.
+          if ($content -notmatch '\$uninstallExit = \$LASTEXITCODE') {
+            throw "uninstall exit code not captured"
+          }
+          foreach ($code in @('0','18','19')) {
+            if ($content -notmatch ('\$uninstallExit -eq ' + $code)) {
+              throw "uninstall exit-code branch missing: $code"
+            }
+          }
+          if ($content -notmatch '\$LASTEXITCODE -eq 18') {
+            throw "bounded poll missing status-exit-18 check"
+          }
+          if ($content -notmatch 'AddSeconds\(30\)') {
+            throw "bounded poll missing 30s deadline"
+          }
+          # The forbidden fixed `Start-Sleep -Seconds 2` immediately
+          # after `& \$HostExe uninstall` is the race we replaced.
+          if ($content -match '\$HostExe uninstall[^\n]*\n[^\n]*Start-Sleep\s+-Seconds\s+2(?!\d)') {
+            throw "old fixed Start-Sleep race after uninstall still present"
+          }
+          Write-Host "[OK] uninstall exit-code handling + bounded poll present"
