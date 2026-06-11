@@ -12,7 +12,7 @@ from typing import Optional
 
 import redis as _redis_lib
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -672,16 +672,219 @@ async def download_installer(
     if platform == "linux":
         script = _linux_installer(agent_id, agent_key, base_url)
         filename = f"netmanager-agent-{agent_id}-linux.sh"
-        media_type = "text/x-shellscript"
+        body_bytes = script.encode("utf-8")
+        media_type_with_charset = "text/x-shellscript; charset=utf-8"
     else:
+        # WIN-INTEGRATE: when WINDOWS_AGENT_V2_ENABLED is false we serve
+        # a 503 instead of the legacy sc.exe-based PowerShell installer.
+        # That legacy script was architecturally broken (Python child
+        # registered as a Windows service does not implement the SCM
+        # dispatcher protocol → Error 1053), so handing it to a user
+        # would be worse than telling them the feature is currently
+        # off. The new Go-host-based installer is shipped via the same
+        # endpoint when the flag is on; until then, hard fail.
+        if not settings.WINDOWS_AGENT_V2_ENABLED:
+            raise HTTPException(
+                status_code=503,
+                detail="Windows installer temporarily unavailable. Please contact your administrator.",
+            )
         script = _windows_installer(agent_id, agent_key, base_url)
         filename = f"netmanager-agent-{agent_id}-windows.ps1"
-        media_type = "text/plain"
+        # WINDOWS-INSTALLER-FIX (2026-06-11) — UTF-8 BOM + CRLF +
+        # charset so Windows PowerShell 5.1's cp1254/cp1252 fallback
+        # does not mis-decode non-ASCII bytes. See PR #75 RCA.
+        body_bytes = (
+            b"\xef\xbb\xbf"
+            + script.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+        )
+        media_type_with_charset = "text/plain; charset=utf-8"
 
-    return PlainTextResponse(
-        content=script,
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    return Response(
+        content=body_bytes,
+        media_type=media_type_with_charset,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────
+# WIN-INTEGRATE — Windows agent host (Go binary) download
+# ─────────────────────────────────────────────────────────────────────
+
+_HOST_BIN_PATH = "/opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe"
+_HOST_SHA_PATH = _HOST_BIN_PATH + ".sha256"
+_HOST_SIZE_MIN = 1 * 1024 * 1024        # 1 MB lower sanity bound
+_HOST_SIZE_MAX = 50 * 1024 * 1024       # 50 MB upper sanity bound
+
+
+class _HostBinaryIntegrity:
+    """Cached integrity result for the embedded Windows host binary.
+
+    Read once per backend process boot. A bad result (binary missing,
+    SHA mismatch, version sentinel) is a permanent "host endpoint
+    unavailable" — flipping it requires an image rebuild, which means
+    a process restart and re-read. Linux endpoints, login, dashboard
+    and the rest of the backend stay up regardless.
+    """
+    ok: bool = False
+    sha256: str | None = None
+    version: str | None = None
+    size: int | None = None
+    error: str | None = None
+
+
+def _read_host_integrity() -> _HostBinaryIntegrity:
+    """Validate the embedded host binary + sidecar. Never raises."""
+    out = _HostBinaryIntegrity()
+    import os
+    import hashlib
+    import logging
+    import subprocess
+
+    log = logging.getLogger("netmanager.security")
+
+    try:
+        if not os.path.isfile(_HOST_BIN_PATH):
+            out.error = "binary file missing"
+            return out
+        size = os.path.getsize(_HOST_BIN_PATH)
+        if size < _HOST_SIZE_MIN or size > _HOST_SIZE_MAX:
+            out.error = f"binary size {size} out of sanity range"
+            return out
+        out.size = size
+
+        if not os.path.isfile(_HOST_SHA_PATH):
+            out.error = "sidecar missing"
+            return out
+        with open(_HOST_SHA_PATH, "r") as f:
+            sidecar = f.read().strip().split()[0]
+        if len(sidecar) != 64 or not all(c in "0123456789abcdef" for c in sidecar):
+            out.error = "sidecar format invalid"
+            return out
+
+        h = hashlib.sha256()
+        with open(_HOST_BIN_PATH, "rb") as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b""):
+                h.update(chunk)
+        actual = h.hexdigest()
+        if actual != sidecar:
+            out.error = "sha256 mismatch"
+            return out
+
+        # Probe the version string embedded by -ldflags. Best-effort:
+        # `strings` is part of the slim image's binutils on most Debian
+        # bases; if absent, we still mark integrity OK but leave the
+        # version unknown so the X-Host-Version header reports "unknown".
+        try:
+            sproc = subprocess.run(
+                ["strings", _HOST_BIN_PATH],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in sproc.stdout.splitlines():
+                if line.startswith("2.0.0-mvp0+g") and len(line) <= 32:
+                    out.version = line.strip()
+                    break
+        except Exception:
+            pass
+
+        if out.version == "dev":
+            out.error = "binary built with default 'dev' HOST_VERSION (rebuild with --build-arg)"
+            log.error("host binary integrity: dev sentinel detected")
+            return out
+
+        out.ok = True
+        out.sha256 = actual
+        return out
+    except Exception as e:
+        out.error = f"integrity check exception: {type(e).__name__}"
+        log.exception("host binary integrity check exploded")
+        return out
+
+
+_HOST_INTEGRITY_CACHE: _HostBinaryIntegrity | None = None
+
+
+def _host_integrity() -> _HostBinaryIntegrity:
+    """Memoised per-process integrity result."""
+    global _HOST_INTEGRITY_CACHE
+    if _HOST_INTEGRITY_CACHE is None:
+        _HOST_INTEGRITY_CACHE = _read_host_integrity()
+    return _HOST_INTEGRITY_CACHE
+
+
+@agents_public_router.get("/{agent_id}/download/host/windows-amd64")
+async def download_agent_host(
+    agent_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_agent_key: str = Header(None, alias="X-Agent-Key"),
+):
+    """Serve the Windows agent host binary (charon-agent-host.exe).
+
+    Gated by WINDOWS_AGENT_V2_ENABLED. The endpoint validates the
+    requester with the same agent_key contract as the platform
+    installer endpoint above; the binary itself is a static artefact
+    baked into the backend image at build time (see
+    backend/Dockerfile multi-stage agent-host-builder).
+
+    Range requests are NOT supported in MVP; if a client sends a Range
+    header we ignore it and serve the full 200 response.
+    """
+    import logging
+    log = logging.getLogger("netmanager.security")
+
+    # Flag gate first — feature off → 404 (do not even hint that the
+    # endpoint exists when the flag is closed).
+    if not settings.WINDOWS_AGENT_V2_ENABLED:
+        raise HTTPException(status_code=404, detail="Endpoint not available")
+
+    if not x_agent_key:
+        raise HTTPException(status_code=401, detail="X-Agent-Key header required")
+
+    # Authenticate via the agent_key contract. RLS bypass like the
+    # other public installer endpoint — the installer machine has no
+    # user session.
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    agent = result.scalar_one_or_none()
+    if not agent or not verify_password(x_agent_key, agent.agent_key_hash):
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    integ = _host_integrity()
+    if not integ.ok:
+        # Server log gets the real reason; client gets generic 503.
+        log.error(
+            "host binary integrity check failed: %s (size=%s)",
+            integ.error, integ.size,
+        )
+        raise HTTPException(status_code=503, detail="Host binary not available")
+
+    # Stream the binary. FastAPI's Response holds it in memory which
+    # is fine for ~3 MB; no need for FileResponse / chunking yet.
+    try:
+        with open(_HOST_BIN_PATH, "rb") as f:
+            body_bytes = f.read()
+    except OSError:
+        log.error("host binary read failed at request time")
+        raise HTTPException(status_code=503, detail="Host binary not available")
+
+    return Response(
+        content=body_bytes,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": 'attachment; filename="charon-agent-host-windows-amd64.exe"',
+            "Content-Length": str(len(body_bytes)),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Host-Version": integ.version or "unknown",
+            "X-Host-SHA256": integ.sha256 or "",
+        },
     )
 
 
