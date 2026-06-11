@@ -209,13 +209,23 @@ def _update_env_file(new_key):
         return
 
     try:
-        with open(_ENV_FILE) as f:
+        # WINDOWS-INSTALLER-FIX (2026-06-11) — Defansif BOM strip.
+        # PowerShell 5.1 'Out-File -Encoding UTF8' BOM yazardı; bu Python
+        # parser'da ilk env var name'i bozuyordu (﻿NETMANAGER_AGENT_KEY).
+        # Yeni installer 'WriteAllText + UTF8Encoding(false)' kullanır,
+        # AMA eski kurulumların migrasyonu için bu fonksiyon da BOM-safe
+        # oku.
+        with open(_ENV_FILE, encoding="utf-8-sig") as f:
             lines = f.readlines()
 
         new_lines = []
         updated = False
         for line in lines:
-            if line.startswith("NETMANAGER_AGENT_KEY="):
+            # Eski BOM'lu kurulumlarda ilk satırda ﻿ kalabilir;
+            # encoding="utf-8-sig" üst seviyede strip ediyor AMA içerikte
+            # satır-başı BOM olsa lstrip et.
+            check = line.lstrip("﻿")
+            if check.startswith("NETMANAGER_AGENT_KEY="):
                 new_lines.append("NETMANAGER_AGENT_KEY={}\n".format(new_key))
                 updated = True
             else:
@@ -224,7 +234,8 @@ def _update_env_file(new_key):
         if not updated:
             new_lines.append("NETMANAGER_AGENT_KEY={}\n".format(new_key))
 
-        with open(_ENV_FILE, "w") as f:
+        # Yazarken BOM ekleme (varsayılan utf-8, BOM yok)
+        with open(_ENV_FILE, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
 
         os.environ["NETMANAGER_AGENT_KEY"] = new_key
