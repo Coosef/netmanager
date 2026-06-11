@@ -48,10 +48,15 @@ func createJobObject() (windows.Handle, error) {
 	return job, nil
 }
 
-// attachToJob is called from process.go after cmd.Start to register
-// the child in the Job Object. On non-Windows builds this is a no-op
-// (see job_stub.go).
-func (p *Process) attachToJob() error {
+// attachToJobLocked is called from Process.Start after cmd.Start to
+// register the child in the Job Object. On non-Windows builds this
+// is a no-op (see job_stub.go).
+//
+// LOCKING: caller (Process.Start) already holds p.mu. This function
+// MUST NOT re-acquire it. The previous version called p.mu.Lock()
+// around `p.jobHandle = ...` which deadlocked Start indefinitely —
+// the CI StartPending hang root cause. sync.Mutex is not reentrant.
+func (p *Process) attachToJobLocked() error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return nil
 	}
@@ -76,9 +81,8 @@ func (p *Process) attachToJob() error {
 		windows.CloseHandle(job)
 		return err
 	}
-	p.mu.Lock()
+	// Caller holds p.mu — assign directly, do NOT re-lock.
 	p.jobHandle = uintptr(job)
-	p.mu.Unlock()
 	return nil
 }
 
@@ -139,16 +143,15 @@ func (p *Process) terminateJob(exitCode uint32) error {
 
 // applySysProcAttr configures the child process's creation flags.
 //
-// HiddenWindow + CREATE_NO_WINDOW: a Windows service runs in
-// session 0 with no interactive desktop. If we don't tell the
-// child not to allocate a console, CreateProcessW spends a long
-// time trying to allocate one against a missing desktop — which
-// is the StartPending hang the integration tests observed in CI.
+// HideWindow + CREATE_NO_WINDOW: a Windows service runs in session 0
+// with no interactive desktop. Asking the child not to allocate a
+// console is sound defense-in-depth even though it was NOT the
+// proven root cause of the CI StartPending incident — that was the
+// nested-mutex deadlock now fixed in Process.Start.
 //
-// We previously also set CREATE_NEW_PROCESS_GROUP for a future
-// cooperative CTRL_BREAK_EVENT path; it is removed for MVP-0
-// because it is not needed yet and adds another knob that can
-// surprise the dispatcher.
+// CREATE_NEW_PROCESS_GROUP was removed: it was only useful for a
+// future cooperative CTRL_BREAK_EVENT path and the Job Object force
+// kill in Stop() is already sufficient for MVP-0.
 //
 // CREATE_SUSPENDED is intentionally NOT set: see
 // docs/JOB_OBJECT_ATTACHMENT_RACE.md for why the obvious

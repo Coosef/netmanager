@@ -96,12 +96,13 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 	h.Log.Info("child env built", "entries", len(env))
 
 	proc := &child.Process{
-		Exec:    h.Cfg.ChildExe,
-		Args:    h.Cfg.ChildArgs,
-		WorkDir: h.Cfg.WorkDir,
-		Env:     env,
-		Stdout:  stdoutFile,
-		Stderr:  stderrFile,
+		Exec:     h.Cfg.ChildExe,
+		Args:     h.Cfg.ChildArgs,
+		WorkDir:  h.Cfg.WorkDir,
+		Env:      env,
+		Stdout:   stdoutFile,
+		Stderr:   stderrFile,
+		DebugLog: h.Log.Info,
 	}
 
 	h.Log.Info("calling proc.Start")
@@ -197,12 +198,13 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 
 			// Fresh process for restart.
 			proc = &child.Process{
-				Exec:    h.Cfg.ChildExe,
-				Args:    h.Cfg.ChildArgs,
-				WorkDir: h.Cfg.WorkDir,
-				Env:     h.buildEnv(),
-				Stdout:  stdoutFile,
-				Stderr:  stderrFile,
+				Exec:     h.Cfg.ChildExe,
+				Args:     h.Cfg.ChildArgs,
+				WorkDir:  h.Cfg.WorkDir,
+				Env:      h.buildEnv(),
+				Stdout:   stdoutFile,
+				Stderr:   stderrFile,
+				DebugLog: h.Log.Info,
 			}
 			startedAt = time.Now()
 			if err := proc.Start(ctx); err != nil {

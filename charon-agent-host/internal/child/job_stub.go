@@ -8,7 +8,9 @@ import "os/exec"
 // and hermetic CI. These code paths are NEVER reached on the production
 // target.
 
-func (p *Process) attachToJob() error { return nil }
+// attachToJobLocked: caller (Process.Start) holds p.mu. No-op on
+// non-Windows targets.
+func (p *Process) attachToJobLocked() error { return nil }
 
 // CloseJob is a no-op on non-Windows targets; mirrors the Windows
 // CloseJob signature so the handler restart cleanup path is
