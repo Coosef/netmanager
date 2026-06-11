@@ -7,7 +7,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/Coosef/netmanager/charon-agent-host/internal/config"
 	"github.com/Coosef/netmanager/charon-agent-host/internal/logging"
 	"github.com/Coosef/netmanager/charon-agent-host/internal/service"
 )
