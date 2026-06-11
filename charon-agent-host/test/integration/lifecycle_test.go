@@ -316,7 +316,7 @@ func TestLifecycle_InstallStartRunsStopUninstall(t *testing.T) {
 	//
 	// Any other error path here is still a hard failure (e.g. a real
 	// SCM Delete refusal).
-	err := service.Uninstall(s.serviceName, 10*time.Second)
+	err = service.Uninstall(s.serviceName, 10*time.Second)
 	if err != nil &&
 		!errors.Is(err, service.ErrServiceNotFound) &&
 		!errors.Is(err, service.ErrDeletePending) {
