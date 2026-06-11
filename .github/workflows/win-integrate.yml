@@ -495,10 +495,12 @@ jobs:
           # LDFLAGS-bearing builds produce surprisingly close binaries
           # on some toolchain versions; the version string is the
           # authoritative differentiator.
-          $oldVer = (& $hostExe version).Trim()
-          $stageVer = (& $hostStage version).Trim()
-          Write-Host "  V1 version: $oldVer"
-          Write-Host "  V2 version: $stageVer"
+          $oldVer = (& $hostExe version 2>&1 | Out-String).Trim()
+          $stageVer = (& $hostStage version 2>&1 | Out-String).Trim()
+          Write-Host "  V1 version: [$oldVer]"
+          Write-Host "  V2 version: [$stageVer]"
+          if (-not $oldVer)   { throw "V1 version probe returned empty" }
+          if (-not $stageVer) { throw "V2 version probe returned empty" }
           if ($oldVer -notmatch '000000000001') {
             throw "V1 version string does not embed g000000000001: $oldVer"
           }
@@ -574,8 +576,9 @@ jobs:
 
           # -- stage 6: verify final binary is V2 via version string --
           # (.bak still exists; cleanup happens after success below)
-          $finalVer = (& $hostExe version).Trim()
-          Write-Host "  final version: $finalVer"
+          $finalVer = (& $hostExe version 2>&1 | Out-String).Trim()
+          Write-Host "  final version: [$finalVer]"
+          if (-not $finalVer) { throw "final version probe returned empty" }
           if ($finalVer -notmatch '000000000002') {
             throw "final binary not V2 (version=$finalVer)"
           }
