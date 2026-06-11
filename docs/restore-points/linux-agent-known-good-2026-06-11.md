@@ -72,6 +72,45 @@ A live Linux agent had heartbeat-ed within the previous 6 seconds at the time th
 | Schema-only dump | `/opt/netmanager-backups/network-manager-schema-known-good-20260611.sql.gz` (25 KB, SHA-256 `04334b236e1e57232434531d9acc0542fbc2584f85bc9552b818089ce401c85d`) |
 | Full DB backup | **NOT taken in this restore point**. The standing nightly Postgres backup, if configured, remains the canonical full-data recovery source — its last successful run should be verified separately. If no nightly backup exists, that is a gap to address before the next migration-bearing PR. |
 
+### Restoring the schema dump safely
+
+The gzipped dump was produced by `docker compose exec -T postgres pg_dump`
+and includes both the `docker compose` deprecation warning (about the
+obsolete `version` attribute) and `pg_dump`'s circular foreign-key
+warnings (hypertable / chunk / continuous_agg) emitted on stderr that
+leaked into the captured stream. The dump itself starts at the
+canonical `-- PostgreSQL database dump` marker; strip everything before
+that marker before piping to `psql`:
+
+```bash
+gunzip -c /opt/netmanager-backups/network-manager-schema-known-good-20260611.sql.gz \
+  | sed -n '/^-- PostgreSQL database dump/,$p' \
+  | psql -U netmgr -d network_manager_restored
+```
+
+`sed -n '/.../,$p'` prints from the first matching line through
+end-of-file, dropping the warning preamble without otherwise modifying
+the dump.
+
+### Full DB backup gate
+
+```
+FULL_DB_BACKUP_REQUIRED_BEFORE_BACKEND_INTEGRATION_DEPLOY=true
+```
+
+The schema dump alone is not a substitute for a full-data backup. The
+following work items MUST verify a recent successful full DB backup
+before they are allowed to proceed beyond a review checkpoint:
+
+- WIN-INTEGRATE backend deploy (the installer integration PR)
+- Any PR that introduces an Alembic migration
+- Agent model / schema changes
+- Enrollment token table introduction
+- DPAPI / enrollment backend changes
+
+For PR #76 (WIN-HOST) this gate does **not** apply because that PR
+touches neither the backend, nor the DB, nor the migration tree.
+
 ## §3 Artifact inventory
 
 ### VPS (`/opt/netmanager-backups/`)
@@ -140,11 +179,33 @@ open('.env', 'w').write(out)
   grep '^WINDOWS_AGENT_V2_ENABLED=' .env  # confirm value is now false
 fi
 
-# Step 3 — Move the git working tree to the known-good tag.
+# Step 3 — Move the git working tree to the known-good commit.
+#
+# Two paths depending on what you have:
+#
+# (A) origin is reachable (normal case):
 git fetch origin --tags
 git reset --hard linux-agent-known-good-2026-06-11
 [ "$(git rev-parse HEAD)" = "9a7bf7a5a4ac540cdf4a40de637d15914caeff65" ] || \
   { echo "FAIL: git reset did not land on the expected commit"; exit 1; }
+#
+# (B) origin is NOT reachable and you are restoring from the local
+#     bundle (DR scenario):
+#
+#     The bundle was built on the VPS at 2026-06-11 09:20:41 UTC, two
+#     minutes BEFORE the local repo on which the annotated tag was
+#     created fetched it back. As a result the bundle does NOT carry
+#     the `linux-agent-known-good-2026-06-11` tag — only the commit
+#     itself. Restore by commit SHA:
+#
+#       git clone /opt/netmanager-backups/netmanager-known-good-20260611.bundle repo
+#       cd repo
+#       git checkout 9a7bf7a5a4ac540cdf4a40de637d15914caeff65
+#
+#     Confirm:
+#
+#       git rev-parse HEAD
+#       # → 9a7bf7a5a4ac540cdf4a40de637d15914caeff65
 
 # Step 4 — Mark the rollback Docker tags as :latest so docker-compose
 # picks them up. The :latest tag move is intentional; the rollback tag
@@ -267,7 +328,14 @@ host. A representative drill requires:
 Until that drill is run and its outcome recorded here, this restore
 point is:
 
-**STATUS: RESTORE POINT CREATED. RESTORE DRILL PENDING.**
+**STATUS:**
+```
+RESTORE POINT CREATED
+OFF-HOST STATUS: LOCAL-ONLY / NOT DURABLE
+BACKUP ARTIFACT INTEGRITY VERIFIED (git bundle + DB schema + Linux artifact)
+DOCKER ARCHIVE DRILL: PENDING  (disposable VM required — production daemon must not load these tags)
+FULL APPLICATION RESTORE DRILL: PENDING
+```
 
 The drill plan, when run, must end by appending a `## §11 Drill log`
 section with: drill date, environment used, recorded times, pass/fail

@@ -24,8 +24,26 @@ Agent v2 / Go service host implementation began. Used to:
 |---|---|---|
 | `netmanager_agent.py` | Production agent runtime, byte-for-byte copy from `backend/agent_script/netmanager_agent.py` at the tagged commit | ✅ Yes (deterministic) |
 | `linux-installer-sample.sh` | Output of `_linux_installer("known-good-fake-id", "REDACTED_FAKE_KEY", "https://netmanager.systrack.app")` | ❌ No — embeds a `# Generated: <UTC timestamp>` line |
-| `SHA256SUMS` | Hash record for both files | — |
+| `SHA256SUMS` | Hash record for both files (POSIX `sha256sum -c` compatible — no comment lines; commentary lives here in MANIFEST.md) | — |
 | `MANIFEST.md` | This document | — |
+
+### About SHA256SUMS
+
+POSIX `sha256sum -c SHA256SUMS` does not tolerate comment lines or blank
+lines and emits *"WARNING: N lines are improperly formatted"* even if
+every hash actually matches. The file is therefore kept comment-free
+and the per-file notes below explain why each hash is or isn't suitable
+for byte-equality comparison:
+
+- **`netmanager_agent.py`** — deterministic byte-for-byte copy. The
+  hash in `SHA256SUMS` should match indefinitely as long as the agent
+  source at the tagged commit is the reference.
+- **`linux-installer-sample.sh`** — the backend's `_linux_installer`
+  template embeds a `# Generated: <UTC timestamp>` line, so every
+  regeneration produces a different SHA-256. The hash in `SHA256SUMS`
+  pins the sample as it was archived at 2026-06-11 09:22 UTC.
+  For restore drills, use the structural checks in the next section
+  instead of hash equality.
 
 ## Secret hygiene
 

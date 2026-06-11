@@ -1,12 +1,2 @@
-# Linux Agent Known-Good Restore Point — 2026-06-11
-# All hashes are SHA-256.
-#
-# IMPORTANT — netmanager_agent.py is byte-for-byte deterministic.
-# IMPORTANT — linux-installer-sample.sh contains a Generated timestamp
-#             from _linux_installer's `datetime.now(timezone.utc)` call,
-#             so its SHA-256 will change if regenerated. Use structural
-#             checks (first line, size range, syntax, secret leakage)
-#             instead of hash equality in restore drills.
-
 7d733e9fd87ef355df276b9b03183c1ac3872cab6ded3baa39a22fc24effd7d2  netmanager_agent.py
 66caedb1bd92e519234741637400386afa797fd86359951d244e4b3680de2169  linux-installer-sample.sh
