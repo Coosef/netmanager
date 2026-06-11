@@ -61,7 +61,7 @@ func Dispatch(args []string, out, errOut io.Writer) int {
 }
 
 func printUsage(w io.Writer) {
-	fmt.Fprintln(w, `charon-agent-host - native Windows service host for the NetManager agent
+	fmt.Fprint(w, `charon-agent-host - native Windows service host for the NetManager agent
 
 Usage:
   charon-agent-host <subcommand> [flags]
