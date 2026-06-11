@@ -124,9 +124,14 @@ jobs:
           HOST_VERSION: ${{ steps.ver.outputs.HOST_VERSION }}
         run: |
           IMG=switch-backend:latest
+          # The runtime image is python:3.12-slim — needs `apt-get update`
+          # before binutils install. Pull strings to /tmp on the host and
+          # use the host's grep, since the image's apt lists may be empty
+          # after the slim base's cleanup step.
           docker run --rm "$IMG" sh -c \
-            "apt-get install -qq -y binutils >/dev/null && strings /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe" \
-            | grep -F "${HOST_VERSION}"
+            "apt-get update -qq >/dev/null 2>&1 && apt-get install -qq -y binutils >/dev/null 2>&1 && strings /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe" \
+            > /tmp/host-strings.txt
+          grep -F "${HOST_VERSION}" /tmp/host-strings.txt
 
       - name: Report binary size
         run: |
@@ -245,10 +250,20 @@ jobs:
           if ($content -notmatch '--child-arg') {
             throw "Go host CLI install section missing"
           }
-          if ($content -notmatch '\$status10\.Trim\(\)\s+-ne\s+"Running"') {
+          # status assignment + comparison live on different lines:
+          #   $status10 = (& $HostExe status ...).Trim()
+          #   if ($exit10 -ne 0 -or $status10 -ne "Running") { ... }
+          # Check both halves separately.
+          if ($content -notmatch '\$status10\s*=.*\.Trim\(\)') {
+            throw "10s status assignment with .Trim() missing"
+          }
+          if ($content -notmatch '\$status10\s+-ne\s+"Running"') {
             throw "10s exact-match status check missing"
           }
-          if ($content -notmatch '\$status30\.Trim\(\)\s+-ne\s+"Running"') {
+          if ($content -notmatch '\$status30\s*=.*\.Trim\(\)') {
+            throw "30s status assignment with .Trim() missing"
+          }
+          if ($content -notmatch '\$status30\s+-ne\s+"Running"') {
             throw "30s exact-match status check missing"
           }
           Write-Host "[OK] All invariant patterns present / removed as required"
