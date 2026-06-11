@@ -294,27 +294,167 @@ def test_existing_host_backed_up_before_replace():
     assert "Move-Item -LiteralPath $HostExe -Destination $HostBackup -Force" in s
 
 
-def test_rollback_on_install_or_status_failure():
-    """install / start / 10s status / 30s status — any failure
-    AFTER the move must roll the .bak back into place."""
+def test_rollback_function_defined():
+    """Post-CI review #3 P0: rollback must be transactional, not a
+    bare binary move. The installer defines a reusable
+    Restore-PreviousAgentService function."""
     s = _gen()
-    assert "$rollbackAvailable" in s
-    # rollback move appears multiple times (install/start/10s/30s)
-    rollback_moves = s.count(
+    assert "function Restore-PreviousAgentService" in s
+
+
+def test_rollback_reinstalls_previous_binary_as_service():
+    """The function must run the host CLI install command against
+    the restored backup binary — restoring the BYTES is not enough,
+    the SCM registration also has to point at it."""
+    s = _gen()
+    # locate the rollback function body
+    import re as _re
+    m = _re.search(
+        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
+        s,
+    )
+    assert m, "Restore-PreviousAgentService body not found"
+    body = m.group(0)
+    # Step 6: re-install
+    assert "Step 6/9: re-installing previous binary" in body
+    assert "& $HostExe install" in body
+    assert "--service-name $ServiceName" in body
+    assert "--child-exe $PythonExe" in body
+    assert '--child-arg "$InstallDir\\run_agent.py"' in body
+    assert "--service-account \"LocalSystem\"" in body
+
+
+def test_rollback_starts_old_service():
+    s = _gen()
+    import re as _re
+    body = _re.search(
+        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
+        s,
+    ).group(0)
+    assert "Step 7/9: starting previous service" in body
+    assert "& $HostExe start --service-name $ServiceName" in body
+
+
+def test_rollback_verifies_10s_and_30s_running():
+    """Rollback only succeeds when the OLD service is observed
+    Running at BOTH 10s and 30s — exact match, not regex."""
+    s = _gen()
+    import re as _re
+    body = _re.search(
+        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
+        s,
+    ).group(0)
+    assert "Step 8/9: verifying previous service Running at 10s" in body
+    assert "Step 9/9: verifying previous service Running at 30s" in body
+    assert "Start-Sleep -Seconds 10" in body
+    assert "Start-Sleep -Seconds 20" in body
+    # Exact match
+    assert '$r10 -ne "Running"' in body
+    assert '$r30 -ne "Running"' in body
+    # belt-and-suspenders exit-code check
+    assert "$e10 -ne 0" in body
+    assert "$e30 -ne 0" in body
+
+
+def test_rollback_bounded_scm_drain_before_replace():
+    """Steps 1-3 of the function: stop, uninstall, bounded poll
+    on status exit 18 — same contract as the main install path."""
+    s = _gen()
+    import re as _re
+    body = _re.search(
+        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
+        s,
+    ).group(0)
+    assert "Step 1/9: stopping partial new service" in body
+    assert "Step 2/9: uninstalling partial new service" in body
+    assert "Step 3/9: polling SCM drain" in body
+    assert "$LASTEXITCODE -eq 18" in body
+    assert "AddSeconds(30)" in body
+
+
+def test_rollback_failure_paths_signal_false():
+    """Every step has its own failure exit returning $false so the
+    caller can distinguish exit 1 (new-fail+recovered) from exit 2
+    (new-fail+rollback-fail)."""
+    s = _gen()
+    import re as _re
+    body = _re.search(
+        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
+        s,
+    ).group(0)
+    failure_signals = body.count("return $false")
+    assert failure_signals >= 6, \
+        f"expected ≥6 distinct failure-signal returns, got {failure_signals}"
+    assert "return $true" in body  # success path
+
+
+def test_exit_code_contract_distinct_paths():
+    """exit-code sözleşmesi:
+       0 = success
+       1 = new failed + previous restored (or fresh install)
+       2 = new failed AND rollback failed -- operator action required
+    """
+    s = _gen()
+    # The Invoke-NewInstallFailure helper carries the dispatch
+    assert "function Invoke-NewInstallFailure" in s
+    import re as _re
+    body = _re.search(
+        r"function Invoke-NewInstallFailure[\s\S]+?\n        \}",
+        s,
+    ).group(0)
+    # All three documented exit values
+    exit_1_no_backup = "No previous binary to roll back to"
+    exit_1_recovered = "Exiting 1 (new install failed; previous service Running)"
+    exit_2_critical = "Manual operator intervention required. Exit 2"
+    assert exit_1_no_backup in body
+    assert exit_1_recovered in body
+    assert exit_2_critical in body
+    # exit 2 only after rollback fail
+    assert "exit 2" in body
+
+
+def test_all_four_failure_call_sites_use_helper():
+    """install / start / 10s / 30s — each post-atomic-move failure
+    path MUST route through Invoke-NewInstallFailure so rollback is
+    consistent. Bare `Move-Item $HostBackup $HostExe` outside the
+    Restore- function is forbidden."""
+    s = _gen()
+    # 4 call sites in the main flow + the function defines the
+    # routing — no other Move-Item with backup→exe direction.
+    call_sites = s.count("Invoke-NewInstallFailure `")
+    assert call_sites == 4, \
+        f"expected exactly 4 Invoke-NewInstallFailure call sites, got {call_sites}"
+    # The ONLY Move-Item HostBackup → HostExe is inside the Restore
+    # function (the legacy bare-move rollback is now extinct).
+    bare_moves = s.count(
         "Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force"
     )
-    assert rollback_moves >= 4, \
-        f"expected ≥4 rollback move sites (install/start/10s/30s), got {rollback_moves}"
+    assert bare_moves == 1, \
+        f"expected exactly 1 backup→exe move (inside Restore fn), got {bare_moves}"
 
 
-def test_no_remove_item_on_host_exe_direct():
+def test_no_remove_item_on_host_exe_in_sha_fail_path():
     """Old fail pattern: Remove-Item $HostExe -Force on SHA failure
-    would destroy the working binary. The new path only ever
-    removes $HostStage, $HostBackup, or moves $HostBackup → $HostExe."""
+    would destroy the working binary. The SHA-mismatch block only
+    ever removes $HostStage. (Restore-PreviousAgentService DOES
+    remove $HostExe — but that is the FAILED-NEW binary, after the
+    SCM has been drained; the BACKUP at $HostBackup is intact.)"""
     s = _gen()
-    bad = re.search(r"Remove-Item\s+-?[A-Za-z]*\s*\$HostExe\b", s)
+    # Locate the SHA-failure block — should appear under stage [7/9]
+    sha_block = re.search(
+        r"Host binary SHA-256 verified[\s\S]{0,800}?integrity check failed[\s\S]{0,600}?exit 1",
+        s,
+    )
+    # Different way: look at the pre-stage-[8/9] failure handling
+    sha_fail = re.search(
+        r"integrity check failed[\s\S]{0,400}?exit 1",
+        s,
+    )
+    assert sha_fail is not None, "could not locate SHA mismatch failure block"
+    fail_text = sha_fail.group(0)
+    bad = re.search(r"Remove-Item\s+-?[A-Za-z]*\s*\$HostExe\b", fail_text)
     assert bad is None, \
-        f"forbidden Remove-Item against $HostExe: {bad.group(0)!r}"
+        f"SHA-mismatch path removed $HostExe: {bad.group(0)!r}"
 
 
 def test_host_binary_url_built_from_agent_id():

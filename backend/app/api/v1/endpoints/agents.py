@@ -2105,6 +2105,160 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         # ----------------------------------------------------------
         try {{
 
+        # ==========================================================
+        # Restore-PreviousAgentService -- TRANSACTIONAL ROLLBACK
+        # ==========================================================
+        # When the new install/start/status sequence fails AFTER the
+        # atomic move into place, we owe the user a working agent.
+        # A simple `Move-Item $HostBackup $HostExe` restores only the
+        # binary; the SCM registration is still pointing at the
+        # failed new binary path (or has no registration at all).
+        #
+        # This function performs full transactional rollback:
+        #   1) stop any partial new service
+        #   2) uninstall partial new service
+        #   3) bounded poll for SCM drain (exit 18)
+        #   4) delete the failed new $HostExe
+        #   5) move $HostBackup back into $HostExe
+        #   6) re-install the previous binary as the service
+        #   7) start the service
+        #   8) verify 10s Running
+        #   9) verify 30s Running
+        # Returns $true only if all nine steps succeed.
+        function Restore-PreviousAgentService {{
+            param(
+                [string]$ServiceName,
+                [string]$HostExe,
+                [string]$HostBackup,
+                [string]$PythonExe,
+                [string]$InstallDir,
+                [string]$LogDir
+            )
+
+            Write-Host "[ROLLBACK] Step 1/9: stopping partial new service..." -ForegroundColor Yellow
+            & $HostExe stop --service-name $ServiceName 2>&1 | Out-Null
+            Start-Sleep -Milliseconds 500
+
+            Write-Host "[ROLLBACK] Step 2/9: uninstalling partial new service..." -ForegroundColor Yellow
+            & $HostExe uninstall --service-name $ServiceName 2>&1 | Out-Null
+
+            Write-Host "[ROLLBACK] Step 3/9: polling SCM drain (max 30s)..." -ForegroundColor Yellow
+            $deadline = (Get-Date).AddSeconds(30)
+            $gone = $false
+            while ((Get-Date) -lt $deadline) {{
+                & $HostExe status --service-name $ServiceName 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 18) {{ $gone = $true; break }}
+                Start-Sleep -Milliseconds 500
+            }}
+            if (-not $gone) {{
+                Write-Host "[ROLLBACK FAIL] SCM did not drain partial service within 30s." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 4/9: removing failed new binary..." -ForegroundColor Yellow
+            Remove-Item -LiteralPath $HostExe -Force -ErrorAction SilentlyContinue
+
+            Write-Host "[ROLLBACK] Step 5/9: restoring previous binary from backup..." -ForegroundColor Yellow
+            if (-not (Test-Path -LiteralPath $HostBackup)) {{
+                Write-Host "[ROLLBACK FAIL] Backup binary missing." -ForegroundColor Red
+                return $false
+            }}
+            Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
+
+            Write-Host "[ROLLBACK] Step 6/9: re-installing previous binary as service..." -ForegroundColor Yellow
+            & $HostExe install `
+                --service-name $ServiceName `
+                --display-name "NetManager Proxy Agent" `
+                --description "Charon agent host" `
+                --child-exe $PythonExe `
+                --child-arg "$InstallDir\\run_agent.py" `
+                --work-dir $InstallDir `
+                --env-file "$InstallDir\\config.env" `
+                --log-dir $LogDir `
+                --service-account "LocalSystem"
+            if ($LASTEXITCODE -ne 0) {{
+                Write-Host "[ROLLBACK FAIL] Re-install of previous binary failed (exit $LASTEXITCODE)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 7/9: starting previous service..." -ForegroundColor Yellow
+            & $HostExe start --service-name $ServiceName
+            if ($LASTEXITCODE -ne 0) {{
+                Write-Host "[ROLLBACK FAIL] Start of previous service failed (exit $LASTEXITCODE)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 8/9: verifying previous service Running at 10s..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
+            $r10 = (& $HostExe status --service-name $ServiceName 2>&1 | Out-String).Trim()
+            $e10 = $LASTEXITCODE
+            if ($e10 -ne 0 -or $r10 -ne "Running") {{
+                Write-Host "[ROLLBACK FAIL] Previous service not Running at 10s (status='$r10' exit=$e10)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 9/9: verifying previous service Running at 30s..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 20
+            $r30 = (& $HostExe status --service-name $ServiceName 2>&1 | Out-String).Trim()
+            $e30 = $LASTEXITCODE
+            if ($e30 -ne 0 -or $r30 -ne "Running") {{
+                Write-Host "[ROLLBACK FAIL] Previous service not Running at 30s (status='$r30' exit=$e30)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK OK] Previous service fully restored and Running." -ForegroundColor Green
+            return $true
+        }}
+
+        # ==========================================================
+        # Invoke-NewInstallFailure -- exit-code contract for the four
+        # post-stage-8/9 failure paths.
+        # ==========================================================
+        # Exit codes:
+        #   0 = success
+        #   1 = new install failed, previous service successfully restored
+        #       and Running (10s + 30s), OR no previous service existed
+        #       (fresh install)
+        #   2 = new install failed AND rollback failed -- operator MUST
+        #       intervene; agent is unmanaged
+        function Invoke-NewInstallFailure {{
+            param(
+                [string]$Stage,
+                [string]$Reason,
+                [bool]$RollbackAvailable,
+                [string]$ServiceName,
+                [string]$HostExe,
+                [string]$HostBackup,
+                [string]$PythonExe,
+                [string]$InstallDir,
+                [string]$LogDir
+            )
+            Write-Host "[ERROR] $Stage failed: $Reason" -ForegroundColor Red
+            if (-not $RollbackAvailable) {{
+                Write-Host "[INFO] No previous binary to roll back to (fresh install)." -ForegroundColor Yellow
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            Write-Host "[INFO] Attempting transactional rollback of previous service..." -ForegroundColor Yellow
+            $recovered = Restore-PreviousAgentService `
+                -ServiceName $ServiceName `
+                -HostExe $HostExe `
+                -HostBackup $HostBackup `
+                -PythonExe $PythonExe `
+                -InstallDir $InstallDir `
+                -LogDir $LogDir
+            if ($recovered) {{
+                Write-Host "[INFO] Rollback successful. Exiting 1 (new install failed; previous service Running)." -ForegroundColor Green
+                Read-Host "Press Enter to exit"
+                exit 1
+            }} else {{
+                Write-Host "[CRITICAL] Rollback FAILED. Previous service NOT restored." -ForegroundColor Red
+                Write-Host "[CRITICAL] Manual operator intervention required. Exit 2." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 2
+            }}
+        }}
+
         Write-Host "[1/9] Administrator privileges verified." -ForegroundColor Cyan
 
         # ==========================================================
@@ -2374,25 +2528,24 @@ exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
             --log-dir $LogDir `
             --service-account "LocalSystem"
         if ($LASTEXITCODE -ne 0) {{
-            Write-Host "[ERROR] Service install failed (exit $LASTEXITCODE)." -ForegroundColor Red
-            if ($rollbackAvailable) {{
-                Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
-                Write-Host "[INFO] Rolled back to previous host binary." -ForegroundColor Yellow
-            }}
-            Read-Host "Press Enter to exit"
-            exit 1
+            Invoke-NewInstallFailure `
+                -Stage "Service install" `
+                -Reason "host install exit=$LASTEXITCODE" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
         }}
 
         & $HostExe start --service-name $ServiceName
         if ($LASTEXITCODE -ne 0) {{
-            Write-Host "[ERROR] Service start failed (exit $LASTEXITCODE)." -ForegroundColor Red
-            & $HostExe uninstall --service-name $ServiceName | Out-Null
-            if ($rollbackAvailable) {{
-                Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
-                Write-Host "[INFO] Rolled back to previous host binary." -ForegroundColor Yellow
-            }}
-            Read-Host "Press Enter to exit"
-            exit 1
+            Invoke-NewInstallFailure `
+                -Stage "Service start" `
+                -Reason "host start exit=$LASTEXITCODE" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
         }}
         Write-Host "[OK] Service install + start commands completed." -ForegroundColor Green
 
@@ -2404,30 +2557,26 @@ exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
         $status10 = (& $HostExe status --service-name $ServiceName).Trim()
         $exit10 = $LASTEXITCODE
         if ($exit10 -ne 0 -or $status10 -ne "Running") {{
-            Write-Host "[ERROR] Service is not running at 10s (status='$status10' exit=$exit10)." -ForegroundColor Red
-            & $HostExe stop --service-name $ServiceName | Out-Null
-            & $HostExe uninstall --service-name $ServiceName | Out-Null
-            if ($rollbackAvailable) {{
-                Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
-                Write-Host "[INFO] Rolled back to previous host binary." -ForegroundColor Yellow
-            }}
-            Read-Host "Press Enter to exit"
-            exit 1
+            Invoke-NewInstallFailure `
+                -Stage "10s status check" `
+                -Reason "status='$status10' exit=$exit10" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
         }}
 
         Start-Sleep -Seconds 20
         $status30 = (& $HostExe status --service-name $ServiceName).Trim()
         $exit30 = $LASTEXITCODE
         if ($exit30 -ne 0 -or $status30 -ne "Running") {{
-            Write-Host "[ERROR] Service is not running at 30s (status='$status30' exit=$exit30)." -ForegroundColor Red
-            & $HostExe stop --service-name $ServiceName | Out-Null
-            & $HostExe uninstall --service-name $ServiceName | Out-Null
-            if ($rollbackAvailable) {{
-                Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
-                Write-Host "[INFO] Rolled back to previous host binary." -ForegroundColor Yellow
-            }}
-            Read-Host "Press Enter to exit"
-            exit 1
+            Invoke-NewInstallFailure `
+                -Stage "30s status check" `
+                -Reason "status='$status30' exit=$exit30" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
         }}
         Write-Host "[OK] Service stably running (10s + 30s exact match)." -ForegroundColor Green
 

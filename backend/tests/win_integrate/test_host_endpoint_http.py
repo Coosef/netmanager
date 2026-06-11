@@ -217,17 +217,12 @@ def test_version_sidecar_missing_returns_503(app_with_overrides, monkeypatch):
     "2.0.0-mvp0+gabcdef12345Z",       # non-hex final char
     "1.0.0-mvp0+gabcdef123456",       # wrong major
     "v2.0.0-mvp0+gabcdef123456",      # leading 'v'
-    "2.0.0-mvp0+gabcdef123456\n",     # trailing newline (strip → OK)
 ])
 def test_version_sidecar_malformed_returns_503(
     app_with_overrides, monkeypatch, bad
 ):
     f = app_with_overrides
     monkeypatch.setattr(f["settings"], "WINDOWS_AGENT_V2_ENABLED", True)
-    if bad.endswith("\n"):
-        # trailing newline is documented as accepted via .strip() —
-        # this is the happy path, exclude from the negative set
-        pytest.skip("trailing newline is stripped by the read path")
     f["ver_path"].write_text(bad)
     monkeypatch.setattr(f["agents_mod"], "_HOST_INTEGRITY_CACHE", None)
     res = f["client"].get(
@@ -237,6 +232,26 @@ def test_version_sidecar_malformed_returns_503(
     assert res.status_code == 503, (
         f"version {bad!r} should reject; got {res.status_code}"
     )
+
+
+def test_version_sidecar_trailing_newline_is_accepted(
+    app_with_overrides, monkeypatch
+):
+    """A trailing newline on the version sidecar (e.g. when the build
+    pipeline uses `echo HOST_VERSION > .version` instead of `printf`)
+    is stripped by the read path's .strip() and the regex match still
+    holds — endpoint serves 200 with the un-newline-ed version in the
+    X-Host-Version header."""
+    f = app_with_overrides
+    monkeypatch.setattr(f["settings"], "WINDOWS_AGENT_V2_ENABLED", True)
+    f["ver_path"].write_text(VALID_VERSION + "\n")
+    monkeypatch.setattr(f["agents_mod"], "_HOST_INTEGRITY_CACHE", None)
+    res = f["client"].get(
+        f"/api/v1/agents/{f['agent_id']}/download/host/windows-amd64",
+        headers={"X-Agent-Key": f["agent_key"]},
+    )
+    assert res.status_code == 200
+    assert res.headers["x-host-version"] == VALID_VERSION  # newline stripped
 
 
 def test_sha_mismatch_returns_503(app_with_overrides, monkeypatch):
