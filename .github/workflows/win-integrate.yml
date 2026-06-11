@@ -18,11 +18,11 @@ on:
       - '.github/workflows/win-integrate.yml'
 
 jobs:
-  # ────────────────────────────────────────────────────────────────
-  # Backend unit — pytest of the new endpoint, installer invariants
+  # ----------------------------------------------------------------
+  # Backend unit -- pytest of the new endpoint, installer invariants
   # and Linux isolation guards. Fast feedback on Ubuntu before paying
   # for a Docker build.
-  # ────────────────────────────────────────────────────────────────
+  # ----------------------------------------------------------------
   backend-unit:
     name: Backend unit
     runs-on: ubuntu-latest
@@ -69,9 +69,9 @@ jobs:
             -q --no-header --tb=no \
             > /tmp/wider.log 2>&1
           RC=$?
-          echo "──────── wider backend suite ────────"
+          echo "-------- wider backend suite --------"
           tail -60 /tmp/wider.log
-          echo "──────── exit code: $RC ────────"
+          echo "-------- exit code: $RC --------"
           # Surface a structured summary
           python - <<'PY'
           import re
@@ -87,18 +87,18 @@ jobs:
           skipped = int(m4.group(1)) if m4 else 0
           print(f"::notice ::wider-suite: passed={passed} failed={failed} skipped={skipped} collection_errors={coll_err}")
           # The post-CI review wants explicit acknowledgement of
-          # pre-existing failures — leave the step "passing" so the
+          # pre-existing failures -- leave the step "passing" so the
           # job is informational, with the metrics in the annotation.
           PY
           exit 0
 
-  # ────────────────────────────────────────────────────────────────
-  # Backend Docker build — proves the multi-stage build embeds the
+  # ----------------------------------------------------------------
+  # Backend Docker build -- proves the multi-stage build embeds the
   # host binary correctly. The source SHA is read directly from
   # github.event.pull_request.head.sha so the embedded HOST_VERSION
   # is derived from the BRANCH HEAD, not the synthetic
   # pull_request merge ref that actions/checkout produces.
-  # ────────────────────────────────────────────────────────────────
+  # ----------------------------------------------------------------
   backend-image:
     name: Backend Docker image
     runs-on: ubuntu-latest
@@ -110,7 +110,7 @@ jobs:
         id: src
         run: |
           # On pull_request runs, actions/checkout fetches a synthetic
-          # merge ref by default — `git rev-parse HEAD` then points at
+          # merge ref by default -- `git rev-parse HEAD` then points at
           # the merge commit, not the branch tip. Read the head SHA
           # from the event payload instead so the embedded HOST_VERSION
           # matches the PR branch's actual HEAD commit.
@@ -132,7 +132,7 @@ jobs:
 
       - name: docker compose config sanity
         run: |
-          # Compose reads .env for variable interpolation — write a
+          # Compose reads .env for variable interpolation -- write a
           # minimal one so the config command doesn't bail on "file
           # not found". Runtime config provides real secrets via
           # env_file at deploy, not here.
@@ -180,7 +180,7 @@ jobs:
           echo "sidecar version: $VER"
           echo "expected      : $HOST_VERSION"
           test "$VER" = "$HOST_VERSION"
-          # Also verify the version matches the production regex —
+          # Also verify the version matches the production regex --
           # the Dockerfile already does this at build time but we
           # re-verify here to catch any future regression in the
           # build step.
@@ -190,7 +190,7 @@ jobs:
         run: |
           IMG=switch-backend:latest
           # Use `file` from the runner host (binutils is no longer
-          # installed inside the runtime image — we don't need it,
+          # installed inside the runtime image -- we don't need it,
           # the version comes from the .version sidecar above).
           docker run --rm "$IMG" cat /opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe > /tmp/host.exe
           file /tmp/host.exe | tee /tmp/file.out
@@ -213,19 +213,19 @@ jobs:
           SOURCE_KIND:  ${{ steps.src.outputs.SOURCE_KIND }}
           HOST_VERSION: ${{ steps.src.outputs.HOST_VERSION }}
         run: |
-          echo "── source provenance ──"
+          echo "-- source provenance --"
           echo "SOURCE_SHA   (${SOURCE_KIND}) : ${SOURCE_SHA}"
           echo "MERGE_SHA    (github.sha)     : ${MERGE_SHA}"
           echo "HOST_VERSION                  : ${HOST_VERSION}"
-          echo "── binary ──"
+          echo "-- binary --"
           ls -l /tmp/host.exe
 
-  # ────────────────────────────────────────────────────────────────
-  # Windows PowerShell 5.1 — real powershell.exe (not pwsh) parses
+  # ----------------------------------------------------------------
+  # Windows PowerShell 5.1 -- real powershell.exe (not pwsh) parses
   # the generated installer. Byte-level + Go-host + reinstall race
   # invariants. Build context not needed; we only generate the
   # installer string from the Python source.
-  # ────────────────────────────────────────────────────────────────
+  # ----------------------------------------------------------------
   installer-ps51:
     name: Installer PS 5.1 (windows-2022)
     runs-on: windows-2022
@@ -262,7 +262,7 @@ jobs:
           SECRET_KEY: testing
         run: |
           export CREDENTIAL_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
-          # Write installer into $RUNNER_TEMP — Windows runners don't have /tmp.
+          # Write installer into $RUNNER_TEMP -- Windows runners don't have /tmp.
           DEST="${RUNNER_TEMP//\\//}/installer.ps1"
           python - "$DEST" <<'PY'
           import sys
@@ -277,7 +277,7 @@ jobs:
           ls -l "$DEST"
           echo "INSTALLER_PATH=$DEST" >> "$GITHUB_ENV"
 
-      - name: ParseFile → 0 errors
+      - name: ParseFile -> 0 errors
         shell: powershell
         run: |
           $path = $env:INSTALLER_PATH
@@ -351,7 +351,7 @@ jobs:
           with open(__import__('os').environ['INSTALLER_PATH'], 'rb') as f:
               content = f.read().decode('utf-8-sig')
 
-          # ── ACL fail-closed ────────────────────────────────────────
+          # -- ACL fail-closed ----------------------------------------
           idx = content.find('Set-Acl $InstallDir $acl')
           if idx < 0:
               sys.exit('Set-Acl call not found')
@@ -367,7 +367,7 @@ jobs:
               sys.exit('ACL catch block must not echo raw exception message to console')
           print('[OK] ACL fail-closed enforced')
 
-          # ── Uninstall exit-code + bounded poll ─────────────────────
+          # -- Uninstall exit-code + bounded poll ---------------------
           if '$uninstallExit = $LASTEXITCODE' not in content:
               sys.exit('uninstall exit code not captured')
           for code in ('0', '18', '19'):
@@ -387,14 +387,14 @@ jobs:
           print('[OK] uninstall exit-code handling + bounded poll present')
           PY
 
-  # ────────────────────────────────────────────────────────────────
-  # Real Windows reinstall integration — windows-2022 runner with
+  # ----------------------------------------------------------------
+  # Real Windows reinstall integration -- windows-2022 runner with
   # elevated rights. Cross-builds two charon-agent-host binaries
   # (V1 and V2) and runs the installer's STAGING / UNINSTALL +
   # DRAIN / ATOMIC REPLACE / RESTART / 10s+30s status lifecycle
   # against the real SCM. Catches the direct-overwrite + file-lock
   # + race-window bugs that source-string assertions cannot.
-  # ────────────────────────────────────────────────────────────────
+  # ----------------------------------------------------------------
   reinstall-integration:
     name: Reinstall lifecycle (windows-2022)
     runs-on: windows-2022
@@ -435,10 +435,10 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          # ── unique service name to avoid cross-run collisions ──
+          # -- unique service name to avoid cross-run collisions --
           $svc = "CharonReinstallIT-$(Get-Random)"
 
-          # ── workspace under RUNNER_TEMP/install ──
+          # -- workspace under RUNNER_TEMP/install --
           $installDir = Join-Path $env:RUNNER_TEMP "install"
           $binDir     = Join-Path $installDir "bin"
           $logDir     = Join-Path $installDir "logs"
@@ -449,10 +449,10 @@ jobs:
           $hostStage  = "$hostExe.new"
           $hostBackup = "$hostExe.bak"
 
-          # ── child fixture: cmd.exe ping -n 600 (long-running) ──
+          # -- child fixture: cmd.exe ping -n 600 (long-running) --
           $childExe = "$env:SystemRoot\System32\cmd.exe"
 
-          # ── stage 1: V1 install + start + 10s Running ──
+          # -- stage 1: V1 install + start + 10s Running --
           Copy-Item "$env:RUNNER_TEMP\host-v1.exe" -Destination $hostExe -Force
           & $hostExe install `
               --service-name $svc `
@@ -479,7 +479,7 @@ jobs:
           }
           Write-Host "[OK] V1 service Running at 10s"
 
-          # ── stage 2: V2 download / stage (simulated copy) ──
+          # -- stage 2: V2 download / stage (simulated copy) --
           # The installer's [6/9] uses Invoke-WebRequest -OutFile $HostStage;
           # we simulate with Copy-Item to the SAME staging path so the
           # subsequent uninstall + replace lifecycle exercises identical
@@ -506,11 +506,11 @@ jobs:
             throw "V2 version string does not embed g000000000002: $stageVer"
           }
           if ($oldVer -eq $stageVer) {
-            throw "V1 and V2 report identical version — fixtures not distinct"
+            throw "V1 and V2 report identical version -- fixtures not distinct"
           }
           Write-Host "[OK] V2 staged with distinct embedded HOST_VERSION"
 
-          # ── stage 3: uninstall V1 + bounded poll for SCM drain ──
+          # -- stage 3: uninstall V1 + bounded poll for SCM drain --
           & $hostExe uninstall --service-name $svc | Out-Null
           $uninstallExit = $LASTEXITCODE
           if ($uninstallExit -ne 0 -and $uninstallExit -ne 18 -and $uninstallExit -ne 19) {
@@ -526,7 +526,7 @@ jobs:
           if (-not $gone) { throw "SCM did not drain V1 within 30s" }
           Write-Host "[OK] V1 uninstalled + SCM drained"
 
-          # ── stage 4: backup V1 then atomic move stage → final ──
+          # -- stage 4: backup V1 then atomic move stage -> final --
           if (Test-Path -LiteralPath $hostExe) {
             Move-Item -LiteralPath $hostExe -Destination $hostBackup -Force
           }
@@ -538,7 +538,7 @@ jobs:
             throw "final exe missing after move"
           }
 
-          # ── stage 5: install V2 + start + 10s + 30s Running ──
+          # -- stage 5: install V2 + start + 10s + 30s Running --
           & $hostExe install `
               --service-name $svc `
               --display-name "Reinstall IT $svc" `
@@ -572,7 +572,7 @@ jobs:
           }
           Write-Host "[OK] V2 service Running at 10s + 30s"
 
-          # ── stage 6: verify final binary is V2 via version string ──
+          # -- stage 6: verify final binary is V2 via version string --
           # (.bak still exists; cleanup happens after success below)
           $finalVer = (& $hostExe version).Trim()
           Write-Host "  final version: $finalVer"
@@ -580,11 +580,11 @@ jobs:
             throw "final binary not V2 (version=$finalVer)"
           }
           if ($finalVer -eq $oldVer) {
-            throw "final binary identical to V1 (version=$finalVer) — replacement did not happen"
+            throw "final binary identical to V1 (version=$finalVer) -- replacement did not happen"
           }
           Write-Host "[OK] final exe is V2 binary"
 
-          # ── stage 7: success cleanup ──
+          # -- stage 7: success cleanup --
           & $hostExe stop --service-name $svc | Out-Null
           Start-Sleep -Milliseconds 500
           & $hostExe uninstall --service-name $svc | Out-Null
