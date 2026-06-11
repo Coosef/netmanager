@@ -69,7 +69,10 @@ jobs:
       - name: docker compose config sanity
         run: |
           # Surface compose / dockerfile path issues before we build a
-          # 400 MB image and discover it 5 minutes in.
+          # 400 MB image and discover it 5 minutes in. Compose reads
+          # .env for variable interpolation — write a minimal one so
+          # the config command doesn't bail on "file not found".
+          touch .env
           docker compose config -q
 
       - name: Build backend image only
@@ -152,24 +155,28 @@ jobs:
         shell: bash
         working-directory: backend
         env:
-          # Provide dummy env so app.core.config.Settings can import
           DATABASE_URL: sqlite+aiosqlite:///tmp.db
           SYNC_DATABASE_URL: sqlite:///tmp.db
           SECRET_KEY: testing
         run: |
+          # CREDENTIAL_ENCRYPTION_KEY must be a valid Fernet key.
+          export CREDENTIAL_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
           # Generate the response BODY exactly as the endpoint would:
-          # BOM + CRLF + UTF-8 encoded script.
-          python - <<'PY'
+          # BOM + CRLF + UTF-8 encoded script. Write directly into
+          # $RUNNER_TEMP — Windows runners don't have /tmp.
+          DEST="${RUNNER_TEMP//\\//}/installer.ps1"
+          python - "$DEST" <<'PY'
+          import sys
           from app.api.v1.endpoints.agents import _windows_installer
+          dest = sys.argv[1]
           script = _windows_installer("test-agent", "REDACTED", "https://netmanager.example.app")
           body = b"\xef\xbb\xbf" + script.replace("\r\n","\n").replace("\n","\r\n").encode("utf-8")
-          with open("/tmp/installer.ps1","wb") as f:
+          with open(dest, "wb") as f:
               f.write(body)
+          print("wrote", dest, len(body), "bytes")
           PY
-          ls -lh /tmp/installer.ps1
-          # Move into the workspace so PowerShell can read it
-          mv /tmp/installer.ps1 $RUNNER_TEMP/installer.ps1
-          echo "INSTALLER_PATH=$RUNNER_TEMP/installer.ps1" >> "$GITHUB_ENV"
+          ls -l "$DEST"
+          echo "INSTALLER_PATH=$DEST" >> "$GITHUB_ENV"
 
       - name: ParseFile → 0 errors
         shell: powershell
