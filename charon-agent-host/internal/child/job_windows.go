@@ -139,12 +139,16 @@ func (p *Process) terminateJob(exitCode uint32) error {
 
 // applySysProcAttr configures the child process's creation flags.
 //
-// CREATE_NEW_PROCESS_GROUP isolates the child's console process
-// group so a future MVP-1 cooperative CTRL_BREAK_EVENT can target
-// it without affecting the host. CTRL_BREAK is NOT used as the
-// only shutdown signal — see shutdown_windows.go for the actual
-// sequence — but isolating the group makes the cooperative attempt
-// safer.
+// HiddenWindow + CREATE_NO_WINDOW: a Windows service runs in
+// session 0 with no interactive desktop. If we don't tell the
+// child not to allocate a console, CreateProcessW spends a long
+// time trying to allocate one against a missing desktop — which
+// is the StartPending hang the integration tests observed in CI.
+//
+// We previously also set CREATE_NEW_PROCESS_GROUP for a future
+// cooperative CTRL_BREAK_EVENT path; it is removed for MVP-0
+// because it is not needed yet and adds another knob that can
+// surprise the dispatcher.
 //
 // CREATE_SUSPENDED is intentionally NOT set: see
 // docs/JOB_OBJECT_ATTACHMENT_RACE.md for why the obvious
@@ -153,5 +157,6 @@ func applySysProcAttr(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
-	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NEW_PROCESS_GROUP
+	cmd.SysProcAttr.HideWindow = true
+	cmd.SysProcAttr.CreationFlags |= windows.CREATE_NO_WINDOW
 }
