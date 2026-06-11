@@ -95,7 +95,23 @@ func newScaffold(t *testing.T) *scaffold {
 	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		t.Fatalf("mkdir log dir: %v", err)
 	}
-	workDir := t.TempDir()
+	// workDir MUST be in a path the SCM-launched LocalSystem service can
+	// read+enter. t.TempDir() points inside the test runner's user
+	// profile (C:\Users\RUNNER~1\AppData\Local\Temp), which is owned
+	// by the runner user with DenyOthers ACL inheritance on the
+	// runner image — LocalSystem can't necessarily `SetCurrentDirectory`
+	// in there, and CreateProcessW blocks. Use RUNNER_TEMP (the
+	// workflow's machine-scope temp, D:\a\_temp on hosted runners) so
+	// SYSTEM has unambiguous access.
+	workDirRoot := os.Getenv("RUNNER_TEMP")
+	if workDirRoot == "" {
+		workDirRoot = t.TempDir()
+	}
+	workDir, err := os.MkdirTemp(workDirRoot, "charon-it-"+sanitizeForPath(t.Name())+"-")
+	if err != nil {
+		t.Fatalf("mkdir work dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(workDir) })
 	pidFile := filepath.Join(workDir, "child.pid")
 
 	// Materialize the PowerShell payload as a .ps1 file. SCM's
