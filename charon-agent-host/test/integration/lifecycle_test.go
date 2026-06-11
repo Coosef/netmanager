@@ -52,17 +52,26 @@ func uniqueServiceName() string {
 // The PID file is the test's only handle on "is the child the same
 // instance or did the supervisor relaunch it" — comparing two
 // successive reads tells us a restart happened.
-// fakeChildScript is the PowerShell payload the fake child runs. It
-// is intentionally kept as ONE LINE because Windows SCM stores the
-// service ImagePath as a single string and newlines inside an argv
-// element are split on by the command-line parser when SCM relaunches
-// the binary — multi-line payloads come back to the supervisor as a
-// truncated `-Command` argument and the child fails to start.
+// fakeChildScript is the PowerShell payload the fake child runs.
 //
-// Semantics: write $PID to the file pointed at by CHARON_TEST_PID_FILE
-// (set on the child's environment via the agent env file) and then
-// sleep forever.
-const fakeChildScript = `$f=$env:CHARON_TEST_PID_FILE; if($f){[IO.File]::WriteAllText($f,$PID.ToString())}; while($true){Start-Sleep 1}`
+// We write it to a temp .ps1 file and pass that path with `-File`
+// rather than embedding the script inline with `-Command`. Reason:
+// Windows SCM stores the service registration as a single string;
+// the supervisor binary parses it back through `flag`, and the OS
+// re-splits it through whichever CRT the binary was linked with.
+// Inline `-Command` payloads that contain shell-significant
+// characters (semicolons, braces, dollar signs, quotes) get
+// mangled at one of those layers and powershell.exe ends up seeing
+// either a truncated script or an empty argument. A bare file path
+// passes through untouched.
+//
+// Semantics of the script: write $PID to the file pointed at by
+// CHARON_TEST_PID_FILE (set on the child's environment via the
+// agent env file) and then sleep forever.
+const fakeChildScript = `$f=$env:CHARON_TEST_PID_FILE
+if ($f) { [IO.File]::WriteAllText($f, $PID.ToString()) }
+while ($true) { Start-Sleep -Seconds 1 }
+`
 
 // scaffold builds a Config + helper functions for an integration
 // test. The caller's t.Cleanup hook is registered so even a panic
@@ -89,6 +98,15 @@ func newScaffold(t *testing.T) *scaffold {
 	workDir := t.TempDir()
 	pidFile := filepath.Join(workDir, "child.pid")
 
+	// Materialize the PowerShell payload as a .ps1 file. SCM's
+	// ImagePath storage corrupts inline `-Command` payloads, so we
+	// pass `-File <path>` instead. The file lives in workDir so
+	// it is torn down with the test's TempDir.
+	scriptPath := filepath.Join(workDir, "fake-child.ps1")
+	if err := os.WriteFile(scriptPath, []byte(fakeChildScript), 0o644); err != nil {
+		t.Fatalf("write fake child script: %v", err)
+	}
+
 	cfg := config.Default()
 	cfg.ServiceName = uniqueServiceName()
 	cfg.DisplayName = "Charon Host IT — " + t.Name()
@@ -97,7 +115,7 @@ func newScaffold(t *testing.T) *scaffold {
 	cfg.ChildArgs = []string{
 		"-NoProfile",
 		"-ExecutionPolicy", "Bypass",
-		"-Command", fakeChildScript,
+		"-File", scriptPath,
 	}
 	cfg.WorkDir = workDir
 	cfg.LogDir = logDir
