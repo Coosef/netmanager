@@ -1,0 +1,88 @@
+# Repo-root Docker context (WIN-INTEGRATE)
+#
+# backend/Dockerfile multi-stage build needs:
+#   - backend/  (Python sources + requirements.txt)
+#   - charon-agent-host/  (Go module for Windows host binary)
+#
+# Everything else is excluded so we don't ship a several-hundred-MB
+# context to dockerd or accidentally embed secrets / restore archives
+# / vendored deps into an image.
+
+# ── Version control ──────────────────────────────────────────────────────
+.git
+.gitignore
+.gitattributes
+.github
+**/.DS_Store
+
+# ── Editor / IDE ─────────────────────────────────────────────────────────
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# ── Secrets / env (defense in depth — backend volumes mounted at runtime) ─
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+*.crt
+*.p12
+
+# ── Python build / runtime artefacts ─────────────────────────────────────
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.egg-info
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/htmlcov
+.venv
+venv
+backend/.venv
+backend/venv
+backend/test_app.db
+backend/test.db
+
+# ── Node / frontend (NOT needed by backend build) ────────────────────────
+frontend
+!frontend/.dockerignore
+node_modules
+
+# ── Go build outputs (binary is produced inside the multi-stage build) ──
+charon-agent-host/bin
+charon-agent-host/build
+charon-agent-host/*.exe
+charon-agent-host/*.sha256
+
+# ── Restore archives / DB dumps / Git bundles ────────────────────────────
+artifacts
+docs/restore-points
+netmanager-restore-points
+backups
+*.tar
+*.tar.gz
+*.tgz
+*.bundle
+*.sql
+*.sql.gz
+
+# ── Misc top-level non-build files ───────────────────────────────────────
+Netmanager
+Netmanager.zip
+Netmanager-handoff.zip
+Switch-Port Policies.docx
+docs
+docker-compose*.bak
+docker-compose.override.yml
+
+# ── Restore frontend out (excluded above) explicit re-include rule needed?
+# No — backend Dockerfile only COPYs backend/ and charon-agent-host/, so
+# excluding everything else is the safe default.
