@@ -201,8 +201,8 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 				Args:    h.Cfg.ChildArgs,
 				WorkDir: h.Cfg.WorkDir,
 				Env:     h.buildEnv(),
-				Stdout:  stdoutLog,
-				Stderr:  stderrLog,
+				Stdout:  stdoutFile,
+				Stderr:  stderrFile,
 			}
 			startedAt = time.Now()
 			if err := proc.Start(ctx); err != nil {
