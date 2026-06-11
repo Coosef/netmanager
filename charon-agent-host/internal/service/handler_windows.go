@@ -33,7 +33,23 @@ const acceptedCmds = svc.AcceptStop | svc.AcceptShutdown
 //
 // The return values (svcSpecificEC, exitCode) bubble up to SCM as the
 // service's exit code.
-func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan<- svc.Status) (bool, uint32) {
+func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan<- svc.Status) (svcSpecificEC bool, exitCode uint32) {
+	// Crash-safety: if anything between here and the `return` panics
+	// the SCM dispatcher will otherwise see a hung StartPending until
+	// its 30s timer expires. Recover + log + send Stopped + return.
+	defer func() {
+		if rec := recover(); rec != nil {
+			h.Log.Error("handler panic recovered",
+				"panic", fmt.Sprintf("%v", rec),
+			)
+			h.Evt.Error(logging.EventHostPanicRecovered,
+				fmt.Sprintf("Handler panic: %v", rec))
+			status <- svc.Status{State: svc.Stopped}
+			svcSpecificEC = false
+			exitCode = 1
+		}
+	}()
+
 	// Tell SCM we're starting RIGHT AWAY so the dispatcher's 30s timer
 	// doesn't elapse while we set up Job Object / logging.
 	status <- svc.Status{State: svc.StartPending}
@@ -41,10 +57,15 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 	h.Log.Info("service execute begin",
 		"service_name", h.Cfg.ServiceName,
 		"child_exe", h.Cfg.ChildExe,
+		"child_args_count", len(h.Cfg.ChildArgs),
+		"work_dir", h.Cfg.WorkDir,
+		"log_dir", h.Cfg.LogDir,
+		"env_file", h.Cfg.EnvFile,
 	)
 	h.Evt.Info(logging.EventServiceStarted, "Service starting: "+h.Cfg.ServiceName)
 
 	// Wire stdout/stderr capture to rotating files.
+	h.Log.Info("opening child stdout/stderr log writers")
 	stdoutLog := logging.NewRotatingWriter(h.Cfg.LogDir, "agent.stdout", ".log")
 	stderrLog := logging.NewRotatingWriter(h.Cfg.LogDir, "agent.stderr", ".log")
 	defer stdoutLog.Close()
@@ -53,15 +74,20 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	h.Log.Info("building child env from env file")
+	env := h.buildEnv()
+	h.Log.Info("child env built", "entries", len(env))
+
 	proc := &child.Process{
 		Exec:    h.Cfg.ChildExe,
 		Args:    h.Cfg.ChildArgs,
 		WorkDir: h.Cfg.WorkDir,
-		Env:     h.buildEnv(),
+		Env:     env,
 		Stdout:  stdoutLog,
 		Stderr:  stderrLog,
 	}
 
+	h.Log.Info("calling proc.Start")
 	startedAt := time.Now()
 	if err := proc.Start(ctx); err != nil {
 		h.Log.Error("child start failed", "err", err.Error())
@@ -71,7 +97,9 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 	}
 	h.Log.Info("child started", "pid", proc.PID())
 
+	h.Log.Info("sending Running status to SCM")
 	status <- svc.Status{State: svc.Running, Accepts: acceptedCmds}
+	h.Log.Info("Running status sent; entering supervisor loop")
 
 	policy := child.DefaultRestartPolicy()
 	var backoff child.BackoffState
