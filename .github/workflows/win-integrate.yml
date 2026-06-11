@@ -79,7 +79,19 @@ jobs:
         env:
           HOST_VERSION: ${{ steps.ver.outputs.HOST_VERSION }}
         run: |
-          docker compose build --build-arg HOST_VERSION="${HOST_VERSION}" backend
+          # docker compose build on GitHub runners delegates to buildx,
+          # which by default produces a multi-platform attestation image
+          # that never lands in the local docker image store. Subsequent
+          # `docker run switch-backend:latest` then fails with "Unable
+          # to find image". Use plain `docker build` against the same
+          # Dockerfile + context so the result is a regular local image
+          # — and so this CI gate also exercises the exact COPY paths
+          # the compose-driven build would.
+          docker build \
+            --build-arg HOST_VERSION="${HOST_VERSION}" \
+            -f backend/Dockerfile \
+            -t switch-backend:latest \
+            .
 
       - name: Embedded host binary present + sidecar match
         run: |
@@ -155,8 +167,12 @@ jobs:
         shell: bash
         working-directory: backend
         env:
-          DATABASE_URL: sqlite+aiosqlite:///tmp.db
-          SYNC_DATABASE_URL: sqlite:///tmp.db
+          # postgresql+asyncpg URLs avoid the SQLite + pool_size conflict
+          # in app.core.database (we never actually open a connection;
+          # the URL just needs to be NOT-SQLite to bypass the kwargs
+          # filter shim that conftest.py installs for pytest).
+          DATABASE_URL: postgresql+asyncpg://x:y@localhost/db
+          SYNC_DATABASE_URL: postgresql+psycopg2://x:y@localhost/db
           SECRET_KEY: testing
         run: |
           # CREDENTIAL_ENCRYPTION_KEY must be a valid Fernet key.
