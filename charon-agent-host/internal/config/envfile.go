@@ -11,10 +11,10 @@ import (
 // own os.Environ().
 //
 // The defensive BOM strip is critical: the v1 PowerShell installer's
-// Out-File -Encoding UTF8 prepended an UTF-8 BOM, which made the first
-// key parse as "﻿NETMANAGER_URL" — invisible to a casual eye but
-// fatal to lookup. The new installer (PR #75) writes BOM-less files,
-// but existing agents on disk may still carry a BOM, so we strip
+// Out-File -Encoding UTF8 prepended an UTF-8 BOM (U+FEFF), which made
+// the first key parse as "<BOM>NETMANAGER_URL" — invisible to a casual
+// eye but fatal to lookup. The new installer (PR #75) writes BOM-less
+// files, but existing agents on disk may still carry a BOM, so we strip
 // defensively forever.
 //
 // Caller errors (file missing, permission denied) are intentionally
@@ -37,7 +37,7 @@ func LoadEnvFile(path string) map[string]string {
 	for sc.Scan() {
 		line := sc.Text()
 		if first {
-			line = strings.TrimPrefix(line, "﻿")
+			line = strings.TrimPrefix(line, "\ufeff")
 			first = false
 		}
 		line = strings.TrimSpace(line)
@@ -52,7 +52,7 @@ func LoadEnvFile(path string) map[string]string {
 		v = strings.TrimSpace(v)
 		// Defensive: strip BOM if it survived past the first-line strip
 		// (e.g. file was concatenated from multiple BOM-prefixed sources).
-		k = strings.TrimPrefix(k, "﻿")
+		k = strings.TrimPrefix(k, "\ufeff")
 		if k == "" {
 			continue
 		}
