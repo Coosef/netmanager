@@ -2,16 +2,16 @@
 //
 // Subcommands:
 //
-//   install     Register with SCM (idempotent, fails if exists)
-//   uninstall   Stop + deregister
-//   start       Ask SCM to start
-//   stop        Ask SCM to stop
-//   status      Print Running / Stopped / ... (exit 0 = Running)
-//   version     Print version string
-//   run         Service entrypoint (called by SCM dispatcher)
-//   run --console  Interactive debug — runs the supervisor in the
-//                  current console without SCM. Useful for `go run`
-//                  in a VM or during manual debugging.
+//	install     Register with SCM (idempotent, fails if exists)
+//	uninstall   Stop + deregister
+//	start       Ask SCM to start
+//	stop        Ask SCM to stop
+//	status      Print Running / Stopped / ... (exit 0 = Running)
+//	version     Print version string
+//	run         Service entrypoint (called by SCM dispatcher)
+//	run --console  Interactive debug — runs the supervisor in the
+//	               current console without SCM. Useful for `go run`
+//	               in a VM or during manual debugging.
 //
 // Every subcommand validates its own flag set; no global flag state.
 package cli
@@ -77,4 +77,3 @@ Subcommands:
   help        Show this message
 `)
 }
-

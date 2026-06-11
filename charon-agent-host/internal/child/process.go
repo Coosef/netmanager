@@ -19,16 +19,16 @@ import (
 // The exposed API is platform-neutral; OS-specific calls live behind
 // build-tagged helpers.
 type Process struct {
-	Exec     string
-	Args     []string
-	WorkDir  string
-	Env      []string
-	Stdout   io.Writer
-	Stderr   io.Writer
+	Exec    string
+	Args    []string
+	WorkDir string
+	Env     []string
+	Stdout  io.Writer
+	Stderr  io.Writer
 
-	mu      sync.Mutex
-	cmd     *exec.Cmd
-	exitCh  chan ExitInfo
+	mu        sync.Mutex
+	cmd       *exec.Cmd
+	exitCh    chan ExitInfo
 	jobHandle uintptr // populated on Windows via attachToJob (see job_*.go)
 }
 

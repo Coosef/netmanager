@@ -8,7 +8,7 @@ const ProgramDataPath = `C:\ProgramData\NetManagerAgent`
 // Subdirectories under ProgramDataPath populated by the PowerShell
 // installer (PR #77) before the host's first run.
 const (
-	BinDir   = ProgramDataPath + `\bin`
-	LogDir   = ProgramDataPath + `\logs`
+	BinDir     = ProgramDataPath + `\bin`
+	LogDir     = ProgramDataPath + `\logs`
 	ConfigFile = ProgramDataPath + `\config.env`
 )

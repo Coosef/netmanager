@@ -21,9 +21,9 @@ const (
 
 type EventLog struct{}
 
-func OpenEventLog() *EventLog        { return &EventLog{} }
-func InstallEventSource() error      { return nil }
-func UninstallEventSource()          {}
+func OpenEventLog() *EventLog                     { return &EventLog{} }
+func InstallEventSource() error                   { return nil }
+func UninstallEventSource()                       {}
 func (e *EventLog) Info(id uint32, msg string)    {}
 func (e *EventLog) Warning(id uint32, msg string) {}
 func (e *EventLog) Error(id uint32, msg string)   {}

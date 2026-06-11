@@ -9,7 +9,7 @@
 //
 // SCM vs host crash-recovery responsibility split:
 //   - SCM:    recovers host crashes via service Recovery Actions
-//             (restart 10s/30s/60s — set at install time)
+//     (restart 10s/30s/60s — set at install time)
 //   - host:   recovers child crashes via the backoff schedule below
 //
 // These are non-overlapping by construction; a host crash kills the

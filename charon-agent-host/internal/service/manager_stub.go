@@ -26,7 +26,7 @@ func Uninstall(serviceName string, deleteTimeout time.Duration) error {
 	return ErrUnsupportedPlatform
 }
 
-func Start(serviceName string) error                  { return ErrUnsupportedPlatform }
-func Stop(serviceName string) error                   { return ErrUnsupportedPlatform }
-func Status(serviceName string) (string, error)       { return "", ErrUnsupportedPlatform }
+func Start(serviceName string) error                   { return ErrUnsupportedPlatform }
+func Stop(serviceName string) error                    { return ErrUnsupportedPlatform }
+func Status(serviceName string) (string, error)        { return "", ErrUnsupportedPlatform }
 func RunUnderSCM(serviceName string, h *Handler) error { return ErrUnsupportedPlatform }
