@@ -417,6 +417,7 @@ jobs:
             -ldflags="-s -w -X github.com/Coosef/netmanager/charon-agent-host/internal/version.Version=${HOST_VERSION}" \
             -o "$RUNNER_TEMP/host-v1.exe" \
             ./cmd/charon-agent-host
+          echo "${HOST_VERSION}" > "$RUNNER_TEMP/host-v1.version"
 
       - name: Build host V2
         shell: bash
@@ -429,6 +430,7 @@ jobs:
             -ldflags="-s -w -X github.com/Coosef/netmanager/charon-agent-host/internal/version.Version=${HOST_VERSION}" \
             -o "$RUNNER_TEMP/host-v2.exe" \
             ./cmd/charon-agent-host
+          echo "${HOST_VERSION}" > "$RUNNER_TEMP/host-v2.version"
 
       - name: Reinstall lifecycle test
         shell: powershell
@@ -489,26 +491,27 @@ jobs:
             throw "V2 stage path missing after copy"
           }
 
-          # Probe both binaries via the host CLI's `version` sub-command
-          # so the test asserts on the EMBEDDED HOST_VERSION rather than
-          # raw SHA bytes. Go build caching can make two distinct
-          # LDFLAGS-bearing builds produce surprisingly close binaries
-          # on some toolchain versions; the version string is the
-          # authoritative differentiator.
-          $oldVer = (& $hostExe version 2>&1 | Out-String).Trim()
-          $stageVer = (& $hostStage version 2>&1 | Out-String).Trim()
+          # Verify V1 and V2 expose distinct embedded HOST_VERSIONs.
+          # We CAN'T `& $hostStage version` because PowerShell refuses
+          # to execute a file whose extension is `.new` (PS treats
+          # unknown extensions as documents and aborts the pipeline
+          # with "Cannot run a document in the middle of a pipeline").
+          # The build steps wrote sidecar text files alongside each
+          # binary; we read those.
+          $oldVer   = (Get-Content -Raw "$env:RUNNER_TEMP/host-v1.version").Trim()
+          $stageVer = (Get-Content -Raw "$env:RUNNER_TEMP/host-v2.version").Trim()
           Write-Host "  V1 version: [$oldVer]"
           Write-Host "  V2 version: [$stageVer]"
-          if (-not $oldVer)   { throw "V1 version probe returned empty" }
-          if (-not $stageVer) { throw "V2 version probe returned empty" }
+          if (-not $oldVer)   { throw "V1 version sidecar empty" }
+          if (-not $stageVer) { throw "V2 version sidecar empty" }
           if ($oldVer -notmatch '000000000001') {
-            throw "V1 version string does not embed g000000000001: $oldVer"
+            throw "V1 sidecar does not embed g000000000001: $oldVer"
           }
           if ($stageVer -notmatch '000000000002') {
-            throw "V2 version string does not embed g000000000002: $stageVer"
+            throw "V2 sidecar does not embed g000000000002: $stageVer"
           }
           if ($oldVer -eq $stageVer) {
-            throw "V1 and V2 report identical version -- fixtures not distinct"
+            throw "V1 and V2 sidecars identical -- fixtures not distinct"
           }
           Write-Host "[OK] V2 staged with distinct embedded HOST_VERSION"
 
