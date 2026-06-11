@@ -106,20 +106,48 @@ func (h *Handler) Execute(args []string, r <-chan svc.ChangeRequest, status chan
 				fmt.Sprintf("Child exited code=%d ran=%.1fs", exit.Code, ranFor.Seconds()),
 			)
 
+			// Release the old Job Object handle BEFORE we replace
+			// `proc` — without this the kernel object leaks for the
+			// rest of the host's lifetime. terminateJob isn't right
+			// here: the child has already exited so there is nothing
+			// to terminate; we only want to drop the handle.
+			if err := proc.CloseJob(); err != nil {
+				h.Log.Warn("close job after child exit failed", "err", err.Error())
+			}
+
 			delay := backoff.NextDelay(policy, ranFor, nil)
 			h.Log.Info("restarting child after backoff",
 				"delay_sec", delay.Seconds(),
 				"attempt", backoff.Attempt(),
 			)
 
-			// Honor service stop during backoff sleep.
+			// Honor service stop during backoff sleep AND a parent
+			// context cancellation. Either should suppress the
+			// restart.
 			select {
 			case cr := <-r:
 				if cr.Cmd == svc.Stop || cr.Cmd == svc.Shutdown {
 					status <- svc.Status{State: svc.Stopped}
 					return false, 0
 				}
+			case <-ctx.Done():
+				h.Log.Info("context cancelled during backoff, not restarting")
+				status <- svc.Status{State: svc.Stopped}
+				return false, 0
 			case <-time.After(delay):
+			}
+
+			// Re-check context just before starting the replacement.
+			// A stop signal could arrive AFTER time.After fires but
+			// BEFORE we call proc.Start; skipping the restart in
+			// that window keeps the host from leaving an orphan
+			// child running after the service has reached Stopped.
+			select {
+			case <-ctx.Done():
+				h.Log.Info("context cancelled after backoff, not restarting")
+				status <- svc.Status{State: svc.Stopped}
+				return false, 0
+			default:
 			}
 
 			// Fresh process for restart.

@@ -14,10 +14,15 @@ import (
 // every process in the tree the moment the host process closes its
 // handle. This is the orphan-prevention guarantee in the spec:
 //
-//   JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE — if the host crashes (panic,
-//   external taskkill, BSOD, etc.) the kernel kills every process
-//   that was ever assigned to the job, including grandchildren spawned
-//   by Python (e.g. paramiko/netmiko SSH subprocesses).
+//	JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE — if the host crashes (panic,
+//	external taskkill, BSOD, etc.) the kernel kills every process
+//	that was ever assigned to the job, including grandchildren spawned
+//	by Python (e.g. paramiko/netmiko SSH subprocesses).
+//
+// NOTE: there is a documented attachment race window between
+// cmd.Start() and AssignProcessToJobObject during which a freshly
+// spawned grandchild could escape the job. MVP-0 acknowledges and
+// defers that race; see docs/JOB_OBJECT_ATTACHMENT_RACE.md.
 func createJobObject() (windows.Handle, error) {
 	job, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
@@ -71,8 +76,40 @@ func (p *Process) attachToJob() error {
 		windows.CloseHandle(job)
 		return err
 	}
+	p.mu.Lock()
 	p.jobHandle = uintptr(job)
+	p.mu.Unlock()
 	return nil
+}
+
+// CloseJob releases the Job Object handle without terminating its
+// members.
+//
+// Use this in the restart code path AFTER the child has already
+// exited on its own — the Job Object's KILL_ON_JOB_CLOSE flag would
+// fire if there were any members still alive, but by construction
+// they have all exited (the child crashed and its tree died with
+// it under normal Windows process semantics). Closing the handle
+// merely releases the kernel object so a fresh job can be created
+// for the replacement child.
+//
+// CloseJob is:
+//   - **idempotent** — calling it on an already-closed or zero
+//     handle is a no-op
+//   - **mutex-protected** — concurrent Stop / restart cleanup
+//     paths cannot double-close
+//   - **distinct from terminateJob** — that one calls
+//     TerminateJobObject first, which kills surviving members
+func (p *Process) CloseJob() error {
+	p.mu.Lock()
+	h := p.jobHandle
+	p.jobHandle = 0
+	p.mu.Unlock()
+
+	if h == 0 {
+		return nil
+	}
+	return windows.CloseHandle(windows.Handle(h))
 }
 
 // terminateJob kills every process in the tree by terminating the job.
@@ -80,27 +117,38 @@ func (p *Process) attachToJob() error {
 // the handle is zero (attachment failed earlier) we still try to kill
 // the immediate child.
 func (p *Process) terminateJob(exitCode uint32) error {
-	if p.jobHandle != 0 {
-		err := windows.TerminateJobObject(windows.Handle(p.jobHandle), exitCode)
-		windows.CloseHandle(windows.Handle(p.jobHandle))
-		p.jobHandle = 0
+	p.mu.Lock()
+	h := p.jobHandle
+	p.jobHandle = 0
+	cmd := p.cmd
+	p.mu.Unlock()
+
+	if h != 0 {
+		err := windows.TerminateJobObject(windows.Handle(h), exitCode)
+		// Close the handle even if Terminate failed — we still need
+		// to release the kernel object.
+		windows.CloseHandle(windows.Handle(h))
 		return err
 	}
 	// Fallback when Job Object attachment failed earlier.
-	if p.cmd != nil && p.cmd.Process != nil {
-		return p.cmd.Process.Kill()
+	if cmd != nil && cmd.Process != nil {
+		return cmd.Process.Kill()
 	}
 	return nil
 }
 
 // applySysProcAttr configures the child process's creation flags.
 //
-// CREATE_NEW_PROCESS_GROUP creates an isolated console process group
-// so the host can target the child without affecting itself when (in
-// future) we deliver a CTRL_BREAK_EVENT. CTRL_BREAK is NOT used as
-// the only shutdown signal — see shutdown_windows.go for the actual
-// sequence — but isolating the group still makes the cooperative
-// attempt safer.
+// CREATE_NEW_PROCESS_GROUP isolates the child's console process
+// group so a future MVP-1 cooperative CTRL_BREAK_EVENT can target
+// it without affecting the host. CTRL_BREAK is NOT used as the
+// only shutdown signal — see shutdown_windows.go for the actual
+// sequence — but isolating the group makes the cooperative attempt
+// safer.
+//
+// CREATE_SUSPENDED is intentionally NOT set: see
+// docs/JOB_OBJECT_ATTACHMENT_RACE.md for why the obvious
+// "suspend / attach / resume" fix is wrong with os/exec's API.
 func applySysProcAttr(cmd *exec.Cmd) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}

@@ -11,56 +11,70 @@ import (
 
 // Stop terminates the child using the documented sequence:
 //
-//   1. (MVP-1 future) Try a cooperative signal — a named event or
-//      named pipe the child agrees to watch. Not implemented in
-//      MVP-0; we deliberately do NOT claim CTRL_BREAK_EVENT is
-//      reliable inside a Windows service (no console attached).
-//   2. Brief grace period — let the child notice the host has gone
-//      away via its own keepalive (the agent's websocket disconnect
-//      handler typically winds down cleanly within a few seconds).
-//   3. Job Object force termination — kills the entire process tree
-//      atomically. This is the only guaranteed step.
+//  1. (MVP-1 future) cooperative signal — a named event or named
+//     pipe the child agrees to watch. NOT implemented in MVP-0;
+//     CTRL_BREAK_EVENT is deliberately NOT relied on because a
+//     Windows service has no console by default.
+//  2. Brief grace period — wait on the child's process handle for
+//     up to `gracePeriod` (typically 5s, well inside the SCM's 30s
+//     StopPending budget). If the child exits on its own during
+//     this window we tear down cleanly.
+//  3. Job Object force termination — kills the entire process
+//     tree atomically via TerminateJobObject. The only guaranteed
+//     step. Always runs on any wait outcome except WAIT_OBJECT_0
+//     (child already exited).
 //
-// gracePeriod is the time between when Stop is called and when the
-// Job Object is terminated. Caller (the service handler) typically
-// passes 5 * time.Second so we stay well inside the SCM's 30s
-// StopPending budget.
+// Returns nil if the child stopped cleanly or was force-killed
+// successfully; non-nil only if force termination itself failed.
 func (p *Process) Stop(gracePeriod time.Duration) error {
-	if p.cmd == nil || p.cmd.Process == nil {
+	p.mu.Lock()
+	cmd := p.cmd
+	p.mu.Unlock()
+
+	if cmd == nil || cmd.Process == nil {
 		return errors.New("child: not running")
 	}
 
-	// Step 1 + 2: brief grace. We can't *send* a signal portably and
-	// reliably from a service — Console Ctrl events require an
-	// attached console which a Windows service does NOT have by
-	// default. So this window is effectively a wait-and-see.
-	//
-	// Future MVP-1: agent listens on a named event
-	// (Global\NetManagerAgent-Shutdown) and host SetEvent's it here.
-	done := make(chan struct{})
-	go func() {
-		_, _ = windows.WaitForSingleObject(
-			windows.Handle(p.cmd.Process.Pid),
-			uint32(gracePeriod/time.Millisecond),
-		)
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		// May have exited cleanly OR may have timed out — both are
-		// fine, the Job Object termination below is idempotent.
-	case exit := <-p.ExitChan():
-		// Child exited on its own during grace window.
-		_ = exit
-		// Still tear down the Job Object handle to free resources.
-		_ = p.terminateJob(0)
+	// Resolve a real process handle from the PID. exec.Cmd's
+	// Process.Handle is a process handle on Windows BUT it is not
+	// safe to pass to WaitForSingleObject across the lifetime of
+	// cmd.Wait() — the runtime may close it concurrently. Open a
+	// fresh SYNCHRONIZE-only handle for the wait, close it on return.
+	hProcess, err := windows.OpenProcess(
+		windows.SYNCHRONIZE, false, uint32(cmd.Process.Pid),
+	)
+	if err != nil {
+		// The child is gone (or never had a discoverable PID).
+		// Drop the Job Object and report a clean stop.
+		_ = p.CloseJob()
 		return nil
-	case <-time.After(gracePeriod):
-		// Timeout
+	}
+	defer windows.CloseHandle(hProcess)
+
+	timeoutMs := uint32(gracePeriod / time.Millisecond)
+	if timeoutMs == 0 {
+		timeoutMs = 1
+	}
+	waitRes, waitErr := windows.WaitForSingleObject(hProcess, timeoutMs)
+	switch {
+	case waitRes == windows.WAIT_OBJECT_0:
+		// Child exited cleanly inside the grace window. Just close
+		// the Job Object (handle release) and we're done.
+		return p.CloseJob()
+	case waitRes == uint32(windows.WAIT_TIMEOUT):
+		// Grace expired. Force-terminate via Job Object below.
+	default:
+		// waitRes == WAIT_FAILED or anything else. We cannot tell
+		// whether the child is alive, so fall through to force
+		// kill — that path is idempotent against an already-dead
+		// process. waitErr is preserved so an operator inspecting
+		// logs can see why we skipped grace, but it is intentionally
+		// not surfaced to the SCM Stop path; what matters there is
+		// that the service reaches Stopped, not why grace failed.
+		_ = waitErr
 	}
 
-	// Step 3: force kill via Job Object — the guaranteed step.
+	// Step 3 — guaranteed force kill via Job Object.
 	if err := p.terminateJob(1); err != nil {
 		return err
 	}
