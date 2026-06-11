@@ -435,7 +435,13 @@ jobs:
       - name: Reinstall lifecycle test
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
+          # NOT "Stop": the host CLI's `status` command intentionally
+          # writes "not-found" to stderr when reporting exit 18
+          # (ErrServiceNotFound), and PS treats native-command stderr
+          # as an error stream that "Stop" would trip on. We rely on
+          # explicit `$LASTEXITCODE` checks and `throw` for hard
+          # failures.
+          $ErrorActionPreference = "Continue"
 
           # -- unique service name to avoid cross-run collisions --
           $svc = "CharonReinstallIT-$(Get-Random)"
