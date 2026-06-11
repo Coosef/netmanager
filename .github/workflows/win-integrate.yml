@@ -293,58 +293,47 @@ jobs:
           }
           Write-Host "[OK] All invariant patterns present / removed as required"
 
-      - name: ACL fail-closed invariant
-        shell: powershell
+      - name: ACL fail-closed + uninstall poll invariants (via Python)
+        shell: bash
         run: |
-          $content = [System.IO.File]::ReadAllText($env:INSTALLER_PATH)
-          # The Set-Acl try must be paired with a catch that exits 1.
-          # We do a coarse structural check: the FIRST catch block
-          # AFTER `Set-Acl $InstallDir $acl` must contain `exit 1`
-          # before the closing brace.
-          $idx = $content.IndexOf('Set-Acl $InstallDir $acl')
-          if ($idx -lt 0) { throw "Set-Acl call not found" }
-          $tail = $content.Substring($idx)
-          $catchIdx = $tail.IndexOf('catch')
-          if ($catchIdx -lt 0) { throw "catch block after Set-Acl not found" }
-          $catchTail = $tail.Substring($catchIdx)
-          # Find the matching `}`. Cheap heuristic: look at the first
-          # 4000 chars of the catch tail and require `exit 1` AND no
-          # `[WARNING] ACL hardening failed` (the old fail-open path).
-          $window = $catchTail.Substring(0, [Math]::Min(4000, $catchTail.Length))
-          if ($window -notmatch 'exit 1') {
-            throw "ACL catch block must `exit 1`"
-          }
-          if ($window -match '\[WARNING\] ACL hardening failed') {
-            throw "ACL catch block still uses the old warning + continue path"
-          }
-          if ($window -match '\$\(\$_\.Exception\.Message\)') {
-            throw "ACL catch block must not echo raw `$_.Exception.Message` to console"
-          }
-          Write-Host "[OK] ACL fail-closed enforced"
+          python - <<'PY'
+          import re, sys
 
-      - name: Uninstall exit-code + bounded poll invariant
-        shell: powershell
-        run: |
-          $content = [System.IO.File]::ReadAllText($env:INSTALLER_PATH)
-          # The reinstall race fix: capture LASTEXITCODE, branch on
-          # 0/18/19/other, poll bounded by 30s for ErrServiceNotFound.
-          if ($content -notmatch '\$uninstallExit = \$LASTEXITCODE') {
-            throw "uninstall exit code not captured"
-          }
-          foreach ($code in @('0','18','19')) {
-            if ($content -notmatch ('\$uninstallExit -eq ' + $code)) {
-              throw "uninstall exit-code branch missing: $code"
-            }
-          }
-          if ($content -notmatch '\$LASTEXITCODE -eq 18') {
-            throw "bounded poll missing status-exit-18 check"
-          }
-          if ($content -notmatch 'AddSeconds\(30\)') {
-            throw "bounded poll missing 30s deadline"
-          }
-          # The forbidden fixed `Start-Sleep -Seconds 2` immediately
-          # after `& \$HostExe uninstall` is the race we replaced.
-          if ($content -match '\$HostExe uninstall[^\n]*\n[^\n]*Start-Sleep\s+-Seconds\s+2(?!\d)') {
-            throw "old fixed Start-Sleep race after uninstall still present"
-          }
-          Write-Host "[OK] uninstall exit-code handling + bounded poll present"
+          with open(__import__('os').environ['INSTALLER_PATH'], 'rb') as f:
+              content = f.read().decode('utf-8-sig')
+
+          # ── ACL fail-closed ────────────────────────────────────────
+          idx = content.find('Set-Acl $InstallDir $acl')
+          if idx < 0:
+              sys.exit('Set-Acl call not found')
+          catch_idx = content.find('catch', idx)
+          if catch_idx < 0:
+              sys.exit('catch block after Set-Acl not found')
+          window = content[catch_idx:catch_idx + 4000]
+          if 'exit 1' not in window:
+              sys.exit('ACL catch block must exit 1')
+          if '[WARNING] ACL hardening failed' in window:
+              sys.exit('ACL catch block still uses the old warning + continue path')
+          if '$($_.Exception.Message)' in window:
+              sys.exit('ACL catch block must not echo raw exception message to console')
+          print('[OK] ACL fail-closed enforced')
+
+          # ── Uninstall exit-code + bounded poll ─────────────────────
+          if '$uninstallExit = $LASTEXITCODE' not in content:
+              sys.exit('uninstall exit code not captured')
+          for code in ('0', '18', '19'):
+              if f'$uninstallExit -eq {code}' not in content:
+                  sys.exit(f'uninstall exit-code branch missing: {code}')
+          if '$LASTEXITCODE -eq 18' not in content:
+              sys.exit('bounded poll missing status-exit-18 check')
+          if 'AddSeconds(30)' not in content:
+              sys.exit('bounded poll missing 30s deadline')
+          # Forbid old fixed Start-Sleep 2 race right after uninstall
+          bad = re.search(
+              r'\$HostExe uninstall[^\n]*\n[^\n]*Start-Sleep\s+-Seconds\s+2(?!\d)',
+              content,
+          )
+          if bad:
+              sys.exit(f'old fixed Start-Sleep race still present: {bad.group(0)!r}')
+          print('[OK] uninstall exit-code handling + bounded poll present')
+          PY
