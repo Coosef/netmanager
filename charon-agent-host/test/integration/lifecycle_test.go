@@ -151,11 +151,13 @@ func (s *scaffold) install(t *testing.T) {
 		"--display-name", s.cfg.DisplayName,
 		"--description", s.cfg.Description,
 		"--child-exe", s.cfg.ChildExe,
-		"--child-args", strings.Join(s.cfg.ChildArgs, ","),
 		"--work-dir", s.cfg.WorkDir,
 		"--env-file", s.cfg.EnvFile,
 		"--log-dir", s.cfg.LogDir,
 		"--service-account", s.cfg.ServiceAccount,
+	}
+	for _, a := range s.cfg.ChildArgs {
+		regArgs = append(regArgs, "--child-arg", a)
 	}
 	if err := service.Install(s.hostExe, s.cfg, regArgs); err != nil {
 		t.Fatalf("install %q: %v", s.serviceName, err)

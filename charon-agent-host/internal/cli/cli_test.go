@@ -55,30 +55,10 @@ func TestDispatch_InstallMissingFlagsFailsValidation(t *testing.T) {
 	}
 }
 
-func TestSplitCSV(t *testing.T) {
-	cases := []struct {
-		in   string
-		want []string
-	}{
-		{"", nil},
-		{"   ", nil},
-		{"a", []string{"a"}},
-		{"a,b,c", []string{"a", "b", "c"}},
-		{" a , b , c ", []string{"a", "b", "c"}},
-		{",,a,,", []string{"a"}},
-	}
-	for _, tc := range cases {
-		got := splitCSV(tc.in)
-		if !equal(got, tc.want) {
-			t.Errorf("splitCSV(%q) = %v, want %v", tc.in, got, tc.want)
-		}
-	}
-}
-
-func TestBuildRegistryArgs_RoundTrip(t *testing.T) {
+func TestBuildRegistryArgs_RoundTrip_SimpleArgs(t *testing.T) {
 	// Build args from a config; parsing them back should reproduce
 	// the same config (the SCM round-trip invariant).
-	fs, cfg, childArgsStr, _ := installFlagSet(&bytes.Buffer{})
+	fs, cfg, childArgs := installFlagSet(&bytes.Buffer{})
 	parseArgs := []string{
 		"--service-name", "TestAgent",
 		"--display-name", "Test Agent",
@@ -86,22 +66,22 @@ func TestBuildRegistryArgs_RoundTrip(t *testing.T) {
 		"--work-dir", "/tmp/agent",
 		"--env-file", "/tmp/agent/config.env",
 		"--log-dir", "/tmp/agent/logs",
-		"--child-args", "/tmp/agent/run_agent.py",
+		"--child-arg", "/tmp/agent/run_agent.py",
 	}
 	if err := fs.Parse(parseArgs); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	cfg.ChildArgs = splitCSV(*childArgsStr)
+	cfg.ChildArgs = []string(*childArgs)
 
 	regArgs := buildRegistryArgs(*cfg, cfg.ChildArgs)
 
 	// Parse the rebuilt args (skip the leading "run") and confirm we
 	// land on the same cfg.
-	fs2, cfg2, childArgsStr2, _ := installFlagSet(&bytes.Buffer{})
+	fs2, cfg2, childArgs2 := installFlagSet(&bytes.Buffer{})
 	if err := fs2.Parse(regArgs[1:]); err != nil {
 		t.Fatalf("re-parse: %v", err)
 	}
-	cfg2.ChildArgs = splitCSV(*childArgsStr2)
+	cfg2.ChildArgs = []string(*childArgs2)
 
 	if cfg.ServiceName != cfg2.ServiceName {
 		t.Errorf("service-name lost in round-trip: %q → %q", cfg.ServiceName, cfg2.ServiceName)
@@ -111,6 +91,43 @@ func TestBuildRegistryArgs_RoundTrip(t *testing.T) {
 	}
 	if !equal(cfg.ChildArgs, cfg2.ChildArgs) {
 		t.Errorf("child-args lost: %v → %v", cfg.ChildArgs, cfg2.ChildArgs)
+	}
+}
+
+// TestBuildRegistryArgs_RoundTrip_CommaInArgs is the regression test
+// for the CI integration bug where a child argument containing a
+// comma (typical for `-Command "WriteAllText($f, $v)"`) was split by
+// the previous CSV scheme and broke PowerShell parsing.
+func TestBuildRegistryArgs_RoundTrip_CommaInArgs(t *testing.T) {
+	fs, cfg, childArgs := installFlagSet(&bytes.Buffer{})
+	tricky := `[System.IO.File]::WriteAllText($pidFile, $PID.ToString())`
+	parseArgs := []string{
+		"--service-name", "TestAgent",
+		"--display-name", "Test Agent",
+		"--child-exe", "/usr/bin/python3",
+		"--work-dir", "/tmp/agent",
+		"--env-file", "/tmp/agent/config.env",
+		"--log-dir", "/tmp/agent/logs",
+		"--child-arg", "-NoProfile",
+		"--child-arg", "-Command",
+		"--child-arg", tricky,
+	}
+	if err := fs.Parse(parseArgs); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	cfg.ChildArgs = []string(*childArgs)
+
+	regArgs := buildRegistryArgs(*cfg, cfg.ChildArgs)
+
+	fs2, cfg2, childArgs2 := installFlagSet(&bytes.Buffer{})
+	if err := fs2.Parse(regArgs[1:]); err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	cfg2.ChildArgs = []string(*childArgs2)
+
+	if !equal(cfg.ChildArgs, cfg2.ChildArgs) {
+		t.Fatalf("comma-containing args lost in round-trip:\n  before: %v\n  after:  %v",
+			cfg.ChildArgs, cfg2.ChildArgs)
 	}
 }
 

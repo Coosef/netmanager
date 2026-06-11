@@ -16,12 +16,11 @@ import (
 // ──────────────────────────────────────────────────────────────────
 
 func installCmd(args []string, out, errOut io.Writer) int {
-	fs, cfg, childArgsStr, _ := installFlagSet(errOut)
+	fs, cfg, childArgs := installFlagSet(errOut)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	childArgs := splitCSV(*childArgsStr)
-	cfg.ChildArgs = childArgs
+	cfg.ChildArgs = []string(*childArgs)
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintln(errOut, err)
 		return 2
@@ -31,7 +30,7 @@ func installCmd(args []string, out, errOut io.Writer) int {
 		fmt.Fprintln(errOut, "resolve own exe path:", err)
 		return 1
 	}
-	registryArgs := buildRegistryArgs(*cfg, childArgs)
+	registryArgs := buildRegistryArgs(*cfg, []string(*childArgs))
 	if err := service.Install(exePath, *cfg, registryArgs); err != nil {
 		fmt.Fprintln(errOut, "install:", err)
 		// Exit 17 = service already exists; other = generic failure.
@@ -155,13 +154,12 @@ func statusCmd(args []string, out, errOut io.Writer) int {
 
 func runCmd(args []string, out, errOut io.Writer) int {
 	// `run` accepts the SAME flags as `install` plus --console.
-	fs, cfg, childArgsStr, _ := installFlagSet(errOut)
+	fs, cfg, childArgs := installFlagSet(errOut)
 	console := fs.Bool("console", false, "Run the supervisor in the current console (no SCM)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	childArgs := splitCSV(*childArgsStr)
-	cfg.ChildArgs = childArgs
+	cfg.ChildArgs = []string(*childArgs)
 	if err := cfg.Validate(); err != nil {
 		fmt.Fprintln(errOut, err)
 		return 2
