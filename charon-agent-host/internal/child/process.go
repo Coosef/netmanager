@@ -1,13 +1,11 @@
 package child
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 )
 
@@ -54,24 +52,23 @@ func (p *Process) Start(ctx context.Context) error {
 	cmd.Dir = p.WorkDir
 	cmd.Env = p.Env
 
-	// Wire stdout/stderr to capture writers. If callers passed nil
-	// writers (e.g. --console mode without separate capture), inherit
-	// the host's stdio so the user sees the output.
+	// Wire stdout/stderr directly to the rotating writers. The earlier
+	// implementation used cmd.StdoutPipe / cmd.StderrPipe + a copyLines
+	// goroutine; that was buying nothing (the writer already serializes)
+	// and was introducing latency on Start because pipe creation has to
+	// allocate kernel objects for both ends. The Go runtime can hand
+	// the writer to the child as an inherited stdout/stderr handle in
+	// one go, which is significantly cheaper.
+	//
+	// If the caller passed nil for either writer (e.g. --console mode
+	// without separate capture) we inherit the host's stdio.
 	if p.Stdout != nil {
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			return err
-		}
-		go copyLines(p.Stdout, stdout)
+		cmd.Stdout = p.Stdout
 	} else {
 		cmd.Stdout = os.Stdout
 	}
 	if p.Stderr != nil {
-		stderr, err := cmd.StderrPipe()
-		if err != nil {
-			return err
-		}
-		go copyLines(p.Stderr, stderr)
+		cmd.Stderr = p.Stderr
 	} else {
 		cmd.Stderr = os.Stderr
 	}
@@ -121,26 +118,4 @@ func (p *Process) PID() int {
 		return 0
 	}
 	return p.cmd.Process.Pid
-}
-
-// copyLines reads from r line-by-line and writes each line to w.
-// Buffered + line-oriented so log rotation never splits an entry mid-line.
-func copyLines(w io.Writer, r io.Reader) {
-	sc := bufio.NewScanner(r)
-	// Larger buffer for occasional long log lines (stack traces).
-	buf := make([]byte, 0, 64*1024)
-	sc.Buffer(buf, 1024*1024)
-	for sc.Scan() {
-		line := sc.Bytes()
-		// Ensure trailing newline for downstream log rotation.
-		if !endsWithLF(line) {
-			_, _ = w.Write(append(append([]byte(nil), line...), '\n'))
-		} else {
-			_, _ = w.Write(line)
-		}
-	}
-}
-
-func endsWithLF(b []byte) bool {
-	return len(b) > 0 && (b[len(b)-1] == '\n' || strings.HasSuffix(string(b), "\r\n"))
 }
