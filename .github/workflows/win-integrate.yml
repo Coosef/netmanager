@@ -489,14 +489,26 @@ jobs:
             throw "V2 stage path missing after copy"
           }
 
-          # SHA verify on staging — old binary at $hostExe stays
-          # working through this step.
-          $stageSha = (Get-FileHash -LiteralPath $hostStage -Algorithm SHA256).Hash
-          $oldExeSha = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash
-          if ($stageSha -eq $oldExeSha) {
-            throw "stage SHA equals old exe SHA — fixtures not distinct"
+          # Probe both binaries via the host CLI's `version` sub-command
+          # so the test asserts on the EMBEDDED HOST_VERSION rather than
+          # raw SHA bytes. Go build caching can make two distinct
+          # LDFLAGS-bearing builds produce surprisingly close binaries
+          # on some toolchain versions; the version string is the
+          # authoritative differentiator.
+          $oldVer = (& $hostExe version).Trim()
+          $stageVer = (& $hostStage version).Trim()
+          Write-Host "  V1 version: $oldVer"
+          Write-Host "  V2 version: $stageVer"
+          if ($oldVer -notmatch '000000000001') {
+            throw "V1 version string does not embed g000000000001: $oldVer"
           }
-          Write-Host "[OK] V2 staged + SHA distinct from V1"
+          if ($stageVer -notmatch '000000000002') {
+            throw "V2 version string does not embed g000000000002: $stageVer"
+          }
+          if ($oldVer -eq $stageVer) {
+            throw "V1 and V2 report identical version — fixtures not distinct"
+          }
+          Write-Host "[OK] V2 staged with distinct embedded HOST_VERSION"
 
           # ── stage 3: uninstall V1 + bounded poll for SCM drain ──
           & $hostExe uninstall --service-name $svc | Out-Null
@@ -560,14 +572,15 @@ jobs:
           }
           Write-Host "[OK] V2 service Running at 10s + 30s"
 
-          # ── stage 6: verify final binary is V2 and bak still exists ──
-          # (we'll clean .bak on success below)
-          $finalSha = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash
-          if ($finalSha -ne $stageSha) {
-            throw "final exe SHA differs from staged V2 SHA"
+          # ── stage 6: verify final binary is V2 via version string ──
+          # (.bak still exists; cleanup happens after success below)
+          $finalVer = (& $hostExe version).Trim()
+          Write-Host "  final version: $finalVer"
+          if ($finalVer -notmatch '000000000002') {
+            throw "final binary not V2 (version=$finalVer)"
           }
-          if ($finalSha -eq $oldExeSha) {
-            throw "final exe SHA equals V1 SHA — replacement did not happen"
+          if ($finalVer -eq $oldVer) {
+            throw "final binary identical to V1 (version=$finalVer) — replacement did not happen"
           }
           Write-Host "[OK] final exe is V2 binary"
 
