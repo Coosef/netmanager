@@ -2091,7 +2091,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
 
         # FAIL-CLOSED: config.env writes the agent key in stage [5/9].
         # If we cannot prove the install directory is restricted to
-        # SYSTEM + Administrators, we MUST NOT continue — every local
+        # SYSTEM + Administrators, we MUST NOT continue -- every local
         # user would be able to read the key. Write the technical
         # exception to a secret-free local log for support diagnostics
         # and abort with a generic user message.
@@ -2275,17 +2275,17 @@ exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
         # Go host CLI exit-code contract (charon-agent-host/internal/
         # cli/subcommands.go::uninstallCmd) is:
         #
-        #   0  → service deleted AND SCM finished unregistration
-        #   18 → ErrServiceNotFound (already gone — benign)
-        #   19 → ErrDeletePending  (Delete() succeeded; SCM still
+        #   0  -> service deleted AND SCM finished unregistration
+        #   18 -> ErrServiceNotFound (already gone -- benign)
+        #   19 -> ErrDeletePending  (Delete() succeeded; SCM still
         #                           asynchronously reaping the
-        #                           registration → soft warning,
+        #                           registration -> soft warning,
         #                           poll until status reports
         #                           not-found, then proceed)
-        #   1  → real failure
-        #   2  → argv parse error
+        #   1  -> real failure
+        #   2  -> argv parse error
         #
-        # We never blindly Start-Sleep — a fixed 2-second wait gave
+        # We never blindly Start-Sleep -- a fixed 2-second wait gave
         # the SCM cleanup race that bit PR #76. Poll status until it
         # reports "not-found" (exit 18) for up to 30 seconds.
         $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
