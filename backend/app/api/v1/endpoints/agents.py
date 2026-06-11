@@ -1958,110 +1958,340 @@ SVCEOF
 
 
 def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
-    # T8.4 Security F1.3 defense-in-depth — PowerShell single-quoted
-    # string'lerde tek tırnak escape `''` ile. Whitelist atlanmış bir
-    # senaryoda bile değer kaçıp komut enjekte edilemez.
+    """Generate Windows PowerShell 5.1 installer (WIN-INTEGRATE 9-stage).
+
+    Architectural rewrite from the PR #75 hardening + the broken
+    sc.exe-based Python service registration was removed entirely.
+    Service installation is now delegated to the embedded
+    charon-agent-host.exe (downloaded by stage [6/9], integrity-
+    checked in [7/9], CLI-installed in [8/9], verified in [9/9]).
+
+    Contract — installer succeeds ONLY when ALL of the following hold:
+      - binary integrity check (SHA-256 == X-Host-SHA256 header)
+      - host install exit code 0
+      - host start exit code 0
+      - 10s status: exit code 0 AND output exactly "Running"
+      - 30s status: exit code 0 AND output exactly "Running"
+
+    Otherwise: exit 1 with a clear message.
+
+    Locale-independent + ASCII-safe (TR Windows cp1254 decode bug
+    fixed in PR #75 — invariants preserved). All admin checks use
+    WindowsBuiltInRole enum; all ACLs use well-known SIDs
+    (S-1-5-18 SYSTEM, S-1-5-32-544 Administrators).
+
+    iwr | iex is NOT supported — $PSCommandPath must resolve to a
+    real file path, otherwise we abort with a clear message.
+    """
     def _psq(s: str) -> str:
+        # F1.3 defense — single-quoted PS string'de ' kaçışı ''
         return "'" + s.replace("'", "''") + "'"
-    p_id  = _psq(agent_id)
+    p_id = _psq(agent_id)
     p_key = _psq(agent_key)
     p_url = _psq(backend_url)
-    # PS-5.1-COMPAT (2026-06-10) — Windows default PowerShell 5.1 hedefte
-    # PowerShell 7 kurulu olmuyor. PS 7-only syntax (?., ??, ternary ?:,
-    # ForEach-Object -Parallel) script'te bulunmamalı. Aksi takdirde
-    # PS 5.1 parser syntax error veriyor (`?.Source` "operator expected"
-    # üretir). Bu üretici hem PS 5.1 hem PS 7 ile parse edilebilir output
-    # döndürmek zorunda; aşağıdaki tüm null-check'ler `if ($cmd) { ... }`
-    # pattern'iyle yazılı.
-    #
-    # Ek: TLS 1.2 enforce. PS 5.1 default'u Windows Server 2016/2019'da
-    # SystemDefault'a bağlı, bazı kurumsal ortamlarda hâlâ TLS 1.0/1.1
-    # üzerinden istek yapıyor. Cloudflare Faz 0 sonrası edge TLS 1.2 min,
-    # Invoke-WebRequest fail edebilir. Script başında explicit set.
+    timestamp_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     return textwrap.dedent(f"""\
-        # NetManager Proxy Agent — Windows Kurulum Betiği
-        # Oluşturulma: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+        # NetManager Proxy Agent - Windows Installer (PS 5.1 compatible)
+        # Generated: {timestamp_utc}
         # Agent ID: {agent_id}
-        # Hedef: Windows PowerShell 5.1 (default) ve PowerShell 7 uyumlu.
+        # Target: Windows PowerShell 5.1 (default) and PowerShell 7.
 
-        $AgentId   = {p_id}
-        $AgentKey  = {p_key}
+        $ErrorActionPreference = "Stop"
+
+        $AgentId    = {p_id}
+        $AgentKey   = {p_key}
         $BackendUrl = {p_url}
-        $InstallDir = "C:\\ProgramData\\NetManagerAgent"
+        $InstallDir  = "C:\\ProgramData\\NetManagerAgent"
+        $BinDir      = "$InstallDir\\bin"
+        $LogDir      = "$InstallDir\\logs"
         $ServiceName = "NetManagerAgent"
-        $PythonExe = ""
+        $HostExe     = "$BinDir\\charon-agent-host.exe"
+        $PythonExe   = $null
 
-        # PS 5.1 default SystemDefault TLS edge'in min 1.2 ile uyumsuz olabilir.
-        # Explicit Tls12 set ederek Invoke-WebRequest'in fail etmesini engelle.
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-        if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")) {{
-            Write-Host "Lütfen Yönetici olarak çalıştırın" -ForegroundColor Red
-            pause; exit 1
+        # ==========================================================
+        # [1/9] Admin check (locale-independent) + self-elevation
+        # ==========================================================
+        # iwr | iex is NOT supported: PSCommandPath would be empty,
+        # self-elevation cannot relaunch us as a file. Hard abort.
+        $principal = New-Object Security.Principal.WindowsPrincipal(
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        )
+        $isAdmin = $principal.IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator
+        )
+
+        if (-not $isAdmin) {{
+            if ($env:NETMANAGER_INSTALLER_ELEVATED -eq "1") {{
+                Write-Host "[ERROR] Administrative elevation failed." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            if (-not $PSCommandPath) {{
+                Write-Host "[ERROR] Installer must be downloaded as a file, not piped (iwr | iex unsupported)." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            $env:NETMANAGER_INSTALLER_ELEVATED = "1"
+            Write-Host "[INFO] Requesting administrator elevation..." -ForegroundColor Yellow
+            $psExe = "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+            Start-Process -FilePath $psExe `
+                -Verb RunAs `
+                -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"")
+            exit
         }}
 
-        Write-Host "[1/5] Python kontrol ediliyor..."
-        # PS 5.1 compat: ?. operatörü yok, if-else pattern kullan.
+        Write-Host "[1/9] Administrator privileges verified." -ForegroundColor Cyan
+
+        # ==========================================================
+        # [2/9] TLS 1.2 + directories + SID-based ACL
+        # ==========================================================
+        # Locale-independent SIDs:
+        #   S-1-5-18      = NT AUTHORITY\\SYSTEM
+        #   S-1-5-32-544  = BUILTIN\\Administrators
+        # Localized strings ("BUILTIN\\Administrators" / "Yoneticiler")
+        # are NOT used.
+        Write-Host "[2/9] Creating install directory + hardening ACL..." -ForegroundColor Cyan
+        foreach ($d in @($InstallDir, $BinDir, $LogDir)) {{
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+        }}
+
+        try {{
+            $systemSid = New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'
+            $adminSid  = New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'
+            $acl = Get-Acl $InstallDir
+            $acl.SetAccessRuleProtection($true, $false)
+            $sysRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $systemSid, "FullControl",
+                "ContainerInherit,ObjectInherit", "None", "Allow"
+            )
+            $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $adminSid, "FullControl",
+                "ContainerInherit,ObjectInherit", "None", "Allow"
+            )
+            $acl.AddAccessRule($sysRule)
+            $acl.AddAccessRule($adminRule)
+            Set-Acl $InstallDir $acl
+            Write-Host "[OK] ACL hardened (SYSTEM + Administrators only, inheritance disabled)." -ForegroundColor Green
+        }} catch {{
+            Write-Host "[WARNING] ACL hardening failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }}
+
+        # ==========================================================
+        # [3/9] Python verification (Store stub detection + --version)
+        # ==========================================================
+        Write-Host "[3/9] Verifying Python installation..." -ForegroundColor Cyan
         $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }} else {{ $PythonExe = $null }}
-        if (-not $PythonExe) {{
-            Write-Host "Python bulunamadı, winget ile kuruluyor..." -ForegroundColor Yellow
-            winget install Python.Python.3.12 --silent --accept-package-agreements
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-            if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }} else {{ $PythonExe = $null }}
-            if (-not $PythonExe) {{
-                Write-Host "Python kurulumu başarısız. Lütfen Python 3.12 manuel kurun ve tekrar deneyin." -ForegroundColor Red
-                pause; exit 1
+        if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }}
+
+        if ($PythonExe -and $PythonExe -like "*\\Microsoft\\WindowsApps\\python.exe") {{
+            Write-Host "[INFO] Microsoft Store stub detected, ignoring." -ForegroundColor Yellow
+            $PythonExe = $null
+        }}
+
+        if ($PythonExe) {{
+            try {{
+                $pythonVersion = & $PythonExe --version 2>&1
+                if ($LASTEXITCODE -ne 0 -or $pythonVersion -notmatch "Python 3\\.") {{
+                    Write-Host "[INFO] Python verification failed, will reinstall." -ForegroundColor Yellow
+                    $PythonExe = $null
+                }} else {{
+                    Write-Host "[OK] Python found: $pythonVersion" -ForegroundColor Green
+                }}
+            }} catch {{
+                $PythonExe = $null
             }}
         }}
 
-        Write-Host "[2/5] Kurulum dizini oluşturuluyor..."
-        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        if (-not $PythonExe) {{
+            Write-Host "[WARNING] Python not found, attempting winget install..." -ForegroundColor Yellow
+            $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+            if (-not $wingetCmd) {{
+                Write-Host "[ERROR] Python 3.12 not installed and winget unavailable." -ForegroundColor Red
+                Write-Host "[ERROR] Please install Python 3.12 manually from https://python.org" -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+            if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }}
+            if ($PythonExe -and $PythonExe -like "*\\Microsoft\\WindowsApps\\python.exe") {{ $PythonExe = $null }}
+            if (-not $PythonExe) {{
+                Write-Host "[ERROR] Python installation failed." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            Write-Host "[OK] Python installed: $PythonExe" -ForegroundColor Green
+        }}
 
-        Write-Host "[3/5] Agent betiği indiriliyor..."
-        # T8.4 F3 — /download/script X-Agent-ID + X-Agent-Key header zorunlu
-        Invoke-WebRequest `
-            -Uri "$BackendUrl/api/v1/agents/download/script" `
-            -Headers @{{ "X-Agent-ID" = $AgentId; "X-Agent-Key" = $AgentKey }} `
-            -OutFile "$InstallDir\\netmanager_agent.py" `
-            -UseBasicParsing
+        # ==========================================================
+        # [4/9] Download Python agent script
+        # ==========================================================
+        Write-Host "[4/9] Downloading agent script..." -ForegroundColor Cyan
+        try {{
+            Invoke-WebRequest `
+                -Uri "$BackendUrl/api/v1/agents/download/script" `
+                -Headers @{{ "X-Agent-ID" = $AgentId; "X-Agent-Key" = $AgentKey }} `
+                -OutFile "$InstallDir\\netmanager_agent.py" `
+                -UseBasicParsing
+            Write-Host "[OK] Agent script downloaded." -ForegroundColor Green
+        }} catch {{
+            Write-Host "[ERROR] Agent script download failed: $($_.Exception.Message)" -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
 
-        Write-Host "[4/5] Bağımlılıklar kuruluyor..."
+        # ==========================================================
+        # [5/9] Write config.env + run_agent.py WITHOUT BOM
+        # ==========================================================
+        Write-Host "[5/9] Installing dependencies and writing config..." -ForegroundColor Cyan
         & $PythonExe -m pip install --quiet --upgrade websockets netmiko
+        if ($LASTEXITCODE -ne 0) {{
+            Write-Host "[ERROR] pip install failed." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
 
-        @"
-NETMANAGER_URL={backend_url}
-NETMANAGER_AGENT_ID={agent_id}
-NETMANAGER_AGENT_KEY={agent_key}
-"@ | Out-File -FilePath "$InstallDir\\config.env" -Encoding UTF8
+        # Out-File -Encoding UTF8 writes BOM on PS 5.1 which breaks
+        # Python parser (first env var name becomes "\\ufeffNETMANAGER_URL").
+        # Use [System.IO.File]::WriteAllText with UTF8Encoding(false).
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-        @"
+        $configContent = "NETMANAGER_URL=$BackendUrl`r`n" + `
+                         "NETMANAGER_AGENT_ID=$AgentId`r`n" + `
+                         "NETMANAGER_AGENT_KEY=$AgentKey`r`n"
+        [System.IO.File]::WriteAllText("$InstallDir\\config.env", $configContent, $utf8NoBom)
+
+        $runAgentContent = @"
 import os, sys
-cfg = open(r'$InstallDir\\config.env').read()
+cfg_path = r'$InstallDir\\config.env'
+with open(cfg_path, encoding='utf-8') as f:
+    cfg = f.read()
 for line in cfg.splitlines():
-    line = line.strip()
+    line = line.lstrip('\\ufeff').strip()
     if '=' in line and not line.startswith('#'):
         k, v = line.split('=', 1)
         os.environ[k.strip()] = v.strip()
-exec(open(r'$InstallDir\\netmanager_agent.py').read())
-"@ | Out-File -FilePath "$InstallDir\\run_agent.py" -Encoding UTF8
+exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
+"@
+        [System.IO.File]::WriteAllText("$InstallDir\\run_agent.py", $runAgentContent, $utf8NoBom)
+        Write-Host "[OK] Config and run wrapper written (no BOM)." -ForegroundColor Green
 
-        Write-Host "[5/5] Windows servisi kuruluyor..."
-        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($existingSvc) {{
-            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-            sc.exe delete $ServiceName | Out-Null
-            Start-Sleep 2
+        # ==========================================================
+        # [6/9] Download Go host binary (charon-agent-host.exe)
+        # ==========================================================
+        Write-Host "[6/9] Downloading agent host binary..." -ForegroundColor Cyan
+        try {{
+            $hostResp = Invoke-WebRequest `
+                -Uri "$BackendUrl/api/v1/agents/$AgentId/download/host/windows-amd64" `
+                -Headers @{{ "X-Agent-Key" = $AgentKey }} `
+                -OutFile $HostExe `
+                -UseBasicParsing `
+                -PassThru
+            $expectedSha = $hostResp.Headers["X-Host-SHA256"]
+            $hostVersion = $hostResp.Headers["X-Host-Version"]
+            Write-Host "[OK] Host binary downloaded (version=$hostVersion)." -ForegroundColor Green
+        }} catch {{
+            Write-Host "[ERROR] Host binary download failed: $($_.Exception.Message)" -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
 
-        $binPath = "`"$PythonExe`" `"$InstallDir\\run_agent.py`""
-        sc.exe create $ServiceName binPath= $binPath DisplayName= "NetManager Proxy Agent" start= auto obj= LocalSystem
-        sc.exe failure $ServiceName reset= 60 actions= restart/10000/restart/30000/restart/60000
-        sc.exe start $ServiceName
+        # ==========================================================
+        # [7/9] SHA-256 integrity check
+        # ==========================================================
+        Write-Host "[7/9] Verifying host binary integrity..." -ForegroundColor Cyan
+        if (-not $expectedSha) {{
+            Write-Host "[ERROR] Server did not return X-Host-SHA256 header." -ForegroundColor Red
+            Remove-Item $HostExe -Force -ErrorAction SilentlyContinue
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        $actualSha = (Get-FileHash $HostExe -Algorithm SHA256).Hash
+        if ($actualSha -ne $expectedSha) {{
+            Write-Host "[ERROR] Host binary integrity check failed." -ForegroundColor Red
+            Remove-Item $HostExe -Force -ErrorAction SilentlyContinue
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        Write-Host "[OK] Host binary SHA-256 verified." -ForegroundColor Green
 
-        Write-Host "✓ NetManager Agent kuruldu!" -ForegroundColor Green
-        pause
+        # ==========================================================
+        # [8/9] Install + start Windows service via host CLI
+        # ==========================================================
+        # Remove any pre-existing service registration before install
+        # (the host's install command refuses if the service already
+        # exists; this lets re-runs work).
+        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($existingSvc) {{
+            Write-Host "[INFO] Existing service detected, removing first..." -ForegroundColor Yellow
+            & $HostExe uninstall --service-name $ServiceName | Out-Null
+            Start-Sleep -Seconds 2
+        }}
+
+        Write-Host "[8/9] Installing Windows service via host CLI..." -ForegroundColor Cyan
+        & $HostExe install `
+            --service-name $ServiceName `
+            --display-name "NetManager Proxy Agent" `
+            --description "Charon agent host" `
+            --child-exe $PythonExe `
+            --child-arg "$InstallDir\\run_agent.py" `
+            --work-dir $InstallDir `
+            --env-file "$InstallDir\\config.env" `
+            --log-dir $LogDir `
+            --service-account "LocalSystem"
+        if ($LASTEXITCODE -ne 0) {{
+            Write-Host "[ERROR] Service install failed (exit $LASTEXITCODE)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+
+        & $HostExe start --service-name $ServiceName
+        if ($LASTEXITCODE -ne 0) {{
+            Write-Host "[ERROR] Service start failed (exit $LASTEXITCODE)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        Write-Host "[OK] Service install + start commands completed." -ForegroundColor Green
+
+        # ==========================================================
+        # [9/9] 10s + 30s Running verification (EXACT match, not regex)
+        # ==========================================================
+        Write-Host "[9/9] Verifying service stays Running..." -ForegroundColor Cyan
+        Start-Sleep -Seconds 10
+        $status10 = (& $HostExe status --service-name $ServiceName).Trim()
+        $exit10 = $LASTEXITCODE
+        if ($exit10 -ne 0 -or $status10 -ne "Running") {{
+            Write-Host "[ERROR] Service is not running at 10s (status='$status10' exit=$exit10)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+
+        Start-Sleep -Seconds 20
+        $status30 = (& $HostExe status --service-name $ServiceName).Trim()
+        $exit30 = $LASTEXITCODE
+        if ($exit30 -ne 0 -or $status30 -ne "Running") {{
+            Write-Host "[ERROR] Service is not running at 30s (status='$status30' exit=$exit30)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        Write-Host "[OK] Service stably running (10s + 30s exact match)." -ForegroundColor Green
+
+        # ==========================================================
+        # Cleanup
+        # ==========================================================
+        try {{
+            if ($PSCommandPath -and (Test-Path $PSCommandPath)) {{
+                Remove-Item $PSCommandPath -Force -ErrorAction SilentlyContinue
+            }}
+        }} catch {{}}
+
+        Write-Host ""
+        Write-Host "[OK] NetManager Agent installation complete." -ForegroundColor Green
+        Write-Host ""
+        Read-Host "Press Enter to close this window"
     """)
 
 

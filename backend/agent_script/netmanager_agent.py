@@ -209,13 +209,20 @@ def _update_env_file(new_key):
         return
 
     try:
-        with open(_ENV_FILE) as f:
+        # WIN-INTEGRATE — defensive BOM strip. Old PowerShell installers
+        # used `Out-File -Encoding UTF8` which on PS 5.1 writes a UTF-8
+        # BOM; that broke Python parsing of the first env var name
+        # (BOM + NETMANAGER_AGENT_KEY). New installer writes BOM-less
+        # files via WriteAllText, but we keep BOM-safe read here so
+        # migration from older installs does not require a rewrite.
+        with open(_ENV_FILE, encoding="utf-8-sig") as f:
             lines = f.readlines()
 
         new_lines = []
         updated = False
         for line in lines:
-            if line.startswith("NETMANAGER_AGENT_KEY="):
+            check = line.lstrip("﻿")
+            if check.startswith("NETMANAGER_AGENT_KEY="):
                 new_lines.append("NETMANAGER_AGENT_KEY={}\n".format(new_key))
                 updated = True
             else:
@@ -224,7 +231,7 @@ def _update_env_file(new_key):
         if not updated:
             new_lines.append("NETMANAGER_AGENT_KEY={}\n".format(new_key))
 
-        with open(_ENV_FILE, "w") as f:
+        with open(_ENV_FILE, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
 
         os.environ["NETMANAGER_AGENT_KEY"] = new_key
