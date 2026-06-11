@@ -1,0 +1,216 @@
+name: charon-agent-host
+
+on:
+  pull_request:
+    paths:
+      - 'charon-agent-host/**'
+      - '.github/workflows/charon-agent-host.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'charon-agent-host/**'
+      - '.github/workflows/charon-agent-host.yml'
+
+defaults:
+  run:
+    working-directory: charon-agent-host
+
+jobs:
+  # ────────────────────────────────────────────────────────────────
+  # Unit — Linux. Pure Go packages (config, child/monitor, cli,
+  # logging/rotating). Drift checks on go.mod/go.sum so PR authors
+  # cannot rely on CI to silently regenerate them.
+  # ────────────────────────────────────────────────────────────────
+  unit:
+    name: Unit (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: charon-agent-host/go.sum
+
+      - name: Verify go.mod / go.sum are committed and in sync
+        run: |
+          if [ ! -f go.sum ]; then
+            echo "::error::go.sum is missing — run 'go mod tidy' locally and commit the result"
+            exit 1
+          fi
+          go mod tidy
+          if ! git diff --exit-code -- go.mod go.sum; then
+            echo "::error::go.mod / go.sum drift detected — run 'go mod tidy' locally and commit the result"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: gofmt
+        run: |
+          out=$(gofmt -l -s .)
+          if [ -n "$out" ]; then
+            echo "::error::Unformatted files:"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go test (race detector enabled)
+        run: go test -race -timeout 90s ./...
+
+  # ────────────────────────────────────────────────────────────────
+  # Cross-compile — proves windows-amd64 build works from Linux.
+  # CGO disabled. UPX intentionally NOT used (EDR / SmartScreen FP).
+  # ────────────────────────────────────────────────────────────────
+  cross-compile:
+    name: Cross-compile (windows/amd64)
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: charon-agent-host/go.sum
+
+      - name: Build windows-amd64
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          mkdir -p bin
+          go build -trimpath -ldflags "-s -w" \
+            -o bin/charon-agent-host-windows-amd64.exe \
+            ./cmd/charon-agent-host
+          ls -lh bin/
+
+      - name: Verify PE32+ Windows binary
+        run: |
+          file bin/charon-agent-host-windows-amd64.exe
+          file bin/charon-agent-host-windows-amd64.exe | grep -q 'PE32+ executable .* x86-64' || {
+            echo "::error::Built binary is not PE32+ x86-64"
+            exit 1
+          }
+
+      - name: SHA-256
+        run: |
+          sha256sum bin/charon-agent-host-windows-amd64.exe \
+            > bin/charon-agent-host-windows-amd64.exe.sha256
+          cat bin/charon-agent-host-windows-amd64.exe.sha256
+
+      - name: Confirm UPX is not used
+        run: |
+          # UPX-packed binaries contain the literal 'UPX!' magic bytes
+          # near the file header. Fail the build if found.
+          if grep -aqE 'UPX!' bin/charon-agent-host-windows-amd64.exe; then
+            echo "::error::UPX magic detected in binary — UPX is explicitly forbidden"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: charon-agent-host-windows-amd64
+          path: |
+            charon-agent-host/bin/charon-agent-host-windows-amd64.exe
+            charon-agent-host/bin/charon-agent-host-windows-amd64.exe.sha256
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────
+  # Integration — windows-2022. The only signal that proves the SCM
+  # dispatcher accepts the host. Runs as administrator (GitHub-hosted
+  # windows-2022 runners start elevated; we verify and FAIL FAST if
+  # they don't). Does NOT use Start-Process -Verb RunAs — interactive
+  # UAC is not reliable in headless CI.
+  # ────────────────────────────────────────────────────────────────
+  windows-integration:
+    name: Integration (windows-2022)
+    runs-on: windows-2022
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: charon-agent-host/go.sum
+
+      - name: Confirm PowerShell 5.1 is available
+        shell: powershell
+        run: |
+          $ver = $PSVersionTable.PSVersion
+          Write-Host "PowerShell version: $ver"
+          if ($ver.Major -ne 5) {
+            throw "Expected Windows PowerShell 5.1, got $ver"
+          }
+
+      - name: Confirm the runner is already elevated (no UAC dance)
+        shell: powershell
+        run: |
+          $principal = New-Object Security.Principal.WindowsPrincipal(
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+          )
+          $isAdmin = $principal.IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator
+          )
+          if (-not $isAdmin) {
+            throw "Windows integration runner is not elevated. GitHub-hosted windows-2022 should start elevated; check the runner image."
+          }
+          Write-Host "Runner is elevated. Skipping Start-Process -Verb RunAs (unreliable in headless CI)."
+
+      - name: Native windows build (sanity)
+        run: go build ./cmd/charon-agent-host
+
+      - name: Integration tests
+        shell: powershell
+        env:
+          # Surface a per-run unique tag the tests read so two
+          # concurrent runs of the same PR never collide on the SCM
+          # service name.
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          # Pre-create the log directory so even an early failure can
+          # surface partial logs to the artifact step.
+          $logDir = Join-Path $env:RUNNER_TEMP "charon-host-it-logs"
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          $env:CHARON_HOST_IT_LOG_DIR = $logDir
+
+          # Run tests directly — runner is already elevated.
+          go test -tags=integration -timeout 5m -v ./test/integration/... `
+            *> "$logDir\go-test.log"
+          $exit = $LASTEXITCODE
+          if ($exit -ne 0) {
+            Write-Host "Integration test exited with code $exit"
+          }
+          exit $exit
+
+      - name: Collect Windows Event Log slices (System + Application)
+        if: always()
+        shell: powershell
+        run: |
+          $logDir = $env:CHARON_HOST_IT_LOG_DIR
+          if (-not $logDir) { $logDir = Join-Path $env:RUNNER_TEMP "charon-host-it-logs" }
+          New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+          # Last 10 minutes of events from System + Application — cheap, scoped.
+          Get-WinEvent -FilterHashtable @{LogName='System';     StartTime=(Get-Date).AddMinutes(-10)} `
+            -ErrorAction SilentlyContinue `
+            | Select-Object TimeCreated, LevelDisplayName, ProviderName, Id, Message `
+            | ConvertTo-Json -Depth 4 `
+            > "$logDir\event-system.json"
+          Get-WinEvent -FilterHashtable @{LogName='Application';StartTime=(Get-Date).AddMinutes(-10)} `
+            -ErrorAction SilentlyContinue `
+            | Select-Object TimeCreated, LevelDisplayName, ProviderName, Id, Message `
+            | ConvertTo-Json -Depth 4 `
+            > "$logDir\event-application.json"
+          # Snapshot of all services in case the integration test left one behind.
+          sc.exe query state= all > "$logDir\sc-query-all.txt"
+
+      - name: Upload integration artifacts (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/charon-host-it-logs/**
+          retention-days: 14
+          if-no-files-found: warn
