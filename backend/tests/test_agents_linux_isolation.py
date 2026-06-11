@@ -20,15 +20,16 @@ import hashlib
 import os
 import re
 
-from app.api.v1.endpoints.agents import _linux_installer
-
 
 SAMPLE_AGENT_ID = "known-good-fake-id"
 SAMPLE_AGENT_KEY = "REDACTED_FAKE_KEY"
 SAMPLE_BACKEND_URL = "https://netmanager.systrack.app"
 
 
+# Lazy import — see win_integrate test file for the same conftest /
+# SQLAlchemy + SQLite reason.
 def _gen_linux() -> str:
+    from app.api.v1.endpoints.agents import _linux_installer
     return _linux_installer(SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, SAMPLE_BACKEND_URL)
 
 
@@ -88,6 +89,7 @@ def test_linux_installer_no_windows_v2_flag_branching():
     gated branch — the Linux path must be the same regardless of
     WINDOWS_AGENT_V2_ENABLED."""
     import inspect
+    from app.api.v1.endpoints.agents import _linux_installer
     src = inspect.getsource(_linux_installer)
     assert "WINDOWS_AGENT_V2_ENABLED" not in src
 

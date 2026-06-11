@@ -13,15 +13,17 @@ Pins the 9-stage installer contract:
 """
 import re
 
-from app.api.v1.endpoints.agents import _windows_installer
-
 
 SAMPLE_AGENT_ID = "test-agent-abcd1234"
 SAMPLE_AGENT_KEY = "test-key-9f8e7d6c"
 SAMPLE_BACKEND_URL = "https://netmanager.example.app"
 
 
+# Lazy import so collection of this test module does not eagerly
+# instantiate app.core.database's SQLAlchemy engine (which fights
+# SQLite + pool_size kwargs at conftest-set test URL).
 def _gen() -> str:
+    from app.api.v1.endpoints.agents import _windows_installer
     return _windows_installer(SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, SAMPLE_BACKEND_URL)
 
 
@@ -339,6 +341,7 @@ def test_agent_key_not_in_filename():
 
 
 def test_quote_injection_escaped():
+    from app.api.v1.endpoints.agents import _windows_installer
     out = _windows_installer("evil'agent", "key'with'quote", "https://x")
     assert "$AgentId    = 'evil''agent'" in out
     assert "$AgentKey   = 'key''with''quote'" in out
