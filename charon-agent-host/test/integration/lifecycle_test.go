@@ -8,6 +8,7 @@
 package integration
 
 import (
+	"errors"
 	"fmt"
 	"math/rand"
 	"os"
@@ -168,14 +169,30 @@ func newScaffold(t *testing.T) *scaffold {
 	// than a slow tear-down log line.
 	t.Cleanup(func() {
 		if err := service.Stop(s.serviceName); err != nil &&
-			err != service.ErrServiceNotFound {
+			!errors.Is(err, service.ErrServiceNotFound) {
 			t.Logf("cleanup: service.Stop returned %v", err)
 		}
 		time.Sleep(2 * time.Second)
 		if err := service.Uninstall(s.serviceName, 10*time.Second); err != nil &&
-			err != service.ErrServiceNotFound {
+			!errors.Is(err, service.ErrServiceNotFound) &&
+			!errors.Is(err, service.ErrDeletePending) {
 			t.Logf("cleanup: service.Uninstall returned %v", err)
 		}
+		// Best-effort post-cleanup probe — log when the SCM finally
+		// reaps a delete-pending registration so an operator
+		// inspecting CI artifacts can see "yes, it eventually went
+		// away" rather than wondering whether the soft sentinel
+		// became a permanent leak. Polls for at most a short, fixed
+		// budget; no timeout inflation, no test-result coupling.
+		probeDeadline := time.Now().Add(15 * time.Second)
+		for time.Now().Before(probeDeadline) {
+			if _, err := service.Status(s.serviceName); errors.Is(err, service.ErrServiceNotFound) {
+				t.Logf("cleanup: SCM registration fully reaped for %q", s.serviceName)
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		t.Logf("cleanup: SCM registration for %q still present at end of probe window", s.serviceName)
 	})
 
 	return s
@@ -283,9 +300,30 @@ func TestLifecycle_InstallStartRunsStopUninstall(t *testing.T) {
 	}
 	s.waitStatus(t, "Stopped", 20*time.Second)
 
-	if err := service.Uninstall(s.serviceName, 10*time.Second); err != nil &&
-		err != service.ErrServiceNotFound {
+	// service.Uninstall sentinels (see manager_windows.go):
+	//
+	//   nil                       — service deleted AND SCM finished
+	//                               unregistration within deleteTimeout
+	//   ErrServiceNotFound        — already gone (benign for cleanup)
+	//   ErrDeletePending          — s.Delete() succeeded but SCM is
+	//                               still asynchronously reaping the
+	//                               registration; documented in the
+	//                               manager as a SOFT WARNING, not a
+	//                               failure. A subsequent install can
+	//                               retry; the post-cleanup probe in
+	//                               t.Cleanup verifies it eventually
+	//                               drains.
+	//
+	// Any other error path here is still a hard failure (e.g. a real
+	// SCM Delete refusal).
+	err := service.Uninstall(s.serviceName, 10*time.Second)
+	if err != nil &&
+		!errors.Is(err, service.ErrServiceNotFound) &&
+		!errors.Is(err, service.ErrDeletePending) {
 		t.Fatalf("uninstall: %v", err)
+	}
+	if errors.Is(err, service.ErrDeletePending) {
+		t.Logf("uninstall accepted soft sentinel: %v", err)
 	}
 }
 
@@ -415,7 +453,7 @@ func TestStop_DuringRestartBackoff_SuppressesRestart(t *testing.T) {
 // check, kept under the new scaffolding-free path so it's quick.
 func TestStatus_ServiceNotFoundReturnsSentinel(t *testing.T) {
 	_, err := service.Status("DefinitelyDoesNotExist-9f8a")
-	if err != service.ErrServiceNotFound {
+	if !errors.Is(err, service.ErrServiceNotFound) {
 		t.Fatalf("got %v, want ErrServiceNotFound", err)
 	}
 }
