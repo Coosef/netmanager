@@ -52,7 +52,7 @@ services:
 
   backend:
     networks: [internal]            # T10 B1c
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     # Faz 6B G7: clear this service's own multiproc subdir on start (stale .db
     # files from dead pids would otherwise accumulate); exec keeps SIGTERM.
     command:
@@ -101,7 +101,7 @@ services:
   # monitor: high-concurrency I/O-bound polling (SNMP, topology, playbooks, analytics)
   celery_worker:
     networks: [internal]            # T10 B1c
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     command:
       - /bin/sh
       - -c
@@ -140,7 +140,7 @@ services:
   # agent_cmd: bridge-dispatched commands to agents (RTT-bound, moderate concurrency)
   celery_agent_worker:
     networks: [internal]            # T10 B1c
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     command:
       - /bin/sh
       - -c
@@ -176,7 +176,7 @@ services:
   # default + bulk: correlation tasks, driver, backup, bulk SSH/config ops
   celery_default_worker:
     networks: [internal]            # T10 B1c
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     command:
       - /bin/sh
       - -c
@@ -212,7 +212,7 @@ services:
 
   celery_beat:
     networks: [internal]            # T10 B1c
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     command:
       - /bin/sh
       - -c
@@ -252,7 +252,7 @@ services:
   # burst can never exhaust the DB pool (KI-4).
   event_consumer:
     networks: [internal]            # T10 B1c
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     command:
       - /bin/sh
       - -c
@@ -288,7 +288,7 @@ services:
 
   flower:
     networks: [internal]            # T10 B1c — internal; debug için dev overlay 5555
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile }
     command: celery -A app.workers.celery_app flower --port=5555 --basic_auth=${FLOWER_USER:-admin}:${FLOWER_PASSWORD:-admin123}
     # T10 B1b — host'a publish YOK (yalnız expose). Flower UI'ya local debug
     # için docker-compose.dev.yml 5555'i geri açar; prod'da dışarı kapalı.

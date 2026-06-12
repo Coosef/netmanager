@@ -75,6 +75,18 @@ class Settings(BaseSettings):
     # Wave 3 W3.3 — PoE Restart akışı (disable → wait → enable) default bekleme
     POE_RESTART_WAIT_SEC: int = 10
 
+    # WIN-INTEGRATE — Windows Agent v2 (Go service host) gate.
+    # Default explicitly false. When false:
+    #   - /api/v1/agents/{id}/download/host/windows-amd64 returns 404
+    #   - /api/v1/agents/{id}/download/windows returns 503 (the old
+    #     broken sc.exe-based PowerShell installer is intentionally
+    #     NOT served — a broken installer is worse than a clear
+    #     "feature off" error).
+    #   - Linux endpoints, /ws/agent, heartbeat behaviour unchanged.
+    # Flip to true only after the manual TR Windows VM end-to-end
+    # test has passed and production deploy has been authorised.
+    WINDOWS_AGENT_V2_ENABLED: bool = False
+
     @property
     def allowed_origins_list(self) -> List[str]:
         return [o.strip() for o in self.ALLOWED_ORIGINS.split(",")]

@@ -12,7 +12,7 @@ from typing import Optional
 
 import redis as _redis_lib
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel
 from sqlalchemy import and_, func, select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +34,7 @@ from app.services.agent_manager import agent_manager
 # sessizce yut. Komut tarafı zaten retry ile (vlans-refresh) kapsanıyor.
 _AGENT_OFFLINE_DEBOUNCE_SECS = 20
 
-# ── Current agent version (read from script at startup) ───────────────────────
+# -- Current agent version (read from script at startup) -----------------------
 def _read_agent_version() -> str:
     try:
         script = Path(__file__).parents[4] / "agent_script" / "netmanager_agent.py"
@@ -185,7 +185,7 @@ async def _emit_offline_if_still_offline(
         pass
 
 
-# ── REST ─────────────────────────────────────────────────────────────────────
+# -- REST ---------------------------------------------------------------------
 
 async def _get_agent_scoped(agent_id: str, db: AsyncSession) -> Agent:
     """Fetch agent — RLS scopes to the active org / location automatically."""
@@ -434,7 +434,7 @@ async def delete_agent(
         await db.commit()
 
 
-# ── Security config ───────────────────────────────────────────────────────────
+# -- Security config -----------------------------------------------------------
 
 @router.put("/{agent_id}/security", response_model=dict)
 async def update_agent_security(
@@ -526,7 +526,7 @@ async def unlock_agent(
     return {"status": "unlocked", "agent_id": agent_id}
 
 
-# ── Command audit log ─────────────────────────────────────────────────────────
+# -- Command audit log ---------------------------------------------------------
 
 @router.get("/{agent_id}/commands", response_model=dict)
 async def get_agent_commands(
@@ -565,7 +565,7 @@ async def get_agent_commands(
     return {"items": items, "total": len(items), "offset": offset, "limit": limit}
 
 
-# ── Installer download ────────────────────────────────────────────────────────
+# -- Installer download --------------------------------------------------------
 
 # HF#10A — public router (gate'siz). X-Agent-Key endpoint içinde doğrulanır.
 @agents_public_router.get("/{agent_id}/download/{platform}")
@@ -672,16 +672,251 @@ async def download_installer(
     if platform == "linux":
         script = _linux_installer(agent_id, agent_key, base_url)
         filename = f"netmanager-agent-{agent_id}-linux.sh"
-        media_type = "text/x-shellscript"
+        body_bytes = script.encode("utf-8")
+        media_type_with_charset = "text/x-shellscript; charset=utf-8"
     else:
+        # WIN-INTEGRATE: when WINDOWS_AGENT_V2_ENABLED is false we serve
+        # a 503 instead of the legacy sc.exe-based PowerShell installer.
+        # That legacy script was architecturally broken (Python child
+        # registered as a Windows service does not implement the SCM
+        # dispatcher protocol → Error 1053), so handing it to a user
+        # would be worse than telling them the feature is currently
+        # off. The new Go-host-based installer is shipped via the same
+        # endpoint when the flag is on; until then, hard fail.
+        if not settings.WINDOWS_AGENT_V2_ENABLED:
+            raise HTTPException(
+                status_code=503,
+                detail="Windows installer temporarily unavailable. Please contact your administrator.",
+            )
         script = _windows_installer(agent_id, agent_key, base_url)
         filename = f"netmanager-agent-{agent_id}-windows.ps1"
-        media_type = "text/plain"
+        # WINDOWS-INSTALLER-FIX (2026-06-11) — UTF-8 BOM + CRLF +
+        # charset so Windows PowerShell 5.1's cp1254/cp1252 fallback
+        # does not mis-decode non-ASCII bytes. See PR #75 RCA.
+        body_bytes = (
+            b"\xef\xbb\xbf"
+            + script.replace("\r\n", "\n").replace("\n", "\r\n").encode("utf-8")
+        )
+        media_type_with_charset = "text/plain; charset=utf-8"
 
-    return PlainTextResponse(
-        content=script,
-        media_type=media_type,
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    return Response(
+        content=body_bytes,
+        media_type=media_type_with_charset,
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+# ---------------------------------------------------------------------
+# WIN-INTEGRATE — Windows agent host (Go binary) download
+# ---------------------------------------------------------------------
+
+_HOST_BIN_PATH     = "/opt/netmanager/agent-bins/charon-agent-host-windows-amd64.exe"
+_HOST_SHA_PATH     = _HOST_BIN_PATH + ".sha256"
+_HOST_VERSION_PATH = _HOST_BIN_PATH + ".version"
+_HOST_SIZE_MIN     = 1 * 1024 * 1024        # 1 MB lower sanity bound
+_HOST_SIZE_MAX     = 50 * 1024 * 1024       # 50 MB upper sanity bound
+
+# Authoritative version contract — the build pipeline writes the
+# .version sidecar after validating HOST_VERSION against this regex.
+# The 12-char SHA is the git short hash of the source commit. The
+# previous default sentinel `dev` and any malformed value
+# (uppercase, non-hex, wrong length) fail this match and are
+# rejected at integrity check time rather than served as "unknown".
+import re as _agent_re_module
+_HOST_VERSION_RE = _agent_re_module.compile(r"^2\.0\.0-mvp0\+g[0-9a-f]{12}$")
+
+
+class _HostBinaryIntegrity:
+    """Cached integrity result for the embedded Windows host binary.
+
+    Read once per backend process boot. A bad result (binary missing,
+    SHA mismatch, version sidecar missing or malformed) is a
+    permanent "host endpoint unavailable" — flipping it requires an
+    image rebuild, which means a process restart and re-read. Linux
+    endpoints, login, dashboard and the rest of the backend stay up
+    regardless.
+    """
+    ok: bool = False
+    sha256: str | None = None
+    version: str | None = None
+    size: int | None = None
+    error: str | None = None
+
+
+def _read_host_integrity() -> _HostBinaryIntegrity:
+    """Validate the embedded host binary + sidecars. Never raises.
+
+    Sidecars are written by the multi-stage Dockerfile build:
+      <bin>.sha256   — 64-hex SHA-256 of <bin>
+      <bin>.version  — `2.0.0-mvp0+g<12-hex>` produced from the
+                       source git short SHA, validated against
+                       _HOST_VERSION_RE at build time.
+
+    The version sidecar is the AUTHORITATIVE source of truth for
+    the binary's version — no `strings` probe, no subprocess. A
+    missing, unreadable, or malformed version sidecar is a hard
+    integrity failure (NOT "unknown" — production never serves a
+    binary whose version we cannot prove).
+    """
+    out = _HostBinaryIntegrity()
+    import os
+    import hashlib
+    import logging
+
+    log = logging.getLogger("netmanager.security")
+
+    try:
+        # -- binary file -------------------------------------------
+        if not os.path.isfile(_HOST_BIN_PATH):
+            out.error = "binary file missing"
+            return out
+        size = os.path.getsize(_HOST_BIN_PATH)
+        if size < _HOST_SIZE_MIN or size > _HOST_SIZE_MAX:
+            out.error = f"binary size {size} out of sanity range"
+            return out
+        out.size = size
+
+        # -- SHA-256 sidecar ---------------------------------------
+        if not os.path.isfile(_HOST_SHA_PATH):
+            out.error = "sha sidecar missing"
+            return out
+        with open(_HOST_SHA_PATH, "r") as f:
+            sidecar = f.read().strip().split()[0]
+        if len(sidecar) != 64 or not all(c in "0123456789abcdef" for c in sidecar):
+            out.error = "sha sidecar format invalid"
+            return out
+
+        h = hashlib.sha256()
+        with open(_HOST_BIN_PATH, "rb") as f:
+            for chunk in iter(lambda: f.read(64 * 1024), b""):
+                h.update(chunk)
+        actual = h.hexdigest()
+        if actual != sidecar:
+            out.error = "sha256 mismatch"
+            log.error("host binary integrity: sha mismatch")
+            return out
+
+        # -- version sidecar (authoritative) -----------------------
+        if not os.path.isfile(_HOST_VERSION_PATH):
+            out.error = "version sidecar missing"
+            log.error("host binary integrity: version sidecar missing")
+            return out
+        try:
+            with open(_HOST_VERSION_PATH, "r") as f:
+                raw_version = f.read().strip()
+        except OSError:
+            out.error = "version sidecar unreadable"
+            log.error("host binary integrity: version sidecar unreadable")
+            return out
+
+        if not _HOST_VERSION_RE.match(raw_version):
+            # Catches: "dev", "", uppercase, non-hex, wrong length,
+            # missing prefix — all reject.
+            out.error = "version sidecar malformed"
+            log.error(
+                "host binary integrity: version sidecar malformed "
+                "(length=%d does-not-match-regex)",
+                len(raw_version),
+            )
+            return out
+
+        out.ok = True
+        out.sha256 = actual
+        out.version = raw_version
+        return out
+    except Exception as e:
+        out.error = f"integrity check exception: {type(e).__name__}"
+        log.exception("host binary integrity check exploded")
+        return out
+
+
+_HOST_INTEGRITY_CACHE: _HostBinaryIntegrity | None = None
+
+
+def _host_integrity() -> _HostBinaryIntegrity:
+    """Memoised per-process integrity result."""
+    global _HOST_INTEGRITY_CACHE
+    if _HOST_INTEGRITY_CACHE is None:
+        _HOST_INTEGRITY_CACHE = _read_host_integrity()
+    return _HOST_INTEGRITY_CACHE
+
+
+@agents_public_router.get("/{agent_id}/download/host/windows-amd64")
+async def download_agent_host(
+    agent_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_agent_key: str = Header(None, alias="X-Agent-Key"),
+):
+    """Serve the Windows agent host binary (charon-agent-host.exe).
+
+    Gated by WINDOWS_AGENT_V2_ENABLED. The endpoint validates the
+    requester with the same agent_key contract as the platform
+    installer endpoint above; the binary itself is a static artefact
+    baked into the backend image at build time (see
+    backend/Dockerfile multi-stage agent-host-builder).
+
+    Range requests are NOT supported in MVP; if a client sends a Range
+    header we ignore it and serve the full 200 response.
+    """
+    import logging
+    log = logging.getLogger("netmanager.security")
+
+    # Flag gate first — feature off → 404 (do not even hint that the
+    # endpoint exists when the flag is closed).
+    if not settings.WINDOWS_AGENT_V2_ENABLED:
+        raise HTTPException(status_code=404, detail="Endpoint not available")
+
+    if not x_agent_key:
+        raise HTTPException(status_code=401, detail="X-Agent-Key header required")
+
+    # Authenticate via the agent_key contract. RLS bypass like the
+    # other public installer endpoint — the installer machine has no
+    # user session.
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
+    result = await db.execute(select(Agent).where(Agent.id == agent_id, Agent.is_active == True))
+    agent = result.scalar_one_or_none()
+    if not agent or not verify_password(x_agent_key, agent.agent_key_hash):
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    integ = _host_integrity()
+    if not integ.ok:
+        # Server log gets the real reason; client gets generic 503.
+        log.error(
+            "host binary integrity check failed: %s (size=%s)",
+            integ.error, integ.size,
+        )
+        raise HTTPException(status_code=503, detail="Host binary not available")
+
+    # Stream the binary. FastAPI's Response holds it in memory which
+    # is fine for ~3 MB; no need for FileResponse / chunking yet.
+    try:
+        with open(_HOST_BIN_PATH, "rb") as f:
+            body_bytes = f.read()
+    except OSError:
+        log.error("host binary read failed at request time")
+        raise HTTPException(status_code=503, detail="Host binary not available")
+
+    return Response(
+        content=body_bytes,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": 'attachment; filename="charon-agent-host-windows-amd64.exe"',
+            "Content-Length": str(len(body_bytes)),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            # integ.ok is True here, which means _read_host_integrity
+            # passed the version regex — version is never None.
+            "X-Host-Version": integ.version,
+            "X-Host-SHA256": integ.sha256 or "",
+        },
     )
 
 
@@ -726,7 +961,7 @@ async def download_agent_script(
     return PlainTextResponse(content=content, media_type="text/x-python")
 
 
-# ── Latency routing ──────────────────────────────────────────────────────────
+# -- Latency routing ----------------------------------------------------------
 
 @router.get("/latency-map", response_model=list[dict])
 async def get_latency_map(
@@ -795,7 +1030,7 @@ async def probe_agent_devices(
     return {"agent_id": agent_id, "probed": len(results), "results": results}
 
 
-# ── WebSocket helper tasks (called on hello) ──────────────────────────────────
+# -- WebSocket helper tasks (called on hello) ----------------------------------
 
 async def _push_device_sync_task(agent_id: str):
     """Push assigned device list to agent for health monitoring.
@@ -930,7 +1165,7 @@ async def _push_vault_task(agent_id: str, agent_org_id: int):
         logging.getLogger("agents").debug(f"Vault push error for {agent_id}: {exc}")
 
 
-# ── Feature 2: Device sync ────────────────────────────────────────────────────
+# -- Feature 2: Device sync ----------------------------------------------------
 
 @router.post("/{agent_id}/device-sync", response_model=dict)
 async def push_device_sync(
@@ -968,7 +1203,7 @@ async def push_device_sync(
     return {"sent": sent, "device_count": len(payload)}
 
 
-# ── Feature 4: SNMP via Agent ─────────────────────────────────────────────────
+# -- Feature 4: SNMP via Agent -------------------------------------------------
 
 @router.post("/{agent_id}/snmp-get", response_model=dict)
 async def snmp_get_via_agent(
@@ -1028,7 +1263,7 @@ async def snmp_walk_via_agent(
     return result
 
 
-# ── Feature 5: Discovery ──────────────────────────────────────────────────────
+# -- Feature 5: Discovery ------------------------------------------------------
 
 @router.post("/{agent_id}/discover", response_model=dict)
 async def trigger_discovery(
@@ -1100,7 +1335,7 @@ async def get_discovery_history(
     ]
 
 
-# ── Feature 6: Syslog ─────────────────────────────────────────────────────────
+# -- Feature 6: Syslog ---------------------------------------------------------
 
 @router.post("/{agent_id}/syslog-config", response_model=dict)
 async def configure_syslog(
@@ -1156,7 +1391,7 @@ async def get_syslog_events(
     return {"items": items, "total": len(items), "offset": offset, "limit": limit}
 
 
-# ── Feature 7: Streaming ──────────────────────────────────────────────────────
+# -- Feature 7: Streaming ------------------------------------------------------
 
 @router.post("/{agent_id}/stream-command", response_model=dict)
 async def start_stream_command(
@@ -1188,7 +1423,7 @@ async def start_stream_command(
     return {"request_id": rid, "stream_url": f"/api/v1/stream/{rid}"}
 
 
-# ── Feature 8: Credential Vault ───────────────────────────────────────────────
+# -- Feature 8: Credential Vault -----------------------------------------------
 
 @router.post("/{agent_id}/refresh-vault", response_model=dict)
 async def refresh_credential_vault(
@@ -1281,7 +1516,7 @@ async def refresh_credential_vault(
     return {"sent": sent, "credential_count": len(credentials), "encrypted": has_crypto}
 
 
-# ── WebSocket ─────────────────────────────────────────────────────────────────
+# -- WebSocket -----------------------------------------------------------------
 
 @agent_ws_router.websocket("/ws/{agent_id}")
 async def agent_websocket(
@@ -1585,7 +1820,7 @@ async def agent_websocket(
         ))
 
 
-# ── Installer templates ───────────────────────────────────────────────────────
+# -- Installer templates -------------------------------------------------------
 
 def _linux_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
     # T8.4 Security F1.3 defense-in-depth — server_url whitelist üstüne
@@ -1755,110 +1990,623 @@ SVCEOF
 
 
 def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
-    # T8.4 Security F1.3 defense-in-depth — PowerShell single-quoted
-    # string'lerde tek tırnak escape `''` ile. Whitelist atlanmış bir
-    # senaryoda bile değer kaçıp komut enjekte edilemez.
+    """Generate Windows PowerShell 5.1 installer (WIN-INTEGRATE 9-stage).
+
+    Architectural rewrite from the PR #75 hardening + the broken
+    sc.exe-based Python service registration was removed entirely.
+    Service installation is now delegated to the embedded
+    charon-agent-host.exe (downloaded by stage [6/9], integrity-
+    checked in [7/9], CLI-installed in [8/9], verified in [9/9]).
+
+    Contract — installer succeeds ONLY when ALL of the following hold:
+      - binary integrity check (SHA-256 == X-Host-SHA256 header)
+      - host install exit code 0
+      - host start exit code 0
+      - 10s status: exit code 0 AND output exactly "Running"
+      - 30s status: exit code 0 AND output exactly "Running"
+
+    Otherwise: exit 1 with a clear message.
+
+    Locale-independent + ASCII-safe (TR Windows cp1254 decode bug
+    fixed in PR #75 — invariants preserved). All admin checks use
+    WindowsBuiltInRole enum; all ACLs use well-known SIDs
+    (S-1-5-18 SYSTEM, S-1-5-32-544 Administrators).
+
+    iwr | iex is NOT supported — $PSCommandPath must resolve to a
+    real file path, otherwise we abort with a clear message.
+    """
     def _psq(s: str) -> str:
+        # F1.3 defense — single-quoted PS string'de ' kaçışı ''
         return "'" + s.replace("'", "''") + "'"
-    p_id  = _psq(agent_id)
+    p_id = _psq(agent_id)
     p_key = _psq(agent_key)
     p_url = _psq(backend_url)
-    # PS-5.1-COMPAT (2026-06-10) — Windows default PowerShell 5.1 hedefte
-    # PowerShell 7 kurulu olmuyor. PS 7-only syntax (?., ??, ternary ?:,
-    # ForEach-Object -Parallel) script'te bulunmamalı. Aksi takdirde
-    # PS 5.1 parser syntax error veriyor (`?.Source` "operator expected"
-    # üretir). Bu üretici hem PS 5.1 hem PS 7 ile parse edilebilir output
-    # döndürmek zorunda; aşağıdaki tüm null-check'ler `if ($cmd) { ... }`
-    # pattern'iyle yazılı.
-    #
-    # Ek: TLS 1.2 enforce. PS 5.1 default'u Windows Server 2016/2019'da
-    # SystemDefault'a bağlı, bazı kurumsal ortamlarda hâlâ TLS 1.0/1.1
-    # üzerinden istek yapıyor. Cloudflare Faz 0 sonrası edge TLS 1.2 min,
-    # Invoke-WebRequest fail edebilir. Script başında explicit set.
+    timestamp_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     return textwrap.dedent(f"""\
-        # NetManager Proxy Agent — Windows Kurulum Betiği
-        # Oluşturulma: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+        # NetManager Proxy Agent - Windows Installer (PS 5.1 compatible)
+        # Generated: {timestamp_utc}
         # Agent ID: {agent_id}
-        # Hedef: Windows PowerShell 5.1 (default) ve PowerShell 7 uyumlu.
+        # Target: Windows PowerShell 5.1 (default) and PowerShell 7.
 
-        $AgentId   = {p_id}
-        $AgentKey  = {p_key}
+        $ErrorActionPreference = "Stop"
+
+        $AgentId    = {p_id}
+        $AgentKey   = {p_key}
         $BackendUrl = {p_url}
-        $InstallDir = "C:\\ProgramData\\NetManagerAgent"
+        $InstallDir  = "C:\\ProgramData\\NetManagerAgent"
+        $BinDir      = "$InstallDir\\bin"
+        $LogDir      = "$InstallDir\\logs"
         $ServiceName = "NetManagerAgent"
-        $PythonExe = ""
+        $HostExe     = "$BinDir\\charon-agent-host.exe"
+        $HostStage   = "$BinDir\\charon-agent-host.exe.new"
+        $HostBackup  = "$BinDir\\charon-agent-host.exe.bak"
+        $PythonExe   = $null
 
-        # PS 5.1 default SystemDefault TLS edge'in min 1.2 ile uyumsuz olabilir.
-        # Explicit Tls12 set ederek Invoke-WebRequest'in fail etmesini engelle.
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-        if (-NOT ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")) {{
-            Write-Host "Lütfen Yönetici olarak çalıştırın" -ForegroundColor Red
-            pause; exit 1
+        # ==========================================================
+        # [1/9] Admin check (locale-independent) + self-elevation
+        # ==========================================================
+        # iwr | iex is NOT supported: PSCommandPath would be empty,
+        # self-elevation cannot relaunch us as a file. Hard abort.
+        $principal = New-Object Security.Principal.WindowsPrincipal(
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        )
+        $isAdmin = $principal.IsInRole(
+            [Security.Principal.WindowsBuiltInRole]::Administrator
+        )
+
+        if (-not $isAdmin) {{
+            if ($env:NETMANAGER_INSTALLER_ELEVATED -eq "1") {{
+                Write-Host "[ERROR] Administrative elevation failed." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            if (-not $PSCommandPath) {{
+                Write-Host "[ERROR] Installer must be downloaded as a file, not piped (iwr | iex unsupported)." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            $env:NETMANAGER_INSTALLER_ELEVATED = "1"
+            Write-Host "[INFO] Requesting administrator elevation..." -ForegroundColor Yellow
+            $psExe = "$env:SystemRoot\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+
+            # Parent waits for elevated child to finish, captures the
+            # exit code, then cleans the on-disk installer (which still
+            # contains the agent key in its header) AFTER the child has
+            # released its handle on the file. If UAC is denied or the
+            # child fails to spawn, the parent still cleans up so the
+            # installer with the embedded key does not linger on disk.
+            $childExit = 1
+            try {{
+                $proc = Start-Process -FilePath $psExe `
+                    -Verb RunAs `
+                    -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "`"$PSCommandPath`"") `
+                    -Wait -PassThru
+                if ($proc -and $proc.ExitCode -ne $null) {{
+                    $childExit = $proc.ExitCode
+                }}
+            }} catch {{
+                Write-Host "[ERROR] UAC elevation denied or installer relaunch failed." -ForegroundColor Red
+                $childExit = 1
+            }} finally {{
+                if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {{
+                    Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+                }}
+            }}
+            exit $childExit
         }}
 
-        Write-Host "[1/5] Python kontrol ediliyor..."
-        # PS 5.1 compat: ?. operatörü yok, if-else pattern kullan.
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }} else {{ $PythonExe = $null }}
-        if (-not $PythonExe) {{
-            Write-Host "Python bulunamadı, winget ile kuruluyor..." -ForegroundColor Yellow
-            winget install Python.Python.3.12 --silent --accept-package-agreements
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-            if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }} else {{ $PythonExe = $null }}
-            if (-not $PythonExe) {{
-                Write-Host "Python kurulumu başarısız. Lütfen Python 3.12 manuel kurun ve tekrar deneyin." -ForegroundColor Red
-                pause; exit 1
+        # ----------------------------------------------------------
+        # Elevated execution path. EVERY exit point (success or
+        # failure) MUST run through the `finally` block below so the
+        # installer file (which embeds the agent key in its header)
+        # never lingers on disk. $AgentKey is also zeroed defensively.
+        # ----------------------------------------------------------
+        try {{
+
+        # ==========================================================
+        # Restore-PreviousAgentService -- TRANSACTIONAL ROLLBACK
+        # ==========================================================
+        # When the new install/start/status sequence fails AFTER the
+        # atomic move into place, we owe the user a working agent.
+        # A simple `Move-Item $HostBackup $HostExe` restores only the
+        # binary; the SCM registration is still pointing at the
+        # failed new binary path (or has no registration at all).
+        #
+        # This function performs full transactional rollback:
+        #   1) stop any partial new service
+        #   2) uninstall partial new service
+        #   3) bounded poll for SCM drain (exit 18)
+        #   4) delete the failed new $HostExe
+        #   5) move $HostBackup back into $HostExe
+        #   6) re-install the previous binary as the service
+        #   7) start the service
+        #   8) verify 10s Running
+        #   9) verify 30s Running
+        # Returns $true only if all nine steps succeed.
+        function Restore-PreviousAgentService {{
+            param(
+                [string]$ServiceName,
+                [string]$HostExe,
+                [string]$HostBackup,
+                [string]$PythonExe,
+                [string]$InstallDir,
+                [string]$LogDir
+            )
+
+            Write-Host "[ROLLBACK] Step 1/9: stopping partial new service..." -ForegroundColor Yellow
+            & $HostExe stop --service-name $ServiceName 2>&1 | Out-Null
+            Start-Sleep -Milliseconds 500
+
+            Write-Host "[ROLLBACK] Step 2/9: uninstalling partial new service..." -ForegroundColor Yellow
+            & $HostExe uninstall --service-name $ServiceName 2>&1 | Out-Null
+
+            Write-Host "[ROLLBACK] Step 3/9: polling SCM drain (max 30s)..." -ForegroundColor Yellow
+            $deadline = (Get-Date).AddSeconds(30)
+            $gone = $false
+            while ((Get-Date) -lt $deadline) {{
+                & $HostExe status --service-name $ServiceName 2>&1 | Out-Null
+                if ($LASTEXITCODE -eq 18) {{ $gone = $true; break }}
+                Start-Sleep -Milliseconds 500
+            }}
+            if (-not $gone) {{
+                Write-Host "[ROLLBACK FAIL] SCM did not drain partial service within 30s." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 4/9: removing failed new binary..." -ForegroundColor Yellow
+            Remove-Item -LiteralPath $HostExe -Force -ErrorAction SilentlyContinue
+
+            Write-Host "[ROLLBACK] Step 5/9: restoring previous binary from backup..." -ForegroundColor Yellow
+            if (-not (Test-Path -LiteralPath $HostBackup)) {{
+                Write-Host "[ROLLBACK FAIL] Backup binary missing." -ForegroundColor Red
+                return $false
+            }}
+            Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
+
+            Write-Host "[ROLLBACK] Step 6/9: re-installing previous binary as service..." -ForegroundColor Yellow
+            & $HostExe install `
+                --service-name $ServiceName `
+                --display-name "NetManager Proxy Agent" `
+                --description "Charon agent host" `
+                --child-exe $PythonExe `
+                --child-arg "$InstallDir\\run_agent.py" `
+                --work-dir $InstallDir `
+                --env-file "$InstallDir\\config.env" `
+                --log-dir $LogDir `
+                --service-account "LocalSystem"
+            if ($LASTEXITCODE -ne 0) {{
+                Write-Host "[ROLLBACK FAIL] Re-install of previous binary failed (exit $LASTEXITCODE)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 7/9: starting previous service..." -ForegroundColor Yellow
+            & $HostExe start --service-name $ServiceName
+            if ($LASTEXITCODE -ne 0) {{
+                Write-Host "[ROLLBACK FAIL] Start of previous service failed (exit $LASTEXITCODE)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 8/9: verifying previous service Running at 10s..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
+            $r10 = (& $HostExe status --service-name $ServiceName 2>&1 | Out-String).Trim()
+            $e10 = $LASTEXITCODE
+            if ($e10 -ne 0 -or $r10 -ne "Running") {{
+                Write-Host "[ROLLBACK FAIL] Previous service not Running at 10s (status='$r10' exit=$e10)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK] Step 9/9: verifying previous service Running at 30s..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 20
+            $r30 = (& $HostExe status --service-name $ServiceName 2>&1 | Out-String).Trim()
+            $e30 = $LASTEXITCODE
+            if ($e30 -ne 0 -or $r30 -ne "Running") {{
+                Write-Host "[ROLLBACK FAIL] Previous service not Running at 30s (status='$r30' exit=$e30)." -ForegroundColor Red
+                return $false
+            }}
+
+            Write-Host "[ROLLBACK OK] Previous service fully restored and Running." -ForegroundColor Green
+            return $true
+        }}
+
+        # ==========================================================
+        # Invoke-NewInstallFailure -- exit-code contract for the four
+        # post-stage-8/9 failure paths.
+        # ==========================================================
+        # Exit codes:
+        #   0 = success
+        #   1 = new install failed, previous service successfully restored
+        #       and Running (10s + 30s), OR no previous service existed
+        #       (fresh install)
+        #   2 = new install failed AND rollback failed -- operator MUST
+        #       intervene; agent is unmanaged
+        function Invoke-NewInstallFailure {{
+            param(
+                [string]$Stage,
+                [string]$Reason,
+                [bool]$RollbackAvailable,
+                [string]$ServiceName,
+                [string]$HostExe,
+                [string]$HostBackup,
+                [string]$PythonExe,
+                [string]$InstallDir,
+                [string]$LogDir
+            )
+            Write-Host "[ERROR] $Stage failed: $Reason" -ForegroundColor Red
+            if (-not $RollbackAvailable) {{
+                Write-Host "[INFO] No previous binary to roll back to (fresh install)." -ForegroundColor Yellow
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            Write-Host "[INFO] Attempting transactional rollback of previous service..." -ForegroundColor Yellow
+            $recovered = Restore-PreviousAgentService `
+                -ServiceName $ServiceName `
+                -HostExe $HostExe `
+                -HostBackup $HostBackup `
+                -PythonExe $PythonExe `
+                -InstallDir $InstallDir `
+                -LogDir $LogDir
+            if ($recovered) {{
+                Write-Host "[INFO] Rollback successful. Exiting 1 (new install failed; previous service Running)." -ForegroundColor Green
+                Read-Host "Press Enter to exit"
+                exit 1
+            }} else {{
+                Write-Host "[CRITICAL] Rollback FAILED. Previous service NOT restored." -ForegroundColor Red
+                Write-Host "[CRITICAL] Manual operator intervention required. Exit 2." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 2
             }}
         }}
 
-        Write-Host "[2/5] Kurulum dizini oluşturuluyor..."
-        New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+        Write-Host "[1/9] Administrator privileges verified." -ForegroundColor Cyan
 
-        Write-Host "[3/5] Agent betiği indiriliyor..."
-        # T8.4 F3 — /download/script X-Agent-ID + X-Agent-Key header zorunlu
-        Invoke-WebRequest `
-            -Uri "$BackendUrl/api/v1/agents/download/script" `
-            -Headers @{{ "X-Agent-ID" = $AgentId; "X-Agent-Key" = $AgentKey }} `
-            -OutFile "$InstallDir\\netmanager_agent.py" `
-            -UseBasicParsing
+        # ==========================================================
+        # [2/9] TLS 1.2 + directories + SID-based ACL
+        # ==========================================================
+        # Locale-independent SIDs:
+        #   S-1-5-18      = NT AUTHORITY\\SYSTEM
+        #   S-1-5-32-544  = BUILTIN\\Administrators
+        # Localized strings ("BUILTIN\\Administrators" / "Yoneticiler")
+        # are NOT used.
+        Write-Host "[2/9] Creating install directory + hardening ACL..." -ForegroundColor Cyan
+        foreach ($d in @($InstallDir, $BinDir, $LogDir)) {{
+            New-Item -ItemType Directory -Force -Path $d | Out-Null
+        }}
 
-        Write-Host "[4/5] Bağımlılıklar kuruluyor..."
+        # FAIL-CLOSED: config.env writes the agent key in stage [5/9].
+        # If we cannot prove the install directory is restricted to
+        # SYSTEM + Administrators, we MUST NOT continue -- every local
+        # user would be able to read the key. Write the technical
+        # exception to a secret-free local log for support diagnostics
+        # and abort with a generic user message.
+        try {{
+            $systemSid = New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'
+            $adminSid  = New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'
+            $acl = Get-Acl $InstallDir
+            $acl.SetAccessRuleProtection($true, $false)
+            $sysRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $systemSid, "FullControl",
+                "ContainerInherit,ObjectInherit", "None", "Allow"
+            )
+            $adminRule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                $adminSid, "FullControl",
+                "ContainerInherit,ObjectInherit", "None", "Allow"
+            )
+            $acl.AddAccessRule($sysRule)
+            $acl.AddAccessRule($adminRule)
+            Set-Acl $InstallDir $acl
+            Write-Host "[OK] ACL hardened (SYSTEM + Administrators only, inheritance disabled)." -ForegroundColor Green
+        }} catch {{
+            $err = $_.Exception
+            try {{
+                $logPath = Join-Path $LogDir "installer-acl.log"
+                $ts = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ssZ")
+                Add-Content -Path $logPath -Value "$ts ACL failure: $($err.GetType().FullName)"
+            }} catch {{}}
+            Write-Host "[ERROR] Install directory ACL could not be secured." -ForegroundColor Red
+            Write-Host "[ERROR] Installation aborted before any credential was written." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+
+        # ==========================================================
+        # [3/9] Python verification (Store stub detection + --version)
+        # ==========================================================
+        Write-Host "[3/9] Verifying Python installation..." -ForegroundColor Cyan
+        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+        if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }}
+
+        if ($PythonExe -and $PythonExe -like "*\\Microsoft\\WindowsApps\\python.exe") {{
+            Write-Host "[INFO] Microsoft Store stub detected, ignoring." -ForegroundColor Yellow
+            $PythonExe = $null
+        }}
+
+        if ($PythonExe) {{
+            try {{
+                $pythonVersion = & $PythonExe --version 2>&1
+                if ($LASTEXITCODE -ne 0 -or $pythonVersion -notmatch "Python 3\\.") {{
+                    Write-Host "[INFO] Python verification failed, will reinstall." -ForegroundColor Yellow
+                    $PythonExe = $null
+                }} else {{
+                    Write-Host "[OK] Python found: $pythonVersion" -ForegroundColor Green
+                }}
+            }} catch {{
+                $PythonExe = $null
+            }}
+        }}
+
+        if (-not $PythonExe) {{
+            Write-Host "[WARNING] Python not found, attempting winget install..." -ForegroundColor Yellow
+            $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
+            if (-not $wingetCmd) {{
+                Write-Host "[ERROR] Python 3.12 not installed and winget unavailable." -ForegroundColor Red
+                Write-Host "[ERROR] Please install Python 3.12 manually from https://python.org" -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
+            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
+            if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }}
+            if ($PythonExe -and $PythonExe -like "*\\Microsoft\\WindowsApps\\python.exe") {{ $PythonExe = $null }}
+            if (-not $PythonExe) {{
+                Write-Host "[ERROR] Python installation failed." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            Write-Host "[OK] Python installed: $PythonExe" -ForegroundColor Green
+        }}
+
+        # ==========================================================
+        # [4/9] Download Python agent script
+        # ==========================================================
+        Write-Host "[4/9] Downloading agent script..." -ForegroundColor Cyan
+        try {{
+            Invoke-WebRequest `
+                -Uri "$BackendUrl/api/v1/agents/download/script" `
+                -Headers @{{ "X-Agent-ID" = $AgentId; "X-Agent-Key" = $AgentKey }} `
+                -OutFile "$InstallDir\\netmanager_agent.py" `
+                -UseBasicParsing
+            Write-Host "[OK] Agent script downloaded." -ForegroundColor Green
+        }} catch {{
+            Write-Host "[ERROR] Agent script download failed." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+
+        # ==========================================================
+        # [5/9] Write config.env + run_agent.py WITHOUT BOM
+        # ==========================================================
+        Write-Host "[5/9] Installing dependencies and writing config..." -ForegroundColor Cyan
         & $PythonExe -m pip install --quiet --upgrade websockets netmiko
+        if ($LASTEXITCODE -ne 0) {{
+            Write-Host "[ERROR] pip install failed." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
 
-        @"
-NETMANAGER_URL={backend_url}
-NETMANAGER_AGENT_ID={agent_id}
-NETMANAGER_AGENT_KEY={agent_key}
-"@ | Out-File -FilePath "$InstallDir\\config.env" -Encoding UTF8
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-        @"
+        $configContent = "NETMANAGER_URL=$BackendUrl`r`n" + `
+                         "NETMANAGER_AGENT_ID=$AgentId`r`n" + `
+                         "NETMANAGER_AGENT_KEY=$AgentKey`r`n"
+        [System.IO.File]::WriteAllText("$InstallDir\\config.env", $configContent, $utf8NoBom)
+
+        $runAgentContent = @"
 import os, sys
-cfg = open(r'$InstallDir\\config.env').read()
+cfg_path = r'$InstallDir\\config.env'
+with open(cfg_path, encoding='utf-8') as f:
+    cfg = f.read()
 for line in cfg.splitlines():
-    line = line.strip()
+    line = line.lstrip('\\ufeff').strip()
     if '=' in line and not line.startswith('#'):
         k, v = line.split('=', 1)
         os.environ[k.strip()] = v.strip()
-exec(open(r'$InstallDir\\netmanager_agent.py').read())
-"@ | Out-File -FilePath "$InstallDir\\run_agent.py" -Encoding UTF8
+exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
+"@
+        [System.IO.File]::WriteAllText("$InstallDir\\run_agent.py", $runAgentContent, $utf8NoBom)
+        Write-Host "[OK] Config and run wrapper written (no BOM)." -ForegroundColor Green
 
-        Write-Host "[5/5] Windows servisi kuruluyor..."
-        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($existingSvc) {{
-            Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
-            sc.exe delete $ServiceName | Out-Null
-            Start-Sleep 2
+        # ==========================================================
+        # [6/9] Download Go host binary to STAGING path (not final)
+        # ==========================================================
+        # Downloading directly to $HostExe would:
+        #   1) Refuse to overwrite if the currently-installed service
+        #      has the file open (Windows file lock).
+        #   2) Destroy the previous working binary if the new download
+        #      or its SHA verification fails -- the existing service
+        #      could no longer restart.
+        # Staging path avoids both. The atomic move into place happens
+        # in [8/9] AFTER the service has been uninstalled.
+        Write-Host "[6/9] Downloading agent host binary to staging..." -ForegroundColor Cyan
+        Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+        try {{
+            $hostResp = Invoke-WebRequest `
+                -Uri "$BackendUrl/api/v1/agents/$AgentId/download/host/windows-amd64" `
+                -Headers @{{ "X-Agent-Key" = $AgentKey }} `
+                -OutFile $HostStage `
+                -UseBasicParsing `
+                -PassThru
+            $expectedSha = $hostResp.Headers["X-Host-SHA256"]
+            $hostVersion = $hostResp.Headers["X-Host-Version"]
+            Write-Host "[OK] Host binary downloaded to staging (version=$hostVersion)." -ForegroundColor Green
+        }} catch {{
+            Write-Host "[ERROR] Host binary download failed." -ForegroundColor Red
+            Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
 
-        $binPath = "`"$PythonExe`" `"$InstallDir\\run_agent.py`""
-        sc.exe create $ServiceName binPath= $binPath DisplayName= "NetManager Proxy Agent" start= auto obj= LocalSystem
-        sc.exe failure $ServiceName reset= 60 actions= restart/10000/restart/30000/restart/60000
-        sc.exe start $ServiceName
+        # ==========================================================
+        # [7/9] SHA-256 integrity check on the STAGE file
+        # ==========================================================
+        # Crucially: this check runs against $HostStage, not $HostExe.
+        # On mismatch we delete only the stage; the previously-installed
+        # working binary at $HostExe is preserved.
+        Write-Host "[7/9] Verifying host binary integrity..." -ForegroundColor Cyan
+        if (-not $expectedSha) {{
+            Write-Host "[ERROR] Server did not return X-Host-SHA256 header." -ForegroundColor Red
+            Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        $actualSha = (Get-FileHash -LiteralPath $HostStage -Algorithm SHA256).Hash
+        if ($actualSha -ne $expectedSha) {{
+            Write-Host "[ERROR] Host binary integrity check failed." -ForegroundColor Red
+            Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        Write-Host "[OK] Host binary SHA-256 verified." -ForegroundColor Green
 
-        Write-Host "✓ NetManager Agent kuruldu!" -ForegroundColor Green
-        pause
+        # ==========================================================
+        # [8/9] Uninstall old service + atomic replace + install + start
+        # ==========================================================
+        # Uninstall first so the SCM releases the file handle before
+        # we move the staged binary into place. Then back the old
+        # binary up (so 10s/30s failure can roll back), move the
+        # staged binary into the final path, and install.
+        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+        if ($existingSvc) {{
+            Write-Host "[INFO] Existing service detected, removing first..." -ForegroundColor Yellow
+            & $HostExe uninstall --service-name $ServiceName | Out-Null
+            $uninstallExit = $LASTEXITCODE
+            if ($uninstallExit -eq 0) {{
+                Write-Host "[OK] Previous service uninstalled." -ForegroundColor Green
+            }} elseif ($uninstallExit -eq 18) {{
+                Write-Host "[INFO] Previous service was already gone." -ForegroundColor Yellow
+            }} elseif ($uninstallExit -eq 19) {{
+                Write-Host "[INFO] Previous service delete pending, polling for cleanup..." -ForegroundColor Yellow
+            }} else {{
+                Write-Host "[ERROR] Previous service uninstall failed (exit $uninstallExit)." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+
+            # Bounded poll: keep asking the host CLI for status until
+            # it reports "not-found" (exit 18). Hard ceiling 30s.
+            $svcGoneDeadline = (Get-Date).AddSeconds(30)
+            $svcGone = $false
+            while ((Get-Date) -lt $svcGoneDeadline) {{
+                & $HostExe status --service-name $ServiceName 2>$null | Out-Null
+                if ($LASTEXITCODE -eq 18) {{
+                    $svcGone = $true
+                    break
+                }}
+                Start-Sleep -Milliseconds 500
+            }}
+            if (-not $svcGone) {{
+                Write-Host "[ERROR] Previous service registration did not clear within 30s." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            Write-Host "[OK] Previous service registration fully cleared." -ForegroundColor Green
+        }}
+
+        # Service is now gone -- file handle released. Move binaries.
+        # Backup the previous host binary so 10s/30s failure has a
+        # rollback target.
+        $rollbackAvailable = $false
+        if (Test-Path -LiteralPath $HostExe) {{
+            Remove-Item -LiteralPath $HostBackup -Force -ErrorAction SilentlyContinue
+            Move-Item -LiteralPath $HostExe -Destination $HostBackup -Force
+            $rollbackAvailable = $true
+            Write-Host "[INFO] Previous host binary backed up." -ForegroundColor Yellow
+        }}
+        Move-Item -LiteralPath $HostStage -Destination $HostExe -Force
+
+        Write-Host "[8/9] Installing Windows service via host CLI..." -ForegroundColor Cyan
+        & $HostExe install `
+            --service-name $ServiceName `
+            --display-name "NetManager Proxy Agent" `
+            --description "Charon agent host" `
+            --child-exe $PythonExe `
+            --child-arg "$InstallDir\\run_agent.py" `
+            --work-dir $InstallDir `
+            --env-file "$InstallDir\\config.env" `
+            --log-dir $LogDir `
+            --service-account "LocalSystem"
+        if ($LASTEXITCODE -ne 0) {{
+            Invoke-NewInstallFailure `
+                -Stage "Service install" `
+                -Reason "host install exit=$LASTEXITCODE" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
+        }}
+
+        & $HostExe start --service-name $ServiceName
+        if ($LASTEXITCODE -ne 0) {{
+            Invoke-NewInstallFailure `
+                -Stage "Service start" `
+                -Reason "host start exit=$LASTEXITCODE" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
+        }}
+        Write-Host "[OK] Service install + start commands completed." -ForegroundColor Green
+
+        # ==========================================================
+        # [9/9] 10s + 30s Running verification (EXACT match, not regex)
+        # ==========================================================
+        Write-Host "[9/9] Verifying service stays Running..." -ForegroundColor Cyan
+        Start-Sleep -Seconds 10
+        $status10 = (& $HostExe status --service-name $ServiceName).Trim()
+        $exit10 = $LASTEXITCODE
+        if ($exit10 -ne 0 -or $status10 -ne "Running") {{
+            Invoke-NewInstallFailure `
+                -Stage "10s status check" `
+                -Reason "status='$status10' exit=$exit10" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
+        }}
+
+        Start-Sleep -Seconds 20
+        $status30 = (& $HostExe status --service-name $ServiceName).Trim()
+        $exit30 = $LASTEXITCODE
+        if ($exit30 -ne 0 -or $status30 -ne "Running") {{
+            Invoke-NewInstallFailure `
+                -Stage "30s status check" `
+                -Reason "status='$status30' exit=$exit30" `
+                -RollbackAvailable $rollbackAvailable `
+                -ServiceName $ServiceName -HostExe $HostExe `
+                -HostBackup $HostBackup -PythonExe $PythonExe `
+                -InstallDir $InstallDir -LogDir $LogDir
+        }}
+        Write-Host "[OK] Service stably running (10s + 30s exact match)." -ForegroundColor Green
+
+        # Success -- clean up staging + backup artefacts.
+        Remove-Item -LiteralPath $HostStage  -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $HostBackup -Force -ErrorAction SilentlyContinue
+
+        Write-Host ""
+        Write-Host "[OK] NetManager Agent installation complete." -ForegroundColor Green
+        Write-Host ""
+
+        }}
+        finally {{
+            # ALL-PATH CLEANUP. Runs regardless of success, ACL fail,
+            # download fail, SHA fail, install fail, status fail, or
+            # any other terminating error.
+            #   - Zero the in-memory agent key so a crash dump cannot
+            #     recover it.
+            #   - Remove the installer file from disk -- its header
+            #     embeds the agent key as a PowerShell single-quoted
+            #     literal.
+            # -LiteralPath prevents wildcard expansion from deleting
+            # anything other than the actual installer path.
+            $AgentKey = $null
+            if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) {{
+                Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+            }}
+        }}
+
+        Read-Host "Press Enter to close this window"
     """)
 
 
