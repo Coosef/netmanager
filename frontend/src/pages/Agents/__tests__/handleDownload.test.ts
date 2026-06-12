@@ -1,15 +1,10 @@
 /**
- * NocAgents handleDownload — davranış kontratı (source-match style).
+ * NocAgents handleDownload — source-match wiring guards.
  *
- * Gerçek React render testi `loginNavigation.integration.test.tsx`
- * paterniyle yapılabilir AMA NocAgents modal'ı çok geniş kapsamlı; source
- * kontrol yeterlidir. Önemli güvenlik invariants:
- *   - X-Agent-Key sadece header'da (URL'de yok)
- *   - agent_key console.log / alert message / toast içinde YOK
- *   - Backend response body veya HTTP status DETAYI kullanıcıya gösterilmez
- *   - Windows script content validation çağrılır
- *   - Concurrent download guard (`if (downloading) return`)
- *   - Generic error message kullanılır
+ * These are cheap regression guards that the wiring stays intact.
+ * The authoritative behavioural test lives in
+ * `createdModal.component.test.tsx` (real jsdom + Testing Library
+ * render against the named export).
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
@@ -20,84 +15,86 @@ const SRC = readFileSync(
   'utf-8',
 )
 
+describe('NocAgents — source guards (component test is authoritative)', () => {
+  it('imports the byte-perfect helper', () => {
+    expect(SRC).toMatch(/from\s+['"]\.\/windowsInstallerDownload['"]/)
+    expect(SRC).toContain('downloadWindowsInstaller')
+  })
 
-describe('NocAgents handleDownload — güvenlik kontratı', () => {
-  it('installCmd helper\'ları import edilir (yeni mimari değil, mevcut helper)', () => {
+  it('only imports buildLinuxInstallCmd from installCmd (Windows builder gone)', () => {
     expect(SRC).toMatch(/from\s+['"]\.\/installCmd['"]/)
     expect(SRC).toContain('buildLinuxInstallCmd')
-    expect(SRC).toContain('buildWindowsInstallCmd')
-    expect(SRC).toContain('isValidWindowsInstallerScript')
-    expect(SRC).toContain('SAFE_DOWNLOAD_ERROR_MESSAGE_TR')
-    expect(SRC).toContain('SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR')
+    expect(SRC).not.toContain('buildWindowsInstallCmd')
   })
 
-  it('installCmd helper çağrısı dinamik değerlerle yapılır', () => {
-    expect(SRC).toMatch(/buildLinuxInstallCmd\(\s*agent\.agent_key\s*,\s*downloadUrl\s*\)/)
-    expect(SRC).toMatch(/buildWindowsInstallCmd\(\s*agent\.agent_key\s*,\s*downloadUrl\s*\)/)
+  it('does NOT round-trip the response through res.text()', () => {
+    expect(SRC).not.toContain('res.text()')
+    expect(SRC).not.toContain('await res.text()')
   })
 
-  it('Eski tek-satır `powershell -ExecutionPolicy Bypass -c "$h=@{...}"` legacy YOK', () => {
-    expect(SRC).not.toMatch(/powershell\s+-ExecutionPolicy\s+Bypass\s+-c\s+"\$h=@\{/)
-    expect(SRC).not.toContain('"$h=@{')
+  it('does NOT construct a Blob from a decoded string', () => {
+    expect(SRC).not.toMatch(/new\s+Blob\(\s*\[\s*text\s*\]/)
   })
 
-  it('handleDownload — concurrent guard', () => {
-    expect(SRC).toMatch(/if\s*\(downloading\)\s*return/)
-  })
-
-  it('handleDownload Windows yolu — X-Agent-Key header (URL\'de DEĞIL)', () => {
-    expect(SRC).toMatch(/headers:\s*\{\s*['"]X-Agent-Key['"]\s*:\s*agent\.agent_key\s*\}/)
-    // URL'de agent_key olmamalı — sadece server_url query
+  it('forbids `agent_key` in URL or filename literal', () => {
     expect(SRC).not.toMatch(/[?&]agent_key=/)
     expect(SRC).not.toMatch(/[?&]X-Agent-Key=/)
-  })
-
-  it('handleDownload Windows yolu — script content validation çağrılır', () => {
-    expect(SRC).toMatch(/isValidWindowsInstallerScript\(\s*text\s*\)/)
-  })
-
-  it('Hata mesajı GENERIC — backend response body sızdırmaz', () => {
-    // Generic mesajlar kullanılır
-    expect(SRC).toContain('SAFE_DOWNLOAD_ERROR_MESSAGE_TR')
-    expect(SRC).toContain('SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR')
-    // Eski "İndirme başarısız: " + raw error message YOK
-    expect(SRC).not.toMatch(/alert\(\s*['"]İndirme başarısız:\s*['"][\s\S]*?e\?\.message/)
-    // e.message direkt alert'e geçirilmez
-    expect(SRC).not.toMatch(/alert\(\s*e\.message\s*\)/)
-    expect(SRC).not.toMatch(/alert\(\s*['"][^'"]*['"]\s*\+\s*e\.message\s*\)/)
-  })
-
-  it('agent_key console/log/toast içinde YOK (security)', () => {
-    // console.log / console.error / window.console.* + agent_key/agent\.agent_key
-    expect(SRC).not.toMatch(/console\.(log|error|warn|info|debug)\([^)]*agent\.agent_key/)
-    expect(SRC).not.toMatch(/console\.(log|error|warn|info|debug)\([^)]*agentKey/)
-  })
-
-  it('Windows için endpoint /api/v1/agents/{id}/download/windows', () => {
-    expect(SRC).toMatch(/\/api\/v1\/agents\/\$\{agent\.id\}\/download\/windows/)
-  })
-
-  it('server_url query encoded olarak gönderilir', () => {
-    expect(SRC).toMatch(/encodeURIComponent\(base\)/)
-  })
-
-  it('İndirilen dosya adı .ps1 ile biter, agent_key dosya adında YOK', () => {
-    expect(SRC).toMatch(/netmanager-agent-\$\{agent\.id\}-installer\.ps1/)
-    // Dosya adında agent_key referansı YOK
     expect(SRC).not.toMatch(/\.ps1[^"`]*agent\.agent_key/)
     expect(SRC).not.toMatch(/agent\.agent_key[^"`]*\.ps1/)
   })
 
-  it('Linux için mevcut downloadInstallerFile davranışı korundu (backward compat)', () => {
-    expect(SRC).toMatch(/agentsApi\.downloadInstallerFile\(\s*agent\.id\s*,\s*agent\.agent_key\s*,\s*platform\s*,\s*base\s*\)/)
+  it('does not contain iwr | iex or Invoke-Expression', () => {
+    expect(SRC).not.toMatch(/\|\s*iex\b/)
+    expect(SRC).not.toContain('Invoke-Expression')
   })
 
-  it("İndir butonu mevcut yapısı korunur — yeni 2. download buton YOK", () => {
-    // DownloadOutlined ikon kullanan Button SAYISI = 1 (CreatedModal içinde)
-    // (Çok geniş kapsamlı NocAgents — broad assertion, sadece eski pattern referans)
-    expect(SRC).toContain('<Button type="default" icon={<DownloadOutlined />}')
-    // Mevcut buton tek
-    const downloadButtonMatches = SRC.match(/<Button[^>]*icon=\{<DownloadOutlined[^>]*\/>\}/g) || []
-    expect(downloadButtonMatches.length).toBe(1)
+  it('exports CreatedModal as a named export for component tests', () => {
+    expect(SRC).toMatch(/export\s+function\s+CreatedModal/)
+  })
+
+  it('Windows branch does NOT render the manual install command block', () => {
+    // The copy/paste block lives in a `platform === "linux"`
+    // sub-conditional now. We assert the constraint at source level
+    // because the markup change is the actual P0-2 fix.
+    expect(SRC).toMatch(/platform === 'linux'\s*&&\s*installCmd/)
+  })
+
+  it('uses i18n keys for platform-aware error messages', () => {
+    // Authoritative hint is the single Alert in the JSX
+    // (`agents.windows_hint` / `agents.linux_hint`). The previously
+    // duplicate `agents.windows_download_primary_hint` reference is
+    // gone now that the hint lives in only one place.
+    expect(SRC).not.toContain("t('agents.windows_download_primary_hint')")
+    // Each platform now has its own download-failure key.
+    expect(SRC).toContain("t('agents.windows_download_failed')")
+    expect(SRC).toContain("t('agents.windows_validation_failed')")
+    expect(SRC).toContain("t('agents.linux_download_failed')")
+  })
+
+  it('selects the failure key based on the active platform', () => {
+    // The Linux failure path previously raised the Windows i18n key.
+    // Source-level guarantee that the platform check is in place.
+    expect(SRC).toMatch(/platform === ['"]windows['"]\s*[?]/)
+  })
+
+  it('preserves the Linux downloadInstallerFile call site verbatim', () => {
+    expect(SRC).toContain(
+      'agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)',
+    )
+  })
+
+  it('keeps the concurrent download guard (synchronous ref)', () => {
+    // The previous `if (downloading) return` was async-stale; two
+    // rapid synthetic clicks could both observe false. Now backed
+    // by a ref so the guard flips synchronously.
+    expect(SRC).toMatch(/downloadingRef\.current/)
+    expect(SRC).toMatch(/if\s*\(\s*downloadingRef\.current\s*\)\s*return/)
+  })
+
+  it('does not log or alert anything containing the agent key', () => {
+    expect(SRC).not.toMatch(/console\.(log|error|warn|info|debug)\([^)]*agent\.agent_key/)
+    expect(SRC).not.toMatch(/alert\(\s*agent\.agent_key/)
+    expect(SRC).not.toMatch(/alert\(\s*e\?\.message\s*\)/)
+    expect(SRC).not.toMatch(/alert\([^)]*\+\s*e\.message/)
   })
 })

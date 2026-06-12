@@ -1552,7 +1552,7 @@
     "windows_label": "Windows",
     "windows_sub": "Windows-Dienst",
     "linux_hint": "Kopieren Sie die heruntergeladene .sh-Datei auf den Server und führen Sie aus: sudo bash netmanager-agent-*.sh",
-    "windows_hint": "Klicken Sie mit der rechten Maustaste auf die .ps1-Datei und wählen Sie \"Als Administrator ausführen\".",
+    "windows_hint": "Laden Sie das Windows-Installationsskript herunter und führen Sie es aus. Der Installer fordert bei Bedarf automatisch Administratorrechte an.",
     "download_linux": "Linux-Installationsskript herunterladen (.sh)",
     "download_windows": "Windows-Installationsskript herunterladen (.ps1)",
     "oneliner_label": "Einzeilige Installation (Kopieren & Einfügen)",
@@ -1568,7 +1568,10 @@
     "detail_version": "Version",
     "detail_ip": "IP",
     "detail_heartbeat": "Letzter Herzschlag",
-    "detail_created": "Erstellt"
+    "detail_created": "Erstellt",
+    "windows_download_failed": "Windows-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen.",
+    "windows_validation_failed": "Windows-Installationsdatei konnte nicht validiert werden. Bitte erneut versuchen.",
+    "linux_download_failed": "Die Linux-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen."
   },
   "users": {
     "title": "Benutzer",

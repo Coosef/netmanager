@@ -1,0 +1,85 @@
+name: win-frontend
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/win-frontend.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/win-frontend.yml'
+
+jobs:
+  frontend-qa:
+    name: Frontend QA
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Unit tests
+        working-directory: frontend
+        run: npm run test -- --run
+
+      - name: Production build
+        working-directory: frontend
+        run: npm run build
+
+      - name: i18n key parity (widening delta = 0)
+        working-directory: frontend
+        run: |
+          # Capture current branch's missing-key count
+          npm run i18n:check 2>&1 | tee /tmp/branch-i18n.log || true
+          BRANCH=$(grep -oE '[0-9]+ eksik key' /tmp/branch-i18n.log | head -1 | grep -oE '^[0-9]+' || echo "0")
+          echo "branch missing keys: $BRANCH"
+
+          # Capture origin/main's baseline for comparison
+          if [ -n "${{ github.event.pull_request.base.sha }}" ]; then
+            git fetch origin "${{ github.event.pull_request.base.sha }}" --depth=1
+            git stash --include-untracked || true
+            git checkout "${{ github.event.pull_request.base.sha }}" -- src/i18n/locales
+            npm run i18n:check 2>&1 | tee /tmp/base-i18n.log || true
+            BASE=$(grep -oE '[0-9]+ eksik key' /tmp/base-i18n.log | head -1 | grep -oE '^[0-9]+' || echo "0")
+            # restore branch locales
+            git checkout HEAD -- src/i18n/locales
+            git stash pop || true
+            echo "base missing keys:   $BASE"
+            DELTA=$((BRANCH - BASE))
+            echo "widening delta:      $DELTA"
+            if [ "$DELTA" -gt 0 ]; then
+              echo "::error::i18n widening delta=$DELTA exceeds 0; PR must not introduce new missing keys"
+              exit 1
+            fi
+          else
+            echo "no base SHA in event payload; widening check skipped (push event)"
+          fi
+
+      - name: Production source guards
+        working-directory: frontend
+        run: |
+          set +e
+          fail=0
+          for pat in "| iex" "Invoke-Expression" "res\.text()" "SAFE_DOWNLOAD_ERROR_MESSAGE_TR" "SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR"; do
+            hits=$(grep -RIn "$pat" src/pages/Agents --exclude-dir=__tests__ 2>&1 | wc -l | tr -d ' ')
+            printf "  %-50s : %s\n" "$pat" "$hits"
+            if [ "$hits" -gt 0 ]; then
+              echo "::error::production source contains forbidden pattern '$pat' ($hits hit)"
+              fail=1
+            fi
+          done
+          exit $fail
