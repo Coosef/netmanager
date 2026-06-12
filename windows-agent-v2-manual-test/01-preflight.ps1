@@ -1,12 +1,22 @@
 ﻿# NetManager / Charon -- Windows Agent v2 manual test preflight
-# Package version: v2
+# Package version: v3
 #
-# v2 hotfix (PR #81 follow-up):
-#   - $psEdition / $PSEdition case-insensitive collision -> $detectedPsEdition
-#   - authoritative UTF-8 BOM + CRLF writer (UTF8Encoding($true) + WriteAllText)
-#   - $ErrorActionPreference = "Stop" + try/catch/finally
-#   - runtime self-validation before printing the "written to" message
-#   - on unexpected failure: forced PRECHECK_RESULT=BLOCKED + exit 3
+# v3 hotfix scope (after a real Windows Server 2019 / PS 5.1 run
+# produced a preflight.txt that was 4215 bytes of pure 0x00):
+#   - Authoritative writer rewritten to the operator-recommended
+#     pattern: [CmdletBinding] + [string[]] $Lines with
+#     [AllowEmptyCollection], explicit [string]::Join, explicit
+#     [string]$text cast, UTF8Encoding($true) + WriteAllText.
+#   - At every call site the buffer is force-cast: [string[]]@($lines).
+#   - A sidecar file is written next to the primary output proving
+#     the runtime types and the SHA-256 of the bytes the writer
+#     actually fed to WriteAllText. If the file on disk later
+#     differs from that SHA-256, we know something outside the
+#     script (AV, EDR, snapshot) is rewriting it.
+#   - Confirm-OutputContract now explicitly counts NUL bytes,
+#     non-zero bytes, and bails on a fully-zero-filled file.
+#   - Fallback writer is a completely separate inline WriteAllText
+#     call -- it does NOT reuse the helper.
 #
 # READ-ONLY system probe. Writes a single text file:
 #     C:\Users\Public\CharonAgentTest\preflight.txt
@@ -25,17 +35,18 @@
 $ErrorActionPreference = "Stop"
 
 # -------------------------------------------------------------------
-# Output setup
+# Output paths
 # -------------------------------------------------------------------
 $OutDir       = "C:\Users\Public\CharonAgentTest"
 $OutFile      = Join-Path $OutDir "preflight.txt"
+$DebugFile    = Join-Path $OutDir "preflight-debug.txt"
 $FallbackFile = Join-Path $OutDir "preflight-write-failure.txt"
 
 $lines    = New-Object System.Collections.Generic.List[string]
 $blockers = New-Object System.Collections.Generic.List[string]
 
-function Add-Line { param([string]$s) $lines.Add($s) | Out-Null }
-function Add-Block { param([string]$reason) $blockers.Add($reason) | Out-Null }
+function Add-Line   { param([string]$s)      $lines.Add($s)    | Out-Null }
+function Add-Block  { param([string]$reason) $blockers.Add($reason) | Out-Null }
 function Add-Section {
     param([string]$title)
     Add-Line ""
@@ -44,38 +55,81 @@ function Add-Section {
     Add-Line ("=" * 64)
 }
 
-# Authoritative UTF-8 BOM + CRLF writer.
-# Uses System.Text.UTF8Encoding($true) + WriteAllText -- the only path
-# that produces a deterministic single BOM and zero NUL bytes on
-# Windows PowerShell 5.1. Does NOT concatenate byte arrays.
-#
-# IMPORTANT (PS 5.1 quirk): the $Buffer parameter is intentionally
-# UNTYPED. Declaring it as [System.Collections.Generic.List[string]]
-# triggers PS 5.1's ParameterBinder to call ToString() on the value
-# while validating, which on List[string] returns the type name --
-# not the values -- and then strict type-check fails with
-# "Cannot bind argument to parameter 'Buffer' because it is an empty
-# string." On PS 7.x this does not happen. Leaving it untyped means
-# the `-join` below handles the List, an Object[], or a string[]
-# all the same way.
-function Write-Utf8BomCrLfFile {
+# -------------------------------------------------------------------
+# Authoritative writer (operator pattern, verbatim shape)
+# -------------------------------------------------------------------
+# Returns the SHA-256 (hex, uppercase) of the bytes actually fed to
+# WriteAllText, so the caller can prove what got written.
+function Write-TextFileUtf8BomCrLf {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)][string]$LiteralPath,
-        [Parameter(Mandatory=$true)]$Buffer
+        [Parameter(Mandatory = $true)]
+        [string]$LiteralPath,
+
+        # PowerShell's Mandatory validator runs against each ELEMENT of
+        # a typed string[]; the first empty string in the array fails
+        # the bind with "Cannot bind argument to parameter 'Lines'
+        # because it is an empty string." Adding BOTH AllowEmptyString
+        # and AllowEmptyCollection is required to accept a mixed array
+        # (which a real preflight report always contains -- section
+        # spacer lines are empty).
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$Lines
     )
-    $joined = ($Buffer -join "`r`n")
-    # Strip trailing CR/LF and re-append exactly one CRLF
-    $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
-    $enc = New-Object System.Text.UTF8Encoding($true)
-    [System.IO.File]::WriteAllText($LiteralPath, $normalized, $enc)
+    $parent = [System.IO.Path]::GetDirectoryName($LiteralPath)
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+    }
+    # Build a real System.String, force-typed.
+    $text = [string]::Join("`r`n", [string[]]$Lines)
+    if (-not $text.EndsWith("`r`n")) {
+        $text = $text + "`r`n"
+    }
+    $text = [string]$text   # belt-and-suspenders against PSObject unwrap
+
+    $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+
+    # Compute the byte stream we are about to write so we can hash it.
+    # Note: GetPreamble + GetBytes is exactly what WriteAllText does
+    # internally for the "no FileStream" overload, so this lets us
+    # prove what we asked the runtime to write.
+    $preamble = $utf8Bom.GetPreamble()
+    $payload  = $utf8Bom.GetBytes($text)
+    $sha      = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $hashBytes = $sha.ComputeHash(($preamble + $payload))
+    } finally {
+        $sha.Dispose()
+    }
+    $hashHex = ($hashBytes | ForEach-Object { $_.ToString("X2") }) -join ""
+
+    [System.IO.File]::WriteAllText(
+        $LiteralPath,
+        [string]$text,
+        $utf8Bom
+    )
+
+    return [pscustomobject]@{
+        TextType         = $text.GetType().FullName
+        TextLength       = $text.Length
+        TextHasNul       = ($text.IndexOf([char]0) -ge 0)
+        EncodedByteCount = $payload.Length
+        PreambleLength   = $preamble.Length
+        ExpectedSha256   = $hashHex
+    }
 }
 
-# Re-read the file we just wrote and prove the byte contract.
-# Throws on any deviation; caller falls back to a fallback file.
+# -------------------------------------------------------------------
+# Self-validation: re-read the file and prove the byte contract.
+# Throws on any deviation. Caller writes a fallback file.
+# -------------------------------------------------------------------
 function Confirm-OutputContract {
     param(
         [Parameter(Mandatory=$true)][string]$LiteralPath,
-        [Parameter(Mandatory=$true)][string]$ExpectedLastLineRegex
+        [Parameter(Mandatory=$true)][string]$ExpectedLastLineRegex,
+        [Parameter(Mandatory=$true)][string]$ExpectedSha256
     )
     if (-not (Test-Path -LiteralPath $LiteralPath)) {
         throw "output file missing after write"
@@ -84,20 +138,40 @@ function Confirm-OutputContract {
     if ($bytes.Length -lt 100) {
         throw ("output too small (" + $bytes.Length + " bytes)")
     }
+
+    # Count NUL and non-zero explicitly. A fully-zero-filled buffer
+    # is the failure mode we saw on the real Server 2019 machine.
+    $nulCount = 0
+    $nonZero  = 0
+    foreach ($b in $bytes) {
+        if ($b -eq 0) { $nulCount++ } else { $nonZero++ }
+    }
+    if ($nonZero -eq 0) {
+        throw ("output is entirely zero-filled (" + $bytes.Length + " bytes, all 0x00)")
+    }
+    if ($nulCount -gt 0) {
+        throw ("NUL byte count = " + $nulCount + " (must be 0)")
+    }
     if (-not ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)) {
-        throw "BOM missing in first 3 bytes"
+        throw ("BOM missing in first 3 bytes (got " + ("{0:X2} {1:X2} {2:X2}" -f $bytes[0], $bytes[1], $bytes[2]) + ")")
     }
     if ($bytes.Length -ge 6) {
         if ($bytes[3] -eq 0xEF -and $bytes[4] -eq 0xBB -and $bytes[5] -eq 0xBF) {
             throw "double BOM detected"
         }
     }
-    $nulCount = 0
-    foreach ($b in $bytes) { if ($b -eq 0) { $nulCount++ } }
-    if ($nulCount -gt 0) {
-        throw ("NUL byte count = " + $nulCount + " (must be 0)")
+    # Prove the bytes on disk match the bytes we fed to WriteAllText.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $actualHashBytes = $sha.ComputeHash($bytes)
+    } finally {
+        $sha.Dispose()
     }
-    # Strict UTF-8 decode (throw on invalid sequences)
+    $actualHashHex = ($actualHashBytes | ForEach-Object { $_.ToString("X2") }) -join ""
+    if ($actualHashHex -ne $ExpectedSha256) {
+        throw ("SHA-256 mismatch: writer fed " + $ExpectedSha256.Substring(0,16) + "... ; disk has " + $actualHashHex.Substring(0,16) + "... (a third-party process may be rewriting the file)")
+    }
+    # Strict UTF-8 decode
     $strict = New-Object System.Text.UTF8Encoding $true, $true
     try {
         $text = $strict.GetString($bytes, 3, $bytes.Length - 3)
@@ -124,13 +198,69 @@ function Confirm-OutputContract {
     }
 }
 
+# -------------------------------------------------------------------
+# Sidecar debug writer -- runtime-type evidence, NO secrets.
+# Uses its OWN inline WriteAllText so a writer-helper bug cannot
+# hide the evidence.
+# -------------------------------------------------------------------
+function Write-DebugSidecar {
+    param(
+        [string]$LiteralPath,
+        [string]$LinesType,
+        [int]$LinesCount,
+        [string]$TextType,
+        [int]$TextLength,
+        [bool]$TextHasNul,
+        [int]$EncodedByteCount,
+        [int]$PreambleLength,
+        [string]$ExpectedSha256,
+        [string]$ScriptVersion,
+        [string]$WriteOutcome
+    )
+    $sb = New-Object System.Text.StringBuilder
+    $null = $sb.Append("CHARON PREFLIGHT WRITER DEBUG").Append("`r`n")
+    $null = $sb.Append("SCRIPT_VERSION=").Append($ScriptVersion).Append("`r`n")
+    $null = $sb.Append("LINES_TYPE=").Append($LinesType).Append("`r`n")
+    $null = $sb.Append("LINES_COUNT=").Append($LinesCount).Append("`r`n")
+    $null = $sb.Append("TEXT_TYPE=").Append($TextType).Append("`r`n")
+    $null = $sb.Append("TEXT_LENGTH=").Append($TextLength).Append("`r`n")
+    $null = $sb.Append("TEXT_HAS_NUL=").Append($TextHasNul).Append("`r`n")
+    $null = $sb.Append("ENCODED_BYTE_COUNT=").Append($EncodedByteCount).Append("`r`n")
+    $null = $sb.Append("PREAMBLE_LENGTH=").Append($PreambleLength).Append("`r`n")
+    $null = $sb.Append("EXPECTED_SHA256=").Append($ExpectedSha256).Append("`r`n")
+    $null = $sb.Append("WRITE_OUTCOME=").Append($WriteOutcome).Append("`r`n")
+    $enc = New-Object System.Text.UTF8Encoding($true)
+    try {
+        [System.IO.File]::WriteAllText($LiteralPath, [string]$sb.ToString(), $enc)
+    } catch {}
+}
+
+# -------------------------------------------------------------------
+# Fallback writer -- SEPARATE inline WriteAllText, not the helper.
+# -------------------------------------------------------------------
+function Write-FallbackFile {
+    param([string]$LiteralPath, [string]$FailureType, [string]$FailureMsg)
+    $sb = New-Object System.Text.StringBuilder
+    $null = $sb.Append("NetManager Agent v2 - Preflight output validation FAILED").Append("`r`n")
+    $null = $sb.Append("Failure type : ").Append($FailureType).Append("`r`n")
+    $null = $sb.Append("Detail       : ").Append($FailureMsg).Append("`r`n")
+    $null = $sb.Append("").Append("`r`n")
+    $null = $sb.Append("This file exists because the primary writer or self-validation rejected the").Append("`r`n")
+    $null = $sb.Append("primary output. Send THIS file back along with the (likely corrupt)").Append("`r`n")
+    $null = $sb.Append("preflight.txt and the preflight-debug.txt next to it.").Append("`r`n")
+    $null = $sb.Append("").Append("`r`n")
+    $null = $sb.Append("PRECHECK_RESULT=BLOCKED").Append("`r`n")
+    $enc = New-Object System.Text.UTF8Encoding($true)
+    try {
+        [System.IO.File]::WriteAllText($LiteralPath, [string]$sb.ToString(), $enc)
+    } catch {}
+}
+
+$ScriptVersion = "v3"
 $resultLabel = "BLOCKED"
 $exitCode    = 3
 
-# Ensure $OutDir exists BEFORE try/finally, so the finally writer
-# always has a parent directory to write into, even if something
-# inside the try block throws very early. This call uses -Force, so
-# missing parents are created; if it itself fails we cannot proceed.
+# Ensure $OutDir exists BEFORE try/finally.
 try {
     $null = New-Item -ItemType Directory -Force -Path $OutDir -ErrorAction Stop
 } catch {
@@ -142,13 +272,10 @@ try {
 try {
     $utcNow = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     Add-Line "NetManager Agent v2 - Preflight Report"
-    Add-Line "Package version: v2"
+    Add-Line "Package version: v3"
     Add-Line ("Generated UTC: " + $utcNow)
     Add-Line "Script: 01-preflight.ps1"
 
-    # -----------------------------------------------------------------
-    # Windows + locale
-    # -----------------------------------------------------------------
     Add-Section "Windows + Locale"
     try {
         $cim = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
@@ -175,9 +302,6 @@ try {
         Add-Line "SystemLocale    : (Get-WinSystemLocale not available on this host)"
     }
 
-    # -----------------------------------------------------------------
-    # PowerShell  (FIXED: $detectedPsEdition -- avoids $PSEdition collision)
-    # -----------------------------------------------------------------
     Add-Section "PowerShell"
     $psv = $PSVersionTable.PSVersion
     $detectedPsEdition = $PSVersionTable.PSEdition
@@ -191,9 +315,6 @@ try {
         Add-Block ("Windows PowerShell Desktop edition expected; found " + $detectedPsEdition + ".")
     }
 
-    # -----------------------------------------------------------------
-    # Process / architecture
-    # -----------------------------------------------------------------
     Add-Section "Process + Architecture"
     Add-Line ("PROCESSOR_ARCHITECTURE      : " + $env:PROCESSOR_ARCHITECTURE)
     Add-Line ("PROCESSOR_ARCHITEW6432      : " + ($env:PROCESSOR_ARCHITEW6432 -as [string]))
@@ -205,9 +326,6 @@ try {
         Add-Block "Windows Agent v2 requires a 64-bit (amd64) Windows OS."
     }
 
-    # -----------------------------------------------------------------
-    # Elevation + UAC
-    # -----------------------------------------------------------------
     Add-Section "Elevation + UAC"
     $wp = New-Object Security.Principal.WindowsPrincipal(
         [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -230,9 +348,6 @@ try {
         Add-Line "UAC policy registry could not be read (non-fatal)."
     }
 
-    # -----------------------------------------------------------------
-    # Reboot pending (read-only)
-    # -----------------------------------------------------------------
     Add-Section "Reboot Pending"
     $rebootSignals = @()
     foreach ($path in @(
@@ -240,9 +355,7 @@ try {
         "HKLM:\Software\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired",
         "HKLM:\Software\Microsoft\Windows\CurrentVersion\Component Based Servicing\PackagesPending"
     )) {
-        try {
-            if (Test-Path -LiteralPath $path) { $rebootSignals += $path }
-        } catch {}
+        try { if (Test-Path -LiteralPath $path) { $rebootSignals += $path } } catch {}
     }
     if ($rebootSignals.Count -gt 0) {
         Add-Line "Reboot is pending. Detected signals:"
@@ -252,9 +365,6 @@ try {
         Add-Line "No reboot pending."
     }
 
-    # -----------------------------------------------------------------
-    # Python toolchain
-    # -----------------------------------------------------------------
     Add-Section "Python toolchain"
     $pyCmd = Get-Command python -ErrorAction SilentlyContinue
     if ($pyCmd) {
@@ -280,24 +390,17 @@ try {
         Add-Line "(The installer will try to install Python 3.12 via winget if missing.)"
     }
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
-    if ($pyLauncher) {
-        Add-Line ("py.exe launcher              : " + $pyLauncher.Source)
-    } else {
-        Add-Line "py.exe launcher              : not present (optional)"
-    }
+    if ($pyLauncher) { Add-Line ("py.exe launcher              : " + $pyLauncher.Source) }
+    else             { Add-Line "py.exe launcher              : not present (optional)" }
     $winget = Get-Command winget -ErrorAction SilentlyContinue
-    if ($winget) {
-        Add-Line ("winget                       : " + $winget.Source)
-    } else {
+    if ($winget) { Add-Line ("winget                       : " + $winget.Source) }
+    else {
         Add-Line "winget                       : not present"
         if (-not $pyCmd) {
             Add-Block "No Python AND no winget. Installer cannot auto-install Python; install Python 3.12 manually first."
         }
     }
 
-    # -----------------------------------------------------------------
-    # Existing NetManagerAgent service
-    # -----------------------------------------------------------------
     Add-Section "Existing NetManagerAgent service"
     $existing = Get-Service -Name "NetManagerAgent" -ErrorAction SilentlyContinue
     if ($existing) {
@@ -316,16 +419,11 @@ try {
         }
         Add-Line ""
         Add-Line "An EXISTING NetManagerAgent service is registered. Preflight will NOT touch it."
-        Add-Line "Decide whether to: (a) uninstall it manually before installer runs,"
-        Add-Line "or (b) let the installer's [8/9] uninstall + bounded drain handle it."
         Add-Block "An existing NetManagerAgent service is registered. Decide handling before installer."
     } else {
         Add-Line "No NetManagerAgent service registered."
     }
 
-    # -----------------------------------------------------------------
-    # Existing install directory + host binary
-    # -----------------------------------------------------------------
     Add-Section "Existing install directory"
     $installDir = "C:\ProgramData\NetManagerAgent"
     $hostExe = Join-Path $installDir "bin\charon-agent-host.exe"
@@ -352,9 +450,6 @@ try {
         Add-Line ("Install directory absent     : " + $installDir + " (fresh install path)")
     }
 
-    # -----------------------------------------------------------------
-    # Relevant running processes
-    # -----------------------------------------------------------------
     Add-Section "Related processes (read-only)"
     foreach ($n in @("charon-agent-host", "python", "netmanager_agent")) {
         $procs = Get-Process -Name $n -ErrorAction SilentlyContinue
@@ -369,9 +464,6 @@ try {
         }
     }
 
-    # -----------------------------------------------------------------
-    # TLS 1.2 capability (no real HTTP request)
-    # -----------------------------------------------------------------
     Add-Section "TLS 1.2 capability"
     try {
         $current = [Net.ServicePointManager]::SecurityProtocol
@@ -384,9 +476,6 @@ try {
         Add-Line "Could not inspect SecurityProtocol."
     }
 
-    # -----------------------------------------------------------------
-    # Disk space
-    # -----------------------------------------------------------------
     Add-Section "Disk space"
     try {
         $drive = (Get-PSDrive C -ErrorAction Stop)
@@ -399,9 +488,6 @@ try {
         Add-Line "Could not read C: drive free space (non-fatal)."
     }
 
-    # -----------------------------------------------------------------
-    # Output directory writability
-    # -----------------------------------------------------------------
     Add-Section "Output directory writability"
     $probe = Join-Path $OutDir ".write-probe.tmp"
     try {
@@ -413,9 +499,6 @@ try {
         Add-Block "Cannot write to C:\Users\Public\CharonAgentTest\."
     }
 
-    # -----------------------------------------------------------------
-    # Service Control Manager Event Log (last 20 errors/warnings)
-    # -----------------------------------------------------------------
     Add-Section "SCM Event Log (last 20 errors/warnings)"
     try {
         $records = Get-WinEvent -LogName System -MaxEvents 200 -ErrorAction Stop |
@@ -433,9 +516,6 @@ try {
         Add-Line "Could not query the System Event Log (try running again from an elevated PowerShell if needed)."
     }
 
-    # -----------------------------------------------------------------
-    # General HTTPS reachability (no request to production endpoints)
-    # -----------------------------------------------------------------
     Add-Section "General HTTPS reachability"
     try {
         $tn = Test-NetConnection -ComputerName "www.microsoft.com" -Port 443 -InformationLevel Quiet -WarningAction SilentlyContinue
@@ -450,9 +530,6 @@ try {
     }
     Add-Line "(No request was made to any NetManager production endpoint.)"
 
-    # -----------------------------------------------------------------
-    # Final verdict
-    # -----------------------------------------------------------------
     Add-Section "Verdict"
     if ($blockers.Count -eq 0) {
         Add-Line "No blockers detected. Preflight PASS."
@@ -469,7 +546,6 @@ try {
         $exitCode = 1
     }
 } catch {
-    # Unexpected failure -- force BLOCKED + exit 3 + safe ASCII-only error line.
     Add-Line ""
     Add-Line "------------------------------------------------------------"
     Add-Line "UNEXPECTED PREFLIGHT FAILURE"
@@ -481,39 +557,65 @@ try {
     $resultLabel = "BLOCKED"
     $exitCode = 3
 } finally {
-    # Defensive: re-ensure $OutDir before we attempt to write.
     try { $null = New-Item -ItemType Directory -Force -Path $OutDir -ErrorAction Stop } catch {}
 
-    $outputOk = $false
-    $writeErrType = ""
-    $writeErrMsg  = ""
+    # Force buffer into a real System.String[] BEFORE calling the writer.
+    [string[]]$reportLines = @($lines | ForEach-Object { [string]$_ })
+    $linesType = $reportLines.GetType().FullName
+    $linesCount = $reportLines.Length
+
+    $outputOk      = $false
+    $writeErrType  = ""
+    $writeErrMsg   = ""
+    $writeInfo     = $null
+
     try {
-        Write-Utf8BomCrLfFile -LiteralPath $OutFile -Buffer $lines
-        Confirm-OutputContract -LiteralPath $OutFile -ExpectedLastLineRegex "^PRECHECK_RESULT=(PASS|BLOCKED)$"
+        $writeInfo = Write-TextFileUtf8BomCrLf -LiteralPath $OutFile -Lines $reportLines
+        Confirm-OutputContract -LiteralPath $OutFile `
+            -ExpectedLastLineRegex "^PRECHECK_RESULT=(PASS|BLOCKED)$" `
+            -ExpectedSha256 $writeInfo.ExpectedSha256
         $outputOk = $true
     } catch {
         $writeErrType = $_.Exception.GetType().FullName
         $writeErrMsg  = $_.Exception.Message
-        $fb = New-Object System.Collections.Generic.List[string]
-        $fb.Add("NetManager Agent v2 - Preflight output validation FAILED") | Out-Null
-        $fb.Add(("Failure type    : " + $writeErrType)) | Out-Null
-        $fb.Add(("Detail          : " + $writeErrMsg)) | Out-Null
-        $fb.Add("This file exists because the primary writer or self-validation rejected the primary output.") | Out-Null
-        $fb.Add("Send THIS file back along with the (likely corrupt) preflight.txt next to it.") | Out-Null
-        $fb.Add("") | Out-Null
-        $fb.Add("PRECHECK_RESULT=BLOCKED") | Out-Null
-        try {
-            Write-Utf8BomCrLfFile -LiteralPath $FallbackFile -Buffer $fb
-        } catch {}
+        Write-FallbackFile -LiteralPath $FallbackFile `
+            -FailureType $writeErrType -FailureMsg $writeErrMsg
         $exitCode = 3
     }
+
+    # Always write the debug sidecar -- runtime types + writer SHA.
+    $textType   = "<unknown>"
+    $textLen    = -1
+    $hasNul     = $false
+    $byteCount  = -1
+    $preLen     = -1
+    $expSha     = ""
+    if ($writeInfo) {
+        $textType  = [string]$writeInfo.TextType
+        $textLen   = [int]$writeInfo.TextLength
+        $hasNul    = [bool]$writeInfo.TextHasNul
+        $byteCount = [int]$writeInfo.EncodedByteCount
+        $preLen    = [int]$writeInfo.PreambleLength
+        $expSha    = [string]$writeInfo.ExpectedSha256
+    }
+    $writeOutcome = "OK"
+    if (-not $outputOk) { $writeOutcome = "FAIL: " + $writeErrType + " :: " + $writeErrMsg }
+    Write-DebugSidecar -LiteralPath $DebugFile `
+        -LinesType $linesType -LinesCount $linesCount `
+        -TextType $textType -TextLength $textLen -TextHasNul $hasNul `
+        -EncodedByteCount $byteCount -PreambleLength $preLen `
+        -ExpectedSha256 $expSha -ScriptVersion $ScriptVersion `
+        -WriteOutcome $writeOutcome
+
     if ($outputOk) {
         Write-Host ("Preflight written to: " + $OutFile)
+        Write-Host ("Debug sidecar       : " + $DebugFile)
     } else {
         Write-Host "PRECHECK OUTPUT VALIDATION FAILED"
         Write-Host ("Failure type : " + $writeErrType)
         Write-Host ("Detail       : " + $writeErrMsg)
         Write-Host ("Fallback     : " + $FallbackFile)
+        Write-Host ("Debug        : " + $DebugFile)
     }
 }
 

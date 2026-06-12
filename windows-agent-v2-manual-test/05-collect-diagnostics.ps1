@@ -48,20 +48,30 @@ function Mask-Line([string]$s) {
     return $out
 }
 
-# Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe; no byte-array concat).
-# $Lines is intentionally untyped -- see 01-preflight.ps1 for the PS 5.1
-# ParameterBinder quirk that makes a typed List[string] / string[] parameter
-# fail with "Cannot bind argument to parameter ... because it is an empty
-# string." The -join below accepts List/Object[]/string[] interchangeably.
+# Authoritative UTF-8 BOM + CRLF writer (PS 5.1 / Windows Server 2019 safe).
+# Mandatory + AllowEmptyString + AllowEmptyCollection together allow a
+# realistic [string[]] that contains empty section-spacer lines.
+# Explicit [string]::Join + [string]$text cast prevent any PSObject
+# unwrap from passing a non-string to WriteAllText.
 function Write-Utf8BomCrLf {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)][string]$LiteralPath,
-        [Parameter(Mandatory=$true)]$Lines
+        [Parameter(Mandatory=$true)]
+        [string]$LiteralPath,
+
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
+        [string[]]$Lines
     )
-    $joined = ($Lines -join "`r`n")
-    $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+    $parent = [System.IO.Path]::GetDirectoryName($LiteralPath)
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        [System.IO.Directory]::CreateDirectory($parent) | Out-Null
+    }
+    $text = [string]::Join("`r`n", [string[]]$Lines)
+    if (-not $text.EndsWith("`r`n")) { $text = $text + "`r`n" }
     $enc = New-Object System.Text.UTF8Encoding($true)
-    [System.IO.File]::WriteAllText($LiteralPath, $normalized, $enc)
+    [System.IO.File]::WriteAllText($LiteralPath, [string]$text, $enc)
 }
 
 function Write-Masked-Copy {

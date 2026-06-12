@@ -280,12 +280,17 @@ if ($fails.Count -eq 0) {
     Add-Line "POST_INSTALL_RESULT=FAIL"
 }
 
-# Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe; no byte-array concat).
-$joined = ($lines -join "`r`n")
-$normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+# Authoritative UTF-8 BOM + CRLF writer (PS 5.1 / Server 2019 safe).
+# Force a real System.String[] and an explicit [string] cast on the
+# content fed to WriteAllText so PSObject unwrap cannot substitute a
+# zero-filled byte buffer.
+[string[]]$reportLines = @($lines | ForEach-Object { [string]$_ })
+$text = [string]::Join("`r`n", $reportLines)
+if (-not $text.EndsWith("`r`n")) { $text = $text + "`r`n" }
 $enc = New-Object System.Text.UTF8Encoding($true)
 $tmp = $OutFile + ".tmp"
-[System.IO.File]::WriteAllText($tmp, $normalized, $enc)
+[System.IO.Directory]::CreateDirectory(([System.IO.Path]::GetDirectoryName($OutFile))) | Out-Null
+[System.IO.File]::WriteAllText($tmp, [string]$text, $enc)
 Move-Item -LiteralPath $tmp -Destination $OutFile -Force
 Write-Host ("Post-install written to: " + $OutFile)
 if ($fails.Count -eq 0) { exit 0 } else { exit 1 }

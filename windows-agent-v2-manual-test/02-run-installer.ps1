@@ -38,14 +38,16 @@ Add-Line ("Wrapper script: 02-run-installer.ps1")
 Add-Line ("InstallerPath parameter: " + $InstallerPath)
 
 function Write-Output-Files([int]$Code) {
-    # Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe).
-    $joined = ($lines -join "`r`n")
-    $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+    # Authoritative UTF-8 BOM + CRLF writer (PS 5.1 / Server 2019 safe).
+    [string[]]$reportLines = @($lines | ForEach-Object { [string]$_ })
+    $text = [string]::Join("`r`n", $reportLines)
+    if (-not $text.EndsWith("`r`n")) { $text = $text + "`r`n" }
     $bomEnc = New-Object System.Text.UTF8Encoding($true)
-    [System.IO.File]::WriteAllText($RunLog + ".tmp", $normalized, $bomEnc)
+    [System.IO.Directory]::CreateDirectory(([System.IO.Path]::GetDirectoryName($RunLog))) | Out-Null
+    [System.IO.File]::WriteAllText($RunLog + ".tmp", [string]$text, $bomEnc)
     Move-Item -LiteralPath ($RunLog + ".tmp") -Destination $RunLog -Force
     $noBomEnc = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($ExitLog, $Code.ToString() + "`r`n", $noBomEnc)
+    [System.IO.File]::WriteAllText($ExitLog, [string]($Code.ToString() + "`r`n"), $noBomEnc)
 }
 
 # -------------------------------------------------------------------

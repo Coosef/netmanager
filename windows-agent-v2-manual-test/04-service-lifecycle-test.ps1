@@ -31,12 +31,14 @@ $OutFile = Join-Path $OutDir "service-lifecycle.txt"
 $lines = New-Object System.Collections.Generic.List[string]
 function Add-Line([string]$s) { $lines.Add($s) | Out-Null }
 function Flush {
-    # Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe; no byte-array concat).
-    $joined = ($lines -join "`r`n")
-    $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+    # Authoritative UTF-8 BOM + CRLF writer (PS 5.1 / Server 2019 safe).
+    [string[]]$reportLines = @($lines | ForEach-Object { [string]$_ })
+    $text = [string]::Join("`r`n", $reportLines)
+    if (-not $text.EndsWith("`r`n")) { $text = $text + "`r`n" }
     $enc = New-Object System.Text.UTF8Encoding($true)
     $tmp = $OutFile + ".tmp"
-    [System.IO.File]::WriteAllText($tmp, $normalized, $enc)
+    [System.IO.Directory]::CreateDirectory(([System.IO.Path]::GetDirectoryName($OutFile))) | Out-Null
+    [System.IO.File]::WriteAllText($tmp, [string]$text, $enc)
     Move-Item -LiteralPath $tmp -Destination $OutFile -Force
 }
 

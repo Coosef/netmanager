@@ -2,34 +2,49 @@
 WINDOWS AGENT V2 - MANUAL TEST PACKAGE
 
 ================================================================
-PACKAGE VERSION: v2
-THE PREVIOUS ZIP MUST NOT BE USED.
-DELETE THE OLD EXTRACTED DIRECTORY BEFORE CONTINUING.
+PACKAGE VERSION: v3
+V1 AND V2 PACKAGES ARE INVALID.
+DELETE ALL PREVIOUS EXTRACTED DIRECTORIES BEFORE CONTINUING.
 ================================================================
-v2 hotfix scope (PR #81 follow-up):
-  - $psEdition / $PSEdition case-insensitive collision fixed
-    (line 72 of 01-preflight.ps1 -- "Cannot overwrite variable
-    PSEdition because it is read-only or constant").
-  - preflight.txt NUL-byte writer bug fixed (Windows PowerShell
-    5.1 byte-array concatenation hazard) -- now uses
-    System.Text.UTF8Encoding($true) + WriteAllText for the
-    primary preflight output and for every other text artifact.
-  - $ErrorActionPreference = "Stop" + try/catch/finally around
-    the main flow so an unexpected failure can no longer print a
-    misleading "Preflight written to" success line.
-  - Runtime self-validation re-reads the output file (BOM=1,
-    NUL=0, bare LF=0, last line marker) before printing the
-    success line; on contract failure a separate file
-    "preflight-write-failure.txt" is produced and exit code is 3.
-  - Writer fix applied to scripts 02-06; the `$matches` reserved
-    automatic variable collision in 05-collect-diagnostics.ps1
-    is renamed `$procMatches`.
+History
+  v1  shipped a $psEdition / $PSEdition case-insensitive
+      collision (the script printed "Cannot overwrite variable
+      PSEdition because it is read-only or constant") AND a
+      byte-array writer that produced a corrupt preflight.txt
+      on Windows PowerShell 5.1.
+  v2  fixed the $psEdition collision and replaced the writer
+      with UTF8Encoding($true) + WriteAllText. On a real Turkish
+      Windows Server 2019 / PS 5.1 machine, v2 still produced a
+      preflight.txt that was 4215 bytes of pure 0x00 even though
+      the script printed "Preflight written to". Root cause
+      under investigation; v2 is INVALID.
+  v3  current. Three independent hardenings:
+        (a) Writer rewritten to the operator-vetted authoritative
+            pattern: [CmdletBinding()] + [Parameter(Mandatory)] +
+            [AllowEmptyString()] + [AllowEmptyCollection()] +
+            [string[]] $Lines, [string]::Join, explicit
+            [string]$text cast, UTF8Encoding($true) +
+            WriteAllText. The caller always force-casts the
+            buffer to [string[]]@($lines | %{ [string]$_ }).
+        (b) New runtime sidecar "preflight-debug.txt" records
+            LINES_TYPE, TEXT_TYPE, TEXT_LENGTH, TEXT_HAS_NUL,
+            ENCODED_BYTE_COUNT, PREAMBLE_LENGTH and an
+            EXPECTED_SHA256 of the exact bytes fed to
+            WriteAllText. The validator now refuses to print
+            "Preflight written to" unless the disk SHA-256 of
+            preflight.txt equals EXPECTED_SHA256.
+        (c) Self-validation now counts NUL and non-zero bytes
+            separately and bails on a fully-zero-filled file
+            (the v2 failure mode).
+      Fallback path is a separate inline WriteAllText that does
+      NOT reuse the helper. Same writer pattern is applied to
+      scripts 02-05.
 
-If you have an old C:\CharonAgentTestPackage or extracted
-windows-agent-v2-manual-test folder on the test machine, REMOVE
-it before extracting v2. The v2 ZIP is named:
+If you have an old C:\CharonAgentTestPackage or any extracted
+"windows-agent-v2-manual-test" or "...-v2" folder on the test
+machine, REMOVE it before extracting v3. The v3 ZIP is named:
 
-    windows-agent-v2-manual-test-v2.zip
+    windows-agent-v2-manual-test-v3.zip
 
 ================================================================
 PLEASE READ BEFORE TOUCHING ANY SCRIPT
@@ -53,10 +68,12 @@ The scripts are designed to:
 OPERATOR PROCEDURE
 ================================================================
 
-Step 1.  Copy windows-agent-v2-manual-test-v2.zip onto the
+Step 1.  Copy windows-agent-v2-manual-test-v3.zip onto the
          Windows test machine via AnyDesk file transfer.
-         If an OLD copy of the extracted folder exists at
-         C:\CharonAgentTestPackage, DELETE it first.
+         If ANY old copy of C:\CharonAgentTestPackage exists,
+         delete it first:
+
+             Remove-Item -LiteralPath C:\CharonAgentTestPackage -Recurse -Force -ErrorAction SilentlyContinue
 
 Step 2.  Extract the ZIP to:
 
@@ -176,6 +193,8 @@ All output files are created under:
 These are the only files this package writes:
 
     preflight.txt
+    preflight-debug.txt              (v3 runtime evidence sidecar)
+    preflight-write-failure.txt      (v3 fallback if validation fails)
     installer-run.txt
     installer-exit-code.txt
     installer-sha256.txt
