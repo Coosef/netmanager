@@ -1570,7 +1570,6 @@
     "detail_heartbeat": "Last Heartbeat",
     "detail_created": "Created",
     "windows_download_primary_hint": "Download the installer and run it with Windows PowerShell. The installer will request Administrator privileges automatically when needed.",
-    "windows_download_secondary_label": "Manual command (advanced)",
     "windows_download_failed": "Could not download the Windows installer. Please try again.",
     "windows_validation_failed": "Could not validate the Windows installer. Please try again."
   },

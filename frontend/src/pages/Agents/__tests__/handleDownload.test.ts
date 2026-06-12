@@ -1,11 +1,10 @@
 /**
- * NocAgents handleDownload — wiring + security contract (source-match).
+ * NocAgents handleDownload — source-match wiring guards.
  *
- * The byte-perfect download mechanics live in
- * `windowsInstallerDownload.ts` and have their own unit tests
- * (`windowsInstallerDownload.test.ts`). This file confirms that
- * NocAgents wires the helper in correctly and the legacy
- * `res.text()` + `Blob(text)` pattern is gone.
+ * These are cheap regression guards that the wiring stays intact.
+ * The authoritative behavioural test lives in
+ * `createdModal.component.test.tsx` (real jsdom + Testing Library
+ * render against the named export).
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
@@ -16,16 +15,16 @@ const SRC = readFileSync(
   'utf-8',
 )
 
-describe('NocAgents handleDownload — wiring + security', () => {
-  it('imports the byte-perfect helper, not the legacy res.text() flow', () => {
+describe('NocAgents — source guards (component test is authoritative)', () => {
+  it('imports the byte-perfect helper', () => {
     expect(SRC).toMatch(/from\s+['"]\.\/windowsInstallerDownload['"]/)
     expect(SRC).toContain('downloadWindowsInstaller')
   })
 
-  it('keeps the existing command-builder helpers', () => {
+  it('only imports buildLinuxInstallCmd from installCmd (Windows builder gone)', () => {
     expect(SRC).toMatch(/from\s+['"]\.\/installCmd['"]/)
     expect(SRC).toContain('buildLinuxInstallCmd')
-    expect(SRC).toContain('buildWindowsInstallCmd')
+    expect(SRC).not.toContain('buildWindowsInstallCmd')
   })
 
   it('does NOT round-trip the response through res.text()', () => {
@@ -34,44 +33,36 @@ describe('NocAgents handleDownload — wiring + security', () => {
   })
 
   it('does NOT construct a Blob from a decoded string', () => {
-    // Legacy: `new Blob([text], ...)` -- text was a decoded string.
-    // The new helper builds the Blob from the original ArrayBuffer
-    // so byte parity is preserved.
     expect(SRC).not.toMatch(/new\s+Blob\(\s*\[\s*text\s*\]/)
   })
 
-  it('keeps the concurrent download guard', () => {
-    expect(SRC).toMatch(/if\s*\(\s*downloading\s*\)\s*return/)
-  })
-
-  it('passes the agent key as the X-Agent-Key header argument (not in the URL)', () => {
-    // Helper call shape: downloadWindowsInstaller({ ..., agentKey: agent.agent_key, ... })
-    expect(SRC).toMatch(/downloadWindowsInstaller\(/)
-    expect(SRC).toMatch(/agentKey:\s*agent\.agent_key/)
-    // Forbid agent_key in the URL.
+  it('forbids `agent_key` in URL or filename literal', () => {
     expect(SRC).not.toMatch(/[?&]agent_key=/)
     expect(SRC).not.toMatch(/[?&]X-Agent-Key=/)
+    expect(SRC).not.toMatch(/\.ps1[^"`]*agent\.agent_key/)
+    expect(SRC).not.toMatch(/agent\.agent_key[^"`]*\.ps1/)
   })
 
-  it('uses generic, secret-free user-facing error messages via i18n', () => {
+  it('does not contain iwr | iex or Invoke-Expression', () => {
+    expect(SRC).not.toMatch(/\|\s*iex\b/)
+    expect(SRC).not.toContain('Invoke-Expression')
+  })
+
+  it('exports CreatedModal as a named export for component tests', () => {
+    expect(SRC).toMatch(/export\s+function\s+CreatedModal/)
+  })
+
+  it('Windows branch does NOT render the manual install command block', () => {
+    // The copy/paste block lives in a `platform === "linux"`
+    // sub-conditional now. We assert the constraint at source level
+    // because the markup change is the actual P0-2 fix.
+    expect(SRC).toMatch(/platform === 'linux'\s*&&\s*installCmd/)
+  })
+
+  it('uses i18n keys for hint + error messages', () => {
+    expect(SRC).toContain("t('agents.windows_download_primary_hint')")
     expect(SRC).toContain("t('agents.windows_download_failed')")
     expect(SRC).toContain("t('agents.windows_validation_failed')")
-    // Legacy SAFE_*_TR constants are gone (moved to i18n)
-    expect(SRC).not.toContain('SAFE_DOWNLOAD_ERROR_MESSAGE_TR')
-    expect(SRC).not.toContain('SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR')
-  })
-
-  it('does not log or alert anything containing the agent key', () => {
-    expect(SRC).not.toMatch(/console\.(log|error|warn|info|debug)\([^)]*agent\.agent_key/)
-    expect(SRC).not.toMatch(/console\.(log|error|warn|info|debug)\([^)]*agentKey/)
-    expect(SRC).not.toMatch(/alert\(\s*agent\.agent_key/)
-    expect(SRC).not.toMatch(/alert\(\s*e\?.message\s*\)/)
-    expect(SRC).not.toMatch(/alert\([^)]*\+\s*e\.message/)
-  })
-
-  it('preserves the existing /api/v1/agents/{id}/download/windows endpoint shape', () => {
-    expect(SRC).toMatch(/\/api\/v1\/agents\/\$\{agent\.id\}\/download\/windows/)
-    expect(SRC).toMatch(/encodeURIComponent\(base\)/)
   })
 
   it('preserves the Linux downloadInstallerFile call site verbatim', () => {
@@ -80,17 +71,18 @@ describe('NocAgents handleDownload — wiring + security', () => {
     )
   })
 
-  it('keeps exactly one DownloadOutlined Button (single primary download)', () => {
-    const matches = SRC.match(/<Button[^>]*icon=\{<DownloadOutlined[^>]*\/>\}/g) || []
-    expect(matches.length).toBe(1)
+  it('keeps the concurrent download guard (synchronous ref)', () => {
+    // The previous `if (downloading) return` was async-stale; two
+    // rapid synthetic clicks could both observe false. Now backed
+    // by a ref so the guard flips synchronously.
+    expect(SRC).toMatch(/downloadingRef\.current/)
+    expect(SRC).toMatch(/if\s*\(\s*downloadingRef\.current\s*\)\s*return/)
   })
 
-  it('does not contain iwr | iex or Invoke-Expression patterns', () => {
-    expect(SRC).not.toMatch(/\|\s*iex\b/)
-    expect(SRC).not.toContain('Invoke-Expression')
-  })
-
-  it('renders the primary-download hint via i18n', () => {
-    expect(SRC).toContain("t('agents.windows_download_primary_hint')")
+  it('does not log or alert anything containing the agent key', () => {
+    expect(SRC).not.toMatch(/console\.(log|error|warn|info|debug)\([^)]*agent\.agent_key/)
+    expect(SRC).not.toMatch(/alert\(\s*agent\.agent_key/)
+    expect(SRC).not.toMatch(/alert\(\s*e\?\.message\s*\)/)
+    expect(SRC).not.toMatch(/alert\([^)]*\+\s*e\.message/)
   })
 })

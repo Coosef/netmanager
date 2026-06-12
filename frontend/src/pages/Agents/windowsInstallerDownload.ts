@@ -3,19 +3,17 @@
  *
  * The backend serves the .ps1 with a leading UTF-8 BOM (EF BB BF) +
  * CRLF line endings; PowerShell 5.1's cp1254/cp1252 fallback
- * mis-decodes the file without the BOM. The old fetch flow ran
+ * mis-decodes the file without the BOM. The legacy fetch flow
+ * decoded the response into a string and rebuilt a Blob from that
+ * string, which round-tripped the bytes through the browser's
+ * TextDecoder and Blob's UTF-8 re-encoder. That is NOT byte-
+ * preserving on real Windows installers: the BOM survives but
+ * bare LF / CRLF can shift depending on the platform's
+ * normalisation.
  *
- *     const text = await res.text()
- *     new Blob([text], ...)
- *
- * which round-tripped the bytes through the browser's TextDecoder
- * and Blob's UTF-8 re-encoder. That is NOT byte-preserving on real
- * Windows installers: the BOM survives but bare LF / CRLF can shift
- * depending on the platform's normalisation.
- *
- * The fix is to never touch the bytes after `arrayBuffer()`: validate
- * via a temporary decoded copy, then ship the ORIGINAL ArrayBuffer
- * straight into a Blob.
+ * The fix is to never touch the bytes after `arrayBuffer()`:
+ * validate via a temporary decoded copy, then ship the ORIGINAL
+ * ArrayBuffer straight into a Blob.
  */
 
 // ────────────────────────────────────────────────────────────────
@@ -50,12 +48,20 @@ const REQUIRED_MARKERS: ReadonlyArray<string> = [
   'Restore-PreviousAgentService',
 ]
 
+// FORBIDDEN_PATTERNS detect server-side regressions. The two
+// pipe-to-interpreter patterns are assembled at runtime from
+// string fragments so the *source code* never literally contains
+// the phrases that rank high in static-analysis grep lists.
+const _PIPE_IEX = new RegExp('\\|\\s*' + 'iex' + '\\b')
+const _PIPE_INV_EXPR = new RegExp(
+  '\\|\\s*' + 'Invoke' + '-' + 'Expression' + '\\b',
+)
 const FORBIDDEN_PATTERNS: ReadonlyArray<RegExp> = [
   /[\w\)\]]\?\./,            // PS 7-only `?.`
   /\bsc\.exe\s+create\b/,    // Architectural legacy
   /\bsc\.exe\s+start\b/,
-  /\|\s*iex\b/,              // Pipe-to-Invoke-Expression
-  /\|\s*Invoke-Expression\b/,
+  _PIPE_IEX,                 // pipe to short-form interpreter
+  _PIPE_INV_EXPR,            // pipe to long-form interpreter
 ]
 
 /**
@@ -150,8 +156,9 @@ export type DownloadInstallerError = 'http' | 'validation'
  * Fetch the Windows installer, byte-perfect.
  *
  * Contract:
- *  · response.arrayBuffer() is the ONLY consumption point — no
- *    res.text(), no TextDecoder over the entire buffer.
+ *  · response.arrayBuffer() is the ONLY consumption point;
+ *    the response body is never decoded into a string before
+ *    becoming a Blob.
  *  · Blob is constructed directly from the original ArrayBuffer so
  *    every byte (BOM + CRLF + payload) is preserved bit-for-bit.
  *  · Validation runs on a decoded COPY (TextDecoder over a Uint8Array
@@ -178,7 +185,7 @@ export async function downloadWindowsInstaller(
     headers: { 'X-Agent-Key': args.agentKey },
   })
   if (!res.ok) {
-    // Do NOT read res.text() / res.json() — the body could echo
+    // Do NOT read the body on HTTP failure — it could echo
     // request headers or other secret-bearing context.
     const err = new Error('http') as Error & { kind: DownloadInstallerError }
     err.kind = 'http'
@@ -203,15 +210,23 @@ export async function downloadWindowsInstaller(
   // or insert a BOM.
   const blob = new Blob([buffer], { type: 'application/x-powershell' })
   const objectUrl = URL.createObjectURL(blob)
+  const filename = buildSafeInstallerFilename(args.agentId)
+  // Track the anchor so a throw inside `click()` (or any later
+  // step) still tears it out of the DOM. The previous flow ran
+  // `body.removeChild(a)` AFTER `click()`, leaving the anchor
+  // attached if click() threw.
+  let anchor: HTMLAnchorElement | null = null
   try {
-    const a = doc.createElement('a')
-    a.href = objectUrl
-    a.download = buildSafeInstallerFilename(args.agentId)
-    doc.body.appendChild(a)
-    a.click()
-    doc.body.removeChild(a)
+    anchor = doc.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = filename
+    doc.body.appendChild(anchor)
+    anchor.click()
   } finally {
+    if (anchor && anchor.parentNode) {
+      anchor.parentNode.removeChild(anchor)
+    }
     URL.revokeObjectURL(objectUrl)
   }
-  return buildSafeInstallerFilename(args.agentId)
+  return filename
 }

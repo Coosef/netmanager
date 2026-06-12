@@ -1570,7 +1570,6 @@
     "detail_heartbeat": "Son Heartbeat",
     "detail_created": "Oluşturulma",
     "windows_download_primary_hint": "Kurulum dosyasını indirin ve Windows PowerShell ile çalıştırın. Kurulum gerektiğinde otomatik olarak Yönetici yetkisi isteyecektir.",
-    "windows_download_secondary_label": "Manuel komut (gelişmiş)",
     "windows_download_failed": "Windows kurulum dosyası indirilemedi. Lütfen tekrar deneyin.",
     "windows_validation_failed": "Windows kurulum dosyası doğrulanamadı. Lütfen tekrar deneyin."
   },

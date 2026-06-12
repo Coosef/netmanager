@@ -213,10 +213,15 @@ describe('buildSafeInstallerFilename', () => {
 
 function mockDocument() {
   const anchors: HTMLAnchorElement[] = []
-  const body = {
-    appendChild: vi.fn((el: any) => anchors.push(el)),
-    removeChild: vi.fn(),
-  } as any
+  const body: any = {
+    appendChild: vi.fn((el: any) => {
+      el.parentNode = body
+      anchors.push(el)
+    }),
+    removeChild: vi.fn((el: any) => {
+      el.parentNode = null
+    }),
+  }
   const doc = {
     createElement: vi.fn((tag: string) => {
       const a: any = {
@@ -224,6 +229,7 @@ function mockDocument() {
         href: '',
         download: '',
         click: vi.fn(),
+        parentNode: null,
       }
       return a
     }),
@@ -427,6 +433,64 @@ describe('downloadWindowsInstaller — byte-perfect + security', () => {
     expect(create).not.toHaveBeenCalled()
     expect(revoke).not.toHaveBeenCalled()
     expect(doc.createElement).not.toHaveBeenCalled()
+  })
+
+  it('removes the anchor and revokes the URL even when click() throws', async () => {
+    const original = buildInstallerBytes()
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      arrayBuffer: async () =>
+        original.buffer.slice(
+          original.byteOffset,
+          original.byteOffset + original.byteLength,
+        ),
+    })) as any
+
+    // mockDocument's anchors throw when click() is called.
+    const anchors: any[] = []
+    const removeCalls = vi.fn()
+    const doc: any = {
+      createElement: vi.fn((tag: string) => {
+        const a: any = {
+          tag,
+          href: '',
+          download: '',
+          click: vi.fn(() => {
+            throw new Error('boom')
+          }),
+          parentNode: null,
+        }
+        anchors.push(a)
+        return a
+      }),
+      body: {
+        appendChild: vi.fn((el: any) => {
+          el.parentNode = doc.body
+          return el
+        }),
+        removeChild: vi.fn((el: any) => {
+          removeCalls(el)
+          el.parentNode = null
+        }),
+      },
+    }
+    const { create, revoke } = withObjectURL()
+
+    await expect(
+      downloadWindowsInstaller({
+        agentId: 'abc',
+        agentKey: 'k',
+        url: '/dl',
+        fetchImpl,
+        documentImpl: doc as any,
+      }),
+    ).rejects.toThrow('boom')
+
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(revoke).toHaveBeenCalledTimes(1)
+    // anchor cleanup must still have happened
+    expect(removeCalls).toHaveBeenCalledTimes(1)
+    expect(anchors[0].parentNode).toBeNull()
   })
 
   it('revokes the Object URL after success', async () => {

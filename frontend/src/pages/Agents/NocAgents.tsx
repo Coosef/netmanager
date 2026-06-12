@@ -4,7 +4,7 @@
 // (full mgmt: create/delete/detail drawer/security) is preserved in git +
 // still mounted from index via the "Yönet" action drawer is out-of-scope here;
 // this is the inventory/overview surface the mockup specifies.
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Space, Popconfirm } from 'antd'
 import { agentsApi, type Agent } from '@/api/agents'
@@ -14,10 +14,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useTranslation } from 'react-i18next'
 import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import AgentDetailModal from './AgentDetailModal'
-import {
-  buildLinuxInstallCmd,
-  buildWindowsInstallCmd,
-} from './installCmd'
+import { buildLinuxInstallCmd } from './installCmd'
 import { downloadWindowsInstaller } from './windowsInstallerDownload'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -264,7 +261,7 @@ function mkC(isDark: boolean) {
   }
 }
 
-function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }; onClose: () => void }) {
+export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }; onClose: () => void }) {
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const [platform, setPlatform] = useState<'linux' | 'windows' | null>(null)
@@ -276,28 +273,28 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
     navigator.clipboard.writeText(text); setter(true); setTimeout(() => setter(false), 2000)
   }
   const base = serverUrl.trim().replace(/\/$/, '') || window.location.origin
-  // T8.4 F3 — agent_key URL'de değil, X-Agent-Key header'da. UI installer
-  // komutu da curl/iwr ile header gönderir; URL'de key görünmez.
+  // T8.4 F3 — agent_key URL'de değil, X-Agent-Key header'da.
   //
-  // 2026-06-11 — Windows komutu helper'a taşındı (`./installCmd.ts`):
-  //  · PS 5.1 uyumlu multiline + backtick line-continuation
-  //  · TLS 1.2 enforce satırı en başta
-  //  · Tek satır `$h=@{...}` quoting bug'ı engellendi
-  //  · Linux komutu (curl pipe sudo bash) helper içinde, davranış aynı
-  //  · serverUrl modal'da değişirse downloadUrl yeniden hesaplanır → komut
-  //    otomatik güncellenir (state-driven render)
+  // WIN-FRONTEND post-CI review #2: Windows için copy/paste manual
+  // PowerShell command UI'dan çıkarıldı. Yalnız .ps1 download butonu
+  // gösterilir; manuel komut agent key'i terminal history'ye yazabilir
+  // ve string escape üzerinde potansiyel enjeksiyon yüzeyi açar. Linux
+  // tarafı (curl | sudo bash) aynen kalır.
   const downloadUrl = platform
     ? `${base}${agentsApi.downloadInstallerUrl(agent.id, platform, base)}`
     : null
   const installCmd = platform === 'linux' && downloadUrl
     ? buildLinuxInstallCmd(agent.agent_key, downloadUrl)
-    : platform === 'windows' && downloadUrl
-    ? buildWindowsInstallCmd(agent.id, agent.agent_key, downloadUrl)
     : null
   const [downloading, setDownloading] = useState(false)
+  // useRef-backed guard: React state updates are async, so two
+  // rapid synthetic clicks can both observe downloading=false and
+  // race. A ref flips synchronously inside the handler.
+  const downloadingRef = useRef(false)
   const handleDownload = async () => {
     if (!platform || !agent.agent_key) return
-    if (downloading) return  // Concurrent download guard
+    if (downloadingRef.current) return  // Concurrent download guard (sync)
+    downloadingRef.current = true
     setDownloading(true)
     try {
       if (platform === 'windows') {
@@ -332,6 +329,7 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
       alert(friendly)
     } finally {
       setDownloading(false)
+      downloadingRef.current = false
     }
   }
 
@@ -373,21 +371,29 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
           )
         })}
       </div>
-      {platform && installCmd && (
+      {platform && downloadUrl && (
         <>
-          <div style={{ marginBottom: 12 }}>
-            <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13, color: C.text }}>{t('agents.oneliner_label')}</Text>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#0f172a', borderRadius: 8, padding: '10px 12px', border: '1px solid #334155' }}>
-              <code style={{ flex: 1, fontSize: 11, color: '#e2e8f0', wordBreak: 'break-all', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{installCmd}</code>
-              <Button size="small" icon={<CopyOutlined />} type={copiedCmd ? 'primary' : 'default'} onClick={() => copy(installCmd, setCopiedCmd)} style={{ flexShrink: 0 }}>
-                {copiedCmd ? t('agents.copied') : t('agents.copy')}
-              </Button>
+          {/* Linux ONLY: copy/paste curl command. Windows users get
+              the .ps1 download button below -- a copy command for
+              Windows would either land the agent key in PowerShell
+              history or require server-side escape sequences whose
+              gaps become injection seams. The file is the safer UX. */}
+          {platform === 'linux' && installCmd && (
+            <div style={{ marginBottom: 12 }} data-testid="linux-oneliner-block">
+              <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13, color: C.text }}>{t('agents.oneliner_label')}</Text>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#0f172a', borderRadius: 8, padding: '10px 12px', border: '1px solid #334155' }}>
+                <code style={{ flex: 1, fontSize: 11, color: '#e2e8f0', wordBreak: 'break-all', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{installCmd}</code>
+                <Button size="small" icon={<CopyOutlined />} type={copiedCmd ? 'primary' : 'default'} onClick={() => copy(installCmd, setCopiedCmd)} style={{ flexShrink: 0 }}>
+                  {copiedCmd ? t('agents.copied') : t('agents.copy')}
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
           <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }} message={platform === 'linux' ? t('agents.linux_hint') : t('agents.windows_hint')} />
           <Button type="default" icon={<DownloadOutlined />} block
             loading={downloading}
-            onClick={handleDownload}>
+            onClick={handleDownload}
+            data-testid="installer-download-button">
             {platform === 'linux' ? t('agents.download_linux') : t('agents.download_windows')}
           </Button>
           {platform === 'windows' && (
