@@ -1,0 +1,211 @@
+name: windows-agent-manual-test-package
+# Validates the windows-agent-v2-manual-test/ package on a real
+# Windows PowerShell 5.1 runner before it can ship.
+#
+# Hard gates:
+#   - every .ps1 must parse on Windows PowerShell 5.1
+#   - every .ps1/.txt/.json must have UTF-8 BOM
+#   - every .ps1/.txt/.json must be CRLF-only (no bare LF, no double BOM)
+#   - every .ps1/.txt/.json must be ASCII-only (no cp1254 hazard)
+#   - no .ps1 may contain forbidden patterns:
+#         | iex   |   | Invoke-Expression   |   sc.exe create
+#         sc.exe start   |   IsInRole("Administrator")
+#     (raw command form -- a $forbidden array literal that NAMES these
+#     patterns inside 02-run-installer.ps1 is allowed because it is the
+#     wrapper's refusal list)
+#   - 02-run-installer.ps1 must reference the required markers:
+#         WindowsBuiltInRole, S-1-5-18, S-1-5-32-544,
+#         charon-agent-host, --child-arg, Get-FileHash,
+#         Restore-PreviousAgentService
+#   - SHA256SUMS.txt must match recomputed digests for every listed file
+
+on:
+  pull_request:
+    paths:
+      - "windows-agent-v2-manual-test/**"
+      - ".github/workflows/windows-agent-manual-test-package.yml"
+  push:
+    branches: [main]
+    paths:
+      - "windows-agent-v2-manual-test/**"
+      - ".github/workflows/windows-agent-manual-test-package.yml"
+  workflow_dispatch:
+
+jobs:
+  validate-package:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: PowerShell version banner
+        run: |
+          Write-Host ("PSVersion: " + $PSVersionTable.PSVersion.ToString())
+          Write-Host ("PSEdition: " + $PSVersionTable.PSEdition)
+          if ($PSVersionTable.PSVersion.Major -ne 5) {
+            Write-Host "::error::This job must run on Windows PowerShell 5.1; got $($PSVersionTable.PSVersion)."
+            exit 1
+          }
+
+      - name: Byte invariants (BOM + CRLF + ASCII + no double BOM)
+        run: |
+          $root  = Join-Path $env:GITHUB_WORKSPACE "windows-agent-v2-manual-test"
+          $files = Get-ChildItem -LiteralPath $root -File |
+                   Where-Object { $_.Extension -in @(".ps1",".txt",".json") }
+          $fail = 0
+          foreach ($f in $files) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $bomOk     = ($bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
+            $doubleBom = $false
+            if ($bytes.Length -ge 6) {
+              $doubleBom = ($bytes[3] -eq 0xEF -and $bytes[4] -eq 0xBB -and $bytes[5] -eq 0xBF)
+            }
+            $text = [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+            $bareLf = ([regex]::Matches($text, "(?<!`r)`n")).Count
+            $nonAscii = 0
+            foreach ($c in $text.ToCharArray()) { if ([int][char]$c -gt 127) { $nonAscii++ } }
+            $row = ("{0,-40} BOM={1} 2BOM={2} bareLF={3} nonASCII={4}" -f $f.Name, $bomOk, $doubleBom, $bareLf, $nonAscii)
+            if ((-not $bomOk) -or $doubleBom -or $bareLf -gt 0 -or $nonAscii -gt 0) {
+              Write-Host "::error::$row"
+              $fail++
+            } else {
+              Write-Host $row
+            }
+          }
+          if ($fail -gt 0) { exit 1 }
+
+      - name: ParseFile gate (Windows PowerShell 5.1)
+        run: |
+          $root  = Join-Path $env:GITHUB_WORKSPACE "windows-agent-v2-manual-test"
+          $files = Get-ChildItem -LiteralPath $root -File -Filter "*.ps1"
+          $fail = 0
+          foreach ($f in $files) {
+            $tokens = $null
+            $errors = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+                       $f.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              foreach ($e in $errors) {
+                Write-Host "::error file=$($f.Name),line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              }
+              $fail++
+            } else {
+              Write-Host "OK    $($f.Name)"
+            }
+          }
+          if ($fail -gt 0) { exit 1 }
+
+      - name: Forbidden patterns (raw command form, excludes refusal-list literals)
+        run: |
+          $root  = Join-Path $env:GITHUB_WORKSPACE "windows-agent-v2-manual-test"
+          $files = Get-ChildItem -LiteralPath $root -File -Filter "*.ps1"
+          # Each entry: regex match against raw line, after we strip
+          # full-line comments. The wrapper at 02-run-installer.ps1 lists
+          # these patterns as string literals inside the $forbidden array
+          # -- we tolerate that by skipping string-literal hits between
+          # single quotes.
+          $forbidden = @(
+            '\|\s*iex\b',
+            '\|\s*Invoke-Expression\b',
+            '\bInvoke-Expression\b',
+            '\bsc\.exe\s+create\b',
+            '\bsc\.exe\s+start\b',
+            'IsInRole\("Administrator"\)'
+          )
+          $fail = 0
+          foreach ($f in $files) {
+            $i = 0
+            foreach ($line in [System.IO.File]::ReadAllLines($f.FullName)) {
+              $i++
+              $stripped = $line.Trim()
+              if ($stripped.StartsWith("#")) { continue }
+              # Drop content inside single-quoted string literals
+              $sanitized = [regex]::Replace($line, "'[^']*'", "''")
+              foreach ($pat in $forbidden) {
+                if ($sanitized -match $pat) {
+                  Write-Host "::error file=$($f.Name),line=$i::forbidden pattern '$pat' in: $stripped"
+                  $fail++
+                }
+              }
+            }
+          }
+          if ($fail -gt 0) { exit 1 }
+
+      - name: Required markers in 02-run-installer.ps1
+        run: |
+          $p = Join-Path $env:GITHUB_WORKSPACE "windows-agent-v2-manual-test\02-run-installer.ps1"
+          $text = [System.IO.File]::ReadAllText($p)
+          $required = @(
+            'WindowsBuiltInRole',
+            'S-1-5-18',
+            'S-1-5-32-544',
+            'charon-agent-host',
+            '--child-arg',
+            'Get-FileHash',
+            'Restore-PreviousAgentService'
+          )
+          $fail = 0
+          foreach ($r in $required) {
+            if ($text -notmatch [regex]::Escape($r)) {
+              Write-Host "::error::missing required marker: $r"
+              $fail++
+            } else {
+              Write-Host "OK    $r"
+            }
+          }
+          if ($fail -gt 0) { exit 1 }
+
+      - name: SHA256SUMS.txt matches recomputed digests
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE "windows-agent-v2-manual-test"
+          $sumsPath = Join-Path $root "SHA256SUMS.txt"
+          if (-not (Test-Path -LiteralPath $sumsPath)) {
+            Write-Host "::error::SHA256SUMS.txt missing."
+            exit 1
+          }
+          $lines = Get-Content -LiteralPath $sumsPath
+          $fail = 0
+          foreach ($l in $lines) {
+            $clean = $l.Trim()
+            if ($clean.Length -eq 0) { continue }
+            $parts = $clean -split '\s+', 2
+            if ($parts.Length -lt 2) { continue }
+            $expected = $parts[0]
+            $name     = $parts[1]
+            $fp = Join-Path $root $name
+            if (-not (Test-Path -LiteralPath $fp)) {
+              Write-Host "::error::SHA256SUMS lists missing file: $name"
+              $fail++
+              continue
+            }
+            $actual = (Get-FileHash -LiteralPath $fp -Algorithm SHA256).Hash
+            if ($expected.ToUpperInvariant() -ne $actual.ToUpperInvariant()) {
+              Write-Host "::error::$name SHA mismatch: expected $expected actual $actual"
+              $fail++
+            } else {
+              Write-Host "OK    $name"
+            }
+          }
+          if ($fail -gt 0) { exit 1 }
+
+      - name: ZIP integrity (optional)
+        run: |
+          $zip = Join-Path $env:GITHUB_WORKSPACE "windows-agent-v2-manual-test.zip"
+          if (Test-Path -LiteralPath $zip) {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            try {
+              $a = [System.IO.Compression.ZipFile]::OpenRead($zip)
+              Write-Host ("ZIP entries: " + $a.Entries.Count)
+              foreach ($e in $a.Entries) { Write-Host (" - " + $e.FullName) }
+              $a.Dispose()
+            } catch {
+              Write-Host "::error::ZIP open failed."
+              exit 1
+            }
+          } else {
+            Write-Host "windows-agent-v2-manual-test.zip not present; skipping ZIP integrity (package directory is authoritative)."
+          }
