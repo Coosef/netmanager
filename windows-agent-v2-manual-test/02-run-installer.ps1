@@ -38,12 +38,14 @@ Add-Line ("Wrapper script: 02-run-installer.ps1")
 Add-Line ("InstallerPath parameter: " + $InstallerPath)
 
 function Write-Output-Files([int]$Code) {
-    $buf = ($lines -join "`r`n") + "`r`n"
-    $bom = [byte[]](0xEF, 0xBB, 0xBF)
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-    [System.IO.File]::WriteAllBytes($RunLog + ".tmp", ($bom + $bytes))
+    # Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe).
+    $joined = ($lines -join "`r`n")
+    $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+    $bomEnc = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($RunLog + ".tmp", $normalized, $bomEnc)
     Move-Item -LiteralPath ($RunLog + ".tmp") -Destination $RunLog -Force
-    [System.IO.File]::WriteAllText($ExitLog, $Code.ToString() + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    $noBomEnc = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($ExitLog, $Code.ToString() + "`r`n", $noBomEnc)
 }
 
 # -------------------------------------------------------------------

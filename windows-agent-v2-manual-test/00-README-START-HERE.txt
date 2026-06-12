@@ -2,6 +2,36 @@
 WINDOWS AGENT V2 - MANUAL TEST PACKAGE
 
 ================================================================
+PACKAGE VERSION: v2
+THE PREVIOUS ZIP MUST NOT BE USED.
+DELETE THE OLD EXTRACTED DIRECTORY BEFORE CONTINUING.
+================================================================
+v2 hotfix scope (PR #81 follow-up):
+  - $psEdition / $PSEdition case-insensitive collision fixed
+    (line 72 of 01-preflight.ps1 -- "Cannot overwrite variable
+    PSEdition because it is read-only or constant").
+  - preflight.txt NUL-byte writer bug fixed (Windows PowerShell
+    5.1 byte-array concatenation hazard) -- now uses
+    System.Text.UTF8Encoding($true) + WriteAllText for the
+    primary preflight output and for every other text artifact.
+  - $ErrorActionPreference = "Stop" + try/catch/finally around
+    the main flow so an unexpected failure can no longer print a
+    misleading "Preflight written to" success line.
+  - Runtime self-validation re-reads the output file (BOM=1,
+    NUL=0, bare LF=0, last line marker) before printing the
+    success line; on contract failure a separate file
+    "preflight-write-failure.txt" is produced and exit code is 3.
+  - Writer fix applied to scripts 02-06; the `$matches` reserved
+    automatic variable collision in 05-collect-diagnostics.ps1
+    is renamed `$procMatches`.
+
+If you have an old C:\CharonAgentTestPackage or extracted
+windows-agent-v2-manual-test folder on the test machine, REMOVE
+it before extracting v2. The v2 ZIP is named:
+
+    windows-agent-v2-manual-test-v2.zip
+
+================================================================
 PLEASE READ BEFORE TOUCHING ANY SCRIPT
 ================================================================
 
@@ -23,8 +53,10 @@ The scripts are designed to:
 OPERATOR PROCEDURE
 ================================================================
 
-Step 1.  Copy windows-agent-v2-manual-test.zip onto the Windows
-         test machine via AnyDesk file transfer.
+Step 1.  Copy windows-agent-v2-manual-test-v2.zip onto the
+         Windows test machine via AnyDesk file transfer.
+         If an OLD copy of the extracted folder exists at
+         C:\CharonAgentTestPackage, DELETE it first.
 
 Step 2.  Extract the ZIP to:
 

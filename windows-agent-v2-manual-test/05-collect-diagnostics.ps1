@@ -48,20 +48,26 @@ function Mask-Line([string]$s) {
     return $out
 }
 
+# Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe; no byte-array concat).
+function Write-Utf8BomCrLf {
+    param(
+        [Parameter(Mandatory=$true)][string]$LiteralPath,
+        [Parameter(Mandatory=$true)][string[]]$Lines
+    )
+    $joined = ($Lines -join "`r`n")
+    $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+    $enc = New-Object System.Text.UTF8Encoding($true)
+    [System.IO.File]::WriteAllText($LiteralPath, $normalized, $enc)
+}
+
 function Write-Masked-Copy {
     param([string]$Src, [string]$Dst)
     try {
         $tail = Get-Content -LiteralPath $Src -Tail 1000 -ErrorAction Stop
-        $masked = $tail | ForEach-Object { Mask-Line $_ }
-        $buf = ($masked -join "`r`n") + "`r`n"
-        $bom = [byte[]](0xEF, 0xBB, 0xBF)
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-        [System.IO.File]::WriteAllBytes($Dst, ($bom + $bytes))
+        $masked = @($tail | ForEach-Object { Mask-Line $_ })
+        Write-Utf8BomCrLf -LiteralPath $Dst -Lines $masked
     } catch {
-        $err = "COULD_NOT_READ_OR_MASK_FILE`r`n"
-        $bom = [byte[]](0xEF, 0xBB, 0xBF)
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($err)
-        [System.IO.File]::WriteAllBytes($Dst, ($bom + $bytes))
+        Write-Utf8BomCrLf -LiteralPath $Dst -Lines @("COULD_NOT_READ_OR_MASK_FILE")
     }
 }
 
@@ -92,10 +98,7 @@ $si.Add("SystemLocale     : " + ((Get-WinSystemLocale).Name)) | Out-Null
 $si.Add("Is64BitOS        : " + [Environment]::Is64BitOperatingSystem) | Out-Null
 $si.Add("CLR              : " + [Environment]::Version) | Out-Null
 
-$buf = ($si -join "`r`n") + "`r`n"
-$bom = [byte[]](0xEF, 0xBB, 0xBF)
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($sysInfo, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $sysInfo -Lines @($si)
 
 # -------------------------------------------------------------------
 # service.txt
@@ -118,9 +121,7 @@ try {
 } catch {
     $so.Add("NetManagerAgent service not registered.") | Out-Null
 }
-$buf = ($so -join "`r`n") + "`r`n"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($svcOut, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $svcOut -Lines @($so)
 
 # -------------------------------------------------------------------
 # host_binary.txt + processes.txt
@@ -144,16 +145,14 @@ if (Test-Path -LiteralPath $hostExe) {
 } else {
     $ho.Add("charon-agent-host.exe missing.") | Out-Null
 }
-$buf = ($ho -join "`r`n") + "`r`n"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($hostOut, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $hostOut -Lines @($ho)
 
 $procOut = Join-Path $Work "processes.txt"
 $po = New-Object System.Collections.Generic.List[string]
 try {
     $hostPid = 0
-    $cim = Get-CimInstance Win32_Service -Filter "Name='NetManagerAgent'" -ErrorAction SilentlyContinue
-    if ($cim) { $hostPid = [int]$cim.ProcessId }
+    $svcCim = Get-CimInstance Win32_Service -Filter "Name='NetManagerAgent'" -ErrorAction SilentlyContinue
+    if ($svcCim) { $hostPid = [int]$svcCim.ProcessId }
     $po.Add("Go host PID: " + $hostPid) | Out-Null
     if ($hostPid -gt 0) {
         $kids = Get-CimInstance Win32_Process -Filter ("ParentProcessId=" + $hostPid) -ErrorAction SilentlyContinue
@@ -161,16 +160,15 @@ try {
             $po.Add(("child PID=" + $k.ProcessId + "  Name=" + $k.Name + "  Exec=" + $k.ExecutablePath)) | Out-Null
         }
     }
+    # NOTE: $matches is a reserved automatic variable -- use $procMatches.
     foreach ($n in @("charon-agent-host","python","python3","pythonw")) {
-        $matches = Get-Process -Name $n -ErrorAction SilentlyContinue
-        foreach ($m in $matches) {
+        $procMatches = Get-Process -Name $n -ErrorAction SilentlyContinue
+        foreach ($m in $procMatches) {
             $po.Add(("by-name " + $n + ": PID=" + $m.Id + "  StartTime=" + ($m.StartTime.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")))) | Out-Null
         }
     }
 } catch {}
-$buf = ($po -join "`r`n") + "`r`n"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($procOut, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $procOut -Lines @($po)
 
 # -------------------------------------------------------------------
 # install_dir_listing.txt  (metadata only, no content)
@@ -191,9 +189,7 @@ if (Test-Path -LiteralPath $installDir) {
 } else {
     $lo.Add("Install directory missing.") | Out-Null
 }
-$buf = ($lo -join "`r`n") + "`r`n"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($listOut, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $listOut -Lines @($lo)
 
 # -------------------------------------------------------------------
 # logs/  (masked, last 1000 lines each)
@@ -238,9 +234,7 @@ try {
 } catch {
     $eo.Add("Event log query failed (or no records).") | Out-Null
 }
-$buf = ($eo -join "`r`n") + "`r`n"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($evtOut, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $evtOut -Lines @($eo)
 
 # -------------------------------------------------------------------
 # summary
@@ -252,9 +246,7 @@ foreach ($it in (Get-ChildItem -LiteralPath $Work -Recurse -Force)) {
     Add-S ("  " + $it.FullName.Substring($Work.Length).TrimStart("\"))
 }
 $summaryFile = Join-Path $Work "summary.txt"
-$buf = ($summary -join "`r`n") + "`r`n"
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
-[System.IO.File]::WriteAllBytes($summaryFile, ($bom + $bytes))
+Write-Utf8BomCrLf -LiteralPath $summaryFile -Lines @($summary)
 
 # -------------------------------------------------------------------
 # ZIP

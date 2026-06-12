@@ -280,11 +280,12 @@ if ($fails.Count -eq 0) {
     Add-Line "POST_INSTALL_RESULT=FAIL"
 }
 
-$buf = ($lines -join "`r`n") + "`r`n"
-$bom = [byte[]](0xEF, 0xBB, 0xBF)
-$bytes = [System.Text.Encoding]::UTF8.GetBytes($buf)
+# Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe; no byte-array concat).
+$joined = ($lines -join "`r`n")
+$normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
+$enc = New-Object System.Text.UTF8Encoding($true)
 $tmp = $OutFile + ".tmp"
-[System.IO.File]::WriteAllBytes($tmp, ($bom + $bytes))
+[System.IO.File]::WriteAllText($tmp, $normalized, $enc)
 Move-Item -LiteralPath $tmp -Destination $OutFile -Force
 Write-Host ("Post-install written to: " + $OutFile)
 if ($fails.Count -eq 0) { exit 0 } else { exit 1 }
