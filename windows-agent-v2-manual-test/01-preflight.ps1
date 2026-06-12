@@ -117,9 +117,19 @@ function Confirm-OutputContract {
 $resultLabel = "BLOCKED"
 $exitCode    = 3
 
+# Ensure $OutDir exists BEFORE try/finally, so the finally writer
+# always has a parent directory to write into, even if something
+# inside the try block throws very early. This call uses -Force, so
+# missing parents are created; if it itself fails we cannot proceed.
 try {
-    $null = New-Item -ItemType Directory -Force -Path $OutDir
+    $null = New-Item -ItemType Directory -Force -Path $OutDir -ErrorAction Stop
+} catch {
+    Write-Host ("FATAL: Could not create output directory: " + $OutDir)
+    Write-Host ("Detail: " + $_.Exception.GetType().FullName)
+    exit 3
+}
 
+try {
     $utcNow = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
     Add-Line "NetManager Agent v2 - Preflight Report"
     Add-Line "Package version: v2"
@@ -461,16 +471,23 @@ try {
     $resultLabel = "BLOCKED"
     $exitCode = 3
 } finally {
+    # Defensive: re-ensure $OutDir before we attempt to write.
+    try { $null = New-Item -ItemType Directory -Force -Path $OutDir -ErrorAction Stop } catch {}
+
     $outputOk = $false
+    $writeErrType = ""
+    $writeErrMsg  = ""
     try {
         Write-Utf8BomCrLfFile -LiteralPath $OutFile -Buffer $lines
         Confirm-OutputContract -LiteralPath $OutFile -ExpectedLastLineRegex "^PRECHECK_RESULT=(PASS|BLOCKED)$"
         $outputOk = $true
     } catch {
+        $writeErrType = $_.Exception.GetType().FullName
+        $writeErrMsg  = $_.Exception.Message
         $fb = New-Object System.Collections.Generic.List[string]
         $fb.Add("NetManager Agent v2 - Preflight output validation FAILED") | Out-Null
-        $fb.Add(("Failure type    : " + $_.Exception.GetType().FullName)) | Out-Null
-        $fb.Add(("Detail          : " + $_.Exception.Message)) | Out-Null
+        $fb.Add(("Failure type    : " + $writeErrType)) | Out-Null
+        $fb.Add(("Detail          : " + $writeErrMsg)) | Out-Null
         $fb.Add("This file exists because the primary writer or self-validation rejected the primary output.") | Out-Null
         $fb.Add("Send THIS file back along with the (likely corrupt) preflight.txt next to it.") | Out-Null
         $fb.Add("") | Out-Null
@@ -484,7 +501,9 @@ try {
         Write-Host ("Preflight written to: " + $OutFile)
     } else {
         Write-Host "PRECHECK OUTPUT VALIDATION FAILED"
-        Write-Host ("Fallback : " + $FallbackFile)
+        Write-Host ("Failure type : " + $writeErrType)
+        Write-Host ("Detail       : " + $writeErrMsg)
+        Write-Host ("Fallback     : " + $FallbackFile)
     }
 }
 
