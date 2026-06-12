@@ -1,0 +1,34 @@
+﻿{
+  "$comment": "EXAMPLE ONLY. Never put a real production agent_key, hub URL, or token here. The manual test campaign uses a SEPARATELY delivered installer .ps1; this file is reference for what the operator should expect to be asked, not a config the test scripts read.",
+  "manual_test_profile": {
+    "name": "windows-agent-v2-manual-2026-06",
+    "intended_runner": "Real Turkish Windows test machine, via AnyDesk",
+    "windows_minimum": {
+      "edition": "Windows 10 Pro 64-bit OR Windows Server 2019/2022 64-bit",
+      "powershell": "Windows PowerShell 5.1 (Desktop edition)",
+      "tls": "1.2 enabled",
+      "free_disk_gb_required": 2
+    }
+  },
+  "agent_placeholder": {
+    "$comment": "These are placeholders -- the real values arrive separately from the platform owner over a different channel.",
+    "agent_id": "REPLACE_WITH_NUMERIC_AGENT_ID",
+    "agent_key": "REPLACE_WITH_AGENT_KEY",
+    "hub_url": "https://REPLACE_WITH_HUB_HOST"
+  },
+  "output_locations": {
+    "package_outputs_dir": "C:\\Users\\Public\\CharonAgentTest",
+    "diagnostics_zip_pattern": "C:\\Users\\Public\\CharonAgentTest\\CharonAgentDiagnostics-<UTC>.zip"
+  },
+  "what_operator_returns": [
+    "preflight.txt",
+    "post-install.txt (only after a separate GO)",
+    "service-lifecycle.txt (only on explicit request)",
+    "CharonAgentDiagnostics-<UTC>.zip (only on explicit request)"
+  ],
+  "do_not_send_back": [
+    "C:\\ProgramData\\NetManagerAgent\\config.env",
+    "C:\\ProgramData\\NetManagerAgent\\bin\\charon-agent-host.exe.bak",
+    "any file containing X-Agent-Key, AGENT_KEY=, Bearer, JWT, or UUID-shaped tokens not already masked by the test package"
+  ]
+}
