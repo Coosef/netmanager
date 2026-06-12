@@ -1552,7 +1552,7 @@
     "windows_label": "Windows",
     "windows_sub": "Windows Service",
     "linux_hint": "Paste the command into a terminal, or download the .sh file and run with sudo bash. Root access required.",
-    "windows_hint": "Paste the command into an elevated PowerShell window, or download the .ps1 file and run as administrator.",
+    "windows_hint": "Download and run the Windows installer. It will automatically request Administrator privileges when required.",
     "download_linux": "Download Linux Installer (.sh)",
     "download_windows": "Download Windows Installer (.ps1)",
     "oneliner_label": "One-liner Install (Copy & Paste)",
@@ -1569,9 +1569,9 @@
     "detail_ip": "IP",
     "detail_heartbeat": "Last Heartbeat",
     "detail_created": "Created",
-    "windows_download_primary_hint": "Download the installer and run it with Windows PowerShell. The installer will request Administrator privileges automatically when needed.",
     "windows_download_failed": "Could not download the Windows installer. Please try again.",
-    "windows_validation_failed": "Could not validate the Windows installer. Please try again."
+    "windows_validation_failed": "Could not validate the Windows installer. Please try again.",
+    "linux_download_failed": "Could not download the Linux installer. Please try again."
   },
   "users": {
     "title": "Users",

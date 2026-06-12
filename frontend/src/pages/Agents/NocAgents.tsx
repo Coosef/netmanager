@@ -318,13 +318,18 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
         await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
       }
     } catch (e: any) {
-      // Generic user-facing message. The error tag never carries
-      // the agent key or the backend response body.
+      // Generic, platform-aware user-facing message. The error tag
+      // never carries the agent key or the backend response body.
+      // The Linux failure path previously surfaced the Windows
+      // download/validation strings; each platform now has its own
+      // i18n key.
       const tag = e?.kind ?? e?.message
       const friendly =
-        tag === 'validation'
-          ? t('agents.windows_validation_failed')
-          : t('agents.windows_download_failed')
+        platform === 'windows'
+          ? tag === 'validation'
+            ? t('agents.windows_validation_failed')
+            : t('agents.windows_download_failed')
+          : t('agents.linux_download_failed')
       // eslint-disable-next-line no-alert
       alert(friendly)
     } finally {
@@ -389,6 +394,9 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
               </div>
             </div>
           )}
+          {/* Single authoritative platform hint -- the previous
+              secondary button-bottom Text duplicated the message
+              and is gone. */}
           <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }} message={platform === 'linux' ? t('agents.linux_hint') : t('agents.windows_hint')} />
           <Button type="default" icon={<DownloadOutlined />} block
             loading={downloading}
@@ -396,11 +404,6 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
             data-testid="installer-download-button">
             {platform === 'linux' ? t('agents.download_linux') : t('agents.download_windows')}
           </Button>
-          {platform === 'windows' && (
-            <Text style={{ display: 'block', fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
-              {t('agents.windows_download_primary_hint')}
-            </Text>
-          )}
         </>
       )}
     </Modal>

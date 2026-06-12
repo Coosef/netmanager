@@ -1552,7 +1552,7 @@
     "windows_label": "Windows",
     "windows_sub": "Windows Servisi",
     "linux_hint": "Komutu terminale yapıştırın veya .sh dosyasını indirip sudo bash ile çalıştırın. Root yetkisi gerektirir.",
-    "windows_hint": "Komutu PowerShell (Yönetici) penceresine yapıştırın veya .ps1 dosyasını indirip Yönetici olarak çalıştırın.",
+    "windows_hint": "Windows kurulum betiğini indirin ve çalıştırın. Kurulum gerektiğinde otomatik olarak Yönetici yetkisi isteyecektir.",
     "download_linux": "Linux Kurulum Betiği İndir (.sh)",
     "download_windows": "Windows Kurulum Betiği İndir (.ps1)",
     "oneliner_label": "Tek Komutla Kur (Kopyala & Yapıştır)",
@@ -1569,9 +1569,9 @@
     "detail_ip": "IP",
     "detail_heartbeat": "Son Heartbeat",
     "detail_created": "Oluşturulma",
-    "windows_download_primary_hint": "Kurulum dosyasını indirin ve Windows PowerShell ile çalıştırın. Kurulum gerektiğinde otomatik olarak Yönetici yetkisi isteyecektir.",
     "windows_download_failed": "Windows kurulum dosyası indirilemedi. Lütfen tekrar deneyin.",
-    "windows_validation_failed": "Windows kurulum dosyası doğrulanamadı. Lütfen tekrar deneyin."
+    "windows_validation_failed": "Windows kurulum dosyası doğrulanamadı. Lütfen tekrar deneyin.",
+    "linux_download_failed": "Linux kurulum dosyası indirilemedi. Lütfen tekrar deneyin."
   },
   "users": {
     "title": "Kullanıcılar",

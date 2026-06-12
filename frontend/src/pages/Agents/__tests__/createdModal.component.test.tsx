@@ -195,12 +195,13 @@ describe('CreatedModal — Windows path', () => {
     expect(screen.queryByText('agents.oneliner_label')).toBeNull()
   })
 
-  it('shows the primary download hint', async () => {
+  it('shows a single authoritative Windows hint (Alert) and no secondary copy', async () => {
     renderModal()
     fireEvent.click(screen.getByText('agents.windows_label'))
-    expect(
-      await screen.findByText('agents.windows_download_primary_hint'),
-    ).toBeTruthy()
+    // The Alert with `agents.windows_hint` is the only Windows hint.
+    expect(await screen.findByText('agents.windows_hint')).toBeTruthy()
+    // The previously duplicated button-bottom hint key is gone.
+    expect(screen.queryByText('agents.windows_download_primary_hint')).toBeNull()
   })
 
   it('clicking download issues exactly one fetch with the X-Agent-Key header', async () => {
@@ -342,10 +343,9 @@ describe('CreatedModal — Linux path UNCHANGED', () => {
     // download button still present
     const btn = screen.getByTestId('installer-download-button')
     expect(btn.textContent).toContain('agents.download_linux')
-    // Windows primary hint NOT shown
-    expect(
-      screen.queryByText('agents.windows_download_primary_hint'),
-    ).toBeNull()
+    // Linux-specific Alert hint visible; Windows hint NOT shown
+    expect(screen.getByText('agents.linux_hint')).toBeTruthy()
+    expect(screen.queryByText('agents.windows_hint')).toBeNull()
   })
 
   it('Linux download uses agentsApi.downloadInstallerFile (not the byte helper)', async () => {
@@ -366,5 +366,185 @@ describe('CreatedModal — Linux path UNCHANGED', () => {
     expect(args[0]).toBe(FAKE_AGENT.id)
     expect(args[1]).toBe(FAKE_AGENT.agent_key)
     expect(args[2]).toBe('linux')
+  })
+
+  it('Linux failure shows the LINUX i18n message (not the Windows key)', async () => {
+    const { agentsApi } = await import('@/api/agents')
+    const dlSpy = agentsApi.downloadInstallerFile as any
+    dlSpy.mockClear?.()
+    dlSpy.mockImplementationOnce(async () => {
+      const err: any = new Error('boom')
+      err.status = 500
+      throw err
+    })
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+
+    renderModal()
+    fireEvent.click(screen.getByText('agents.linux_label'))
+    const btn = await screen.findByTestId('installer-download-button')
+
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+
+    expect(alertSpy).toHaveBeenCalledTimes(1)
+    const msg = alertSpy.mock.calls[0][0] as string
+    expect(msg).toBe('agents.linux_download_failed')
+    // Crucially: the Windows i18n keys do NOT leak onto the
+    // Linux path -- the original review #3 bug.
+    expect(msg).not.toBe('agents.windows_download_failed')
+    expect(msg).not.toBe('agents.windows_validation_failed')
+    // No agent key, no URL, no raw exception
+    expect(msg).not.toContain(FAKE_AGENT.agent_key)
+    expect(msg).not.toContain('boom')
+    expect(msg).not.toMatch(/api\/v1\/agents/)
+  })
+
+  it('Linux: retry after failure is allowed (guard resets, second click runs)', async () => {
+    const { agentsApi } = await import('@/api/agents')
+    const dlSpy = agentsApi.downloadInstallerFile as any
+    dlSpy.mockClear?.()
+    // first call fails, second succeeds
+    dlSpy
+      .mockImplementationOnce(async () => {
+        throw new Error('boom')
+      })
+      .mockImplementationOnce(async () => undefined)
+    vi.spyOn(window, 'alert').mockImplementation(() => {})
+
+    renderModal()
+    fireEvent.click(screen.getByText('agents.linux_label'))
+    const btn = await screen.findByTestId('installer-download-button')
+
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(dlSpy).toHaveBeenCalledTimes(1)
+
+    // Second click must reach the API again -- the guard should be
+    // released by the finally{} block.
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(dlSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+
+// ────────────────────────────────────────────────────────────────
+// Loading state (deferred Promise)
+// ────────────────────────────────────────────────────────────────
+
+
+describe('CreatedModal -- loading state (deferred resolve / reject)', () => {
+  // tiny deferred helper -- reuse across success and error cases
+  function deferred<T = void>() {
+    let resolve!: (v: T) => void
+    let reject!: (e: any) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+    return { promise, resolve, reject }
+  }
+
+  it('Windows: button shows loading until fetch resolves; second click during loading is ignored', async () => {
+    const d = deferred<any>()
+    const url = installURLMock()
+    const mock = vi.fn(() => d.promise as any) as any
+    // @ts-ignore
+    globalThis.fetch = mock as any
+
+    renderModal()
+    fireEvent.click(screen.getByText('agents.windows_label'))
+    const btn = await screen.findByTestId('installer-download-button')
+
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(mock).toHaveBeenCalledTimes(1)
+    // AntD adds `ant-btn-loading` to the button class while loading.
+    // Second click should be swallowed by the concurrent guard.
+    expect(btn.className).toMatch(/ant-btn-loading/)
+
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(mock).toHaveBeenCalledTimes(1)
+
+    // Resolve the deferred -> loading clears + Object URL workflow runs
+    const bytes = buildValidInstaller()
+    await act(async () => {
+      d.resolve({
+        ok: true,
+        arrayBuffer: async () =>
+          bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          ),
+      })
+      // drain microtasks
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(btn.className).not.toMatch(/ant-btn-loading/)
+    expect(url.created.length).toBe(1)
+
+    // A subsequent independent click must start a new request.
+    const d2 = deferred<any>()
+    mock.mockImplementationOnce(() => d2.promise)
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(mock).toHaveBeenCalledTimes(2)
+    await act(async () => {
+      d2.resolve({
+        ok: true,
+        arrayBuffer: async () =>
+          bytes.buffer.slice(
+            bytes.byteOffset,
+            bytes.byteOffset + bytes.byteLength,
+          ),
+      })
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(btn.className).not.toMatch(/ant-btn-loading/)
+  })
+
+  it('Windows: button clears loading after deferred REJECT and allows retry', async () => {
+    const d = deferred<any>()
+    const mock = vi.fn(() => d.promise as any) as any
+    // @ts-ignore
+    globalThis.fetch = mock as any
+    installURLMock()
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
+
+    renderModal()
+    fireEvent.click(screen.getByText('agents.windows_label'))
+    const btn = await screen.findByTestId('installer-download-button')
+
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(btn.className).toMatch(/ant-btn-loading/)
+
+    // Reject the deferred -> alert fires, loading clears, retry OK.
+    await act(async () => {
+      d.reject(new Error('network'))
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(btn.className).not.toMatch(/ant-btn-loading/)
+    expect(alertSpy).toHaveBeenCalledTimes(1)
+    expect(alertSpy.mock.calls[0][0]).toBe('agents.windows_download_failed')
+
+    // Retry after failure
+    const d2 = deferred<any>()
+    mock.mockImplementationOnce(() => d2.promise)
+    await act(async () => {
+      fireEvent.click(btn)
+    })
+    expect(mock).toHaveBeenCalledTimes(2)
   })
 })

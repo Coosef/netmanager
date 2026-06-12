@@ -1552,7 +1552,7 @@
     "windows_label": "Windows",
     "windows_sub": "Служба Windows",
     "linux_hint": "Скопируйте загруженный файл .sh на сервер и запустите: sudo bash netmanager-agent-*.sh",
-    "windows_hint": "Щёлкните правой кнопкой мыши загруженный файл .ps1 и выберите «Запуск от имени администратора».",
+    "windows_hint": "Скачайте и запустите установочный сценарий Windows. При необходимости установщик автоматически запросит права администратора.",
     "download_linux": "Скачать установщик Linux (.sh)",
     "download_windows": "Скачать установщик Windows (.ps1)",
     "oneliner_label": "Установка одной командой (Копировать и вставить)",
@@ -1569,9 +1569,9 @@
     "detail_ip": "IP",
     "detail_heartbeat": "Последний пульс",
     "detail_created": "Создано",
-    "windows_download_primary_hint": "Скачайте установочный файл и запустите его через Windows PowerShell. При необходимости установщик автоматически запросит права администратора.",
     "windows_download_failed": "Не удалось скачать установщик Windows. Попробуйте ещё раз.",
-    "windows_validation_failed": "Не удалось проверить установщик Windows. Попробуйте ещё раз."
+    "windows_validation_failed": "Не удалось проверить установщик Windows. Попробуйте ещё раз.",
+    "linux_download_failed": "Не удалось скачать установщик Linux. Попробуйте ещё раз."
   },
   "users": {
     "title": "Пользователи",

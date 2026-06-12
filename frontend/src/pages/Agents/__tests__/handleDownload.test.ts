@@ -59,10 +59,22 @@ describe('NocAgents — source guards (component test is authoritative)', () => 
     expect(SRC).toMatch(/platform === 'linux'\s*&&\s*installCmd/)
   })
 
-  it('uses i18n keys for hint + error messages', () => {
-    expect(SRC).toContain("t('agents.windows_download_primary_hint')")
+  it('uses i18n keys for platform-aware error messages', () => {
+    // Authoritative hint is the single Alert in the JSX
+    // (`agents.windows_hint` / `agents.linux_hint`). The previously
+    // duplicate `agents.windows_download_primary_hint` reference is
+    // gone now that the hint lives in only one place.
+    expect(SRC).not.toContain("t('agents.windows_download_primary_hint')")
+    // Each platform now has its own download-failure key.
     expect(SRC).toContain("t('agents.windows_download_failed')")
     expect(SRC).toContain("t('agents.windows_validation_failed')")
+    expect(SRC).toContain("t('agents.linux_download_failed')")
+  })
+
+  it('selects the failure key based on the active platform', () => {
+    // The Linux failure path previously raised the Windows i18n key.
+    // Source-level guarantee that the platform check is in place.
+    expect(SRC).toMatch(/platform === ['"]windows['"]\s*[?]/)
   })
 
   it('preserves the Linux downloadInstallerFile call site verbatim', () => {
