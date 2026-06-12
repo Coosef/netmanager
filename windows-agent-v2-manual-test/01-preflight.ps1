@@ -48,10 +48,20 @@ function Add-Section {
 # Uses System.Text.UTF8Encoding($true) + WriteAllText -- the only path
 # that produces a deterministic single BOM and zero NUL bytes on
 # Windows PowerShell 5.1. Does NOT concatenate byte arrays.
+#
+# IMPORTANT (PS 5.1 quirk): the $Buffer parameter is intentionally
+# UNTYPED. Declaring it as [System.Collections.Generic.List[string]]
+# triggers PS 5.1's ParameterBinder to call ToString() on the value
+# while validating, which on List[string] returns the type name --
+# not the values -- and then strict type-check fails with
+# "Cannot bind argument to parameter 'Buffer' because it is an empty
+# string." On PS 7.x this does not happen. Leaving it untyped means
+# the `-join` below handles the List, an Object[], or a string[]
+# all the same way.
 function Write-Utf8BomCrLfFile {
     param(
         [Parameter(Mandatory=$true)][string]$LiteralPath,
-        [Parameter(Mandatory=$true)][System.Collections.Generic.List[string]]$Buffer
+        [Parameter(Mandatory=$true)]$Buffer
     )
     $joined = ($Buffer -join "`r`n")
     # Strip trailing CR/LF and re-append exactly one CRLF

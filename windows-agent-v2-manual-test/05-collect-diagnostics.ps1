@@ -49,10 +49,14 @@ function Mask-Line([string]$s) {
 }
 
 # Authoritative UTF-8 BOM + CRLF writer (PS 5.1 safe; no byte-array concat).
+# $Lines is intentionally untyped -- see 01-preflight.ps1 for the PS 5.1
+# ParameterBinder quirk that makes a typed List[string] / string[] parameter
+# fail with "Cannot bind argument to parameter ... because it is an empty
+# string." The -join below accepts List/Object[]/string[] interchangeably.
 function Write-Utf8BomCrLf {
     param(
         [Parameter(Mandatory=$true)][string]$LiteralPath,
-        [Parameter(Mandatory=$true)][string[]]$Lines
+        [Parameter(Mandatory=$true)]$Lines
     )
     $joined = ($Lines -join "`r`n")
     $normalized = $joined.TrimEnd([char]13, [char]10) + "`r`n"
