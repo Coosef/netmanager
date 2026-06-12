@@ -34,23 +34,39 @@ export function buildLinuxInstallCmd(agentKey: string, downloadUrl: string): str
 }
 
 
-export function buildWindowsInstallCmd(agentKey: string, downloadUrl: string): string {
-  // Windows PowerShell 5.1 uyumlu, multiline + backtick line-continuation.
-  // Yorum satırları kullanıcı için dokümantasyon; PowerShell parse-skip eder.
+/**
+ * Build a file-based, side-effect-safe PowerShell command. The user
+ * downloads the installer to %TEMP%, then runs it via
+ * `powershell.exe ... -File`. This sets `$PSCommandPath`, so the
+ * installer's self-elevation and try/finally cleanup work as
+ * designed (see backend installer template).
+ *
+ * The previous flow piped Invoke-WebRequest to Invoke-Expression
+ * (`iwr | iex`). That left `$PSCommandPath` empty, broke
+ * self-elevation, blocked the installer's all-path cleanup, and
+ * left the agent key in the terminal history. None of that
+ * remains.
+ *
+ * The download URL placeholder must include the dynamic agent ID
+ * (the URL is built by the caller). The agent key travels as a
+ * header, NEVER as a URL parameter or filename component.
+ */
+export function buildWindowsInstallCmd(
+  agentId: string,
+  agentKey: string,
+  downloadUrl: string,
+): string {
+  // Filename uses the same sanitiser as the actual download flow
+  // (see buildSafeInstallerFilename in windowsInstallerDownload.ts).
+  // `.` is excluded so `..\` traversal tokens cannot survive.
+  const cleanedId = String(agentId ?? '').replace(/[^A-Za-z0-9_-]/g, '')
+  const safeId = cleanedId || 'agent'
   const lines = [
-    '# Windows PowerShell\'i Yonetici olarak acin (PS 5.1 uyumlu)',
     '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
-    'Set-ExecutionPolicy Bypass -Scope Process -Force',
-    '',
-    '$hdr = @{',
-    `  "X-Agent-Key" = "${agentKey}"`,
-    '}',
-    '',
-    'iwr `',
-    `  -Uri "${downloadUrl}" \``,
-    '  -Headers $hdr `',
-    '  -UseBasicParsing |',
-    '  iex',
+    `$installer = Join-Path $env:TEMP "netmanager-agent-${safeId}-installer.ps1"`,
+    `$headers = @{"X-Agent-Key" = "${agentKey}"}`,
+    `Invoke-WebRequest -Uri "${downloadUrl}" -Headers $headers -UseBasicParsing -OutFile $installer`,
+    'powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer',
   ]
   return lines.join('\n')
 }

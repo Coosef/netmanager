@@ -17,10 +17,8 @@ import AgentDetailModal from './AgentDetailModal'
 import {
   buildLinuxInstallCmd,
   buildWindowsInstallCmd,
-  isValidWindowsInstallerScript,
-  SAFE_DOWNLOAD_ERROR_MESSAGE_TR,
-  SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR,
 } from './installCmd'
+import { downloadWindowsInstaller } from './windowsInstallerDownload'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -294,7 +292,7 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
   const installCmd = platform === 'linux' && downloadUrl
     ? buildLinuxInstallCmd(agent.agent_key, downloadUrl)
     : platform === 'windows' && downloadUrl
-    ? buildWindowsInstallCmd(agent.agent_key, downloadUrl)
+    ? buildWindowsInstallCmd(agent.id, agent.agent_key, downloadUrl)
     : null
   const [downloading, setDownloading] = useState(false)
   const handleDownload = async () => {
@@ -303,46 +301,33 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
     setDownloading(true)
     try {
       if (platform === 'windows') {
-        // Windows: fetch + script validation + Blob anchor.
-        // Linux'tan AYRI yol çünkü Windows için script içeriği PS 5.1
-        // uyumluluğunu doğrulamak ZORUNLU (backend response yanlışsa
-        // kullanıcı sessizce bozuk dosya indirmesin).
+        // WIN-FRONTEND: byte-perfect download. The helper:
+        //  · uses res.arrayBuffer() and builds the Blob from the
+        //    ORIGINAL buffer (no text() / re-encode)
+        //  · validates a temporary decoded copy
+        //  · sanitises the filename so traversal characters cannot
+        //    leak through agent.id
+        //  · never reads response body on HTTP failure (no key leak)
         const url = `/api/v1/agents/${agent.id}/download/windows${
           base ? `?server_url=${encodeURIComponent(base)}` : ''
         }`
-        const res = await fetch(url, {
-          headers: { 'X-Agent-Key': agent.agent_key },
+        await downloadWindowsInstaller({
+          agentId: agent.id,
+          agentKey: agent.agent_key,
+          url,
         })
-        if (!res.ok) {
-          // Backend response body veya HTTP status DETAYI kullanıcıya
-          // gösterilmez (sızıntı koruması). Generic mesaj.
-          throw new Error('http')
-        }
-        const text = await res.text()
-        if (!isValidWindowsInstallerScript(text)) {
-          throw new Error('validation')
-        }
-        // Validation geçti → Blob anchor ile indir
-        const blob = new Blob([text], { type: 'application/octet-stream' })
-        const a = document.createElement('a')
-        a.href = URL.createObjectURL(blob)
-        a.download = `netmanager-agent-${agent.id}-installer.ps1`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-        URL.revokeObjectURL(a.href)
       } else {
         // Linux: mevcut downloadInstallerFile davranışı korundu.
         await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
       }
     } catch (e: any) {
-      // Hata mesajı kullanıcıya GENERIC — backend response body, agent key,
-      // sunucu detayları LOG/UI/TOAST'a sızmaz.
-      const tag = e?.message
+      // Generic user-facing message. The error tag never carries
+      // the agent key or the backend response body.
+      const tag = e?.kind ?? e?.message
       const friendly =
         tag === 'validation'
-          ? SAFE_SCRIPT_VALIDATION_ERROR_MESSAGE_TR
-          : SAFE_DOWNLOAD_ERROR_MESSAGE_TR
+          ? t('agents.windows_validation_failed')
+          : t('agents.windows_download_failed')
       // eslint-disable-next-line no-alert
       alert(friendly)
     } finally {
@@ -405,6 +390,11 @@ function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: string }
             onClick={handleDownload}>
             {platform === 'linux' ? t('agents.download_linux') : t('agents.download_windows')}
           </Button>
+          {platform === 'windows' && (
+            <Text style={{ display: 'block', fontSize: 11, color: C.muted, marginTop: 8, lineHeight: 1.5 }}>
+              {t('agents.windows_download_primary_hint')}
+            </Text>
+          )}
         </>
       )}
     </Modal>

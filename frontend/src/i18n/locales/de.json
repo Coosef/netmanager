@@ -1568,7 +1568,11 @@
     "detail_version": "Version",
     "detail_ip": "IP",
     "detail_heartbeat": "Letzter Herzschlag",
-    "detail_created": "Erstellt"
+    "detail_created": "Erstellt",
+    "windows_download_primary_hint": "Laden Sie die Installationsdatei herunter und führen Sie sie mit Windows PowerShell aus. Der Installer fordert bei Bedarf automatisch Administratorrechte an.",
+    "windows_download_secondary_label": "Manueller Befehl (erweitert)",
+    "windows_download_failed": "Windows-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen.",
+    "windows_validation_failed": "Windows-Installationsdatei konnte nicht validiert werden. Bitte erneut versuchen."
   },
   "users": {
     "title": "Benutzer",

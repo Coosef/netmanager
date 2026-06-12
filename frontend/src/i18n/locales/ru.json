@@ -1568,7 +1568,11 @@
     "detail_version": "Версия",
     "detail_ip": "IP",
     "detail_heartbeat": "Последний пульс",
-    "detail_created": "Создано"
+    "detail_created": "Создано",
+    "windows_download_primary_hint": "Скачайте установочный файл и запустите его через Windows PowerShell. При необходимости установщик автоматически запросит права администратора.",
+    "windows_download_secondary_label": "Ручная команда (расширенно)",
+    "windows_download_failed": "Не удалось скачать установщик Windows. Попробуйте ещё раз.",
+    "windows_validation_failed": "Не удалось проверить установщик Windows. Попробуйте ещё раз."
   },
   "users": {
     "title": "Пользователи",
