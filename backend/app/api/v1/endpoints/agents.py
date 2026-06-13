@@ -920,6 +920,151 @@ async def download_agent_host(
     )
 
 
+# ---------------------------------------------------------------------
+# WIN-INTEGRATE — Windows agent v2 private Python runtime bundle
+# ---------------------------------------------------------------------
+#
+# Two new flag-gated endpoints (Section D of the architecture plan):
+#
+#   GET /api/v1/agents/{agent_id}/download/runtime/windows-amd64/manifest
+#   GET /api/v1/agents/{agent_id}/download/runtime/windows-amd64
+#
+# Both share the host endpoint's gating shape:
+#   - flag off            → 404 (do not hint the endpoint exists)
+#   - missing X-Agent-Key → 401
+#   - wrong agent or key  → 404 (info-disclosure safe)
+#   - integrity failure   → 503 (generic)
+#
+# The on-disk source-of-truth is parallel to the host binary at
+# `agents.py:718-720`:
+#   /opt/netmanager/agent-bins/charon-runtime-windows-amd64.current        (single-line version)
+#   /opt/netmanager/agent-bins/charon-runtime-windows-amd64-<v>.zip
+#   /opt/netmanager/agent-bins/charon-runtime-windows-amd64-<v>.zip.sha256
+#   /opt/netmanager/agent-bins/charon-runtime-windows-amd64-<v>.manifest.json
+#
+# Integrity is checked once per process boot and memoized via
+# `app.services.windows_runtime.integrity.runtime_integrity()`.
+
+
+async def _authenticate_runtime_agent(
+    agent_id: str,
+    x_agent_key: str | None,
+    db: AsyncSession,
+) -> None:
+    """Shared auth gate for the two runtime endpoints.
+
+    Raises HTTPException(404) when the flag is off, (401) when the
+    header is missing, or (404) when the agent or key is wrong.
+    Returns None on success.
+    """
+    if not settings.WINDOWS_AGENT_V2_ENABLED:
+        raise HTTPException(status_code=404, detail="Endpoint not available")
+    if not x_agent_key:
+        raise HTTPException(status_code=401, detail="X-Agent-Key header required")
+
+    from sqlalchemy import text as _sql_text
+    await db.execute(_sql_text("SELECT set_config('app.is_super_admin', 'on', true)"))
+    result = await db.execute(
+        select(Agent).where(Agent.id == agent_id, Agent.is_active == True)
+    )
+    agent = result.scalar_one_or_none()
+    if not agent or not verify_password(x_agent_key, agent.agent_key_hash):
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+
+@agents_public_router.get("/{agent_id}/download/runtime/windows-amd64/manifest")
+async def download_agent_runtime_manifest(
+    agent_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_agent_key: str = Header(None, alias="X-Agent-Key"),
+):
+    """Serve the detached runtime-bundle manifest (JSON).
+
+    The body is the on-disk manifest bytes VERBATIM — the installer
+    persists the response and feeds it back through the same Pydantic
+    schema at Stage 4, so any in-flight reformatting (key re-order,
+    re-indent) would break that downstream parity. We do NOT
+    re-serialize.
+    """
+    import logging
+    log = logging.getLogger("netmanager.security")
+
+    await _authenticate_runtime_agent(agent_id, x_agent_key, db)
+
+    integ = _host_integrity()
+    baked_version = integ.version if integ.ok else None
+
+    from app.services.windows_runtime.integrity import runtime_integrity
+    r = runtime_integrity(baked_version)
+    if not r.ok or r.manifest_bytes is None:
+        log.error("runtime manifest integrity check failed: %s", r.error)
+        raise HTTPException(status_code=503, detail="Runtime bundle not available")
+
+    return Response(
+        content=r.manifest_bytes,
+        media_type="application/json",
+        headers={
+            "Content-Length": str(len(r.manifest_bytes)),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
+@agents_public_router.get("/{agent_id}/download/runtime/windows-amd64")
+async def download_agent_runtime(
+    agent_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    x_agent_key: str = Header(None, alias="X-Agent-Key"),
+):
+    """Serve the runtime-bundle ZIP.
+
+    Range requests are NOT supported in MVP; a `Range` header is
+    ignored and the full 200 response is served (parity with the
+    host binary endpoint above).
+    """
+    import logging
+    log = logging.getLogger("netmanager.security")
+
+    await _authenticate_runtime_agent(agent_id, x_agent_key, db)
+
+    integ = _host_integrity()
+    baked_version = integ.version if integ.ok else None
+
+    from app.services.windows_runtime.integrity import runtime_integrity
+    r = runtime_integrity(baked_version)
+    if not r.ok or r.zip_path is None or r.manifest is None:
+        log.error("runtime zip integrity check failed: %s", r.error)
+        raise HTTPException(status_code=503, detail="Runtime bundle not available")
+
+    try:
+        with open(r.zip_path, "rb") as f:
+            body_bytes = f.read()
+    except OSError:
+        log.error("runtime zip read failed at request time")
+        raise HTTPException(status_code=503, detail="Runtime bundle not available")
+
+    filename = f"charon-runtime-windows-amd64-{r.version}.zip"
+    return Response(
+        content=body_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Length": str(len(body_bytes)),
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+            "X-Charon-Runtime-Version": r.manifest.runtime_version,
+            "X-Charon-Runtime-Zip-Sha256": r.zip_sha256 or "",
+            "X-Charon-Python-Version": r.manifest.python_version,
+            "X-Charon-Compatible-Host-Core-Range": r.manifest.compatible_host_core_range,
+        },
+    )
+
+
 # HF#10A — public router (gate'siz). X-Agent-ID + X-Agent-Key endpoint içinde doğrulanır.
 @agents_public_router.get("/download/script")
 async def download_agent_script(
