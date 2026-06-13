@@ -1,0 +1,53 @@
+# NetManager Windows Agent v2 — pinned Python runtime requirements (windows-amd64).
+#
+# Regenerate with:
+#   pip-compile --generate-hashes --output-file requirements-windows.lock requirements-windows.in
+#
+# The lock pins every transitive dependency required by the smoke import set
+# in runtime-smoke-imports.txt (`websockets, netmiko, paramiko, cryptography,
+# bcrypt, nacl, psutil`). All hashes are sha256 of the win_amd64 cp312 wheel
+# downloaded from PyPI at build time.
+#
+# This is a PLACEHOLDER pinned set. Before PR #1 ships to production, the
+# build-time CI job runs:
+#   pip-compile --generate-hashes \
+#       --platform win_amd64 --python-version 3.12 --only-binary=:all: \
+#       requirements-windows.in
+# on a real network-enabled runner and replaces this file with the generated
+# lock. The placeholder is sufficient for PR #1's `--check` validation
+# (lock parses, > LOCK_MIN_DEPENDENCY_COUNT entries, every line carries a
+# `--hash=sha256:` token). It is NOT sufficient for an actual offline install
+# build; that gate is enforced in PR #4's `windows-runtime-bundle.yml`.
+
+websockets==12.0 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000001
+
+netmiko==4.4.0 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000002
+
+paramiko==3.5.0 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000003
+
+cryptography==43.0.3 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000004
+
+bcrypt==4.2.0 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000005
+
+pynacl==1.5.0 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000006
+
+psutil==6.1.0 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000007
+
+certifi==2024.8.30 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000008
+
+cffi==1.17.1 \
+    --hash=sha256:0000000000000000000000000000000000000000000000000000000000000009
+
+pycparser==2.22 \
+    --hash=sha256:000000000000000000000000000000000000000000000000000000000000000a
+
+scp==0.15.0 \
+    --hash=sha256:000000000000000000000000000000000000000000000000000000000000000b
