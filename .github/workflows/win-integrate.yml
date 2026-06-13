@@ -28,6 +28,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        # Full history is required so the Host CLI contract pin test
+        # (test_pin_commit_is_reachable_from_head) can run
+        # `git merge-base --is-ancestor e9becfe... HEAD` against the
+        # actual commit graph. With the default fetch-depth: 1 the
+        # pinned commit isn't in the runner's local git database even
+        # when it's an ancestor of origin/main.
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
