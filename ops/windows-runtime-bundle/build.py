@@ -5,23 +5,31 @@ Section C.1–C.6 + the runtime-smoke-imports.txt canonical contract
 (#34 + #47 + #63) + SOURCE_DATE_EPOCH rules (#22 + #31 + #39 + corrections
 through v11).
 
-PR #1 scope: this is the builder source. It supports a `--check` mode
-that exercises every fail-closed precondition WITHOUT downloading any
-embedded Python or any wheels. The full `--build` path (network download
-+ pip install --target + ZIP assembly) ships in PR #4 once the
-`windows-runtime-bundle.yml` CI workflow is in place.
+Two modes:
 
-The build mode REQUIRES SOURCE_DATE_EPOCH. The check mode also reads it
-(missing / malformed → exit 1) because that gate is the single most
-likely place for an operator mistake to slip through.
+  --check  — Validate every fail-closed precondition WITHOUT producing
+             a bundle. Confirms release-pins.toml grammar, lock-file
+             hashes, smoke-list canonical bytes, SOURCE_DATE_EPOCH
+             range. Same gate fires in both modes.
+  --build  — Assemble a deterministic ZIP + detached manifest + SHA-256
+             sidecar from a PRE-STAGED source tree. The fetch + stage
+             step (download Python embed, pip download wheelhouse, pip
+             install --target) is the workflow's responsibility; this
+             builder does not touch the network and does not write
+             outside `--output-dir`. Two clean builds with the same
+             SOURCE_DATE_EPOCH against an identical source tree produce
+             byte-identical ZIP + manifest + sidecar.
 """
 from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
+import json
 import os
 import re
 import sys
+import zipfile
 from pathlib import Path
 
 # Builder is a small enough script that we accept the toml-stdlib
@@ -354,6 +362,307 @@ def run_check(root: Path) -> int:
 
 
 # --------------------------------------------------------------------- #
+# `--build` driver (Section C.1 + C.5).
+# --------------------------------------------------------------------- #
+#
+# `--build` operates on a PRE-STAGED source tree that already contains:
+#
+#   <source-tree>/runtime/python/...                  (embed + .pyd + .dll)
+#   <source-tree>/app/run_agent.py                    (entrypoint)
+#   <source-tree>/app/netmanager_agent.py             (agent module)
+#   <source-tree>/licenses/...                        (per #8)
+#   <source-tree>/metadata/runtime-smoke-imports.txt  (byte copy of ops/)
+#
+# It NEVER reaches out to the network. The CI workflow stages everything
+# above (download python.org embed, pip-download wheelhouse, pip install
+# --target) BEFORE invoking the builder.
+
+# Deterministic ZIP constants — mirrored from release-pins.toml (those
+# are documentation; these are the source of truth at build time).
+ZIP_COMPRESSION_LEVEL = 6
+ZIP_FILE_MODE = 0o644
+# Unix (3) on the create-system byte makes the ZIP deterministic across
+# Linux- and Windows-hosted CI runners (Windows zipfile defaults to
+# create_system=0 = MS-DOS, which embeds the host's local timezone in
+# the extra field — kills cross-platform byte-equality).
+ZIP_CREATE_SYSTEM = 3
+ZIP_CREATE_VERSION = 20
+ZIP_EXTRACT_VERSION = 20
+
+# Reproducibility lexical order (#7) — UTF-8 binary, lowercased.
+_ZIP_SORT_KEY = lambda zip_name: zip_name.encode("utf-8").lower()
+
+# Per the architecture plan, the manifest's `entrypoint` is the canonical
+# Windows form `app\run_agent.py`. Any deviation in the staged tree is a
+# fail-closed builder error.
+EXPECTED_ENTRYPOINT_CANONICAL = "app\\run_agent.py"
+
+# Required top-level subtree roots (presence enforced before ZIP).
+_REQUIRED_SOURCE_ROOTS = ("runtime", "app", "licenses", "metadata")
+
+
+class _CollectedFile:
+    """A single staged file ready for ZIP assembly."""
+
+    __slots__ = ("zip_name", "canonical", "abs_path", "size", "sha256_lower")
+
+    def __init__(self, zip_name: str, canonical: str, abs_path: Path) -> None:
+        self.zip_name = zip_name        # POSIX form (forward slashes) — PKZIP standard
+        self.canonical = canonical      # Windows form (backslashes) — manifest schema
+        self.abs_path = abs_path
+        data = abs_path.read_bytes()
+        self.size = len(data)
+        self.sha256_lower = hashlib.sha256(data).hexdigest()
+
+
+def _collect_source_tree(source_tree: Path) -> list[_CollectedFile]:
+    """Walk the staged tree and return a sorted, deterministic file list.
+
+    Symlinks are NOT followed (`is_file()` returns True for files only;
+    Path.rglob does include directories, which we skip). Every file's
+    relative path is converted to canonical Windows form for the
+    manifest, with a POSIX twin for the ZIP entry name.
+
+    Sorted lexically by UTF-8-binary lowercase of the POSIX name — per
+    correction #7's reproducibility rule.
+    """
+    if not source_tree.is_dir():
+        raise BuilderError(f"source tree {source_tree} is not a directory")
+    files: list[_CollectedFile] = []
+    for entry in source_tree.rglob("*"):
+        if entry.is_symlink():
+            raise BuilderError(
+                f"source tree contains symlink {entry} — refused (Section F)"
+            )
+        if not entry.is_file():
+            continue
+        rel_posix = entry.relative_to(source_tree).as_posix()
+        canonical = rel_posix.replace("/", "\\")
+        files.append(_CollectedFile(rel_posix, canonical, entry))
+    files.sort(key=lambda f: _ZIP_SORT_KEY(f.zip_name))
+    return files
+
+
+def _enforce_top_level_subtree(source_tree: Path) -> None:
+    """Every top-level root listed in `_REQUIRED_SOURCE_ROOTS` MUST exist."""
+    missing = [
+        name for name in _REQUIRED_SOURCE_ROOTS
+        if not (source_tree / name).is_dir()
+    ]
+    if missing:
+        raise BuilderError(
+            f"source tree missing required top-level subtree(s): {missing}"
+        )
+
+
+def _enforce_smoke_list_parity(
+    source_tree: Path,
+    ops_smoke_list: Path,
+) -> None:
+    """The in-tree smoke list MUST be byte-identical to the ops/ source."""
+    in_tree = source_tree / "metadata" / SMOKE_LIST_FILENAME
+    if not in_tree.is_file():
+        raise BuilderError(
+            f"source tree missing metadata/{SMOKE_LIST_FILENAME}"
+        )
+    if in_tree.read_bytes() != ops_smoke_list.read_bytes():
+        raise BuilderError(
+            "in-tree metadata/runtime-smoke-imports.txt does not match "
+            "ops/windows-runtime-bundle/runtime-smoke-imports.txt — the "
+            "deployed copy MUST be a byte-for-byte mirror (correction #63)."
+        )
+
+
+def _emit_deterministic_zip(
+    zip_path: Path,
+    files: list[_CollectedFile],
+    bucket_epoch: int,
+) -> None:
+    """Write the ZIP at `zip_path` deterministically.
+
+    Two clean builds with the same `bucket_epoch` and the same `files`
+    list produce byte-identical ZIPs. Compression level is fixed at 6.
+    External attributes are normalized to `0o644 << 16` regardless of
+    host OS. `create_system` is forced to Unix (3) so a Windows host
+    runner cannot poison the file with DOS-time extra fields.
+    """
+    dt = datetime.datetime.fromtimestamp(bucket_epoch, datetime.timezone.utc)
+    date_time = (dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second)
+
+    if zip_path.exists():
+        zip_path.unlink()
+    zip_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with zipfile.ZipFile(
+        zip_path,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED,
+        compresslevel=ZIP_COMPRESSION_LEVEL,
+    ) as zf:
+        for entry in files:
+            zi = zipfile.ZipInfo(filename=entry.zip_name)
+            zi.date_time = date_time
+            zi.compress_type = zipfile.ZIP_DEFLATED
+            zi.create_system = ZIP_CREATE_SYSTEM
+            zi.create_version = ZIP_CREATE_VERSION
+            zi.extract_version = ZIP_EXTRACT_VERSION
+            zi.external_attr = (ZIP_FILE_MODE << 16)
+            zi.internal_attr = 0
+            with entry.abs_path.open("rb") as src:
+                zf.writestr(zi, src.read())
+
+
+def _emit_manifest(
+    manifest_path: Path,
+    pins: dict[str, object],
+    epoch: int,
+    files: list[_CollectedFile],
+    zip_size: int,
+    zip_sha256_lower: str,
+) -> bytes:
+    """Write the detached manifest JSON; return the bytes written.
+
+    Schema: Section C.2 of the architecture plan. Sorted keys, two-space
+    indent, trailing newline (per correction #7).
+    """
+    files_inventory = [
+        {
+            "path": f.canonical,
+            "size": f.size,
+            "sha256": f.sha256_lower.upper(),
+        }
+        for f in files
+    ]
+    canonical_inventory_paths = {f.canonical for f in files}
+    if EXPECTED_ENTRYPOINT_CANONICAL not in canonical_inventory_paths:
+        raise BuilderError(
+            f"staged tree does not contain entrypoint "
+            f"{EXPECTED_ENTRYPOINT_CANONICAL!r} (file missing from app/)"
+        )
+    smoke_canonical = "metadata\\" + SMOKE_LIST_FILENAME
+    if smoke_canonical not in canonical_inventory_paths:
+        raise BuilderError(
+            f"staged tree does not contain {smoke_canonical!r} "
+            f"(metadata subtree missing the deployed smoke list)"
+        )
+
+    manifest = {
+        "schema_version": 1,
+        "runtime_version": pins["RUNTIME_VERSION"],
+        "python_version": pins["PYTHON_VERSION"],
+        "platform": pins["BUNDLE_PLATFORM"],
+        "built_utc": epoch_to_iso8601_utc(epoch),
+        "embedded_python_source_sha256": str(pins["EMBEDDED_PYTHON_SHA256"]).upper(),
+        "zip_size_bytes": zip_size,
+        "zip_sha256": zip_sha256_lower.upper(),
+        "compatible_host_core_range": pins["COMPATIBLE_HOST_CORE_RANGE"],
+        "entrypoint": EXPECTED_ENTRYPOINT_CANONICAL,
+        "files": files_inventory,
+    }
+    body = (
+        json.dumps(manifest, sort_keys=True, indent=2).encode("utf-8")
+        + b"\n"
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_bytes(body)
+    return body
+
+
+def _emit_sha_sidecar(sha_path: Path, zip_sha256_lower: str) -> None:
+    """Write the `.zip.sha256` sidecar (lowercase + LF, matches the
+    backend's `_read_runtime_integrity()` parser exactly)."""
+    sha_path.parent.mkdir(parents=True, exist_ok=True)
+    sha_path.write_text(zip_sha256_lower + "\n", encoding="utf-8")
+
+
+def run_build(
+    root: Path,
+    *,
+    source_tree: Path,
+    output_dir: Path,
+) -> dict[str, object]:
+    """Build the runtime bundle from a pre-staged source tree.
+
+    Returns a result dict with paths + the computed SHA + the byte size.
+    Raises `BuilderError` (caught by `main`) on any validation failure.
+    """
+    pins = load_release_pins(root / "release-pins.toml")
+    upper = _probe_zip_upper_bound()
+    epoch = parse_source_date_epoch(dict(os.environ), upper_bound=upper)
+    modules = validate_smoke_list_bytes(root / SMOKE_LIST_FILENAME)
+    pinned = parse_requirements_lock(root / "requirements-windows.lock")
+    min_count = int(pins.get("LOCK_MIN_DEPENDENCY_COUNT", 0))
+    if len(pinned) < min_count:
+        raise BuilderError(
+            f"lock has {len(pinned)} pinned entries; floor is {min_count}."
+        )
+
+    _enforce_top_level_subtree(source_tree)
+    _enforce_smoke_list_parity(source_tree, root / SMOKE_LIST_FILENAME)
+    files = _collect_source_tree(source_tree)
+    if not files:
+        raise BuilderError("source tree contains no files")
+
+    runtime_version = str(pins["RUNTIME_VERSION"])
+    bundle_platform = str(pins["BUNDLE_PLATFORM"])
+    base = f"charon-runtime-{bundle_platform}-{runtime_version}"
+    zip_path      = output_dir / f"{base}.zip"
+    sha_path      = output_dir / f"{base}.zip.sha256"
+    manifest_path = output_dir / f"{base}.manifest.json"
+    current_path  = output_dir / f"charon-runtime-{bundle_platform}.current"
+
+    bucket_epoch = epoch_to_dos_bucket(epoch)
+    _emit_deterministic_zip(zip_path, files, bucket_epoch)
+    zip_bytes = zip_path.read_bytes()
+    zip_size = len(zip_bytes)
+    lower_bound = int(pins["SIZE_LOWER_BOUND_BYTES"])
+    upper_bound = int(pins["SIZE_UPPER_BOUND_BYTES"])
+    if zip_size < lower_bound:
+        raise BuilderError(
+            f"built ZIP size {zip_size} below SIZE_LOWER_BOUND_BYTES {lower_bound}"
+        )
+    if zip_size > upper_bound:
+        raise BuilderError(
+            f"built ZIP size {zip_size} above SIZE_UPPER_BOUND_BYTES {upper_bound}"
+        )
+    zip_sha256_lower = hashlib.sha256(zip_bytes).hexdigest()
+
+    manifest_bytes = _emit_manifest(
+        manifest_path, pins, epoch, files, zip_size, zip_sha256_lower,
+    )
+    _emit_sha_sidecar(sha_path, zip_sha256_lower)
+    current_path.parent.mkdir(parents=True, exist_ok=True)
+    current_path.write_text(runtime_version + "\n", encoding="utf-8")
+
+    return {
+        "zip_path":         zip_path,
+        "sha_path":         sha_path,
+        "manifest_path":    manifest_path,
+        "current_path":     current_path,
+        "zip_size":         zip_size,
+        "zip_sha256_lower": zip_sha256_lower,
+        "zip_sha256_upper": zip_sha256_lower.upper(),
+        "bucket_epoch":     bucket_epoch,
+        "runtime_version":  runtime_version,
+        "files":            files,
+        "manifest_bytes":   manifest_bytes,
+    }
+
+
+def _print_build_summary(result: dict[str, object]) -> None:
+    print(f"runtime_version         : {result['runtime_version']}")
+    print(f"bucket_epoch            : {result['bucket_epoch']}")
+    print(f"file_count              : {len(result['files'])}")
+    print(f"zip_size                : {result['zip_size']}")
+    print(f"zip_sha256              : {result['zip_sha256_upper']}")
+    print(f"zip_path                : {result['zip_path']}")
+    print(f"sha_path                : {result['sha_path']}")
+    print(f"manifest_path           : {result['manifest_path']}")
+    print(f"current_path            : {result['current_path']}")
+    print("BUILD_RESULT=OK")
+
+
+# --------------------------------------------------------------------- #
 # CLI entry.
 # --------------------------------------------------------------------- #
 
@@ -363,25 +672,58 @@ def main(argv: list[str] | None = None) -> int:
         prog="build.py",
         description=(
             "NetManager Windows Agent v2 runtime bundle builder. "
-            "The --check mode validates every fail-closed precondition "
-            "without producing a bundle; the full --build mode is wired "
-            "up in PR #4."
+            "--check validates every fail-closed precondition without "
+            "producing a bundle. --build assembles the deterministic ZIP "
+            "+ detached manifest + .sha256 sidecar from a pre-staged "
+            "source tree (fetch + stage is the workflow's responsibility)."
         ),
     )
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument(
         "--check",
         action="store_true",
         help="Validate inputs and SOURCE_DATE_EPOCH without building.",
+    )
+    mode.add_argument(
+        "--build",
+        action="store_true",
+        help="Build the runtime bundle from a pre-staged source tree.",
+    )
+    parser.add_argument(
+        "--source-tree",
+        type=Path,
+        help=(
+            "Directory containing the pre-staged runtime / app / licenses "
+            "/ metadata subtrees. REQUIRED when --build is set."
+        ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help=(
+            "Directory to write <prefix>.zip, <prefix>.zip.sha256, "
+            "<prefix>.manifest.json and the .current sidecar. REQUIRED "
+            "when --build is set."
+        ),
     )
     args = parser.parse_args(argv)
     root = Path(__file__).resolve().parent
     try:
         if args.check:
             return run_check(root)
-        print(
-            "FATAL: --build mode is gated to PR #4; this PR ships only --check.",
-            file=sys.stderr,
-        )
+        if args.build:
+            if args.source_tree is None or args.output_dir is None:
+                raise BuilderError(
+                    "--build requires --source-tree and --output-dir"
+                )
+            result = run_build(
+                root,
+                source_tree=args.source_tree,
+                output_dir=args.output_dir,
+            )
+            _print_build_summary(result)
+            return 0
+        # Unreachable — argparse mutually-exclusive group enforces it.
         return 1
     except BuilderError as err:
         print(f"BUILDER_ERROR: {err}", file=sys.stderr)

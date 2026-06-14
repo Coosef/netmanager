@@ -1,0 +1,447 @@
+name: windows-runtime-bundle
+
+# Triggers on any change to the builder source, its lockfile / pins /
+# smoke list, or this workflow itself. Runs deterministic build matrix +
+# fail-closed gates on every PR; merge to main re-runs the same matrix.
+# The companion `win-integrate.yml` workflow exercises the broader
+# WIN-INTEGRATE pytest surface (manifest schema, ZIP namespace safety,
+# host CLI contract pin) so this workflow stays focused on the BUILDER
+# itself.
+
+on:
+  pull_request:
+    paths:
+      - 'ops/windows-runtime-bundle/**'
+      - '.github/workflows/windows-runtime-bundle.yml'
+      - 'backend/tests/win_integrate/test_runtime_builder.py'
+  push:
+    branches: [main]
+    paths:
+      - 'ops/windows-runtime-bundle/**'
+      - '.github/workflows/windows-runtime-bundle.yml'
+      - 'backend/tests/win_integrate/test_runtime_builder.py'
+  workflow_dispatch:
+
+# A canonical SOURCE_DATE_EPOCH = 2025-01-01T00:00:00Z. Workflow jobs
+# that vary the epoch override this locally; the unified default keeps
+# the build matrix free of "what epoch was that job using?" surprises.
+env:
+  CANONICAL_SOURCE_DATE_EPOCH: '1735689600'
+
+jobs:
+  # ----------------------------------------------------------------
+  # builder-check
+  # ----------------------------------------------------------------
+  # Runs `build.py --check` against the committed inputs. Smallest
+  # gate; every other downstream job depends on it being green.
+  # ----------------------------------------------------------------
+  builder-check:
+    name: Builder --check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run --check (canonical epoch)
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.CANONICAL_SOURCE_DATE_EPOCH }}
+        run: |
+          python ops/windows-runtime-bundle/build.py --check | tee check.out
+          grep -q '^CHECK_RESULT=OK$' check.out
+
+      - name: Run --check fails without SOURCE_DATE_EPOCH (correction #22)
+        run: |
+          if python ops/windows-runtime-bundle/build.py --check 2>err.out; then
+            echo "Expected non-zero exit when SOURCE_DATE_EPOCH is missing"
+            cat err.out
+            exit 1
+          fi
+          grep -q 'BUILDER_ERROR' err.out
+          grep -qi 'SOURCE_DATE_EPOCH' err.out
+          echo "[OK] --check rejects missing SOURCE_DATE_EPOCH"
+
+      - name: Run --check fails for pre-1980 epoch (correction #31)
+        env:
+          SOURCE_DATE_EPOCH: '1'
+        run: |
+          if python ops/windows-runtime-bundle/build.py --check 2>err.out; then
+            echo "Expected non-zero exit for pre-1980 epoch"
+            cat err.out
+            exit 1
+          fi
+          grep -q 'BUILDER_ERROR' err.out
+          echo "[OK] --check rejects pre-1980 epoch"
+
+  # ----------------------------------------------------------------
+  # builder-pytest
+  # ----------------------------------------------------------------
+  # The pytest suite in backend/tests/win_integrate/test_runtime_builder.py
+  # exercises both --check and --build in isolation. We re-run only that
+  # file here so a builder change can't be merged if its own unit tests
+  # break. The broader win_integrate suite runs in win-integrate.yml.
+  # ----------------------------------------------------------------
+  builder-pytest:
+    name: Builder pytest (test_runtime_builder.py)
+    runs-on: ubuntu-latest
+    needs: builder-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend requirements
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: pytest test_runtime_builder.py
+        working-directory: backend
+        run: |
+          python -m pytest -v tests/win_integrate/test_runtime_builder.py
+
+  # ----------------------------------------------------------------
+  # builder-deterministic
+  # ----------------------------------------------------------------
+  # Build the bundle TWICE against an identical synthetic source tree
+  # with the same SOURCE_DATE_EPOCH. The ZIP, .sha256 sidecar, manifest,
+  # and .current sidecar MUST be byte-identical across runs.
+  # Reproducibility contract (correction #7).
+  # ----------------------------------------------------------------
+  builder-deterministic:
+    name: Deterministic build (same epoch -> byte-identical)
+    runs-on: ubuntu-latest
+    needs: builder-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run twin builds + assert byte equality
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.CANONICAL_SOURCE_DATE_EPOCH }}
+        run: |
+          python - <<'PY'
+          import hashlib, os, shutil, subprocess, sys, tempfile
+          from pathlib import Path
+
+          REPO = Path(".")
+          OPS = REPO / "ops/windows-runtime-bundle"
+          # Reuse the test helper's synthetic-tree shape so this CI job
+          # exercises the same on-disk layout as the pytest suite.
+          sys.path.insert(0, str(REPO / "backend"))
+          from tests.win_integrate.test_runtime_builder import (
+              SHORT_PINS_TOML, PLACEHOLDER_LOCK, _stage_synthetic_tree,
+          )
+
+          def build_into(root, stage_root, out_root):
+              cmd = [
+                  sys.executable, str(OPS / "build.py"),
+                  "--build",
+                  "--source-tree", str(stage_root),
+                  "--output-dir",  str(out_root),
+              ]
+              # The builder reads release-pins.toml / lock / smoke list
+              # from its own __file__ directory, so we have to splice
+              # the relaxed-bounds files in place via a tempdir copy
+              # then point build.py.__file__ at it. Simpler: copy
+              # build.py + the relaxed inputs into the test root.
+              shutil.copy(OPS / "build.py", root / "build.py")
+              (root / "release-pins.toml").write_text(SHORT_PINS_TOML, encoding="utf-8")
+              (root / "requirements-windows.lock").write_text(PLACEHOLDER_LOCK, encoding="utf-8")
+              shutil.copy(OPS / "runtime-smoke-imports.txt",
+                          root / "runtime-smoke-imports.txt")
+              proc = subprocess.run(
+                  [sys.executable, str(root / "build.py"), "--build",
+                   "--source-tree", str(stage_root), "--output-dir", str(out_root)],
+                  env={**os.environ, "SOURCE_DATE_EPOCH": "1735689600"},
+                  capture_output=True, text=True,
+              )
+              if proc.returncode != 0:
+                  print(proc.stdout); print(proc.stderr, file=sys.stderr)
+                  sys.exit(f"build returned {proc.returncode}")
+              return proc.stdout
+
+          # FIXED random seed so both builds use the same bytes for the
+          # synthetic python.exe. os.urandom would differ across runs.
+          import random
+          random.seed(0xDEADBEEF)
+          runtime_bytes = bytes(random.randint(0, 255) for _ in range(4096))
+
+          smoke = (OPS / "runtime-smoke-imports.txt").read_bytes()
+
+          with tempfile.TemporaryDirectory() as td_a, tempfile.TemporaryDirectory() as td_b:
+              td_a = Path(td_a); td_b = Path(td_b)
+              for td in (td_a, td_b):
+                  (td / "stage").mkdir()
+                  (td / "out").mkdir()
+                  _stage_synthetic_tree(td / "stage", smoke, runtime_bytes=runtime_bytes)
+              build_into(td_a, td_a / "stage", td_a / "out")
+              build_into(td_b, td_b / "stage", td_b / "out")
+
+              for name in (
+                  "charon-runtime-windows-amd64-9.9.9.zip",
+                  "charon-runtime-windows-amd64-9.9.9.zip.sha256",
+                  "charon-runtime-windows-amd64-9.9.9.manifest.json",
+                  "charon-runtime-windows-amd64.current",
+              ):
+                  a = (td_a / "out" / name).read_bytes()
+                  b = (td_b / "out" / name).read_bytes()
+                  if a != b:
+                      sys.exit(f"DRIFT on {name}: {len(a)} vs {len(b)} bytes")
+              print("[OK] twin builds produced byte-identical artifacts")
+          PY
+
+  # ----------------------------------------------------------------
+  # builder-dos-bucket
+  # ----------------------------------------------------------------
+  # Two builds in the SAME DOS 2-second bucket -> ZIP + sha byte-equal,
+  # manifest differs (built_utc reflects original epoch).
+  # Two builds in DIFFERENT DOS buckets -> all three differ.
+  # ----------------------------------------------------------------
+  builder-dos-bucket:
+    name: DOS-bucket boundary semantics (#39)
+    runs-on: ubuntu-latest
+    needs: builder-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Same bucket -> ZIP & sha equal, manifest differs
+        run: |
+          python - <<'PY'
+          import os, random, shutil, subprocess, sys, tempfile
+          from pathlib import Path
+          REPO = Path(".")
+          OPS = REPO / "ops/windows-runtime-bundle"
+          sys.path.insert(0, str(REPO / "backend"))
+          from tests.win_integrate.test_runtime_builder import (
+              SHORT_PINS_TOML, PLACEHOLDER_LOCK, _stage_synthetic_tree,
+          )
+
+          def build_at(epoch, label):
+              td = Path(tempfile.mkdtemp(prefix=f"build-{label}-"))
+              (td / "stage").mkdir(); (td / "out").mkdir()
+              shutil.copy(OPS / "build.py", td / "build.py")
+              (td / "release-pins.toml").write_text(SHORT_PINS_TOML, encoding="utf-8")
+              (td / "requirements-windows.lock").write_text(PLACEHOLDER_LOCK, encoding="utf-8")
+              shutil.copy(OPS / "runtime-smoke-imports.txt", td / "runtime-smoke-imports.txt")
+              random.seed(0xC0FFEE)
+              runtime = bytes(random.randint(0, 255) for _ in range(4096))
+              smoke = (OPS / "runtime-smoke-imports.txt").read_bytes()
+              _stage_synthetic_tree(td / "stage", smoke, runtime_bytes=runtime)
+              p = subprocess.run(
+                  [sys.executable, str(td / "build.py"), "--build",
+                   "--source-tree", str(td / "stage"), "--output-dir", str(td / "out")],
+                  env={**os.environ, "SOURCE_DATE_EPOCH": str(epoch)},
+                  capture_output=True, text=True,
+              )
+              if p.returncode != 0:
+                  print(p.stdout); print(p.stderr, file=sys.stderr); sys.exit(1)
+              out = td / "out"
+              return {
+                  "zip":      (out / "charon-runtime-windows-amd64-9.9.9.zip").read_bytes(),
+                  "sha":      (out / "charon-runtime-windows-amd64-9.9.9.zip.sha256").read_bytes(),
+                  "manifest": (out / "charon-runtime-windows-amd64-9.9.9.manifest.json").read_bytes(),
+              }
+
+          # 1735689600 and 1735689601 are in the same DOS bucket (even floor).
+          a = build_at(1735689600, "even")
+          b = build_at(1735689601, "odd_same_bucket")
+          if a["zip"] != b["zip"]:
+              sys.exit("ZIP differs within same DOS bucket")
+          if a["sha"] != b["sha"]:
+              sys.exit(".sha256 differs within same DOS bucket")
+          if a["manifest"] == b["manifest"]:
+              sys.exit("manifest must differ when built_utc differs")
+          print("[OK] same-bucket: zip+sha byte-equal, manifest differs")
+
+          # 1735689600 and 1735689602 are in DIFFERENT DOS buckets.
+          c = build_at(1735689602, "next_bucket")
+          if a["zip"] == c["zip"]:
+              sys.exit("ZIP must differ across DOS bucket")
+          if a["sha"] == c["sha"]:
+              sys.exit(".sha256 must differ across DOS bucket")
+          if a["manifest"] == c["manifest"]:
+              sys.exit("manifest must differ across DOS bucket")
+          print("[OK] different-bucket: all three differ")
+          PY
+
+  # ----------------------------------------------------------------
+  # builder-manifest-schema
+  # ----------------------------------------------------------------
+  # The detached manifest the builder emits MUST round-trip through
+  # the backend's strict Pydantic `Manifest` schema. Drift between
+  # the builder's output and the schema would silently break the
+  # runtime endpoint's integrity check; catch it at PR time.
+  # ----------------------------------------------------------------
+  builder-manifest-schema:
+    name: Manifest schema round-trip (Pydantic)
+    runs-on: ubuntu-latest
+    needs: builder-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend requirements
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build synthetic bundle + parse manifest through Manifest schema
+        run: |
+          python - <<'PY'
+          import json, os, random, shutil, subprocess, sys, tempfile
+          from pathlib import Path
+          REPO = Path(".")
+          OPS = REPO / "ops/windows-runtime-bundle"
+          sys.path.insert(0, str(REPO / "backend"))
+          from tests.win_integrate.test_runtime_builder import (
+              SHORT_PINS_TOML, PLACEHOLDER_LOCK, _stage_synthetic_tree,
+          )
+          from app.services.windows_runtime.manifest import Manifest
+
+          td = Path(tempfile.mkdtemp(prefix="schema-roundtrip-"))
+          (td / "stage").mkdir(); (td / "out").mkdir()
+          shutil.copy(OPS / "build.py", td / "build.py")
+          (td / "release-pins.toml").write_text(SHORT_PINS_TOML, encoding="utf-8")
+          (td / "requirements-windows.lock").write_text(PLACEHOLDER_LOCK, encoding="utf-8")
+          shutil.copy(OPS / "runtime-smoke-imports.txt", td / "runtime-smoke-imports.txt")
+          random.seed(1)
+          smoke = (OPS / "runtime-smoke-imports.txt").read_bytes()
+          _stage_synthetic_tree(td / "stage", smoke,
+                                runtime_bytes=bytes(random.randint(0,255) for _ in range(4096)))
+
+          p = subprocess.run(
+              [sys.executable, str(td / "build.py"), "--build",
+               "--source-tree", str(td / "stage"), "--output-dir", str(td / "out")],
+              env={**os.environ, "SOURCE_DATE_EPOCH": "1735689600"},
+              capture_output=True, text=True,
+          )
+          if p.returncode != 0:
+              print(p.stdout); print(p.stderr, file=sys.stderr); sys.exit(1)
+
+          manifest_path = td / "out" / "charon-runtime-windows-amd64-9.9.9.manifest.json"
+          data = json.loads(manifest_path.read_text("utf-8"))
+          m = Manifest(**data)
+          assert m.runtime_version == "9.9.9", m.runtime_version
+          assert m.platform == "windows-amd64", m.platform
+          assert m.entrypoint == "app\\run_agent.py", m.entrypoint
+          assert any(f.path == "metadata\\runtime-smoke-imports.txt" for f in m.files)
+          print("[OK] manifest round-trip through Pydantic schema succeeded")
+          PY
+
+  # ----------------------------------------------------------------
+  # builder-fail-closed
+  # ----------------------------------------------------------------
+  # Negative gates: missing entrypoint, missing top-level subtree,
+  # tampered in-tree smoke list, symlink. Each must fail with a
+  # BUILDER_ERROR sentinel.
+  # ----------------------------------------------------------------
+  builder-fail-closed:
+    name: Fail-closed gates (missing entrypoint / subtree / smoke / symlink)
+    runs-on: ubuntu-latest
+    needs: builder-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Negative-case matrix
+        run: |
+          python - <<'PY'
+          import os, random, shutil, subprocess, sys, tempfile
+          from pathlib import Path
+          REPO = Path(".")
+          OPS = REPO / "ops/windows-runtime-bundle"
+          sys.path.insert(0, str(REPO / "backend"))
+          from tests.win_integrate.test_runtime_builder import (
+              SHORT_PINS_TOML, PLACEHOLDER_LOCK, _stage_synthetic_tree,
+          )
+
+          def build_expect_fail(stage_mutator, label, *, contains):
+              td = Path(tempfile.mkdtemp(prefix=f"neg-{label}-"))
+              (td / "stage").mkdir(); (td / "out").mkdir()
+              shutil.copy(OPS / "build.py", td / "build.py")
+              (td / "release-pins.toml").write_text(SHORT_PINS_TOML, encoding="utf-8")
+              (td / "requirements-windows.lock").write_text(PLACEHOLDER_LOCK, encoding="utf-8")
+              shutil.copy(OPS / "runtime-smoke-imports.txt", td / "runtime-smoke-imports.txt")
+              random.seed(7)
+              smoke = (OPS / "runtime-smoke-imports.txt").read_bytes()
+              _stage_synthetic_tree(td / "stage", smoke,
+                                    runtime_bytes=bytes(random.randint(0,255) for _ in range(4096)))
+              stage_mutator(td / "stage", smoke)
+              p = subprocess.run(
+                  [sys.executable, str(td / "build.py"), "--build",
+                   "--source-tree", str(td / "stage"), "--output-dir", str(td / "out")],
+                  env={**os.environ, "SOURCE_DATE_EPOCH": "1735689600"},
+                  capture_output=True, text=True,
+              )
+              if p.returncode == 0:
+                  sys.exit(f"[{label}] expected non-zero exit; got rc=0 stdout={p.stdout}")
+              if "BUILDER_ERROR" not in p.stderr:
+                  sys.exit(f"[{label}] expected BUILDER_ERROR; got stderr={p.stderr!r}")
+              if contains not in p.stderr:
+                  sys.exit(f"[{label}] stderr missing {contains!r}; got {p.stderr!r}")
+              print(f"[OK] {label}: rejected with BUILDER_ERROR ({contains!r})")
+
+          def drop_entrypoint(stage, _smoke):
+              (stage / "app" / "run_agent.py").unlink()
+          build_expect_fail(drop_entrypoint, "missing-entrypoint", contains="entrypoint")
+
+          def drop_runtime_root(stage, _smoke):
+              shutil.rmtree(stage / "runtime")
+          build_expect_fail(drop_runtime_root, "missing-runtime-root",
+                            contains="required top-level subtree")
+
+          def tamper_smoke(stage, _smoke):
+              (stage / "metadata" / "runtime-smoke-imports.txt").write_bytes(
+                  b"ssl\nsocket\n"
+              )
+          build_expect_fail(tamper_smoke, "smoke-list-mismatch",
+                            contains="does not match")
+
+          def add_symlink(stage, _smoke):
+              try:
+                  (stage / "app" / "alias.py").symlink_to(stage / "app" / "run_agent.py")
+              except OSError:
+                  print("[SKIP] filesystem does not support symlinks")
+          build_expect_fail(add_symlink, "symlink-in-tree", contains="symlink")
+          PY
+
+  # ----------------------------------------------------------------
+  # builder-windows-2022
+  # ----------------------------------------------------------------
+  # Run --check on a Windows runner so we catch any cross-platform
+  # encoding / line-ending / pathsep regression in the builder source
+  # itself. PR #1 and PR #4 both authored the builder on Linux/macOS;
+  # this job confirms it runs cleanly on the same Windows-2022 image
+  # the production CI bundle build will eventually use.
+  # ----------------------------------------------------------------
+  builder-windows-2022:
+    name: Builder --check (windows-2022)
+    runs-on: windows-2022
+    needs: builder-check
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run --check on windows-2022
+        shell: bash
+        env:
+          SOURCE_DATE_EPOCH: ${{ env.CANONICAL_SOURCE_DATE_EPOCH }}
+        run: |
+          python ops/windows-runtime-bundle/build.py --check | tee check.out
+          grep -q '^CHECK_RESULT=OK$' check.out
