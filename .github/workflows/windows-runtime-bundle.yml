@@ -121,6 +121,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install pytest (test_runtime_builder imports it at top-level)
+        run: pip install pytest
+
       - name: Run twin builds + assert byte equality
         env:
           SOURCE_DATE_EPOCH: ${{ env.CANONICAL_SOURCE_DATE_EPOCH }}
@@ -212,6 +215,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install pytest (test_runtime_builder imports it at top-level)
+        run: pip install pytest
 
       - name: Same bucket -> ZIP & sha equal, manifest differs
         run: |
@@ -356,6 +362,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Install pytest (test_runtime_builder imports it at top-level)
+        run: pip install pytest
 
       - name: Negative-case matrix
         run: |

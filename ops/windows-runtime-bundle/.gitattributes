@@ -1,0 +1,11 @@
+# Runtime bundle source files are byte-strict. Git's default
+# `text=auto` line-ending conversion CRLF-corrupts files like
+# `runtime-smoke-imports.txt` whose canonical byte format requires
+# LF-only line endings (correction #63). Force LF on every file
+# under this tree to guarantee Windows-hosted CI checkouts see the
+# same bytes the builder enforces.
+* text eol=lf
+*.zip binary
+*.png binary
+*.jpg binary
+*.ico binary
