@@ -399,6 +399,15 @@ jobs:
           with open(__import__('os').environ['INSTALLER_PATH'], 'rb') as f:
               content = f.read().decode('utf-8-sig')
 
+          # Strip PS-comment lines — comments may legitimately mention
+          # forbidden symbols (e.g. documenting that `$LASTEXITCODE` is
+          # banned). Only executable lines must satisfy the "must not
+          # contain" assertions below.
+          executable = "\n".join(
+              line for line in content.split("\n")
+              if not line.lstrip().startswith("#")
+          )
+
           # -- ACL fail-closed ----------------------------------------
           idx = content.find('Set-Acl $InstallDir $acl')
           if idx < 0:
@@ -441,12 +450,14 @@ jobs:
               content,
           ):
               sys.exit('Section H 9A status probe must use Invoke-ProcessCaptured')
-          # Forbid the legacy LASTEXITCODE pipeline anywhere in the script.
-          if re.search(r'\$LASTEXITCODE\b', content):
-              sys.exit('$LASTEXITCODE leaked back into Section H template '
-                       '(stdout-pollution forbidden by correction #66)')
+          # Forbid the legacy LASTEXITCODE pipeline in EXECUTABLE code.
+          # Comments may legitimately quote the symbol while explaining
+          # why the bare-install / pipeline pollution pattern is banned.
+          if re.search(r'\$LASTEXITCODE\b', executable):
+              sys.exit('$LASTEXITCODE leaked back into Section H executable '
+                       'lines (stdout-pollution forbidden by correction #66)')
           # Forbid the bare `& $HostExe install` pattern (correction #58).
-          bad = re.search(r'&\s*\$HostExe(Live|Bak|New)?\s+install\b', content)
+          bad = re.search(r'&\s*\$HostExe(Live|Bak|New)?\s+install\b', executable)
           if bad:
               sys.exit(f'bare host install pattern returned: {bad.group(0)!r}')
           print('[OK] Section H 9A uninstall + bounded poll Invoke-ProcessCaptured contract present')
