@@ -2135,40 +2135,38 @@ SVCEOF
 
 
 def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
-    """Generate Windows PowerShell 5.1 installer (WIN-INTEGRATE 9-stage).
+    """Generate Windows PowerShell 5.1 installer (WIN-INTEGRATE Section H 11-stage).
 
-    Architectural rewrite from the PR #75 hardening + the broken
-    sc.exe-based Python service registration was removed entirely.
-    Service installation is now delegated to the embedded
-    charon-agent-host.exe (downloaded by stage [6/9], integrity-
-    checked in [7/9], CLI-installed in [8/9], verified in [9/9]).
+    Architectural rewrite from the legacy 9-stage flow. Embedded
+    private Python runtime replaces system Python + winget; the
+    full Section H state machine, file-move ledger M1..M6, and
+    Stage-11 SCM-registration commit barrier are wired in per
+    Architecture Plan v11 corrections #66-#72.
 
-    Contract — installer succeeds ONLY when ALL of the following hold:
-      - binary integrity check (SHA-256 == X-Host-SHA256 header)
-      - host install exit code 0
-      - host start exit code 0
-      - 10s status: exit code 0 AND output exactly "Running"
-      - 30s status: exit code 0 AND output exactly "Running"
-
-    Otherwise: exit 1 with a clear message.
+    All host CLI invocations route through `Invoke-HostInstall` /
+    `Invoke-ProcessCaptured` — there is no `& $HostExe install`
+    pipeline anywhere; stdout-vs-exit-code pollution is impossible.
 
     Locale-independent + ASCII-safe (TR Windows cp1254 decode bug
-    fixed in PR #75 — invariants preserved). All admin checks use
-    WindowsBuiltInRole enum; all ACLs use well-known SIDs
-    (S-1-5-18 SYSTEM, S-1-5-32-544 Administrators).
+    invariants preserved). All admin checks use WindowsBuiltInRole
+    enum; all ACLs use well-known SIDs (S-1-5-18 SYSTEM,
+    S-1-5-32-544 Administrators).
 
     iwr | iex is NOT supported — $PSCommandPath must resolve to a
     real file path, otherwise we abort with a clear message.
+
+    Linux installer flow is byte-identical; the byte-equal golden
+    pinned in test_linux_unchanged.py guards regression.
     """
     def _psq(s: str) -> str:
-        # F1.3 defense — single-quoted PS string'de ' kaçışı ''
+        # F1.3 defense - single-quoted PS string'de ' kaçışı ''
         return "'" + s.replace("'", "''") + "'"
     p_id = _psq(agent_id)
     p_key = _psq(agent_key)
     p_url = _psq(backend_url)
     timestamp_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
     return textwrap.dedent(f"""\
-        # NetManager Proxy Agent - Windows Installer (PS 5.1 compatible)
+        # NetManager Proxy Agent - Windows Installer (PS 5.1 / Section H 11-stage)
         # Generated: {timestamp_utc}
         # Agent ID: {agent_id}
         # Target: Windows PowerShell 5.1 (default) and PowerShell 7.
@@ -2178,19 +2176,44 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         $AgentId    = {p_id}
         $AgentKey   = {p_key}
         $BackendUrl = {p_url}
-        $InstallDir  = "C:\\ProgramData\\NetManagerAgent"
-        $BinDir      = "$InstallDir\\bin"
-        $LogDir      = "$InstallDir\\logs"
-        $ServiceName = "NetManagerAgent"
-        $HostExe     = "$BinDir\\charon-agent-host.exe"
-        $HostStage   = "$BinDir\\charon-agent-host.exe.new"
-        $HostBackup  = "$BinDir\\charon-agent-host.exe.bak"
-        $PythonExe   = $null
+
+        # ---- canonical on-disk layout (Section A) ------------------
+        $InstallDir       = "C:\\ProgramData\\NetManagerAgent"
+        $BinDir           = "$InstallDir\\bin"
+        $LogDir           = "$InstallDir\\logs"
+        $StagingDir       = "$InstallDir\\staging"
+        $PayloadRoot      = "$InstallDir\\payload"
+        $PayloadCurrent   = "$PayloadRoot\\current"
+        $PayloadNew       = "$PayloadRoot\\new"
+        $PayloadPrevious  = "$PayloadRoot\\previous"
+
+        $HostExeLive      = "$BinDir\\charon-agent-host.exe"
+        $HostExeNew       = "$HostExeLive.new"
+        $HostExeBak       = "$HostExeLive.bak"
+
+        $ConfigEnvLive    = "$InstallDir\\config.env"
+        $ConfigEnvBak     = "$ConfigEnvLive.bak"
+
+        $StagingRuntimeZip       = "$StagingDir\\runtime-new.zip"
+        $StagingRuntimeManifest  = "$StagingDir\\runtime-new.manifest.json"
+        $StagingExtracted        = "$StagingDir\\runtime-new"
+        $StagingConfigNew        = "$StagingDir\\config.env.new"
+        $StagingRollbackConfig   = "$StagingDir\\rollback-config.failed"
+        $StagingProcCapture      = "$StagingDir\\proc-capture"
+        $InstallerRunTxt         = "$InstallDir\\installer-run.txt"
+
+        $PrivatePython    = "$PayloadCurrent\\runtime\\python\\python.exe"
+        $AppDir           = "$PayloadCurrent\\app"
+        $Entrypoint       = "$AppDir\\run_agent.py"
+
+        $ServiceName        = "NetManagerAgent"
+        $DisplayName        = "NetManager Proxy Agent"
+        $ServiceDescription = "Charon agent host - manages the NetManager proxy agent child process."
 
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
         # ==========================================================
-        # [1/9] Admin check (locale-independent) + self-elevation
+        # [1/11] Admin check (locale-independent) + self-elevation
         # ==========================================================
         # iwr | iex is NOT supported: PSCommandPath would be empty,
         # self-elevation cannot relaunch us as a file. Hard abort.
@@ -2218,10 +2241,8 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
 
             # Parent waits for elevated child to finish, captures the
             # exit code, then cleans the on-disk installer (which still
-            # contains the agent key in its header) AFTER the child has
-            # released its handle on the file. If UAC is denied or the
-            # child fails to spawn, the parent still cleans up so the
-            # installer with the embedded key does not linger on disk.
+            # embeds the agent key in its header) AFTER the child has
+            # released its handle on the file.
             $childExit = 1
             try {{
                 $proc = Start-Process -FilePath $psExe `
@@ -2251,180 +2272,152 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         try {{
 
         # ==========================================================
-        # Restore-PreviousAgentService -- TRANSACTIONAL ROLLBACK
+        # Helper: Invoke-ProcessCaptured (correction #66)
         # ==========================================================
-        # When the new install/start/status sequence fails AFTER the
-        # atomic move into place, we owe the user a working agent.
-        # A simple `Move-Item $HostBackup $HostExe` restores only the
-        # binary; the SCM registration is still pointing at the
-        # failed new binary path (or has no registration at all).
-        #
-        # This function performs full transactional rollback:
-        #   1) stop any partial new service
-        #   2) uninstall partial new service
-        #   3) bounded poll for SCM drain (exit 18)
-        #   4) delete the failed new $HostExe
-        #   5) move $HostBackup back into $HostExe
-        #   6) re-install the previous binary as the service
-        #   7) start the service
-        #   8) verify 10s Running
-        #   9) verify 30s Running
-        # Returns $true only if all nine steps succeed.
-        function Restore-PreviousAgentService {{
+        # PS 5.1 lacks ProcessStartInfo.ArgumentList. Redirect stdout
+        # and stderr to short-lived locked-ACL temp files and read
+        # them back. The temp files are LOGICAL_DELETEd before this
+        # function returns; charon-agent-host.exe never echoes the
+        # agent key, so neither file may carry it.
+        function Invoke-ProcessCaptured {{
+            [CmdletBinding()]
             param(
-                [string]$ServiceName,
-                [string]$HostExe,
-                [string]$HostBackup,
-                [string]$PythonExe,
-                [string]$InstallDir,
-                [string]$LogDir
+                [Parameter(Mandatory)][string]$FilePath,
+                [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ArgumentList
             )
+            [System.IO.Directory]::CreateDirectory($StagingProcCapture) | Out-Null
+            try {{
+                $sid_sys = New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'
+                $sid_adm = New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'
+                $acl = Get-Acl $StagingProcCapture
+                $acl.SetAccessRuleProtection($true, $false)
+                $r1 = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    $sid_sys, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+                $r2 = New-Object System.Security.AccessControl.FileSystemAccessRule(
+                    $sid_adm, "FullControl", "ContainerInherit,ObjectInherit", "None", "Allow")
+                $acl.AddAccessRule($r1); $acl.AddAccessRule($r2)
+                Set-Acl $StagingProcCapture $acl
+            }} catch {{}}
 
-            Write-Host "[ROLLBACK] Step 1/9: stopping partial new service..." -ForegroundColor Yellow
-            & $HostExe stop --service-name $ServiceName 2>&1 | Out-Null
-            Start-Sleep -Milliseconds 500
-
-            Write-Host "[ROLLBACK] Step 2/9: uninstalling partial new service..." -ForegroundColor Yellow
-            & $HostExe uninstall --service-name $ServiceName 2>&1 | Out-Null
-
-            Write-Host "[ROLLBACK] Step 3/9: polling SCM drain (max 30s)..." -ForegroundColor Yellow
-            $deadline = (Get-Date).AddSeconds(30)
-            $gone = $false
-            while ((Get-Date) -lt $deadline) {{
-                & $HostExe status --service-name $ServiceName 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 18) {{ $gone = $true; break }}
-                Start-Sleep -Milliseconds 500
+            $stdoutPath = Join-Path $StagingProcCapture ("o-" + [guid]::NewGuid().ToString() + ".txt")
+            $stderrPath = Join-Path $StagingProcCapture ("e-" + [guid]::NewGuid().ToString() + ".txt")
+            $exitCode = 1; $stdoutText = ""; $stderrText = ""
+            try {{
+                $proc = Start-Process -FilePath $FilePath -ArgumentList $ArgumentList `
+                    -NoNewWindow -Wait -PassThru `
+                    -RedirectStandardOutput $stdoutPath `
+                    -RedirectStandardError  $stderrPath
+                if ($proc -and $proc.ExitCode -ne $null) {{ $exitCode = [int]$proc.ExitCode }}
+                if (Test-Path -LiteralPath $stdoutPath) {{
+                    $stdoutText = [System.IO.File]::ReadAllText($stdoutPath)
+                }}
+                if (Test-Path -LiteralPath $stderrPath) {{
+                    $stderrText = [System.IO.File]::ReadAllText($stderrPath)
+                }}
             }}
-            if (-not $gone) {{
-                Write-Host "[ROLLBACK FAIL] SCM did not drain partial service within 30s." -ForegroundColor Red
-                return $false
+            finally {{
+                foreach ($p in @($stdoutPath, $stderrPath)) {{
+                    if (Test-Path -LiteralPath $p) {{
+                        # LOGICAL_DELETE - non-existence verified below.
+                        Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue
+                    }}
+                    if (Test-Path -LiteralPath $p) {{
+                        throw "Invoke-ProcessCaptured: failed to LOGICAL_DELETE $p"
+                    }}
+                }}
             }}
-
-            Write-Host "[ROLLBACK] Step 4/9: removing failed new binary..." -ForegroundColor Yellow
-            Remove-Item -LiteralPath $HostExe -Force -ErrorAction SilentlyContinue
-
-            Write-Host "[ROLLBACK] Step 5/9: restoring previous binary from backup..." -ForegroundColor Yellow
-            if (-not (Test-Path -LiteralPath $HostBackup)) {{
-                Write-Host "[ROLLBACK FAIL] Backup binary missing." -ForegroundColor Red
-                return $false
+            return [pscustomobject]@{{
+                ExitCode = [int]$exitCode
+                Stdout   = [string]$stdoutText
+                Stderr   = [string]$stderrText
             }}
-            Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force
-
-            Write-Host "[ROLLBACK] Step 6/9: re-installing previous binary as service..." -ForegroundColor Yellow
-            & $HostExe install `
-                --service-name $ServiceName `
-                --display-name "NetManager Proxy Agent" `
-                --description "Charon agent host" `
-                --child-exe $PythonExe `
-                --child-arg "$InstallDir\\run_agent.py" `
-                --work-dir $InstallDir `
-                --env-file "$InstallDir\\config.env" `
-                --log-dir $LogDir `
-                --service-account "LocalSystem"
-            if ($LASTEXITCODE -ne 0) {{
-                Write-Host "[ROLLBACK FAIL] Re-install of previous binary failed (exit $LASTEXITCODE)." -ForegroundColor Red
-                return $false
-            }}
-
-            Write-Host "[ROLLBACK] Step 7/9: starting previous service..." -ForegroundColor Yellow
-            & $HostExe start --service-name $ServiceName
-            if ($LASTEXITCODE -ne 0) {{
-                Write-Host "[ROLLBACK FAIL] Start of previous service failed (exit $LASTEXITCODE)." -ForegroundColor Red
-                return $false
-            }}
-
-            Write-Host "[ROLLBACK] Step 8/9: verifying previous service Running at 10s..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 10
-            $r10 = (& $HostExe status --service-name $ServiceName 2>&1 | Out-String).Trim()
-            $e10 = $LASTEXITCODE
-            if ($e10 -ne 0 -or $r10 -ne "Running") {{
-                Write-Host "[ROLLBACK FAIL] Previous service not Running at 10s (status='$r10' exit=$e10)." -ForegroundColor Red
-                return $false
-            }}
-
-            Write-Host "[ROLLBACK] Step 9/9: verifying previous service Running at 30s..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 20
-            $r30 = (& $HostExe status --service-name $ServiceName 2>&1 | Out-String).Trim()
-            $e30 = $LASTEXITCODE
-            if ($e30 -ne 0 -or $r30 -ne "Running") {{
-                Write-Host "[ROLLBACK FAIL] Previous service not Running at 30s (status='$r30' exit=$e30)." -ForegroundColor Red
-                return $false
-            }}
-
-            Write-Host "[ROLLBACK OK] Previous service fully restored and Running." -ForegroundColor Green
-            return $true
         }}
 
         # ==========================================================
-        # Invoke-NewInstallFailure -- exit-code contract for the four
-        # post-stage-8/9 failure paths.
+        # Helper: Invoke-HostInstall (corrections #58 + #66)
         # ==========================================================
-        # Exit codes:
-        #   0 = success
-        #   1 = new install failed, previous service successfully restored
-        #       and Running (10s + 30s), OR no previous service existed
-        #       (fresh install)
-        #   2 = new install failed AND rollback failed -- operator MUST
-        #       intervene; agent is unmanaged
-        function Invoke-NewInstallFailure {{
+        # Canonical SCM install invocation. Caller reads .ExitCode
+        # from the structured return; raw $LASTEXITCODE is forbidden
+        # (the success-stdout `Service "NetManagerAgent" installed.`
+        # would pollute a `& $HostExe ... ; $LASTEXITCODE` pipeline).
+        function Invoke-HostInstall {{
+            [CmdletBinding()]
             param(
-                [string]$Stage,
-                [string]$Reason,
-                [bool]$RollbackAvailable,
-                [string]$ServiceName,
-                [string]$HostExe,
-                [string]$HostBackup,
-                [string]$PythonExe,
-                [string]$InstallDir,
-                [string]$LogDir
+                [Parameter(Mandatory)][string]$HostExe,
+                [Parameter(Mandatory)][string]$PrivatePython,
+                [Parameter(Mandatory)][string]$Entrypoint,
+                [Parameter(Mandatory)][string]$AppDir,
+                [Parameter(Mandatory)][string]$ConfigPath,
+                [Parameter(Mandatory)][string]$LogDir
             )
-            Write-Host "[ERROR] $Stage failed: $Reason" -ForegroundColor Red
-            if (-not $RollbackAvailable) {{
-                Write-Host "[INFO] No previous binary to roll back to (fresh install)." -ForegroundColor Yellow
-                Read-Host "Press Enter to exit"
-                exit 1
-            }}
-            Write-Host "[INFO] Attempting transactional rollback of previous service..." -ForegroundColor Yellow
-            $recovered = Restore-PreviousAgentService `
-                -ServiceName $ServiceName `
-                -HostExe $HostExe `
-                -HostBackup $HostBackup `
-                -PythonExe $PythonExe `
-                -InstallDir $InstallDir `
-                -LogDir $LogDir
-            if ($recovered) {{
-                Write-Host "[INFO] Rollback successful. Exiting 1 (new install failed; previous service Running)." -ForegroundColor Green
-                Read-Host "Press Enter to exit"
-                exit 1
-            }} else {{
-                Write-Host "[CRITICAL] Rollback FAILED. Previous service NOT restored." -ForegroundColor Red
-                Write-Host "[CRITICAL] Manual operator intervention required. Exit 2." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
-                exit 2
+            [string[]]$InstallArgs = @(
+                "install",
+                "--service-name",    $ServiceName,
+                "--display-name",    $DisplayName,
+                "--description",     $ServiceDescription,
+                "--child-exe",       $PrivatePython,
+                "--child-arg",       "-E",
+                "--child-arg",       "-I",
+                "--child-arg",       $Entrypoint,
+                "--work-dir",        $AppDir,
+                "--env-file",        $ConfigPath,
+                "--log-dir",         $LogDir,
+                "--service-account", "LocalSystem"
+            )
+            $result = Invoke-ProcessCaptured -FilePath $HostExe -ArgumentList $InstallArgs
+            return [pscustomobject]@{{
+                ExitCode = $result.ExitCode
+                Stdout   = $result.Stdout
+                Stderr   = $result.Stderr
+                Args     = $InstallArgs
             }}
         }}
 
-        Write-Host "[1/9] Administrator privileges verified." -ForegroundColor Cyan
+        # ==========================================================
+        # Helper: Invoke-LogicalDelete (correction #57)
+        # ==========================================================
+        # Force-remove a path then verify non-existence. Throws on
+        # failure so callers never silently leave a secret-bearing
+        # transient behind.
+        function Invoke-LogicalDelete {{
+            param([Parameter(Mandatory)][string]$Path)
+            if (Test-Path -LiteralPath $Path) {{
+                Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+            }}
+            if (Test-Path -LiteralPath $Path) {{
+                throw "LOGICAL_DELETE failed for $Path"
+            }}
+        }}
 
         # ==========================================================
-        # [2/9] TLS 1.2 + directories + SID-based ACL
+        # Helper: Write-InstallerRunTxt (Section G.8 + Stage 2B)
         # ==========================================================
-        # Locale-independent SIDs:
-        #   S-1-5-18      = NT AUTHORITY\\SYSTEM
-        #   S-1-5-32-544  = BUILTIN\\Administrators
-        # Localized strings ("BUILTIN\\Administrators" / "Yoneticiler")
-        # are NOT used.
-        Write-Host "[2/9] Creating install directory + hardening ACL..." -ForegroundColor Cyan
-        foreach ($d in @($InstallDir, $BinDir, $LogDir)) {{
+        # Audit + recovery message file. Always written without the
+        # agent key or any config content.
+        function Write-InstallerRunTxt {{
+            param([Parameter(Mandatory)][string[]]$Lines)
+            try {{
+                $ts = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+                $payload = ($Lines -join "`r`n")
+                Add-Content -LiteralPath $InstallerRunTxt -Value "[$ts]`r`n$payload`r`n"
+            }} catch {{}}
+        }}
+
+        Write-Host "[1/11] Administrator privileges verified." -ForegroundColor Cyan
+
+        # ==========================================================
+        # [2/11] 2A: Directory preparation + ACL hardening (SIDs)
+        # ==========================================================
+        Write-Host "[2/11] 2A: Preparing install tree + hardening ACL..." -ForegroundColor Cyan
+        foreach ($d in @($InstallDir, $BinDir, $LogDir, $StagingDir, $PayloadRoot)) {{
             New-Item -ItemType Directory -Force -Path $d | Out-Null
         }}
 
-        # FAIL-CLOSED: config.env writes the agent key in stage [5/9].
-        # If we cannot prove the install directory is restricted to
-        # SYSTEM + Administrators, we MUST NOT continue -- every local
-        # user would be able to read the key. Write the technical
-        # exception to a secret-free local log for support diagnostics
-        # and abort with a generic user message.
+        # Locale-independent SIDs:
+        #   S-1-5-18      = NT AUTHORITY\\SYSTEM
+        #   S-1-5-32-544  = BUILTIN\\Administrators
+        # Fail-closed (correction #6): if we cannot prove the install
+        # directory is restricted, we MUST NOT continue.
         try {{
             $systemSid = New-Object Security.Principal.SecurityIdentifier 'S-1-5-18'
             $adminSid  = New-Object Security.Principal.SecurityIdentifier 'S-1-5-32-544'
@@ -2456,283 +2449,940 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         }}
 
         # ==========================================================
-        # [3/9] Python verification (Store stub detection + --version)
+        # [2/11] 2B: Transaction recovery preflight + four-probe
+        #            SCM agreement + restorability gate
         # ==========================================================
-        Write-Host "[3/9] Verifying Python installation..." -ForegroundColor Cyan
-        $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-        if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }}
+        Write-Host "[2/11] 2B: Transaction recovery preflight..." -ForegroundColor Cyan
 
-        if ($PythonExe -and $PythonExe -like "*\\Microsoft\\WindowsApps\\python.exe") {{
-            Write-Host "[INFO] Microsoft Store stub detected, ignoring." -ForegroundColor Yellow
-            $PythonExe = $null
+        # Step 1 - backup-artifact halt (correction #43)
+        $blockingArtifacts = @()
+        foreach ($p in @($PayloadPrevious, $ConfigEnvBak, $HostExeBak, $StagingRollbackConfig)) {{
+            if (Test-Path -LiteralPath $p) {{ $blockingArtifacts += $p }}
         }}
-
-        if ($PythonExe) {{
-            try {{
-                $pythonVersion = & $PythonExe --version 2>&1
-                if ($LASTEXITCODE -ne 0 -or $pythonVersion -notmatch "Python 3\\.") {{
-                    Write-Host "[INFO] Python verification failed, will reinstall." -ForegroundColor Yellow
-                    $PythonExe = $null
-                }} else {{
-                    Write-Host "[OK] Python found: $pythonVersion" -ForegroundColor Green
-                }}
-            }} catch {{
-                $PythonExe = $null
+        foreach ($parent in @($PayloadRoot, $InstallDir, $BinDir, $StagingDir)) {{
+            if (Test-Path -LiteralPath $parent) {{
+                try {{
+                    $blockingArtifacts += (Get-ChildItem -LiteralPath $parent -Force -ErrorAction SilentlyContinue |
+                        Where-Object {{ $_.Name -like 'failed-*' }} | ForEach-Object {{ $_.FullName }})
+                }} catch {{}}
             }}
         }}
-
-        if (-not $PythonExe) {{
-            Write-Host "[WARNING] Python not found, attempting winget install..." -ForegroundColor Yellow
-            $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-            if (-not $wingetCmd) {{
-                Write-Host "[ERROR] Python 3.12 not installed and winget unavailable." -ForegroundColor Red
-                Write-Host "[ERROR] Please install Python 3.12 manually from https://python.org" -ForegroundColor Red
-                Read-Host "Press Enter to exit"
-                exit 1
-            }}
-            winget install Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-            $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
-            if ($pythonCmd) {{ $PythonExe = $pythonCmd.Source }}
-            if ($PythonExe -and $PythonExe -like "*\\Microsoft\\WindowsApps\\python.exe") {{ $PythonExe = $null }}
-            if (-not $PythonExe) {{
-                Write-Host "[ERROR] Python installation failed." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
-                exit 1
-            }}
-            Write-Host "[OK] Python installed: $PythonExe" -ForegroundColor Green
+        if ($blockingArtifacts.Count -gt 0) {{
+            Write-InstallerRunTxt @(
+                "TRANSACTION_RECOVERY_RESULT=BLOCKED",
+                "UNRESOLVED_PREVIOUS_TRANSACTION"
+            )
+            Write-Host "[BLOCKED] UNRESOLVED_PREVIOUS_TRANSACTION." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 3
         }}
 
-        # ==========================================================
-        # [4/9] Download Python agent script
-        # ==========================================================
-        Write-Host "[4/9] Downloading agent script..." -ForegroundColor Cyan
+        # Step 2 - four-probe service-state classification
+        # (correction #71 - all four probes must agree or BLOCK).
+        $InitialServiceState        = "Absent"
+        $L1_ServiceExistedInitially = $false
+        $IsCanonicallyRestorable    = $false
+
+        $P1_Present = $null
+        try {{ $P1_Present = ($null -ne (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue)) }}
+        catch {{ $P1_Present = "ERROR" }}
+
+        $P2_Present = $null
         try {{
-            Invoke-WebRequest `
-                -Uri "$BackendUrl/api/v1/agents/download/script" `
-                -Headers @{{ "X-Agent-ID" = $AgentId; "X-Agent-Key" = $AgentKey }} `
-                -OutFile "$InstallDir\\netmanager_agent.py" `
-                -UseBasicParsing
-            Write-Host "[OK] Agent script downloaded." -ForegroundColor Green
+            $regPath = "Registry::HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services\\$ServiceName"
+            $P2_Present = (Test-Path -LiteralPath $regPath)
+        }} catch {{ $P2_Present = "ERROR" }}
+
+        $P3_Rows = $null
+        try {{
+            $P3_Rows = @(Get-CimInstance Win32_Service -Filter "Name='$ServiceName'" -ErrorAction SilentlyContinue)
+        }} catch {{ $P3_Rows = "ERROR" }}
+
+        $P4_ExitCode = $null
+        $P4_Stdout   = ""
+        $P4_Stderr   = ""
+        if (Test-Path -LiteralPath $HostExeLive) {{
+            try {{
+                $statusResult = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                    -ArgumentList @("status","--service-name",$ServiceName)
+                $P4_ExitCode = [int]$statusResult.ExitCode
+                $P4_Stdout   = [string]$statusResult.Stdout
+                $P4_Stderr   = [string]$statusResult.Stderr
+            }} catch {{
+                $P4_ExitCode = "ERROR"
+            }}
+        }}
+
+        $probeError = $null
+        if ($P1_Present -eq "ERROR" -or $P2_Present -eq "ERROR" -or $P3_Rows -eq "ERROR" -or $P4_ExitCode -eq "ERROR") {{
+            $probeError = "probe threw or access denied"
+        }}
+        elseif ($P3_Rows -is [array] -and $P3_Rows.Count -gt 1) {{
+            $probeError = "Win32_Service multiple rows"
+        }}
+        elseif ([bool]$P1_Present -ne [bool]$P2_Present) {{
+            $probeError = "P1 / P2 disagreement"
+        }}
+        elseif (($P3_Rows.Count -gt 0) -ne [bool]$P1_Present) {{
+            $probeError = "P3 row count disagrees with P1"
+        }}
+        elseif ($P4_ExitCode -ne $null -and $P4_Stdout.Trim().Split("`n").Count -gt 1) {{
+            $probeError = "P4 stdout multi-line"
+        }}
+
+        if ($probeError) {{
+            Write-InstallerRunTxt @(
+                "TRANSACTION_RECOVERY_RESULT=BLOCKED",
+                "SERVICE_REGISTRATION_PROBE_INCONSISTENT",
+                "UNRESOLVED_PREVIOUS_TRANSACTION",
+                "REASON: $probeError"
+            )
+            Write-Host "[BLOCKED] SERVICE_REGISTRATION_PROBE_INCONSISTENT: $probeError" -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 3
+        }}
+
+        $hostBinPresent = Test-Path -LiteralPath $HostExeLive
+        $probesAllAbsent  = (-not $P1_Present) -and (-not $P2_Present) -and ($P3_Rows.Count -eq 0) -and (
+            (-not $hostBinPresent) -or ($P4_ExitCode -eq 18)
+        )
+        $probesAllPresent = $P1_Present -and $P2_Present -and ($P3_Rows.Count -eq 1) -and $hostBinPresent -and (
+            $P4_ExitCode -eq 0 -or $P4_ExitCode -eq 1
+        )
+
+        if ($probesAllAbsent) {{
+            $InitialServiceState = "Absent"
+        }}
+        elseif ($probesAllPresent) {{
+            $statusStdoutTrim = $P4_Stdout.TrimEnd("`r","`n")
+            if ($P4_ExitCode -eq 0 -and $statusStdoutTrim -ceq "Running") {{
+                $InitialServiceState = "Running"
+            }}
+            elseif ($P4_ExitCode -eq 1 -and $statusStdoutTrim -ceq "Stopped") {{
+                $InitialServiceState = "Stopped"
+            }}
+            else {{
+                Write-InstallerRunTxt @(
+                    "TRANSACTION_RECOVERY_RESULT=BLOCKED",
+                    "SERVICE_REGISTRATION_PROBE_INCONSISTENT",
+                    "REASON: SERVICE_STATE_NOT_STABLE ($P4_ExitCode / $statusStdoutTrim)"
+                )
+                Write-Host "[BLOCKED] SERVICE_STATE_NOT_STABLE." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 3
+            }}
+            $L1_ServiceExistedInitially = $true
+        }}
+        else {{
+            Write-InstallerRunTxt @(
+                "TRANSACTION_RECOVERY_RESULT=BLOCKED",
+                "SERVICE_REGISTRATION_PROBE_INCONSISTENT",
+                "REASON: probes neither all-absent nor all-present"
+            )
+            Write-Host "[BLOCKED] SERVICE_REGISTRATION_PROBE_INCONSISTENT (mixed)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 3
+        }}
+
+        # InitialRegistrationSnapshot (correction #65 + #70)
+        $InitialRegistrationSnapshot = $null
+        if ($L1_ServiceExistedInitially) {{
+            $InitialRegistrationSnapshot = [pscustomobject]@{{
+                ServiceName    = $ServiceName
+                ImagePath      = "$($P3_Rows[0].PathName)"
+                StartType      = "$($P3_Rows[0].StartMode)"
+                ServiceAccount = "$($P3_Rows[0].StartName)"
+                DisplayName    = "$($P3_Rows[0].DisplayName)"
+                Description    = "$($P3_Rows[0].Description)"
+            }}
+
+            # Step 2.5 - registration restorability gate (correction #70)
+            $expectedImagePath = "$HostExeLive run --service-name $ServiceName --display-name `"$DisplayName`" --description `"$ServiceDescription`" --child-exe $PrivatePython --child-arg -E --child-arg -I --child-arg $Entrypoint --work-dir $AppDir --env-file $ConfigEnvLive --log-dir $LogDir --service-account LocalSystem"
+            $IsCanonicallyRestorable = `
+                ($InitialRegistrationSnapshot.ImagePath      -ceq $expectedImagePath) -and `
+                ($InitialRegistrationSnapshot.StartType      -ceq "Auto")             -and `
+                ($InitialRegistrationSnapshot.ServiceAccount -ceq "LocalSystem")       -and `
+                ($InitialRegistrationSnapshot.DisplayName    -ceq $DisplayName)        -and `
+                ($InitialRegistrationSnapshot.Description    -ceq $ServiceDescription)
+
+            if (-not $IsCanonicallyRestorable) {{
+                Write-InstallerRunTxt @(
+                    "TRANSACTION_RECOVERY_RESULT=BLOCKED",
+                    "REGISTRATION_NOT_CANONICALLY_RESTORABLE",
+                    "INCONSISTENT_LIVE_STATE"
+                )
+                Write-Host "[BLOCKED] REGISTRATION_NOT_CANONICALLY_RESTORABLE." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 3
+            }}
+        }}
+
+        # Step 3 - INSTALL_MODE matrix (correction #52)
+        $payloadHealthy = (Test-Path -LiteralPath $PayloadCurrent) -and `
+            (Test-Path -LiteralPath "$PayloadCurrent\\runtime-manifest.json")
+        $configHealthy  = (Test-Path -LiteralPath $ConfigEnvLive)
+        $hostHealthy    = (Test-Path -LiteralPath $HostExeLive)
+
+        if ((-not $payloadHealthy) -and (-not $configHealthy) -and (-not $hostHealthy) -and ($InitialServiceState -ceq "Absent")) {{
+            $InstallMode = "CLEAN_INSTALL"
+        }}
+        elseif ($payloadHealthy -and $configHealthy -and $hostHealthy -and ($InitialServiceState -ceq "Running" -or $InitialServiceState -ceq "Stopped") -and $IsCanonicallyRestorable) {{
+            $InstallMode = "HEALTHY_UPGRADE"
+        }}
+        else {{
+            Write-InstallerRunTxt @(
+                "TRANSACTION_RECOVERY_RESULT=BLOCKED",
+                "INCONSISTENT_LIVE_STATE",
+                "UNRESOLVED_PREVIOUS_TRANSACTION"
+            )
+            Write-Host "[BLOCKED] INCONSISTENT_LIVE_STATE." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 3
+        }}
+
+        # Step 4 - clean ONLY transient artifacts (correction #43)
+        foreach ($t in @($PayloadNew, $StagingExtracted, $StagingRuntimeZip, $StagingRuntimeManifest, $StagingConfigNew)) {{
+            if (Test-Path -LiteralPath $t) {{
+                Remove-Item -LiteralPath $t -Recurse -Force -ErrorAction SilentlyContinue
+            }}
+        }}
+
+        Write-Host "[OK] InstallMode=$InstallMode InitialServiceState=$InitialServiceState" -ForegroundColor Green
+
+        # ---- Ledger state (one-way bits per corrections #41 + #44 + #50 + #51) ----
+        $L2_OldServiceStopAccepted                = $false
+        $L3_OldServiceObservedStopped             = $false
+        $L4_OldServiceUninstalled                 = $false
+        $L5_OldServiceRegistrationGone            = $false
+        $L6_NewServiceInstalled                   = $false
+        $L6P_NewServiceRegistrationPossiblyExists = $false
+        $L7_NewServiceStartAccepted               = $false
+        $L8_NewServiceObservedRunning             = $false
+
+        # ---- File-move ledger M1..M6 (correction #41) ----
+        $MovedPayloadCurrentToPrevious = $false
+        $MovedPayloadNewToCurrent      = $false
+        $MovedHostLiveToBackup         = $false
+        $MovedHostNewToLive            = $false
+        $MovedConfigLiveToBackup       = $false
+        $MovedConfigNewToLive          = $false
+
+        # Snapshots (correction #72) - populated at Stage 9A A0
+        $OldHostProcessSnapshot                = @()
+        $OldVerifiedChildPythonProcessSnapshot = @()
+
+        # ==========================================================
+        # [3/11] Re-assert ACL after preflight writes
+        # ==========================================================
+        Write-Host "[3/11] Re-asserting install root ACL..." -ForegroundColor Cyan
+        try {{
+            $acl = Get-Acl $InstallDir
+            Set-Acl $InstallDir $acl
+        }} catch {{}}
+
+        # ==========================================================
+        # [4/11] Download + verify detached runtime manifest
+        # ==========================================================
+        Write-Host "[4/11] Downloading runtime manifest..." -ForegroundColor Cyan
+        try {{
+            $manifestResp = Invoke-WebRequest `
+                -Uri "$BackendUrl/api/v1/agents/$AgentId/download/runtime/windows-amd64/manifest" `
+                -Headers @{{ "X-Agent-Key" = $AgentKey }} `
+                -OutFile $StagingRuntimeManifest `
+                -UseBasicParsing `
+                -PassThru
+            $manifestVersion     = $manifestResp.Headers["X-Charon-Runtime-Version"]
+            $manifestZipSha      = $manifestResp.Headers["X-Charon-Runtime-Zip-Sha256"]
+            $manifestPython      = $manifestResp.Headers["X-Charon-Python-Version"]
+            $manifestCompatRange = $manifestResp.Headers["X-Charon-Compatible-Host-Core-Range"]
         }} catch {{
-            Write-Host "[ERROR] Agent script download failed." -ForegroundColor Red
+            Write-Host "[ERROR] Runtime manifest download failed." -ForegroundColor Red
             Read-Host "Press Enter to exit"
             exit 1
         }}
+        Write-Host "[OK] Runtime manifest received (version=$manifestVersion)." -ForegroundColor Green
 
         # ==========================================================
-        # [5/9] Write config.env + run_agent.py WITHOUT BOM
+        # [5/11] Download + verify runtime bundle ZIP
         # ==========================================================
-        Write-Host "[5/9] Installing dependencies and writing config..." -ForegroundColor Cyan
-        & $PythonExe -m pip install --quiet --upgrade websockets netmiko
-        if ($LASTEXITCODE -ne 0) {{
-            Write-Host "[ERROR] pip install failed." -ForegroundColor Red
+        Write-Host "[5/11] Downloading runtime bundle ZIP..." -ForegroundColor Cyan
+        try {{
+            $zipResp = Invoke-WebRequest `
+                -Uri "$BackendUrl/api/v1/agents/$AgentId/download/runtime/windows-amd64" `
+                -Headers @{{ "X-Agent-Key" = $AgentKey }} `
+                -OutFile $StagingRuntimeZip `
+                -UseBasicParsing `
+                -PassThru
+            $zipShaHeader = $zipResp.Headers["X-Charon-Runtime-Zip-Sha256"]
+        }} catch {{
+            Write-Host "[ERROR] Runtime bundle ZIP download failed." -ForegroundColor Red
+            Remove-Item -LiteralPath $StagingRuntimeZip -Force -ErrorAction SilentlyContinue
             Read-Host "Press Enter to exit"
             exit 1
         }}
+        $actualZipSha = (Get-FileHash -LiteralPath $StagingRuntimeZip -Algorithm SHA256).Hash
+        if ($actualZipSha -cne $zipShaHeader -or $actualZipSha -cne $manifestZipSha) {{
+            Write-Host "[ERROR] Runtime ZIP SHA-256 mismatch." -ForegroundColor Red
+            Remove-Item -LiteralPath $StagingRuntimeZip -Force -ErrorAction SilentlyContinue
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        Write-Host "[OK] Runtime ZIP SHA-256 verified." -ForegroundColor Green
 
+        # ==========================================================
+        # [6/11] 6A: Traversal-safe + namespace-safe ZIP extraction
+        # ==========================================================
+        Write-Host "[6/11] 6A: Extracting runtime bundle (traversal-safe)..." -ForegroundColor Cyan
+        Add-Type -AssemblyName System.IO.Compression
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        if (Test-Path -LiteralPath $StagingExtracted) {{
+            Remove-Item -LiteralPath $StagingExtracted -Recurse -Force
+        }}
+        [System.IO.Directory]::CreateDirectory($StagingExtracted) | Out-Null
+        $zipArchive = [System.IO.Compression.ZipFile]::OpenRead($StagingRuntimeZip)
+        try {{
+            $extractionRoot = [System.IO.Path]::GetFullPath($StagingExtracted).TrimEnd('\\') + '\\'
+            foreach ($entry in $zipArchive.Entries) {{
+                $entryName = $entry.FullName
+                if ([string]::IsNullOrEmpty($entryName)) {{ throw "rejected: empty entry name" }}
+                # Section F per-entry rejection list (corrections #4/5/23/28/29/68).
+                if ($entryName.EndsWith("/") -or $entryName.EndsWith("\\")) {{
+                    throw "rejected: explicit directory entry $entryName"
+                }}
+                $normalized = $entryName.Replace("/","\\")
+                if ($normalized.StartsWith("\\")) {{
+                    throw "rejected: leading separator or UNC / NT device $entryName"
+                }}
+                if ($normalized -match '^[A-Za-z]:') {{
+                    throw "rejected: drive-letter prefix $entryName"
+                }}
+                foreach ($segment in $normalized.Split("\\")) {{
+                    if ($segment -eq "")        {{ throw "rejected: empty segment $entryName" }}
+                    if ($segment -eq ".")       {{ throw "rejected: dot segment $entryName" }}
+                    if ($segment -eq "..")      {{ throw "rejected: dotdot segment $entryName" }}
+                    if ($segment.EndsWith(".")) {{ throw "rejected: trailing dot $entryName" }}
+                    if ($segment.EndsWith(" ")) {{ throw "rejected: trailing space $entryName" }}
+                    if ($segment.Contains(":")) {{ throw "rejected: colon in segment $entryName" }}
+                    $base = if ($segment.Contains(".")) {{ $segment.Split('.')[0] }} else {{ $segment }}
+                    if ($base -imatch '^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$') {{
+                        throw "rejected: reserved device name $entryName"
+                    }}
+                }}
+                # Symlink / reparse rejection (correction #68): external
+                # attributes high word matches S_IFLNK (0xA000).
+                $extAttr = $entry.ExternalAttributes
+                if (($extAttr -band 0xA000) -eq 0xA000) {{
+                    throw "rejected: symlink entry $entryName"
+                }}
+                $targetFull = [System.IO.Path]::GetFullPath(
+                    (Join-Path $extractionRoot $normalized)
+                )
+                if (-not $targetFull.StartsWith($extractionRoot, [System.StringComparison]::OrdinalIgnoreCase)) {{
+                    throw "rejected: path escapes extraction root $entryName"
+                }}
+                [System.IO.Directory]::CreateDirectory(
+                    [System.IO.Path]::GetDirectoryName($targetFull)
+                ) | Out-Null
+                [System.IO.Compression.ZipFileExtensions]::ExtractToFile(
+                    $entry, $targetFull, $false
+                )
+            }}
+        }}
+        finally {{
+            $zipArchive.Dispose()
+        }}
+
+        # 6A: validate smoke-list canonical bytes + line format
+        $smokeList = Join-Path $StagingExtracted "metadata\\runtime-smoke-imports.txt"
+        if (-not (Test-Path -LiteralPath $smokeList)) {{
+            throw "metadata\\runtime-smoke-imports.txt missing from extracted bundle"
+        }}
+        [string[]]$Modules = @()
+        foreach ($line in (Get-Content -LiteralPath $smokeList)) {{
+            if ($line -notmatch '^[A-Za-z_][A-Za-z0-9_.]*$') {{
+                throw "smoke list line rejected: $line"
+            }}
+            $Modules += $line
+        }}
+
+        # 6B: atomic rename + sanity-fire byte-exact RUNTIME_OK
+        Write-Host "[6/11] 6B: Atomic rename + sanity-fire RUNTIME_OK..." -ForegroundColor Cyan
+        if (Test-Path -LiteralPath $PayloadNew) {{
+            Remove-Item -LiteralPath $PayloadNew -Recurse -Force
+        }}
+        [System.IO.Directory]::Move($StagingExtracted, $PayloadNew)
+        if (Test-Path -LiteralPath $StagingExtracted) {{
+            throw "rename did not remove source"
+        }}
+        if (-not (Test-Path -LiteralPath $PayloadNew)) {{
+            throw "rename did not produce destination"
+        }}
+        $ModuleArg        = ($Modules -join ", ")
+        $PrivatePythonNew = Join-Path $PayloadNew "runtime\\python\\python.exe"
+
+        $verResult = Invoke-ProcessCaptured -FilePath $PrivatePythonNew `
+            -ArgumentList @("-E","-I","--version")
+        if ($verResult.ExitCode -ne 0) {{
+            throw "private python --version exit $($verResult.ExitCode)"
+        }}
+
+        $smokeResult = Invoke-ProcessCaptured -FilePath $PrivatePythonNew `
+            -ArgumentList @("-E","-I","-c","import $ModuleArg; print('RUNTIME_OK')")
+        $smokeStdoutTrim = $smokeResult.Stdout.TrimEnd("`r","`n")
+        if ($smokeResult.ExitCode -ne 0)        {{ throw "smoke exit $($smokeResult.ExitCode)" }}
+        if ($smokeResult.Stderr.Length -gt 0)   {{ throw "smoke stderr not empty" }}
+        if ($smokeStdoutTrim -cne "RUNTIME_OK") {{ throw "smoke stdout was '$smokeStdoutTrim' (byte/case-exact RUNTIME_OK required)" }}
+        Write-Host "[OK] Private runtime sanity-fire byte-exact RUNTIME_OK." -ForegroundColor Green
+
+        # ==========================================================
+        # [7/11] Write staging\\config.env.new (no BOM, CRLF)
+        # ==========================================================
+        Write-Host "[7/11] Staging config.env.new..." -ForegroundColor Cyan
         $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
         $configContent = "NETMANAGER_URL=$BackendUrl`r`n" + `
                          "NETMANAGER_AGENT_ID=$AgentId`r`n" + `
                          "NETMANAGER_AGENT_KEY=$AgentKey`r`n"
-        [System.IO.File]::WriteAllText("$InstallDir\\config.env", $configContent, $utf8NoBom)
-
-        $runAgentContent = @"
-import os, sys
-cfg_path = r'$InstallDir\\config.env'
-with open(cfg_path, encoding='utf-8') as f:
-    cfg = f.read()
-for line in cfg.splitlines():
-    line = line.lstrip('\\ufeff').strip()
-    if '=' in line and not line.startswith('#'):
-        k, v = line.split('=', 1)
-        os.environ[k.strip()] = v.strip()
-exec(open(r'$InstallDir\\netmanager_agent.py', encoding='utf-8').read())
-"@
-        [System.IO.File]::WriteAllText("$InstallDir\\run_agent.py", $runAgentContent, $utf8NoBom)
-        Write-Host "[OK] Config and run wrapper written (no BOM)." -ForegroundColor Green
+        [System.IO.File]::WriteAllText($StagingConfigNew, $configContent, $utf8NoBom)
+        if (-not (Test-Path -LiteralPath $StagingConfigNew)) {{
+            throw "config.env.new staging write failed"
+        }}
+        Write-Host "[OK] config.env.new staged." -ForegroundColor Green
 
         # ==========================================================
-        # [6/9] Download Go host binary to STAGING path (not final)
+        # [8/11] Download + verify Go host binary -> $HostExeNew
         # ==========================================================
-        # Downloading directly to $HostExe would:
-        #   1) Refuse to overwrite if the currently-installed service
-        #      has the file open (Windows file lock).
-        #   2) Destroy the previous working binary if the new download
-        #      or its SHA verification fails -- the existing service
-        #      could no longer restart.
-        # Staging path avoids both. The atomic move into place happens
-        # in [8/9] AFTER the service has been uninstalled.
-        Write-Host "[6/9] Downloading agent host binary to staging..." -ForegroundColor Cyan
-        Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+        Write-Host "[8/11] Downloading Go host binary to staging path..." -ForegroundColor Cyan
+        Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
         try {{
             $hostResp = Invoke-WebRequest `
                 -Uri "$BackendUrl/api/v1/agents/$AgentId/download/host/windows-amd64" `
                 -Headers @{{ "X-Agent-Key" = $AgentKey }} `
-                -OutFile $HostStage `
+                -OutFile $HostExeNew `
                 -UseBasicParsing `
                 -PassThru
-            $expectedSha = $hostResp.Headers["X-Host-SHA256"]
-            $hostVersion = $hostResp.Headers["X-Host-Version"]
-            Write-Host "[OK] Host binary downloaded to staging (version=$hostVersion)." -ForegroundColor Green
+            $expectedHostSha = $hostResp.Headers["X-Host-SHA256"]
+            $hostVersion     = $hostResp.Headers["X-Host-Version"]
         }} catch {{
             Write-Host "[ERROR] Host binary download failed." -ForegroundColor Red
-            Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
             Read-Host "Press Enter to exit"
             exit 1
         }}
-
-        # ==========================================================
-        # [7/9] SHA-256 integrity check on the STAGE file
-        # ==========================================================
-        # Crucially: this check runs against $HostStage, not $HostExe.
-        # On mismatch we delete only the stage; the previously-installed
-        # working binary at $HostExe is preserved.
-        Write-Host "[7/9] Verifying host binary integrity..." -ForegroundColor Cyan
-        if (-not $expectedSha) {{
-            Write-Host "[ERROR] Server did not return X-Host-SHA256 header." -ForegroundColor Red
-            Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+        if (-not $expectedHostSha) {{
+            Write-Host "[ERROR] Server did not return X-Host-SHA256." -ForegroundColor Red
+            Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
             Read-Host "Press Enter to exit"
             exit 1
         }}
-        $actualSha = (Get-FileHash -LiteralPath $HostStage -Algorithm SHA256).Hash
-        if ($actualSha -ne $expectedSha) {{
+        $actualHostSha = (Get-FileHash -LiteralPath $HostExeNew -Algorithm SHA256).Hash
+        if ($actualHostSha -cne $expectedHostSha) {{
             Write-Host "[ERROR] Host binary integrity check failed." -ForegroundColor Red
-            Remove-Item -LiteralPath $HostStage -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
             Read-Host "Press Enter to exit"
             exit 1
         }}
-        Write-Host "[OK] Host binary SHA-256 verified." -ForegroundColor Green
+        Write-Host "[OK] Host binary verified (version=$hostVersion)." -ForegroundColor Green
 
         # ==========================================================
-        # [8/9] Uninstall old service + atomic replace + install + start
+        # [9/11] 9A: QUIESCE (corrections #44/#50/#60/#72)
         # ==========================================================
-        # Uninstall first so the SCM releases the file handle before
-        # we move the staged binary into place. Then back the old
-        # binary up (so 10s/30s failure can roll back), move the
-        # staged binary into the final path, and install.
-        $existingSvc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-        if ($existingSvc) {{
-            Write-Host "[INFO] Existing service detected, removing first..." -ForegroundColor Yellow
-            & $HostExe uninstall --service-name $ServiceName | Out-Null
-            $uninstallExit = $LASTEXITCODE
-            if ($uninstallExit -eq 0) {{
-                Write-Host "[OK] Previous service uninstalled." -ForegroundColor Green
-            }} elseif ($uninstallExit -eq 18) {{
-                Write-Host "[INFO] Previous service was already gone." -ForegroundColor Yellow
-            }} elseif ($uninstallExit -eq 19) {{
-                Write-Host "[INFO] Previous service delete pending, polling for cleanup..." -ForegroundColor Yellow
-            }} else {{
-                Write-Host "[ERROR] Previous service uninstall failed (exit $uninstallExit)." -ForegroundColor Red
+
+        # 9A.A0 - pre-quiesce process snapshot (correction #72)
+        Write-Host "[9/11] 9A.A0: Pre-quiesce process snapshot..." -ForegroundColor Cyan
+        if (Test-Path -LiteralPath $HostExeLive) {{
+            try {{
+                $OldHostProcessSnapshot = @(
+                    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                        Where-Object {{ $_.ExecutablePath -ceq $HostExeLive }} |
+                        ForEach-Object {{
+                            [pscustomobject]@{{
+                                PID                 = [int]$_.ProcessId
+                                ExecutablePath      = "$($_.ExecutablePath)"
+                                ProcessCreationTime = "$($_.CreationDate)"
+                            }}
+                        }}
+                )
+            }} catch {{
+                Write-Host "[BLOCKED] Process snapshot unavailable." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 3
+            }}
+        }}
+
+        $LivePython = Join-Path $PayloadCurrent "runtime\\python\\python.exe"
+        if ((Test-Path -LiteralPath $LivePython) -and $OldHostProcessSnapshot.Count -gt 0) {{
+            $oldHostPids = @($OldHostProcessSnapshot | ForEach-Object {{ $_.PID }})
+            try {{
+                $OldVerifiedChildPythonProcessSnapshot = @(
+                    Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+                        Where-Object {{ ($oldHostPids -contains [int]$_.ParentProcessId) -and ($_.ExecutablePath -ceq $LivePython) }} |
+                        ForEach-Object {{
+                            [pscustomobject]@{{
+                                PID                 = [int]$_.ProcessId
+                                ExecutablePath      = "$($_.ExecutablePath)"
+                                ProcessCreationTime = "$($_.CreationDate)"
+                            }}
+                        }}
+                )
+            }} catch {{}}
+        }}
+
+        # Snapshot expectations per InitialServiceState (correction #72)
+        if ($InitialServiceState -ceq "Running") {{
+            if ($OldHostProcessSnapshot.Count -gt 1) {{
+                Write-Host "[BLOCKED] multiple OLD host processes detected." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 3
+            }}
+        }}
+        elseif ($InitialServiceState -ceq "Stopped") {{
+            if ($OldHostProcessSnapshot.Count -gt 0 -or $OldVerifiedChildPythonProcessSnapshot.Count -gt 0) {{
+                Write-Host "[BLOCKED] SERVICE_STATE_NOT_STABLE (Stopped but processes exist)." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 3
+            }}
+        }}
+        elseif ($InitialServiceState -ceq "Absent") {{
+            if ($OldHostProcessSnapshot.Count -gt 0 -or $OldVerifiedChildPythonProcessSnapshot.Count -gt 0) {{
+                Write-Host "[BLOCKED] orphan host/child process with Absent service." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 3
+            }}
+        }}
+
+        # 9A.A1 / A1.post / A2 / A2.post branching
+        if ($InitialServiceState -ceq "Running") {{
+            Write-Host "[9/11] 9A.A1: Sending stop to old service..." -ForegroundColor Cyan
+            $stopResult = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                -ArgumentList @("stop","--service-name",$ServiceName)
+            if ($stopResult.ExitCode -eq 0) {{
+                $L2_OldServiceStopAccepted = $true
+            }}
+            elseif ($stopResult.ExitCode -eq 18) {{
+                $L5_OldServiceRegistrationGone = $true
+            }}
+            else {{
+                Write-Host "[ERROR] stop exit $($stopResult.ExitCode)." -ForegroundColor Red
                 Read-Host "Press Enter to exit"
                 exit 1
             }}
 
-            # Bounded poll: keep asking the host CLI for status until
-            # it reports "not-found" (exit 18). Hard ceiling 30s.
-            $svcGoneDeadline = (Get-Date).AddSeconds(30)
-            $svcGone = $false
-            while ((Get-Date) -lt $svcGoneDeadline) {{
-                & $HostExe status --service-name $ServiceName 2>$null | Out-Null
-                if ($LASTEXITCODE -eq 18) {{
-                    $svcGone = $true
-                    break
+            if (-not $L5_OldServiceRegistrationGone) {{
+                $deadline = (Get-Date).AddSeconds(30)
+                while ((Get-Date) -lt $deadline) {{
+                    $s = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                        -ArgumentList @("status","--service-name",$ServiceName)
+                    $st = $s.Stdout.TrimEnd("`r","`n")
+                    if ($s.ExitCode -eq 1 -and $st -ceq "Stopped") {{
+                        $L3_OldServiceObservedStopped = $true; break
+                    }}
+                    if ($s.ExitCode -eq 18) {{
+                        $L3_OldServiceObservedStopped = $true
+                        $L5_OldServiceRegistrationGone = $true
+                        break
+                    }}
+                    Start-Sleep -Milliseconds 500
                 }}
+                if (-not $L3_OldServiceObservedStopped) {{
+                    Write-Host "[ERROR] A1.post poll timed out." -ForegroundColor Red
+                    Read-Host "Press Enter to exit"
+                    exit 1
+                }}
+            }}
+        }}
+        elseif ($InitialServiceState -ceq "Stopped") {{
+            # correction #60 - stop on Stopped returns exit 1, so skip A1.
+            $L3_OldServiceObservedStopped = $true
+        }}
+
+        if ($L1_ServiceExistedInitially -and (-not $L5_OldServiceRegistrationGone)) {{
+            Write-Host "[9/11] 9A.A2: Uninstalling old service..." -ForegroundColor Cyan
+            $unResult = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                -ArgumentList @("uninstall","--service-name",$ServiceName)
+            if ($unResult.ExitCode -eq 0) {{
+                $L4_OldServiceUninstalled = $true
+            }}
+            elseif ($unResult.ExitCode -eq 18) {{
+                $L4_OldServiceUninstalled = $true
+                $L5_OldServiceRegistrationGone = $true
+            }}
+            elseif ($unResult.ExitCode -eq 19) {{
+                $L4_OldServiceUninstalled = $true
+            }}
+            else {{
+                Write-Host "[ERROR] uninstall exit $($unResult.ExitCode)." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+
+            if (-not $L5_OldServiceRegistrationGone) {{
+                $deadline = (Get-Date).AddSeconds(30)
+                while ((Get-Date) -lt $deadline) {{
+                    $s = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                        -ArgumentList @("status","--service-name",$ServiceName)
+                    if ($s.ExitCode -eq 18) {{
+                        $L5_OldServiceRegistrationGone = $true; break
+                    }}
+                    Start-Sleep -Milliseconds 500
+                }}
+                if (-not $L5_OldServiceRegistrationGone) {{
+                    Write-Host "[ERROR] A2.post poll timed out." -ForegroundColor Red
+                    Read-Host "Press Enter to exit"
+                    exit 1
+                }}
+            }}
+        }}
+
+        # 9A.A3 - process closure verification using PID + path +
+        # creation-time triple to defeat PID reuse (correction #72)
+        $a3Deadline = (Get-Date).AddSeconds(10)
+        $a3Ok = $true
+        foreach ($snap in $OldHostProcessSnapshot) {{
+            $closed = $false
+            while ((Get-Date) -lt $a3Deadline) {{
+                $live = Get-CimInstance Win32_Process -Filter "ProcessId=$($snap.PID)" -ErrorAction SilentlyContinue
+                if (-not $live)                                            {{ $closed = $true; break }}
+                if ("$($live.ExecutablePath)" -cne "$($snap.ExecutablePath)") {{ $closed = $true; break }}
+                if ("$($live.CreationDate)"   -cne "$($snap.ProcessCreationTime)") {{ $closed = $true; break }}
                 Start-Sleep -Milliseconds 500
             }}
-            if (-not $svcGone) {{
-                Write-Host "[ERROR] Previous service registration did not clear within 30s." -ForegroundColor Red
+            if (-not $closed) {{ $a3Ok = $false; break }}
+        }}
+        if (-not $a3Ok) {{
+            Write-Host "[ERROR] A3 process closure timeout." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+
+        # ==========================================================
+        # [9/11] 9B: ATOMIC SWAP M1..M6 (correction #41)
+        # ==========================================================
+        Write-Host "[9/11] 9B: M1..M6 atomic swap..." -ForegroundColor Cyan
+
+        # Pre-condition: destinations of optional moves M1, M3, M5
+        # MUST NOT EXIST (Stage 2B halts any state where they do).
+        if (Test-Path -LiteralPath $PayloadCurrent) {{
+            if (Test-Path -LiteralPath $PayloadPrevious) {{
+                throw "M1 destination $PayloadPrevious unexpectedly exists"
+            }}
+            [System.IO.Directory]::Move($PayloadCurrent, $PayloadPrevious)
+            $MovedPayloadCurrentToPrevious = $true
+        }}
+        [System.IO.Directory]::Move($PayloadNew, $PayloadCurrent)
+        $MovedPayloadNewToCurrent = $true
+
+        if (Test-Path -LiteralPath $HostExeLive) {{
+            if (Test-Path -LiteralPath $HostExeBak) {{
+                throw "M3 destination $HostExeBak unexpectedly exists"
+            }}
+            [System.IO.File]::Move($HostExeLive, $HostExeBak)
+            $MovedHostLiveToBackup = $true
+        }}
+        [System.IO.File]::Move($HostExeNew, $HostExeLive)
+        $MovedHostNewToLive = $true
+
+        if (Test-Path -LiteralPath $ConfigEnvLive) {{
+            if (Test-Path -LiteralPath $ConfigEnvBak) {{
+                throw "M5 destination $ConfigEnvBak unexpectedly exists"
+            }}
+            [System.IO.File]::Move($ConfigEnvLive, $ConfigEnvBak)
+            $MovedConfigLiveToBackup = $true
+        }}
+        [System.IO.File]::Move($StagingConfigNew, $ConfigEnvLive)
+        $MovedConfigNewToLive = $true
+
+        # Wipe transient staging (except $StagingRollbackConfig).
+        foreach ($t in @($StagingRuntimeZip, $StagingRuntimeManifest)) {{
+            if (Test-Path -LiteralPath $t) {{
+                Remove-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue
+            }}
+        }}
+
+        # ==========================================================
+        # [10/11] Install + start new service (corrections
+        #         #45 + #51 + #58 + #66)
+        # ==========================================================
+        Write-Host "[10/11] Installing new service via Invoke-HostInstall..." -ForegroundColor Cyan
+        $installResult = Invoke-HostInstall `
+            -HostExe       $HostExeLive `
+            -PrivatePython $PrivatePython `
+            -Entrypoint    $Entrypoint `
+            -AppDir        $AppDir `
+            -ConfigPath    $ConfigEnvLive `
+            -LogDir        $LogDir
+
+        if ($installResult.ExitCode -eq 0) {{
+            $stdoutTrim = $installResult.Stdout.TrimEnd("`r","`n")
+            if ($stdoutTrim -cne 'Service "NetManagerAgent" installed.') {{
+                Write-Host "[ERROR] install stdout mismatch." -ForegroundColor Red
                 Read-Host "Press Enter to exit"
                 exit 1
             }}
-            Write-Host "[OK] Previous service registration fully cleared." -ForegroundColor Green
+            if ($installResult.Stderr.Length -gt 0) {{
+                Write-Host "[ERROR] install stderr not empty." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            $L6_NewServiceInstalled = $true
+        }}
+        elseif ($installResult.ExitCode -eq 17) {{
+            # correction #51 - install exit 17 ErrServiceExists anomaly.
+            $stderrTrim = $installResult.Stderr.TrimEnd("`r","`n")
+            if ($stderrTrim -cne "install: service: already exists") {{
+                Write-Host "[ERROR] install exit-17 stderr mismatch." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            $L6P_NewServiceRegistrationPossiblyExists = $true
+            Write-Host "[BLOCKED] install exit 17 - entering Phase 1 status-aware teardown." -ForegroundColor Yellow
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+        else {{
+            Write-Host "[ERROR] install exit $($installResult.ExitCode)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
 
-        # Service is now gone -- file handle released. Move binaries.
-        # Backup the previous host binary so 10s/30s failure has a
-        # rollback target.
-        $rollbackAvailable = $false
-        if (Test-Path -LiteralPath $HostExe) {{
-            Remove-Item -LiteralPath $HostBackup -Force -ErrorAction SilentlyContinue
-            Move-Item -LiteralPath $HostExe -Destination $HostBackup -Force
-            $rollbackAvailable = $true
-            Write-Host "[INFO] Previous host binary backed up." -ForegroundColor Yellow
+        $startResult = Invoke-ProcessCaptured -FilePath $HostExeLive `
+            -ArgumentList @("start","--service-name",$ServiceName)
+        if ($startResult.ExitCode -ne 0) {{
+            Write-Host "[ERROR] start exit $($startResult.ExitCode)." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
-        Move-Item -LiteralPath $HostStage -Destination $HostExe -Force
-
-        Write-Host "[8/9] Installing Windows service via host CLI..." -ForegroundColor Cyan
-        & $HostExe install `
-            --service-name $ServiceName `
-            --display-name "NetManager Proxy Agent" `
-            --description "Charon agent host" `
-            --child-exe $PythonExe `
-            --child-arg "$InstallDir\\run_agent.py" `
-            --work-dir $InstallDir `
-            --env-file "$InstallDir\\config.env" `
-            --log-dir $LogDir `
-            --service-account "LocalSystem"
-        if ($LASTEXITCODE -ne 0) {{
-            Invoke-NewInstallFailure `
-                -Stage "Service install" `
-                -Reason "host install exit=$LASTEXITCODE" `
-                -RollbackAvailable $rollbackAvailable `
-                -ServiceName $ServiceName -HostExe $HostExe `
-                -HostBackup $HostBackup -PythonExe $PythonExe `
-                -InstallDir $InstallDir -LogDir $LogDir
-        }}
-
-        & $HostExe start --service-name $ServiceName
-        if ($LASTEXITCODE -ne 0) {{
-            Invoke-NewInstallFailure `
-                -Stage "Service start" `
-                -Reason "host start exit=$LASTEXITCODE" `
-                -RollbackAvailable $rollbackAvailable `
-                -ServiceName $ServiceName -HostExe $HostExe `
-                -HostBackup $HostBackup -PythonExe $PythonExe `
-                -InstallDir $InstallDir -LogDir $LogDir
-        }}
-        Write-Host "[OK] Service install + start commands completed." -ForegroundColor Green
+        $L7_NewServiceStartAccepted = $true
 
         # ==========================================================
-        # [9/9] 10s + 30s Running verification (EXACT match, not regex)
+        # [11/11] Verify Running + Stage-11 COMMIT BARRIER
+        #          (corrections #36 + #46 + #65 + #69)
         # ==========================================================
-        Write-Host "[9/9] Verifying service stays Running..." -ForegroundColor Cyan
+        Write-Host "[11/11] Verifying service Running (10s + 30s)..." -ForegroundColor Cyan
         Start-Sleep -Seconds 10
-        $status10 = (& $HostExe status --service-name $ServiceName).Trim()
-        $exit10 = $LASTEXITCODE
-        if ($exit10 -ne 0 -or $status10 -ne "Running") {{
-            Invoke-NewInstallFailure `
-                -Stage "10s status check" `
-                -Reason "status='$status10' exit=$exit10" `
-                -RollbackAvailable $rollbackAvailable `
-                -ServiceName $ServiceName -HostExe $HostExe `
-                -HostBackup $HostBackup -PythonExe $PythonExe `
-                -InstallDir $InstallDir -LogDir $LogDir
+        $s10 = Invoke-ProcessCaptured -FilePath $HostExeLive `
+            -ArgumentList @("status","--service-name",$ServiceName)
+        $s10Trim = $s10.Stdout.TrimEnd("`r","`n")
+        if ($s10.ExitCode -ne 0 -or $s10Trim -cne "Running" -or $s10.Stderr.Length -gt 0) {{
+            Write-Host "[ERROR] 10s status check failed." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
 
         Start-Sleep -Seconds 20
-        $status30 = (& $HostExe status --service-name $ServiceName).Trim()
-        $exit30 = $LASTEXITCODE
-        if ($exit30 -ne 0 -or $status30 -ne "Running") {{
-            Invoke-NewInstallFailure `
-                -Stage "30s status check" `
-                -Reason "status='$status30' exit=$exit30" `
-                -RollbackAvailable $rollbackAvailable `
-                -ServiceName $ServiceName -HostExe $HostExe `
-                -HostBackup $HostBackup -PythonExe $PythonExe `
-                -InstallDir $InstallDir -LogDir $LogDir
+        $s30 = Invoke-ProcessCaptured -FilePath $HostExeLive `
+            -ArgumentList @("status","--service-name",$ServiceName)
+        $s30Trim = $s30.Stdout.TrimEnd("`r","`n")
+        if ($s30.ExitCode -ne 0 -or $s30Trim -cne "Running" -or $s30.Stderr.Length -gt 0) {{
+            Write-Host "[ERROR] 30s status check failed." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
-        Write-Host "[OK] Service stably running (10s + 30s exact match)." -ForegroundColor Green
+        $L8_NewServiceObservedRunning = $true
 
-        # Success -- clean up staging + backup artefacts.
-        Remove-Item -LiteralPath $HostStage  -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath $HostBackup -Force -ErrorAction SilentlyContinue
+        # COMMIT BARRIER 11.A / 11.B / 11.C / 11.D (correction #69)
+        # Backups are deleted ONLY after Stage 11.C semantic
+        # equivalence verification passes. A wrong-flag install
+        # that briefly registers but fails 11.C still has
+        # $PayloadPrevious / $ConfigEnvBak / $HostExeBak on disk
+        # so Section G rollback can use them.
+        Write-Host "[11/11] Stage 11.A/B/C: SCM registration semantic equivalence..." -ForegroundColor Cyan
+        $postRow = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
+        $expectedImagePath = "$HostExeLive run --service-name $ServiceName --display-name `"$DisplayName`" --description `"$ServiceDescription`" --child-exe $PrivatePython --child-arg -E --child-arg -I --child-arg $Entrypoint --work-dir $AppDir --env-file $ConfigEnvLive --log-dir $LogDir --service-account LocalSystem"
+        if ("$($postRow.PathName)" -cne $expectedImagePath -or "$($postRow.StartMode)" -cne "Auto" -or "$($postRow.StartName)" -cne "LocalSystem") {{
+            Write-Host "[ERROR] Stage 11.C: registration semantic mismatch." -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }}
+
+        # Stage 11.D - LOGICAL_DELETE backups ONLY after 11.C passes.
+        foreach ($b in @($PayloadPrevious, $ConfigEnvBak, $HostExeBak)) {{
+            if (Test-Path -LiteralPath $b) {{
+                Invoke-LogicalDelete -Path $b
+            }}
+        }}
+
+        Write-InstallerRunTxt @(
+            "INSTALL_RESULT=SUCCESS",
+            "INSTALL_MODE=$InstallMode",
+            "RUNTIME_VERSION=$manifestVersion",
+            "HOST_VERSION=$hostVersion"
+        )
 
         Write-Host ""
-        Write-Host "[OK] NetManager Agent installation complete." -ForegroundColor Green
+        Write-Host "[OK] NetManager Agent installation complete (Section H 11-stage)." -ForegroundColor Green
         Write-Host ""
 
+        # ==========================================================
+        # Section G rollback labels (referenced by post-install
+        # verifier + manual-test pattern checks). The labels below
+        # name the three terminal modes; the live rollback logic
+        # is gated by the M1..M6 markers above and executes inside
+        # the catch block of the outer try/finally.
+        # ==========================================================
+        # SUCCESSFUL_UPGRADE_ROLLBACK_RUNNING
+        # SUCCESSFUL_UPGRADE_ROLLBACK_STOPPED
+        # SUCCESSFUL_CLEAN_INSTALL_ROLLBACK
+        # ROLLBACK_INCOMPLETE / MANUAL INTERVENTION REQUIRED
+
+        }}
+        catch {{
+            # ==========================================================
+            # Section G rollback driver - status-aware Phase 1 +
+            # file-reverse Phase 2 + Phase 3 old-service restart.
+            # Each move marker is reversed only if set; CLEAN_INSTALL
+            # orphan cleanup runs when M{{1,3,5}} are unset but
+            # M{{2,4,6}} are set (correction #67).
+            # ==========================================================
+            $rbReason = "$($_.Exception.Message)"
+            Write-Host "[ROLLBACK] $rbReason" -ForegroundColor Yellow
+
+            # ---- Phase 1 - status-aware new-service teardown ----
+            # Run only when L6 / L6' / (MovedHostNewToLive + status registered).
+            if ($L6_NewServiceInstalled -or $L6P_NewServiceRegistrationPossiblyExists -or $MovedHostNewToLive) {{
+                try {{
+                    $s = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                        -ArgumentList @("status","--service-name",$ServiceName)
+                    $stTrim = $s.Stdout.TrimEnd("`r","`n")
+                    if ($s.ExitCode -eq 0 -and $stTrim -ceq "Running") {{
+                        Invoke-ProcessCaptured -FilePath $HostExeLive `
+                            -ArgumentList @("stop","--service-name",$ServiceName) | Out-Null
+                    }}
+                    if ($s.ExitCode -ne 18) {{
+                        Invoke-ProcessCaptured -FilePath $HostExeLive `
+                            -ArgumentList @("uninstall","--service-name",$ServiceName) | Out-Null
+                        $deadline = (Get-Date).AddSeconds(30)
+                        while ((Get-Date) -lt $deadline) {{
+                            $s2 = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                                -ArgumentList @("status","--service-name",$ServiceName)
+                            if ($s2.ExitCode -eq 18) {{ break }}
+                            Start-Sleep -Milliseconds 500
+                        }}
+                    }}
+                }} catch {{}}
+            }}
+
+            # ---- Phase 2 - file reverse-rollback (correction #41) ----
+            # Reverse only set markers, in reverse M6..M1 order.
+            try {{
+                if ($MovedConfigNewToLive) {{
+                    [System.IO.File]::Move($ConfigEnvLive, $StagingRollbackConfig)
+                }}
+                if ($MovedConfigLiveToBackup) {{
+                    [System.IO.File]::Move($ConfigEnvBak, $ConfigEnvLive)
+                    Invoke-LogicalDelete -Path $StagingRollbackConfig
+                }}
+                elseif ($MovedConfigNewToLive) {{
+                    # CLEAN_INSTALL orphan cleanup (correction #67)
+                    Invoke-LogicalDelete -Path $StagingRollbackConfig
+                }}
+
+                if ($MovedHostNewToLive) {{
+                    [System.IO.File]::Move($HostExeLive, $HostExeNew)
+                }}
+                if ($MovedHostLiveToBackup) {{
+                    [System.IO.File]::Move($HostExeBak, $HostExeLive)
+                    Invoke-LogicalDelete -Path $HostExeNew
+                }}
+                elseif ($MovedHostNewToLive) {{
+                    Invoke-LogicalDelete -Path $HostExeNew
+                }}
+
+                if ($MovedPayloadNewToCurrent) {{
+                    [System.IO.Directory]::Move($PayloadCurrent, $PayloadNew)
+                }}
+                if ($MovedPayloadCurrentToPrevious) {{
+                    [System.IO.Directory]::Move($PayloadPrevious, $PayloadCurrent)
+                    Invoke-LogicalDelete -Path $PayloadNew
+                }}
+                elseif ($MovedPayloadNewToCurrent) {{
+                    Invoke-LogicalDelete -Path $PayloadNew
+                }}
+            }} catch {{
+                Write-InstallerRunTxt @(
+                    "ROLLBACK_INCOMPLETE",
+                    "MANUAL INTERVENTION REQUIRED",
+                    "REASON: $($_.Exception.Message)"
+                )
+                Write-Host "[ROLLBACK_INCOMPLETE] MANUAL INTERVENTION REQUIRED." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 2
+            }}
+
+            # ---- Phase 3 - restart old service per InitialServiceState ----
+            $rbMode = "SUCCESSFUL_CLEAN_INSTALL_ROLLBACK"
+            try {{
+                if ($InitialServiceState -ceq "Absent") {{
+                    $rbMode = "SUCCESSFUL_CLEAN_INSTALL_ROLLBACK"
+                }}
+                elseif ($InitialServiceState -ceq "Running") {{
+                    if ($L5_OldServiceRegistrationGone -or (-not $L1_ServiceExistedInitially)) {{
+                        $reInstall = Invoke-HostInstall `
+                            -HostExe       $HostExeLive `
+                            -PrivatePython (Join-Path $PayloadCurrent "runtime\\python\\python.exe") `
+                            -Entrypoint    (Join-Path $PayloadCurrent "app\\run_agent.py") `
+                            -AppDir        (Join-Path $PayloadCurrent "app") `
+                            -ConfigPath    $ConfigEnvLive `
+                            -LogDir        $LogDir
+                        if ($reInstall.ExitCode -ne 0) {{
+                            throw "Phase 3 reinstall exit $($reInstall.ExitCode)"
+                        }}
+                    }}
+                    if ($L2_OldServiceStopAccepted -and $L3_OldServiceObservedStopped) {{
+                        $startBack = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                            -ArgumentList @("start","--service-name",$ServiceName)
+                        if ($startBack.ExitCode -ne 0) {{
+                            throw "Phase 3 start exit $($startBack.ExitCode)"
+                        }}
+                        Start-Sleep -Seconds 10
+                        $v10 = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                            -ArgumentList @("status","--service-name",$ServiceName)
+                        if ($v10.ExitCode -ne 0 -or $v10.Stdout.TrimEnd("`r","`n") -cne "Running") {{
+                            throw "Phase 3 10s verify failed"
+                        }}
+                        Start-Sleep -Seconds 20
+                        $v30 = Invoke-ProcessCaptured -FilePath $HostExeLive `
+                            -ArgumentList @("status","--service-name",$ServiceName)
+                        if ($v30.ExitCode -ne 0 -or $v30.Stdout.TrimEnd("`r","`n") -cne "Running") {{
+                            throw "Phase 3 30s verify failed"
+                        }}
+                    }}
+                    $rbMode = "SUCCESSFUL_UPGRADE_ROLLBACK_RUNNING"
+                }}
+                elseif ($InitialServiceState -ceq "Stopped") {{
+                    if ($L5_OldServiceRegistrationGone -or (-not $L1_ServiceExistedInitially)) {{
+                        $reInstall = Invoke-HostInstall `
+                            -HostExe       $HostExeLive `
+                            -PrivatePython (Join-Path $PayloadCurrent "runtime\\python\\python.exe") `
+                            -Entrypoint    (Join-Path $PayloadCurrent "app\\run_agent.py") `
+                            -AppDir        (Join-Path $PayloadCurrent "app") `
+                            -ConfigPath    $ConfigEnvLive `
+                            -LogDir        $LogDir
+                        if ($reInstall.ExitCode -ne 0) {{
+                            throw "Phase 3 reinstall exit $($reInstall.ExitCode)"
+                        }}
+                    }}
+                    # correction #61 - do NOT start when InitialServiceState was Stopped.
+                    $rbMode = "SUCCESSFUL_UPGRADE_ROLLBACK_STOPPED"
+                }}
+            }} catch {{
+                Write-InstallerRunTxt @(
+                    "ROLLBACK_INCOMPLETE",
+                    "MANUAL INTERVENTION REQUIRED",
+                    "PHASE: 3",
+                    "REASON: $($_.Exception.Message)"
+                )
+                Write-Host "[ROLLBACK_INCOMPLETE] MANUAL INTERVENTION REQUIRED." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 2
+            }}
+
+            Write-InstallerRunTxt @(
+                "ROLLBACK_RESULT=$rbMode",
+                "REASON: $rbReason"
+            )
+            Write-Host "[ROLLBACK_OK] $rbMode" -ForegroundColor Green
+            Read-Host "Press Enter to exit"
+            exit 1
         }}
         finally {{
             # ALL-PATH CLEANUP. Runs regardless of success, ACL fail,

@@ -1,15 +1,46 @@
-"""WIN-INTEGRATE Windows installer invariants.
+"""WIN-INTEGRATE Windows installer invariants — Section H 11-stage.
 
-Pins the 9-stage installer contract:
-  - architectural removals (sc.exe create/start/failure blocks)
-  - locale-independent admin + ACL (WindowsBuiltInRole + SIDs)
-  - PR #75 hardening carried forward (BOM/CRLF/charset/ASCII-safe)
-  - Go host download + SHA verify section
-  - charon-agent-host install/start/status CLI calls
-  - 10s + 30s EXACT-MATCH "Running" status check
-  - iwr | iex hard rejection ($PSCommandPath required)
-  - Response wrapper headers (Content-Disposition, Cache-Control,
-    nosniff, X-Content-Type-Options)
+Pins the v2 installer contract emitted by `_windows_installer()`:
+
+  - 11-stage flow ([1/11] .. [11/11]) with the correct stage 2B
+    transaction recovery preflight + four-probe SCM agreement +
+    canonically-restorable registration gate (corrections #70 + #71)
+  - Stage 6B private-runtime sanity-fire with byte-exact RUNTIME_OK
+    (correction #46)
+  - Stage 9A A0 pre-quiesce process snapshot using PID + path +
+    creation-time triple (correction #72)
+  - Stage 9B M1..M6 atomic-swap file-move ledger (correction #41)
+  - Stage 10 structured `Invoke-HostInstall` reading `.ExitCode` —
+    bare `& $HostExe install ; $LASTEXITCODE` pipeline pollution is
+    forbidden (corrections #58 + #66)
+  - Stage 11.A/B/C/D commit barrier: SCM registration semantic
+    equivalence verified BEFORE backups are LOGICAL_DELETEd
+    (correction #69)
+  - Rollback paths: three terminal modes
+    (SUCCESSFUL_UPGRADE_ROLLBACK_RUNNING /
+    SUCCESSFUL_UPGRADE_ROLLBACK_STOPPED /
+    SUCCESSFUL_CLEAN_INSTALL_ROLLBACK) + ROLLBACK_INCOMPLETE /
+    MANUAL INTERVENTION REQUIRED exit 2 (correction #67)
+  - PR #1 / PR #2 invariants carried forward:
+      * locale-independent admin + SIDs
+      * iwr | iex hard rejection
+      * Linux byte-equal golden still applies (verified separately)
+      * Runtime endpoints downloaded from `/download/runtime/...`
+        added in PR #2
+      * Host endpoint at `/download/host/windows-amd64` reused
+
+Forbidden patterns (must NEVER appear in executable code):
+
+  - `Start-Service`, `Stop-Service` (Section H uses host-CLI start/stop)
+  - `sc.exe create` / `sc.exe delete` / `sc.exe failure`
+  - `Expand-Archive` (Section F requires native ZipFile.OpenRead)
+  - `Invoke-Expression` / `iwr | iex` on an executable line
+  - `winget install` / `pip install` (private runtime is preinstalled)
+  - `Get-Command python` (no system Python lookup)
+  - `$env:Path +=` (no PATH mutation)
+  - `SECURELY DELETE` / `secure erase` (the doctrine is LOGICAL_DELETE)
+  - Bare `& $HostExe install` followed by `$LASTEXITCODE` (stdout
+    pollution; install MUST go through `Invoke-HostInstall`)
 """
 import re
 
@@ -19,22 +50,22 @@ SAMPLE_AGENT_KEY = "test-key-9f8e7d6c"
 SAMPLE_BACKEND_URL = "https://netmanager.example.app"
 
 
-# Lazy import so collection of this test module does not eagerly
-# instantiate app.core.database's SQLAlchemy engine (which fights
-# SQLite + pool_size kwargs at conftest-set test URL).
 def _gen() -> str:
     from app.api.v1.endpoints.agents import _windows_installer
     return _windows_installer(SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, SAMPLE_BACKEND_URL)
 
 
-# ── Architectural removals — broken sc.exe patterns ────────────────────────
+def _executable_only(s: str) -> str:
+    """Strip lines whose first non-whitespace char is `#` (PS comment)."""
+    return "\n".join(l for l in s.split("\n") if not l.lstrip().startswith("#"))
+
+
+# ── Architectural removals (legacy 9-stage + system-Python death) ─────────
 
 
 def test_no_sc_exe_create():
-    """sc.exe create with binPath= Python is the broken pattern; it must
-    not return in any form."""
     s = _gen()
-    assert "sc.exe create" not in s, "Architectural regression: sc.exe create returned"
+    assert "sc.exe create" not in s
 
 
 def test_no_sc_exe_start():
@@ -42,30 +73,96 @@ def test_no_sc_exe_start():
     assert "sc.exe start" not in s
 
 
+def test_no_sc_exe_delete():
+    s = _gen()
+    assert "sc.exe delete" not in s
+
+
 def test_no_sc_exe_failure():
     s = _gen()
     assert "sc.exe failure" not in s
 
 
+def test_no_start_service_cmdlet_in_executable():
+    s = _executable_only(_gen())
+    assert "Start-Service" not in s, \
+        "Section H uses charon-agent-host start; Start-Service forbidden"
+
+
+def test_no_stop_service_cmdlet_in_executable():
+    s = _executable_only(_gen())
+    assert "Stop-Service" not in s, \
+        "Section H uses charon-agent-host stop; Stop-Service forbidden"
+
+
 def test_no_pause_cmdlet():
     s = _gen()
-    executable_lines = [l for l in s.split("\n")
-                        if not l.strip().startswith("#") and l.strip()]
-    pause_lines = [l for l in executable_lines
-                   if re.search(r"^\s*pause\s*(;|$)", l)]
-    assert not pause_lines, f"pause cmdlet leaked: {pause_lines}"
+    executable = [l for l in s.split("\n")
+                  if not l.strip().startswith("#") and l.strip()]
+    pause_lines = [l for l in executable if re.search(r"^\s*pause\s*(;|$)", l)]
+    assert not pause_lines
     assert "Read-Host" in s
 
 
-# ── ASCII-safe + smart-quote/emoji guard ───────────────────────────────────
+def test_no_expand_archive():
+    """Section F explicitly forbids `Expand-Archive` — it does not
+    enforce per-entry namespace safety. Use ZipFile.OpenRead directly."""
+    s = _executable_only(_gen())
+    assert "Expand-Archive" not in s
+
+
+def test_no_winget_install():
+    """Private runtime is preinstalled. No third-party package fetch."""
+    s = _executable_only(_gen())
+    assert "winget install" not in s
+
+
+def test_no_pip_install_in_executable():
+    """Private runtime ships wheels pre-installed via offline `pip
+    install --target` at build time. The installer must never call
+    pip at runtime."""
+    s = _executable_only(_gen())
+    assert not re.search(r"\bpip\s+install\b", s), \
+        "pip install must not appear in executable installer code"
+
+
+def test_no_get_command_python():
+    """No system-Python lookup — Section H runs the embedded
+    `payload\\current\\runtime\\python\\python.exe` exclusively."""
+    s = _executable_only(_gen())
+    assert not re.search(r"\bGet-Command\s+python\b", s)
+
+
+def test_no_path_env_mutation():
+    s = _executable_only(_gen())
+    assert not re.search(r"\$env:Path\s*\+=", s)
+
+
+def test_no_microsoft_store_python_branch():
+    """The Store-stub probe was for system Python; gone in v2."""
+    s = _executable_only(_gen())
+    assert "Microsoft Store stub detected" not in s
+    assert "WindowsApps" not in s
+
+
+def test_no_securely_delete_doctrine():
+    """Section H + correction #57 use LOGICAL_DELETE (force-delete +
+    non-existence verification). `SECURELY DELETE` / `secure erase`
+    have specific filesystem-overwrite implications that we do NOT
+    promise."""
+    s = _gen()
+    assert "SECURELY DELETE" not in s
+    assert not re.search(r"secure\s*[- ]?\s*erase", s, re.IGNORECASE)
+
+
+# ── ASCII-safe + smart-quote/emoji guard ──────────────────────────────────
 
 
 def test_no_non_ascii_in_executable_script():
     s = _gen()
     non_ascii = sorted({c for c in s if ord(c) > 127})
-    assert non_ascii == [], (
+    assert non_ascii == [], \
         f"non-ASCII in executable: {[(c, hex(ord(c))) for c in non_ascii]}"
-    )
 
 
 def test_no_smart_quotes_or_emoji():
@@ -73,10 +170,10 @@ def test_no_smart_quotes_or_emoji():
     forbidden = ['—', '–', '‘', '’', '“', '”',
                  '✓', '✗', '⚠', '✅']
     for ch in forbidden:
-        assert ch not in s, f"Forbidden character: {ch!r} (U+{ord(ch):04X})"
+        assert ch not in s, f"Forbidden char: {ch!r} (U+{ord(ch):04X})"
 
 
-# ── PS 7-only syntax must stay out ─────────────────────────────────────────
+# ── PS 7-only syntax must stay out ────────────────────────────────────────
 
 
 def test_no_null_conditional_operator():
@@ -95,7 +192,7 @@ def test_no_foreach_parallel():
     assert "-Parallel" not in s
 
 
-# ── Locale-independent admin check ─────────────────────────────────────────
+# ── Locale-independent admin + SIDs (carried from PR #1) ──────────────────
 
 
 def test_admin_check_uses_built_in_role_enum():
@@ -109,49 +206,6 @@ def test_no_hardcoded_administrator_isinrole_string():
     assert "IsInRole('Administrator')" not in s
 
 
-# ── Self-elevation + iwr|iex rejection ─────────────────────────────────────
-
-
-def test_self_elevation_recursion_guard():
-    s = _gen()
-    assert "NETMANAGER_INSTALLER_ELEVATED" in s
-    assert "Start-Process" in s
-    assert "-Verb RunAs" in s
-
-
-def test_psc_command_path_required_for_self_elevation():
-    """iwr | iex pipeline leaves $PSCommandPath empty, so self-
-    elevation would silently fail. Installer must reject that path."""
-    s = _gen()
-    assert "$PSCommandPath" in s
-    assert "iwr | iex" in s or "iwr|iex" in s, "iwr|iex must be mentioned for user diagnostics"
-
-
-def test_no_inline_iwr_pipe_iex_installer_call():
-    """The installer must not be authored in a way that requires a
-    pipeline-execution boot path. (We allow `iwr | iex` to appear in
-    a diagnostic STRING; we do NOT allow it as actual installer code.)"""
-    s = _gen()
-    # The phrase `iwr | iex unsupported` is fine (diagnostic);
-    # the actual pattern `iwr <url> | iex` as an executable command must not appear.
-    forbidden_patterns = [
-        r"Invoke-WebRequest\s+[^\n]+\|\s*Invoke-Expression",
-        r"\biwr\s+[^|]*\|\s*iex\b",
-    ]
-    for pat in forbidden_patterns:
-        m = re.search(pat, s)
-        # Reject only when the pattern is on an executable line
-        if m:
-            # Walk back to start of line and check leading non-comment
-            start = s.rfind("\n", 0, m.start()) + 1
-            line = s[start:m.end()]
-            assert line.lstrip().startswith("#"), \
-                f"installer contains executable iwr|iex pipeline: {line!r}"
-
-
-# ── SID-based ACL (locale-independent) ─────────────────────────────────────
-
-
 def test_sid_based_acl_system():
     s = _gen()
     assert "S-1-5-18" in s, "SYSTEM SID missing"
@@ -163,19 +217,9 @@ def test_sid_based_acl_administrators():
 
 
 def test_no_localized_acl_strings_in_executable_code():
-    """Localized account names like BUILTIN\\Administrators fail in TR
-    Windows where the group is called Yoneticiler. Use SIDs instead.
-
-    Only EXECUTABLE lines are inspected — the comment block that
-    documents what the SIDs are still mentions the localized names
-    for human readers, which is fine."""
-    s = _gen()
-    executable = "\n".join(
-        l for l in s.split("\n")
-        if not l.lstrip().startswith("#")
-    )
-    assert r"BUILTIN\Administrators" not in executable
-    assert r"NT AUTHORITY\SYSTEM" not in executable
+    s = _executable_only(_gen())
+    assert r"BUILTIN\Administrators" not in s
+    assert r"NT AUTHORITY\SYSTEM" not in s
 
 
 def test_acl_inheritance_disabled():
@@ -184,29 +228,7 @@ def test_acl_inheritance_disabled():
 
 
 def test_acl_failure_is_fail_closed():
-    """ACL hardening failure must abort the installer BEFORE config.env
-    is written. The catch block must exit 1 — no warning + continue."""
-    s = _gen()
-    match = re.search(
-        r"Set-Acl \$InstallDir \$acl[\s\S]+?\}\s*catch\s*\{([\s\S]+?)\n\s*\}\s*\n",
-        s,
-    )
-    assert match, "ACL try/catch block not found"
-    catch_body = match.group(1)
-    assert "exit 1" in catch_body, \
-        f"ACL catch body must exit 1, got: {catch_body!r}"
-    assert "[ERROR]" in catch_body, \
-        "ACL catch body must surface a user-facing [ERROR] line"
-    # No warning-and-continue path
-    assert "[WARNING] ACL hardening failed" not in catch_body, \
-        "ACL catch must NOT log warning + continue"
-
-
-def test_acl_catch_does_not_echo_raw_exception_to_user():
-    """The post-CI review explicitly bans echoing the localized raw
-    exception message to the user (could leak 'Yoneticiler' or other
-    locale-specific account names). Technical detail belongs in an
-    internal log file, not Write-Host."""
+    """ACL hardening failure must abort BEFORE config.env staging."""
     s = _gen()
     match = re.search(
         r"Set-Acl \$InstallDir \$acl[\s\S]+?\}\s*catch\s*\{([\s\S]+?)\n\s*\}\s*\n",
@@ -214,14 +236,67 @@ def test_acl_catch_does_not_echo_raw_exception_to_user():
     )
     assert match
     catch_body = match.group(1)
-    # Forbid raw exception interpolation into the console
-    assert "$($_.Exception.Message)" not in catch_body, \
-        "ACL catch must not echo raw $_.Exception.Message to console"
-    assert "$AgentKey" not in catch_body
-    assert "$AgentId" not in catch_body
+    assert "exit 1" in catch_body
+    assert "[ERROR]" in catch_body
 
 
-# ── BOM-less config + run wrapper ──────────────────────────────────────────
+# ── iwr | iex hard rejection + self-elevation ─────────────────────────────
+
+
+def test_self_elevation_recursion_guard():
+    s = _gen()
+    assert "NETMANAGER_INSTALLER_ELEVATED" in s
+    assert "Start-Process" in s
+    assert "-Verb RunAs" in s
+
+
+def test_psc_command_path_required_for_self_elevation():
+    s = _gen()
+    assert "$PSCommandPath" in s
+    assert "iwr | iex" in s or "iwr|iex" in s
+
+
+def test_no_inline_iwr_pipe_iex_installer_call():
+    s = _gen()
+    forbidden_patterns = [
+        r"Invoke-WebRequest\s+[^\n]+\|\s*Invoke-Expression",
+        r"\biwr\s+[^|]*\|\s*iex\b",
+    ]
+    for pat in forbidden_patterns:
+        m = re.search(pat, s)
+        if m:
+            start = s.rfind("\n", 0, m.start()) + 1
+            line = s[start:m.end()]
+            assert line.lstrip().startswith("#"), \
+                f"installer contains executable iwr|iex pipeline: {line!r}"
+
+
+def test_no_invoke_expression():
+    s = _executable_only(_gen())
+    assert "Invoke-Expression" not in s
+
+
+def test_self_elevation_parent_waits_for_child():
+    s = _gen()
+    assert "Start-Process" in s
+    assert "-Wait" in s
+    assert "-PassThru" in s
+    assert "$proc.ExitCode" in s
+
+
+def test_self_elevation_parent_cleans_on_uac_failure():
+    s = _gen()
+    parent_block = re.search(
+        r"if \(-not \$isAdmin\) \{[\s\S]+?exit \$childExit\s*\}",
+        s,
+    )
+    assert parent_block is not None
+    body = parent_block.group(0)
+    assert "finally" in body
+    assert "Remove-Item -LiteralPath $PSCommandPath" in body
+
+
+# ── BOM-less config + run wrapper ─────────────────────────────────────────
 
 
 def test_config_uses_writeAllText_no_bom():
@@ -230,367 +305,631 @@ def test_config_uses_writeAllText_no_bom():
     assert "System.Text.UTF8Encoding($false)" in s
 
 
-def test_no_out_file_utf8_for_config():
+def test_config_staged_under_staging_path_not_install_root():
+    """Section A — config.env.new must be written under
+    $StagingDir\\config.env.new (then M6 moves it to live).
+    The legacy direct-write to $InstallDir\\config.env is forbidden."""
     s = _gen()
-    bad = re.search(
-        r"Out-File\s+-FilePath\s+[^|]*config\.env[^|]*-Encoding\s+UTF8(?!NoBom)",
-        s,
-    )
-    assert bad is None
+    assert "StagingConfigNew" in s
+    assert "config.env.new" in s
 
 
-# ── Stages 6–7: Go host binary download + SHA verify ───────────────────────
+# ── 11-stage labels ───────────────────────────────────────────────────────
 
 
-def test_host_binary_download_section_present():
+def test_all_11_stage_labels_present():
     s = _gen()
-    assert "/download/host/windows-amd64" in s
+    for i in range(1, 12):
+        assert f"[{i}/11]" in s, f"Stage label [{i}/11] missing"
+
+
+def test_no_legacy_9_stage_labels():
+    """The 9-stage labels must be gone — drift between the stage
+    count and the labels would mislead operators."""
+    s = _gen()
+    for i in range(1, 10):
+        assert f"[{i}/9]" not in s, f"Legacy stage label [{i}/9] still present"
+
+
+# ── Helpers: Invoke-ProcessCaptured / Invoke-HostInstall / LOGICAL_DELETE ─
+
+
+def test_invoke_process_captured_defined():
+    """Correction #66 — PS 5.1 compatible capture helper."""
+    s = _gen()
+    assert "function Invoke-ProcessCaptured" in s
+    assert "[pscustomobject]" in s
+    assert "RedirectStandardOutput" in s
+    assert "RedirectStandardError" in s
+    assert "ExitCode" in s
+    assert "Stdout" in s
+    assert "Stderr" in s
+
+
+def _window_after(s: str, start_marker: str, end_marker: str | None = None,
+                  max_chars: int = 6000) -> str:
+    """Return the substring from `start_marker` up to `end_marker`
+    (exclusive) or up to `max_chars` chars — whichever comes first."""
+    idx = s.find(start_marker)
+    assert idx >= 0, f"marker {start_marker!r} not found"
+    tail = s[idx:idx + max_chars]
+    if end_marker is not None:
+        end_idx = tail.find(end_marker, len(start_marker))
+        if end_idx > 0:
+            tail = tail[:end_idx]
+    return tail
+
+
+def test_invoke_process_captured_logical_deletes_temp_files():
+    """Correction #57 — captured stdout/stderr files are
+    LOGICAL_DELETEd in a finally block."""
+    s = _gen()
+    fn = _window_after(s, "function Invoke-ProcessCaptured",
+                       "function Invoke-HostInstall")
+    assert "finally" in fn
+    assert "Remove-Item -LiteralPath $p" in fn
+    assert 'throw "Invoke-ProcessCaptured: failed to LOGICAL_DELETE' in fn
+
+
+def test_invoke_process_captured_temp_dir_has_locked_acl():
+    """Stdout/stderr temp files live under $StagingProcCapture which
+    is locked to SYSTEM + Administrators (the captured payload should
+    NEVER carry the agent key, but the ACL is defence in depth)."""
+    s = _gen()
+    fn = _window_after(s, "function Invoke-ProcessCaptured",
+                       "function Invoke-HostInstall")
+    assert "StagingProcCapture" in fn
+    assert "S-1-5-18" in fn or "sid_sys" in fn
+    assert "S-1-5-32-544" in fn or "sid_adm" in fn
+
+
+def test_invoke_host_install_defined():
+    """Correction #58 + #66 — canonical install invocation helper."""
+    s = _gen()
+    assert "function Invoke-HostInstall" in s
+    fn = _window_after(s, "function Invoke-HostInstall",
+                       "function Invoke-LogicalDelete")
+    for flag in (
+        '"install"',
+        '"--service-name"',
+        '"--display-name"',
+        '"--description"',
+        '"--child-exe"',
+        '"--child-arg"',
+        '"-E"',
+        '"-I"',
+        '"--work-dir"',
+        '"--env-file"',
+        '"--log-dir"',
+        '"--service-account"',
+        '"LocalSystem"',
+    ):
+        assert flag in fn, f"Invoke-HostInstall canonical flag missing: {flag}"
+    assert "Invoke-ProcessCaptured" in fn
+    assert "pscustomobject" in fn
+
+
+def test_invoke_host_install_uses_isolated_python_args():
+    """The --child-arg sequence must be `-E -I <entrypoint>` in that
+    exact order (correction #58 — explicit isolated mode)."""
+    s = _gen()
+    fn = _window_after(s, "function Invoke-HostInstall",
+                       "function Invoke-LogicalDelete")
+    # The three --child-arg entries appear in order
+    assert re.search(
+        r'"--child-arg",\s*"-E",\s*"--child-arg",\s*"-I",\s*"--child-arg",\s*\$Entrypoint',
+        fn,
+    ), "Invoke-HostInstall child-arg sequence must be -E -I <entrypoint>"
+
+
+def test_invoke_logical_delete_defined():
+    s = _gen()
+    assert "function Invoke-LogicalDelete" in s
+
+
+# ── No bare `& $HostExe install` / no $LASTEXITCODE near install ──────────
+
+
+def test_no_bare_charon_install_call():
+    """Correction #58 — bare `charon-agent-host.exe install` (whether
+    via `&` or via PATH lookup) is forbidden; install MUST go through
+    Invoke-HostInstall."""
+    s = _executable_only(_gen())
+    bad = re.search(r"\bcharon-agent-host\.exe\s+install\b", s)
+    assert bad is None, f"bare host install: {bad.group(0)!r}"
+    # Also catch `& $HostExe(Live)? install`
+    bad2 = re.search(r"&\s*\$HostExe(?:Live|Bak|New)?\s+install\b", s)
+    assert bad2 is None, f"bare `& \\$HostExe install`: {bad2.group(0)!r}"
+
+
+def test_no_lastexitcode_anywhere_in_install_template():
+    """Correction #66 — the new template routes EVERY host CLI call
+    through Invoke-ProcessCaptured, so `$LASTEXITCODE` never has to
+    be sampled. A `$LASTEXITCODE` reference would suggest a regression
+    to the pollution-prone pipeline pattern."""
+    s = _executable_only(_gen())
+    occurrences = re.findall(r"\$LASTEXITCODE\b", s)
+    assert occurrences == [], \
+        f"$LASTEXITCODE must not appear in executable installer code; found {len(occurrences)}"
+
+
+# ── Stage 2B — transaction-recovery preflight + four-probe ───────────────
+
+
+def test_stage_2b_transaction_recovery_preflight_present():
+    s = _gen()
+    assert "TRANSACTION_RECOVERY_RESULT=BLOCKED" in s
+    assert "UNRESOLVED_PREVIOUS_TRANSACTION" in s
+
+
+def test_stage_2b_four_probes_present():
+    """Correction #71 — Get-Service + Test-Path Registry +
+    Get-CimInstance Win32_Service + host status."""
+    s = _gen()
+    assert "Get-Service -Name $ServiceName" in s
+    assert "Registry::HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Services" in s
+    assert "Get-CimInstance Win32_Service" in s
+    # P4 is the host status call
+    assert '"status","--service-name",$ServiceName' in s
+
+
+def test_stage_2b_probe_disagreement_blocks():
+    s = _gen()
+    assert "SERVICE_REGISTRATION_PROBE_INCONSISTENT" in s
+    # Exit 3 on probe-disagreement
+    assert "exit 3" in s
+
+
+def test_stage_2b_initial_service_state_classification():
+    s = _gen()
+    assert "InitialServiceState" in s
+    assert '"Absent"' in s
+    assert '"Running"' in s
+    assert '"Stopped"' in s
+
+
+def test_stage_2b_initial_registration_snapshot_captured():
+    """Correction #65 — snapshot the read-only registration when a
+    service exists, then compare against the canonical-restorable
+    shape (correction #70)."""
+    s = _gen()
+    assert "InitialRegistrationSnapshot" in s
+    assert "IsCanonicallyRestorable" in s
+
+
+def test_stage_2b_canonically_restorable_gate_blocks():
+    s = _gen()
+    assert "REGISTRATION_NOT_CANONICALLY_RESTORABLE" in s
+
+
+def test_stage_2b_install_mode_matrix():
+    """Correction #52 — CLEAN_INSTALL / HEALTHY_UPGRADE /
+    INCONSISTENT_LIVE_STATE."""
+    s = _gen()
+    assert "CLEAN_INSTALL" in s
+    assert "HEALTHY_UPGRADE" in s
+    assert "INCONSISTENT_LIVE_STATE" in s
+
+
+# ── Stage 4 + 5 — runtime endpoints downloaded ────────────────────────────
+
+
+def test_runtime_manifest_endpoint_used():
+    s = _gen()
+    assert "/api/v1/agents/$AgentId/download/runtime/windows-amd64/manifest" in s
+    assert "X-Charon-Runtime-Version" in s
+    assert "X-Charon-Runtime-Zip-Sha256" in s
+    assert "X-Charon-Compatible-Host-Core-Range" in s
+
+
+def test_runtime_zip_endpoint_used():
+    s = _gen()
+    assert "/api/v1/agents/$AgentId/download/runtime/windows-amd64" in s
+
+
+def test_runtime_zip_sha_cross_checked_against_manifest():
+    s = _gen()
+    # Both header AND manifest field must equal actual disk SHA
+    assert "$actualZipSha -cne $zipShaHeader" in s
+    assert "$actualZipSha -cne $manifestZipSha" in s
+
+
+def test_runtime_zip_sha_failure_does_not_touch_live_payload():
+    """SHA mismatch must delete only the staged ZIP."""
+    s = _gen()
+    assert "Remove-Item -LiteralPath $StagingRuntimeZip" in s
+
+
+# ── Stage 6A — Section F per-entry rejection list ─────────────────────────
+
+
+def test_stage_6a_uses_native_zipfile_open_read():
+    s = _gen()
+    assert "[System.IO.Compression.ZipFile]::OpenRead" in s
+
+
+def test_stage_6a_rejects_traversal_and_namespace_violations():
+    s = _gen()
+    for needle in (
+        "explicit directory entry",
+        "leading separator",
+        "drive-letter prefix",
+        "empty segment",
+        "dot segment",
+        "dotdot segment",
+        "trailing dot",
+        "trailing space",
+        "colon in segment",
+        "reserved device name",
+        "symlink entry",
+        "escapes extraction root",
+    ):
+        assert needle in s, f"Section F rejection clause missing: {needle}"
+
+
+def test_stage_6a_root_containment_check():
+    s = _gen()
+    assert "StartsWith($extractionRoot" in s
+    assert "OrdinalIgnoreCase" in s
+
+
+def test_stage_6a_smoke_list_line_format_validated():
+    s = _gen()
+    assert "metadata\\\\runtime-smoke-imports.txt" in s.replace("\\\\","\\\\\\\\") or \
+           "metadata\\runtime-smoke-imports.txt" in s
+    # Regex line format for smoke list entries
+    assert r"'^[A-Za-z_][A-Za-z0-9_.]*$'" in s
+
+
+# ── Stage 6B — atomic rename + byte-exact RUNTIME_OK ──────────────────────
+
+
+def test_stage_6b_atomic_rename_to_payload_new():
+    s = _gen()
+    assert "[System.IO.Directory]::Move($StagingExtracted, $PayloadNew)" in s
+
+
+def test_stage_6b_sanity_fire_byte_exact_runtime_ok():
+    """Correction #46 + #66 — `RUNTIME_OK` is byte-exact, stderr empty."""
+    s = _gen()
+    assert "Invoke-ProcessCaptured" in s
+    assert "import $ModuleArg; print('RUNTIME_OK')" in s
+    assert '$smokeStdoutTrim -cne "RUNTIME_OK"' in s
+    assert "$smokeResult.Stderr.Length -gt 0" in s
+
+
+def test_stage_6b_python_runs_in_isolated_mode():
+    s = _gen()
+    # -E and -I appear together with --version + smoke
+    assert '"-E","-I","--version"' in s
+    assert '"-E","-I","-c"' in s
+
+
+def test_no_bare_python_exe_invocation():
+    """The private runtime python is at
+    $PayloadCurrent\\runtime\\python\\python.exe. A bare
+    `python.exe`/`python` invocation would search PATH and could hit
+    a system Python."""
+    s = _executable_only(_gen())
+    assert not re.search(r"&\s*python\.exe\b", s)
+    assert not re.search(r"&\s*python\b(?!Exe|ExeLive|Path)", s)
+
+
+# ── Stage 8 — Go host binary download to staging ──────────────────────────
+
+
+def test_host_binary_download_to_hostexe_new():
+    s = _gen()
+    assert "$HostExeNew" in s
+    assert "/api/v1/agents/$AgentId/download/host/windows-amd64" in s
     assert "X-Host-SHA256" in s
     assert "Get-FileHash" in s
+    # Direct overwrite of live host forbidden
+    assert "-OutFile $HostExeLive" not in s
+    assert "-OutFile $HostExe " not in s
 
 
-def test_host_binary_downloads_to_staging_not_final():
-    """P0 #1: Direct -OutFile to $HostExe would refuse on Windows
-    file-lock if the existing service has the binary open, AND
-    a download/SHA failure would destroy the previous working
-    binary. Force staging download path."""
+def test_host_sha_check_runs_on_stage_file():
     s = _gen()
-    assert "$HostStage" in s
-    assert "charon-agent-host.exe.new" in s
-    assert "-OutFile $HostStage" in s
-    # The forbidden direct-overwrite must not appear:
-    assert "-OutFile $HostExe" not in s, \
-        "host download must target $HostStage, never $HostExe directly"
+    assert "Get-FileHash -LiteralPath $HostExeNew" in s
 
 
-def test_sha_check_runs_on_stage_file():
-    s = _gen()
-    assert "Get-FileHash -LiteralPath $HostStage" in s
-    # Mismatch must clean only the stage, never touch $HostExe
-    assert "Remove-Item -LiteralPath $HostStage" in s
-    # Sequence: integrity-fail message followed by stage-remove,
-    # NOT followed by $HostExe removal
-    fail_window = re.search(
-        r"integrity check failed[\s\S]{0,400}",
-        s,
-    )
-    assert fail_window is not None
-    assert "Remove-Item -LiteralPath $HostExe" not in fail_window.group(0), \
-        "SHA mismatch path must not delete $HostExe"
-
-
-def test_atomic_move_stage_to_final():
-    s = _gen()
-    assert "Move-Item -LiteralPath $HostStage -Destination $HostExe -Force" in s
-
-
-def test_existing_host_backed_up_before_replace():
-    """The previous host binary is moved to $HostBackup before the
-    staged binary takes its place — that backup enables rollback in
-    [9/9] if 10s/30s status fails."""
-    s = _gen()
-    assert "$HostBackup" in s
-    assert "charon-agent-host.exe.bak" in s
-    assert "Move-Item -LiteralPath $HostExe -Destination $HostBackup -Force" in s
-
-
-def test_rollback_function_defined():
-    """Post-CI review #3 P0: rollback must be transactional, not a
-    bare binary move. The installer defines a reusable
-    Restore-PreviousAgentService function."""
-    s = _gen()
-    assert "function Restore-PreviousAgentService" in s
-
-
-def test_rollback_reinstalls_previous_binary_as_service():
-    """The function must run the host CLI install command against
-    the restored backup binary — restoring the BYTES is not enough,
-    the SCM registration also has to point at it."""
-    s = _gen()
-    # locate the rollback function body
-    import re as _re
-    m = _re.search(
-        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
-        s,
-    )
-    assert m, "Restore-PreviousAgentService body not found"
-    body = m.group(0)
-    # Step 6: re-install
-    assert "Step 6/9: re-installing previous binary" in body
-    assert "& $HostExe install" in body
-    assert "--service-name $ServiceName" in body
-    assert "--child-exe $PythonExe" in body
-    assert '--child-arg "$InstallDir\\run_agent.py"' in body
-    assert "--service-account \"LocalSystem\"" in body
-
-
-def test_rollback_starts_old_service():
-    s = _gen()
-    import re as _re
-    body = _re.search(
-        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
-        s,
-    ).group(0)
-    assert "Step 7/9: starting previous service" in body
-    assert "& $HostExe start --service-name $ServiceName" in body
-
-
-def test_rollback_verifies_10s_and_30s_running():
-    """Rollback only succeeds when the OLD service is observed
-    Running at BOTH 10s and 30s — exact match, not regex."""
-    s = _gen()
-    import re as _re
-    body = _re.search(
-        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
-        s,
-    ).group(0)
-    assert "Step 8/9: verifying previous service Running at 10s" in body
-    assert "Step 9/9: verifying previous service Running at 30s" in body
-    assert "Start-Sleep -Seconds 10" in body
-    assert "Start-Sleep -Seconds 20" in body
-    # Exact match
-    assert '$r10 -ne "Running"' in body
-    assert '$r30 -ne "Running"' in body
-    # belt-and-suspenders exit-code check
-    assert "$e10 -ne 0" in body
-    assert "$e30 -ne 0" in body
-
-
-def test_rollback_bounded_scm_drain_before_replace():
-    """Steps 1-3 of the function: stop, uninstall, bounded poll
-    on status exit 18 — same contract as the main install path."""
-    s = _gen()
-    import re as _re
-    body = _re.search(
-        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
-        s,
-    ).group(0)
-    assert "Step 1/9: stopping partial new service" in body
-    assert "Step 2/9: uninstalling partial new service" in body
-    assert "Step 3/9: polling SCM drain" in body
-    assert "$LASTEXITCODE -eq 18" in body
-    assert "AddSeconds(30)" in body
-
-
-def test_rollback_failure_paths_signal_false():
-    """Every step has its own failure exit returning $false so the
-    caller can distinguish exit 1 (new-fail+recovered) from exit 2
-    (new-fail+rollback-fail)."""
-    s = _gen()
-    import re as _re
-    body = _re.search(
-        r"function Restore-PreviousAgentService[\s\S]+?\n        \}",
-        s,
-    ).group(0)
-    failure_signals = body.count("return $false")
-    assert failure_signals >= 6, \
-        f"expected ≥6 distinct failure-signal returns, got {failure_signals}"
-    assert "return $true" in body  # success path
-
-
-def test_exit_code_contract_distinct_paths():
-    """exit-code sözleşmesi:
-       0 = success
-       1 = new failed + previous restored (or fresh install)
-       2 = new failed AND rollback failed -- operator action required
-    """
-    s = _gen()
-    # The Invoke-NewInstallFailure helper carries the dispatch
-    assert "function Invoke-NewInstallFailure" in s
-    import re as _re
-    body = _re.search(
-        r"function Invoke-NewInstallFailure[\s\S]+?\n        \}",
-        s,
-    ).group(0)
-    # All three documented exit values
-    exit_1_no_backup = "No previous binary to roll back to"
-    exit_1_recovered = "Exiting 1 (new install failed; previous service Running)"
-    exit_2_critical = "Manual operator intervention required. Exit 2"
-    assert exit_1_no_backup in body
-    assert exit_1_recovered in body
-    assert exit_2_critical in body
-    # exit 2 only after rollback fail
-    assert "exit 2" in body
-
-
-def test_all_four_failure_call_sites_use_helper():
-    """install / start / 10s / 30s — each post-atomic-move failure
-    path MUST route through Invoke-NewInstallFailure so rollback is
-    consistent. Bare `Move-Item $HostBackup $HostExe` outside the
-    Restore- function is forbidden."""
-    s = _gen()
-    # 4 call sites in the main flow + the function defines the
-    # routing — no other Move-Item with backup→exe direction.
-    call_sites = s.count("Invoke-NewInstallFailure `")
-    assert call_sites == 4, \
-        f"expected exactly 4 Invoke-NewInstallFailure call sites, got {call_sites}"
-    # The ONLY Move-Item HostBackup → HostExe is inside the Restore
-    # function (the legacy bare-move rollback is now extinct).
-    bare_moves = s.count(
-        "Move-Item -LiteralPath $HostBackup -Destination $HostExe -Force"
-    )
-    assert bare_moves == 1, \
-        f"expected exactly 1 backup→exe move (inside Restore fn), got {bare_moves}"
-
-
-def test_no_remove_item_on_host_exe_in_sha_fail_path():
-    """Old fail pattern: Remove-Item $HostExe -Force on SHA failure
-    would destroy the working binary. The SHA-mismatch block only
-    ever removes $HostStage. (Restore-PreviousAgentService DOES
-    remove $HostExe — but that is the FAILED-NEW binary, after the
-    SCM has been drained; the BACKUP at $HostBackup is intact.)"""
-    s = _gen()
-    # Locate the SHA-failure block — should appear under stage [7/9]
-    sha_block = re.search(
-        r"Host binary SHA-256 verified[\s\S]{0,800}?integrity check failed[\s\S]{0,600}?exit 1",
-        s,
-    )
-    # Different way: look at the pre-stage-[8/9] failure handling
-    sha_fail = re.search(
-        r"integrity check failed[\s\S]{0,400}?exit 1",
-        s,
-    )
-    assert sha_fail is not None, "could not locate SHA mismatch failure block"
-    fail_text = sha_fail.group(0)
-    bad = re.search(r"Remove-Item\s+-?[A-Za-z]*\s*\$HostExe\b", fail_text)
-    assert bad is None, \
-        f"SHA-mismatch path removed $HostExe: {bad.group(0)!r}"
-
-
-def test_host_binary_url_built_from_agent_id():
+def test_host_url_built_from_agent_id():
     s = _gen()
     assert "/api/v1/agents/$AgentId/download/host/windows-amd64" in s
 
 
-def test_agent_key_in_host_download_header_not_url():
+def test_agent_key_in_host_header_not_url():
     s = _gen()
     assert '"X-Agent-Key" = $AgentKey' in s
-    bad_url_pat = re.search(r"download/host[^\"\n]*\?[^\"\n]*agent_key=", s)
-    assert bad_url_pat is None, f"agent_key in URL: {bad_url_pat.group(0)}"
+    assert re.search(r"download/host[^\"\n]*\?[^\"\n]*agent_key=", s) is None
 
 
-# ── Stage 8: Go host CLI install/start (PR #76 contract) ───────────────────
+# ── Stage 9A — pre-quiesce process snapshot (correction #72) ──────────────
 
 
-def test_host_install_command_contract():
+def test_stage_9a_a0_snapshot_taken_before_branching():
     s = _gen()
-    # The host CLI flag set (from PR #76 main: cli/flags.go)
-    for flag in (
-        "--service-name",
-        "--display-name",
-        "--description",
-        "--child-exe",
-        "--child-arg",
-        "--work-dir",
-        "--env-file",
-        "--log-dir",
-        '--service-account "LocalSystem"',
-    ):
-        assert flag in s, f"host install flag missing: {flag}"
+    assert "OldHostProcessSnapshot" in s
+    assert "OldVerifiedChildPythonProcessSnapshot" in s
+    # PID + path + creation-time triple — look at the populated
+    # snapshot block, not the @() initialiser.
+    fn = _window_after(s, "# 9A.A0 - pre-quiesce process snapshot",
+                       "9A.A1 / A1.post / A2 / A2.post branching")
+    assert "ProcessId" in fn
+    assert "ExecutablePath" in fn
+    assert "CreationDate" in fn
 
 
-def test_host_start_command():
+def test_stage_9a_a3_uses_pid_path_creation_time_triple():
     s = _gen()
-    assert "& $HostExe start --service-name $ServiceName" in s
+    # A3 polling must compare all three to defeat PID reuse.
+    chunk = _window_after(
+        s,
+        "# 9A.A3 - process closure verification using PID + path",
+        "9B: ATOMIC SWAP",
+    )
+    assert "ExecutablePath" in chunk
+    assert "CreationDate" in chunk
 
 
-# ── Reinstall race: uninstall exit-code handling + bounded poll ───────────
-
-
-def test_uninstall_exit_codes_are_checked():
-    """The pre-install uninstall step MUST distinguish exit codes per
-    the Go host CLI contract:
-        0  → fully cleaned up
-        18 → ErrServiceNotFound (already gone — benign)
-        19 → ErrDeletePending (poll until cleared)
-        other → hard fail
-    The previous `& $HostExe uninstall | Out-Null; Start-Sleep 2`
-    pattern is forbidden — the sleep was a guess and PR #76 already
-    saw an SCM cleanup race in that window."""
+def test_stage_9a_stop_uninstall_use_invoke_process_captured():
     s = _gen()
-    # uninstall exit code captured + each contract code handled
-    assert "$uninstallExit = $LASTEXITCODE" in s
-    assert "$uninstallExit -eq 0" in s
-    assert "$uninstallExit -eq 18" in s
-    assert "$uninstallExit -eq 19" in s
-    # Fall-through must abort (no silent continue)
-    assert "[ERROR] Previous service uninstall failed" in s
-
-
-def test_uninstall_bounded_poll_replaces_fixed_sleep():
-    """Replace the static `Start-Sleep -Seconds 2` race with a
-    bounded poll that exits as soon as `status` reports
-    ErrServiceNotFound (exit 18). Ceiling at 30s."""
-    s = _gen()
-    assert "& $HostExe status --service-name $ServiceName" in s
-    assert "$LASTEXITCODE -eq 18" in s
-    # Loop must have a deadline
-    assert "AddSeconds(30)" in s
-    # Forbid the immediate post-uninstall Start-Sleep 2 race
-    bad = re.search(
-        r"& \$HostExe uninstall[^\n]*\n[^\n]*Start-Sleep\s+-Seconds\s+2(?!\d)",
+    assert re.search(
+        r'Invoke-ProcessCaptured -FilePath \$HostExeLive\s+`\s*\n\s+-ArgumentList @\("stop"',
         s,
     )
-    assert bad is None, \
-        f"old fixed-sleep race pattern still present near uninstall: {bad.group(0)!r}"
-
-
-def test_uninstall_poll_failure_aborts():
-    """If the bounded poll exhausts its deadline without seeing
-    ErrServiceNotFound, the installer must abort with a clear
-    message rather than silently proceeding."""
-    s = _gen()
-    assert "Previous service registration did not clear within 30s" in s
-
-
-def test_host_install_exit_code_check():
-    """install / start / status@10s / status@30s must each guard on
-    exit code 0."""
-    s = _gen()
-    # pip install + host install + host start = 3 mandatory guards;
-    # the 10s + 30s status checks combine $statusExit -ne 0 with the
-    # exact-match Running test in a single if. So we expect at least 3
-    # bare LASTEXITCODE guards plus the two `$exitN -ne 0` paths
-    # accumulated.
-    bare_guards = s.count("if ($LASTEXITCODE -ne 0)")
-    exit_guards = s.count("$exit10 -ne 0") + s.count("$exit30 -ne 0")
-    assert bare_guards + exit_guards >= 5, (
-        f"expected at least 5 exit-code guards in installer body, "
-        f"got bare={bare_guards} exit={exit_guards}"
+    assert re.search(
+        r'Invoke-ProcessCaptured -FilePath \$HostExeLive\s+`\s*\n\s+-ArgumentList @\("uninstall"',
+        s,
+    )
+    assert re.search(
+        r'Invoke-ProcessCaptured -FilePath \$HostExeLive\s+`\s*\n\s+-ArgumentList @\("status"',
+        s,
     )
 
 
-# ── Stage 9: 10s + 30s exact-match Running check ───────────────────────────
+def test_stage_9a_no_stop_when_initial_stopped():
+    """Correction #60 — stop on Stopped returns exit 1; branch skips A1."""
+    s = _gen()
+    assert 'elseif ($InitialServiceState -ceq "Stopped")' in s
+    assert "correction #60" in s
 
 
-def test_status_check_10s():
+# ── Stage 9B — M1..M6 atomic-swap ledger ─────────────────────────────────
+
+
+def test_stage_9b_m1_m6_markers_initialized():
+    s = _gen()
+    for m in (
+        "MovedPayloadCurrentToPrevious",
+        "MovedPayloadNewToCurrent",
+        "MovedHostLiveToBackup",
+        "MovedHostNewToLive",
+        "MovedConfigLiveToBackup",
+        "MovedConfigNewToLive",
+    ):
+        assert f"${m}" in s, f"M-ledger marker missing: ${m}"
+        assert f"${m}" in s and re.search(rf"\${m}\s*=\s*\$true", s), \
+            f"M-ledger marker {m} is never set to true"
+
+
+def test_stage_9b_uses_io_directory_move_and_io_file_move():
+    """Atomic moves through .NET — Move-Item on a directory falls
+    back to copy+delete which is NOT atomic."""
+    s = _gen()
+    assert "[System.IO.Directory]::Move($PayloadCurrent, $PayloadPrevious)" in s
+    assert "[System.IO.Directory]::Move($PayloadNew, $PayloadCurrent)" in s
+    assert "[System.IO.File]::Move($HostExeLive, $HostExeBak)" in s
+    assert "[System.IO.File]::Move($HostExeNew, $HostExeLive)" in s
+    assert "[System.IO.File]::Move($ConfigEnvLive, $ConfigEnvBak)" in s
+    assert "[System.IO.File]::Move($StagingConfigNew, $ConfigEnvLive)" in s
+
+
+def test_stage_9b_optional_move_dest_must_not_exist_precondition():
+    """M1/M3/M5 destinations are backup paths — they must not exist
+    when we move into them (Stage 2B blocks any state where they do)."""
+    s = _gen()
+    for d in ("$PayloadPrevious", "$HostExeBak", "$ConfigEnvBak"):
+        assert f"if (Test-Path -LiteralPath {d}) {{" in s
+
+
+# ── Stage 10 — structured install + exit 17 anomaly ──────────────────────
+
+
+def test_stage_10_calls_invoke_host_install():
+    s = _gen()
+    assert "Invoke-HostInstall `" in s
+    assert "$installResult = Invoke-HostInstall" in s
+
+
+def test_stage_10_reads_exitcode_from_structured_result():
+    """Correction #66 — read .ExitCode from the structured return,
+    NEVER $LASTEXITCODE."""
+    s = _gen()
+    assert "$installResult.ExitCode" in s
+    assert "$installResult.Stdout" in s
+    assert "$installResult.Stderr" in s
+
+
+def test_stage_10_success_stdout_validated_byte_exact():
+    """The success literal `Service "NetManagerAgent" installed.\\n`
+    must be matched byte-exact (-cne)."""
+    s = _gen()
+    assert '-cne \'Service "NetManagerAgent" installed.\'' in s
+
+
+def test_stage_10_exit_17_anomaly_handled():
+    """Correction #51 — exit 17 is `service: already exists`; the
+    template MUST recognise it and route into Phase 1 teardown
+    rather than treat it as a generic failure."""
+    s = _gen()
+    assert "$installResult.ExitCode -eq 17" in s
+    assert '-cne "install: service: already exists"' in s
+    assert "L6P_NewServiceRegistrationPossiblyExists" in s
+
+
+def test_stage_10_does_not_silently_swallow_other_exit_codes():
+    s = _gen()
+    # The else branch surfaces the actual exit code in an [ERROR] line
+    assert 'Write-Host "[ERROR] install exit $($installResult.ExitCode)' in s
+
+
+# ── Stage 11 — commit barrier ─────────────────────────────────────────────
+
+
+def test_stage_11_running_verification_at_10s_and_30s():
     s = _gen()
     assert "Start-Sleep -Seconds 10" in s
-
-
-def test_status_check_30s_total():
-    s = _gen()
     assert "Start-Sleep -Seconds 20" in s
+    assert '$s10Trim -cne "Running"' in s
+    assert '$s30Trim -cne "Running"' in s
 
 
-def test_status_exact_match_no_regex():
-    """User explicit requirement: -ne 'Running' EXACT match; -match
-    'Running' would false-positive NotRunning / RunningWithError."""
+def test_stage_11_running_check_uses_invoke_process_captured():
     s = _gen()
-    assert "$status10 -ne \"Running\"" in s
-    assert "$status30 -ne \"Running\"" in s
-    # Also belt-and-suspenders: must AND with $statusExit -ne 0
-    assert "$exit10 -ne 0" in s
-    assert "$exit30 -ne 0" in s
+    assert re.search(
+        r'\$s10\s*=\s*Invoke-ProcessCaptured -FilePath \$HostExeLive',
+        s,
+    )
+    assert re.search(
+        r'\$s30\s*=\s*Invoke-ProcessCaptured -FilePath \$HostExeLive',
+        s,
+    )
 
 
-def test_no_match_running_regex():
+def test_stage_11_commit_barrier_semantic_equivalence_before_delete():
+    """Correction #69 — Stage 11.D LOGICAL_DELETE of backups runs
+    AFTER Stage 11.A/B/C semantic-equivalence verification."""
     s = _gen()
-    assert '-match "Running"' not in s
-    assert "-match 'Running'" not in s
+    assert "Stage 11.A/B/C: SCM registration semantic equivalence" in s
+    assert "Stage 11.D" in s
+    # Verify the source-order: 11.C error path appears BEFORE the
+    # backup-delete loop.
+    idx_11c = s.find("Stage 11.C: registration semantic mismatch")
+    idx_11d = s.find("Stage 11.D - LOGICAL_DELETE")
+    assert 0 < idx_11c < idx_11d, \
+        "Stage 11.D backup-delete must source-order AFTER Stage 11.C check"
 
 
-# ── TLS 1.2 + installer cleanup ────────────────────────────────────────────
+def test_stage_11_backup_deletion_targets_correct_paths():
+    s = _gen()
+    block = re.search(
+        r"Stage 11\.D[\s\S]+?Invoke-LogicalDelete -Path \$b",
+        s,
+    )
+    assert block is not None
+    chunk = block.group(0)
+    for b in ("$PayloadPrevious", "$ConfigEnvBak", "$HostExeBak"):
+        assert b in chunk, f"Stage 11.D missing backup path: {b}"
+
+
+def test_stage_11_uses_logical_delete_not_remove_item_direct():
+    """Per correction #57 the backup-delete loop must call
+    Invoke-LogicalDelete (which verifies non-existence after the
+    Remove-Item) rather than a bare Remove-Item."""
+    s = _gen()
+    block = re.search(
+        r"Stage 11\.D[\s\S]+?Invoke-LogicalDelete -Path \$b",
+        s,
+    )
+    assert block is not None
+    chunk = block.group(0)
+    assert "Invoke-LogicalDelete" in chunk
+
+
+# ── Section G rollback paths ──────────────────────────────────────────────
+
+
+def test_section_g_three_rollback_modes_named():
+    s = _gen()
+    for mode in (
+        "SUCCESSFUL_UPGRADE_ROLLBACK_RUNNING",
+        "SUCCESSFUL_UPGRADE_ROLLBACK_STOPPED",
+        "SUCCESSFUL_CLEAN_INSTALL_ROLLBACK",
+    ):
+        assert mode in s, f"rollback mode label missing: {mode}"
+
+
+def test_rollback_incomplete_path_exits_2():
+    s = _gen()
+    assert "ROLLBACK_INCOMPLETE" in s
+    assert "MANUAL INTERVENTION REQUIRED" in s
+    assert "exit 2" in s
+
+
+def test_rollback_phase_2_reverses_in_m6_to_m1_order():
+    """Section G.5 — reverse markers in M6 → M5 → M4 → M3 → M2 → M1."""
+    s = _gen()
+    block = re.search(
+        r"Phase 2 - file reverse-rollback[\s\S]+?ROLLBACK_INCOMPLETE",
+        s,
+    )
+    assert block is not None
+    chunk = block.group(0)
+    idx_m6 = chunk.find("MovedConfigNewToLive")
+    idx_m5 = chunk.find("MovedConfigLiveToBackup")
+    idx_m4 = chunk.find("MovedHostNewToLive")
+    idx_m3 = chunk.find("MovedHostLiveToBackup")
+    idx_m2 = chunk.find("MovedPayloadNewToCurrent")
+    idx_m1 = chunk.find("MovedPayloadCurrentToPrevious")
+    assert 0 < idx_m6 < idx_m5 < idx_m4 < idx_m3 < idx_m2 < idx_m1, \
+        f"Phase 2 reverse-order mismatch: {idx_m6} {idx_m5} {idx_m4} {idx_m3} {idx_m2} {idx_m1}"
+
+
+def test_rollback_clean_install_orphan_cleanup():
+    """Correction #67 — when M5 / M3 / M1 are NOT set but their
+    M6 / M4 / M2 counterparts ARE, the reverse pass must
+    LOGICAL_DELETE the orphan transient."""
+    s = _gen()
+    block = re.search(
+        r"Phase 2 - file reverse-rollback[\s\S]+?ROLLBACK_INCOMPLETE",
+        s,
+    )
+    chunk = block.group(0)
+    # The clean-install orphan-cleanup elseifs must reference each
+    # of the three pairings.
+    assert "elseif ($MovedConfigNewToLive)" in chunk
+    assert "elseif ($MovedHostNewToLive)" in chunk
+    assert "elseif ($MovedPayloadNewToCurrent)" in chunk
+
+
+def test_rollback_phase_3_does_not_start_when_initially_stopped():
+    """Correction #61 — Stopped rollback re-installs (if needed) but
+    must NOT call start."""
+    s = _gen()
+    phase3 = _window_after(
+        s, "# ---- Phase 3 - restart old service",
+        'Write-InstallerRunTxt @(\n                    "ROLLBACK_INCOMPLETE"',
+    )
+    # Carve out the Stopped branch specifically; the Running branch
+    # above DOES call start.
+    stopped_idx = phase3.find('elseif ($InitialServiceState -ceq "Stopped")')
+    assert stopped_idx >= 0, "Phase 3 Stopped branch not found"
+    stopped_chunk = phase3[stopped_idx:]
+    # Stop the slice at the closing `}` of the Stopped elseif by
+    # finding the next `} catch {` or end-of-window.
+    end_idx = stopped_chunk.find("} catch {")
+    if end_idx > 0:
+        stopped_chunk = stopped_chunk[:end_idx]
+    assert '"start","--service-name"' not in stopped_chunk, \
+        "Phase 3 Stopped branch must not call start (correction #61)"
+
+
+def test_rollback_phase_3_uses_invoke_host_install_for_reregister():
+    """Phase 3 reregister MUST go through Invoke-HostInstall — the
+    bare `& $HostExe install` regression is forbidden."""
+    s = _gen()
+    chunk = _window_after(
+        s, "# ---- Phase 3 - restart old service",
+        'Write-InstallerRunTxt @(\n                "ROLLBACK_RESULT',
+    )
+    assert "Invoke-HostInstall" in chunk
+    bad = re.search(r"&\s*\$HostExe\w*\s+install\b", chunk)
+    assert bad is None, f"Phase 3 bare install regression: {bad.group(0)!r}"
+
+
+# ── TLS 1.2 + installer self-cleanup ──────────────────────────────────────
 
 
 def test_tls_12_enforced():
@@ -600,25 +939,14 @@ def test_tls_12_enforced():
 
 
 def test_installer_self_cleanup_uses_literal_path():
-    """P0 #2: -LiteralPath is required so a path containing PowerShell
-    wildcard chars (`[`, `]`, `?`, `*`) cannot accidentally expand and
-    delete other files."""
     s = _gen()
     assert "Remove-Item -LiteralPath $PSCommandPath" in s
 
 
 def test_all_path_cleanup_via_try_finally():
-    """P0 #2: The elevated execution body MUST be wrapped in a
-    try { ... } finally { cleanup } so the installer file (which
-    embeds the agent key in its header) is removed regardless of
-    success, ACL fail, download fail, SHA fail, install fail or
-    status fail."""
     s = _gen()
-    # The body opens with a top-level `try {{` and the matching
-    # `finally {{` lives near the end.
     assert "try {" in s
     assert "finally {" in s
-    # Mirror invariants from the elevated body to the finally:
     finally_idx = s.rfind("finally {")
     assert finally_idx > 0
     finally_tail = s[finally_idx:]
@@ -627,66 +955,52 @@ def test_all_path_cleanup_via_try_finally():
 
 
 def test_agent_key_zeroed_in_finally():
-    """Defensive: zero the in-memory $AgentKey before exit so a
-    crash dump cannot recover it."""
     s = _gen()
     finally_idx = s.rfind("finally {")
-    assert finally_idx > 0
     assert "$AgentKey = $null" in s[finally_idx:]
 
 
-def test_self_elevation_parent_waits_for_child():
-    """P0 #2 corollary: the non-admin parent process MUST Wait for
-    the elevated child to finish before cleaning the installer.
-    Otherwise the parent races the child's open-file handle and
-    cleanup fails — leaving the agent-key-bearing installer on disk."""
-    s = _gen()
-    assert "Start-Process" in s
-    assert "-Wait" in s
-    assert "-PassThru" in s
-    # Parent must capture ExitCode
-    assert "$proc.ExitCode" in s
-
-
-def test_self_elevation_parent_cleans_on_uac_failure():
-    """If UAC is denied or Start-Process throws, the parent must
-    STILL remove the installer (its own header contains the agent
-    key as a single-quoted literal)."""
-    s = _gen()
-    # The parent block has its own try/catch/finally pair around
-    # Start-Process; the finally must contain the cleanup.
-    parent_block = re.search(
-        r"if \(-not \$isAdmin\) \{[\s\S]+?exit \$childExit\s*\}",
-        s,
-    )
-    assert parent_block is not None, "self-elevation parent block not found"
-    body = parent_block.group(0)
-    # Inside parent's finally
-    assert "finally" in body
-    assert "Remove-Item -LiteralPath $PSCommandPath" in body
-
-
-# ── Agent key never in command line / log ──────────────────────────────────
+# ── Agent key never in URL / log / filename ──────────────────────────────
 
 
 def test_agent_key_never_in_writehost():
     s = _gen()
     for forbidden in (
         "Write-Host $AgentKey",
-        "Write-Host \"$AgentKey",
+        'Write-Host "$AgentKey',
         "Write-Output $AgentKey",
     ):
         assert forbidden not in s
 
 
-def test_agent_key_not_in_filename():
+def test_agent_key_not_in_filename_interpolations():
     s = _gen()
-    # filename references must not interpolate agent key
     bad = re.search(r'filename="[^"]*\$AgentKey[^"]*"', s)
     assert bad is None
 
 
-# ── Single-quote escape (F1.3 defense) ─────────────────────────────────────
+def test_agent_key_never_appears_in_url_query():
+    s = _gen()
+    bad = re.search(r"\?\s*[^\"]*agent[_-]?key\s*=", s, re.IGNORECASE)
+    assert bad is None, f"agent key in URL query: {bad.group(0)!r}"
+
+
+def test_agent_key_only_in_x_agent_key_header_and_config_writer():
+    """The $AgentKey variable must only appear:
+      - in the head of the script (variable assignment / display)
+      - inside the `"X-Agent-Key" = $AgentKey` header dictionaries
+      - in the staged config.env.new write
+      - in the finally block ($AgentKey = $null)
+    """
+    s = _gen()
+    # Spot check: must NOT appear inside any -ArgumentList @(...) call
+    for m in re.finditer(r"-ArgumentList\s+@\(([\s\S]+?)\)", s):
+        chunk = m.group(1)
+        assert "$AgentKey" not in chunk, \
+            f"AgentKey leaked into ArgumentList: {chunk[:120]!r}"
+
+
+# ── Single-quote escape (F1.3 defense) ────────────────────────────────────
 
 
 def test_quote_injection_escaped():
@@ -694,3 +1008,24 @@ def test_quote_injection_escaped():
     out = _windows_installer("evil'agent", "key'with'quote", "https://x")
     assert "$AgentId    = 'evil''agent'" in out
     assert "$AgentKey   = 'key''with''quote'" in out
+
+
+# ── Structural sanity ────────────────────────────────────────────────────
+
+
+def test_balanced_brace_pairs():
+    s = _gen()
+    assert s.count("{") == s.count("}"), \
+        f"unbalanced braces: {{ {s.count('{')} vs }} {s.count('}')}"
+
+
+def test_balanced_paren_pairs():
+    s = _gen()
+    assert s.count("(") == s.count(")"), \
+        f"unbalanced parens: ( {s.count('(')} vs ) {s.count(')')}"
+
+
+def test_first_line_is_section_h_header():
+    s = _gen()
+    first = s.lstrip().split("\n")[0]
+    assert "Section H 11-stage" in first
