@@ -277,7 +277,10 @@ jobs:
             'POST_INSTALL_RESULT=PASS'
           )
           for needle in "${required[@]}"; do
-            if ! grep -E "$needle" "$POST" >/dev/null; then
+            # `grep -E --` terminates option processing so a pattern
+            # that starts with `--` (--display-name, --child-exe, etc)
+            # is not mis-parsed as an unknown option.
+            if ! grep -E -- "$needle" "$POST" >/dev/null; then
               echo "MISSING required verifier landmark: $needle" >&2
               exit 1
             fi
@@ -512,35 +515,48 @@ jobs:
         # right outcome for an unreachable backend. What we PROVE
         # here is that the script never adds a Python / winget /
         # Microsoft-Store-stub [BLOCK]; if those legacy blockers
-        # came back, this job would fail with a different exit code
-        # and a different [BLOCK] line.
+        # came back, this job would fail.
         run: |
           $ws = "$env:GITHUB_WORKSPACE\$env:PACKAGE_DIR"
           Push-Location $ws
+          $rc = 1
           try {
             $out = & powershell -NoProfile -ExecutionPolicy Bypass -File ".\01-preflight.ps1" 2>&1
             $code = $LASTEXITCODE
-            Write-Host "exit=$code"
+            Write-Host "preflight exited with code $code"
             $out | ForEach-Object { Write-Host $_ }
             # Required: NO python / winget / Store [BLOCK].
             $bad = $out | Where-Object { $_ -match '\[BLOCK\].*(python|winget|Microsoft\s*Store)' }
             if ($bad) {
               Write-Host "Legacy Python/winget/Store blocker re-emerged"
-              exit 1
-            }
-            # Confirm the 4 positive-report lines are still printed.
-            foreach ($line in @(
-              "Private Python runtime      : not installed",
-              "Installer action            : private runtime will be downloaded and installed",
-              "System Python required      : No",
-              "winget required             : No"
-            )) {
-              if (-not ($out -match [regex]::Escape($line))) {
-                Write-Host "Missing positive report line: $line"
-                exit 1
+              $rc = 1
+            } else {
+              # Confirm the 4 positive-report lines are still printed.
+              $missing = $false
+              foreach ($line in @(
+                "Private Python runtime      : not installed",
+                "Installer action            : private runtime will be downloaded and installed",
+                "System Python required      : No",
+                "winget required             : No"
+              )) {
+                if (-not ($out -match [regex]::Escape($line))) {
+                  Write-Host "Missing positive report line: $line"
+                  $missing = $true
+                }
+              }
+              if ($missing) {
+                $rc = 1
+              } else {
+                Write-Host "[OK] preflight emitted 4 positive-report lines without legacy blockers"
+                # The CHILD script exited 1 because example.invalid
+                # was unreachable. That is the EXPECTED outcome of
+                # this contract test: the legacy Python/winget/Store
+                # blockers are gone AND the 4 positive-report lines
+                # are still printed. Surface success up to the runner.
+                $rc = 0
               }
             }
-            Write-Host "[OK] preflight emitted 4 positive-report lines without legacy blockers"
           } finally {
             Pop-Location
           }
+          exit $rc
