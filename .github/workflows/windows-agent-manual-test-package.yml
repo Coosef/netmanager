@@ -1,0 +1,532 @@
+name: windows-agent-manual-test-package
+
+# Validates the v4 manual test package on every change to the package
+# tree, the workflow itself, or the pytest verification that mirrors
+# the workflow's static assertions.
+
+on:
+  pull_request:
+    paths:
+      - 'windows-agent-v2-manual-test/**'
+      - '.github/workflows/windows-agent-manual-test-package.yml'
+      - 'backend/tests/win_integrate/test_manual_test_package.py'
+  push:
+    branches: [main]
+    paths:
+      - 'windows-agent-v2-manual-test/**'
+      - '.github/workflows/windows-agent-manual-test-package.yml'
+      - 'backend/tests/win_integrate/test_manual_test_package.py'
+  workflow_dispatch:
+
+env:
+  PACKAGE_DIR: 'windows-agent-v2-manual-test'
+
+jobs:
+  # ----------------------------------------------------------------
+  # package-pytest
+  # ----------------------------------------------------------------
+  # Runs the pytest mirror of the static assertions below. This keeps
+  # the contract testable from `pytest backend/tests/win_integrate/`
+  # as well as from CI.
+  # ----------------------------------------------------------------
+  package-pytest:
+    name: Package pytest (test_manual_test_package.py)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install pytest
+        run: pip install pytest
+
+      - name: pytest test_manual_test_package.py
+        working-directory: backend
+        run: python -m pytest -v tests/win_integrate/test_manual_test_package.py
+
+  # ----------------------------------------------------------------
+  # package-sha256sums
+  # ----------------------------------------------------------------
+  # The SHA256SUMS.txt manifest MUST list every file in the package
+  # tree except itself, sorted alphabetically, each line being
+  # `<lowercase-hex>  <filename>\n`. Any drift -- a missing entry, a
+  # stale hash, a self-entry -- fails this job and blocks the PR.
+  # ----------------------------------------------------------------
+  package-sha256sums:
+    name: SHA256SUMS.txt regenerable from tree
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify SHA256SUMS.txt matches the tree exactly
+        run: |
+          set -euo pipefail
+          cd "$PACKAGE_DIR"
+          expected=$(mktemp)
+          for f in $(ls | grep -v '^SHA256SUMS.txt$' | sort); do
+            sha=$(sha256sum "$f" | awk '{print $1}')
+            printf "%s  %s\n" "$sha" "$f" >> "$expected"
+          done
+          if ! diff -u "$expected" SHA256SUMS.txt; then
+            echo "SHA256SUMS.txt is out of date. Regenerate with:" >&2
+            echo "  cd $PACKAGE_DIR && for f in \$(ls | grep -v '^SHA256SUMS.txt\$' | sort); do printf \"%s  %s\\n\" \"\$(sha256sum \"\$f\" | awk '{print \$1}')\" \"\$f\"; done > SHA256SUMS.txt" >&2
+            exit 1
+          fi
+          # Defensive: SHA256SUMS.txt must NOT list itself.
+          if grep -q '  SHA256SUMS.txt$' SHA256SUMS.txt; then
+            echo "SHA256SUMS.txt must NOT list itself" >&2
+            exit 1
+          fi
+          echo "[OK] SHA256SUMS.txt matches the tree"
+
+  # ----------------------------------------------------------------
+  # package-readme
+  # ----------------------------------------------------------------
+  # 00-README-START-HERE.txt MUST declare PACKAGE VERSION: v4, MUST
+  # reject v1/v2/v3, MUST contain the six hard rules.
+  # ----------------------------------------------------------------
+  package-readme:
+    name: README v4 version + 6 hard rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assert v4 + reject v1/v2/v3
+        run: |
+          set -euo pipefail
+          README="$PACKAGE_DIR/00-README-START-HERE.txt"
+          head -n 1 "$README" | grep -qx 'PACKAGE VERSION: v4'
+          grep -q 'Do not use v1, v2, or v3' "$README"
+          grep -q 'Do not install Python manually'           "$README"
+          grep -q 'Do not install winget manually'           "$README"
+          grep -q 'Do not modify the system PATH'            "$README"
+          grep -q 'Windows Agent installer provides its own private runtime' "$README"
+          grep -q 'HTTPS access only to the configured' "$README"
+          grep -q 'No direct access to python.org, PyPI, Microsoft Store' "$README"
+          echo "[OK] README v4 + 6 hard rules present"
+
+  # ----------------------------------------------------------------
+  # package-preflight
+  # ----------------------------------------------------------------
+  # 01-preflight.ps1 MUST:
+  #   - emit the 4 positive-report lines verbatim
+  #   - emit PRECHECK_RESULT=PASS / PRECHECK_RESULT=BLOCKED
+  #   - have NO Add-Block call that references missing system Python
+  #     or missing winget (correction #11 + #32: v2 ships its own
+  #     private runtime, so those legacy blockers are gone)
+  # ----------------------------------------------------------------
+  package-preflight:
+    name: Preflight v4 contract (no Python/winget Add-Block)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static checks on 01-preflight.ps1
+        run: |
+          set -euo pipefail
+          PRE="$PACKAGE_DIR/01-preflight.ps1"
+          grep -q 'Private Python runtime      : not installed' "$PRE"
+          grep -q 'Installer action            : private runtime will be downloaded and installed' "$PRE"
+          grep -q 'System Python required      : No' "$PRE"
+          grep -q 'winget required             : No' "$PRE"
+          grep -q 'PRECHECK_RESULT=PASS' "$PRE"
+          grep -q 'PRECHECK_RESULT=BLOCKED' "$PRE"
+          # The legacy v3 Add-Block(s) for "python not found" / "winget
+          # unavailable" / "Microsoft Store stub detected" MUST NOT
+          # reappear -- they would re-block on machines that don't
+          # ship system Python or winget, which is the norm.
+          if grep -E -i 'Add-Block.+(python|winget|microsoft\s*store)' "$PRE"; then
+            echo "01-preflight.ps1 has a legacy Python/winget/Store Add-Block call" >&2
+            exit 1
+          fi
+          echo "[OK] preflight v4 contract intact"
+
+  # ----------------------------------------------------------------
+  # package-installer-orchestrator
+  # ----------------------------------------------------------------
+  # 02-run-installer.ps1 MUST reference (in comments + identifiers)
+  # every Section H 11-stage landmark the manual-test linter inherits
+  # from the Architecture Plan v11 (corrections #66 - #72). It MUST
+  # NOT contain any forbidden pattern (bare host install, sc.exe,
+  # winget install, pip install without --no-index, etc).
+  # ----------------------------------------------------------------
+  package-installer-orchestrator:
+    name: Installer orchestrator landmarks + forbidden patterns
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required Section H landmarks present
+        run: |
+          set -euo pipefail
+          ORCH="$PACKAGE_DIR/02-run-installer.ps1"
+          required=(
+            'Invoke-ProcessCaptured'
+            'Invoke-HostInstall'
+            'OldHostProcessSnapshot'
+            'OldVerifiedChildPythonProcessSnapshot'
+            'IsCanonicallyRestorable'
+            'SERVICE_REGISTRATION_PROBE_INCONSISTENT'
+            'REGISTRATION_NOT_CANONICALLY_RESTORABLE'
+            'INCONSISTENT_LIVE_STATE'
+            'UNRESOLVED_PREVIOUS_TRANSACTION'
+            'SUCCESSFUL_UPGRADE_ROLLBACK_RUNNING'
+            'SUCCESSFUL_UPGRADE_ROLLBACK_STOPPED'
+            'SUCCESSFUL_CLEAN_INSTALL_ROLLBACK'
+            'ROLLBACK_INCOMPLETE'
+            'MANUAL INTERVENTION REQUIRED'
+            'Stage 11.A/B/C'
+            'Stage 11.D'
+            '\[11/11\]'
+            '\[9/11\]'
+            '\[2/11\]'
+          )
+          for needle in "${required[@]}"; do
+            if ! grep -E "$needle" "$ORCH" >/dev/null; then
+              echo "MISSING required landmark: $needle" >&2
+              exit 1
+            fi
+          done
+          echo "[OK] all Section H landmarks present in 02-run-installer.ps1"
+      - name: Forbidden patterns absent
+        run: |
+          set -euo pipefail
+          ORCH="$PACKAGE_DIR/02-run-installer.ps1"
+          # Strip PS-comment lines before scanning so commentary about
+          # the forbidden pattern doesn't trip its own ban.
+          tmpfile=$(mktemp)
+          grep -v '^[[:space:]]*#' "$ORCH" > "$tmpfile"
+          forbidden=(
+            '\bcharon-agent-host\.exe\s+install\b'
+            '&\s*\$HostExe(Live|Bak|New)?\s+install\b'
+            '\$LASTEXITCODE'
+            '\bInvoke-Expression\b'
+            '\|\s*iex\b'
+            'SECURELY DELETE'
+            'secure[ -]erase'
+            '\bsc\.exe\s+(create|delete|failure)\b'
+            '\bStart-Service\b'
+            '\bStop-Service\b'
+            '\bExpand-Archive\b'
+            'compatible_host_(versions|semver)\b'
+            '\bSemVer\b'
+            'Sysinternals\b'
+            '\bhandle\.exe\b'
+            'config\.env\.failed-'
+            'winget\s+install'
+            '\bGet-Command\s+python\b'
+            '\$env:Path\s*\+='
+          )
+          for pat in "${forbidden[@]}"; do
+            if grep -E "$pat" "$tmpfile" >/dev/null; then
+              hit=$(grep -E -n "$pat" "$tmpfile" | head -1)
+              echo "FORBIDDEN pattern present: $pat" >&2
+              echo "  hit: $hit" >&2
+              exit 1
+            fi
+          done
+          # pip install is allowed only with --no-index (offline).
+          if grep -E '\bpip\s+install\b' "$tmpfile" | grep -v -- '--no-index' >/dev/null; then
+            echo "pip install without --no-index found" >&2
+            exit 1
+          fi
+          echo "[OK] no forbidden patterns in executable lines"
+
+  # ----------------------------------------------------------------
+  # package-post-install
+  # ----------------------------------------------------------------
+  # 03-post-install-verify.ps1 must verify the PRIVATE runtime path,
+  # byte-exact RUNTIME_OK via Invoke-ProcessCaptured, host-CLI status
+  # via Invoke-ProcessCaptured, the deployed smoke list parity, and
+  # the Stage 11.C canonical-equivalence ImagePath argv.
+  # ----------------------------------------------------------------
+  package-post-install:
+    name: Post-install verifier private-runtime + 11.C canonical equivalence
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifier landmarks present
+        run: |
+          set -euo pipefail
+          POST="$PACKAGE_DIR/03-post-install-verify.ps1"
+          required=(
+            'C:\\\\ProgramData\\\\NetManagerAgent'
+            'payload\\\\current\\\\runtime\\\\python\\\\python.exe'
+            'payload\\\\current\\\\metadata\\\\runtime-smoke-imports.txt'
+            'Invoke-ProcessCaptured'
+            "RUNTIME_OK"
+            'status","--service-name"'
+            'Get-CimInstance Win32_Service'
+            '--display-name'
+            '--child-exe'
+            '--child-arg'
+            '--work-dir'
+            '--env-file'
+            '--log-dir'
+            '--service-account'
+            'LocalSystem'
+            'POST_INSTALL_RESULT=PASS'
+          )
+          for needle in "${required[@]}"; do
+            if ! grep -E "$needle" "$POST" >/dev/null; then
+              echo "MISSING required verifier landmark: $needle" >&2
+              exit 1
+            fi
+          done
+          echo "[OK] post-install verifier landmarks present"
+
+  # ----------------------------------------------------------------
+  # package-diagnostics-exclusions
+  # ----------------------------------------------------------------
+  # 05-collect-diagnostics.ps1 MUST exclude every secret-bearing path
+  # (correction #56 + Section G): config.env*, staging\config.env.new,
+  # staging\rollback-config.failed, staging\proc-capture\*.
+  # ----------------------------------------------------------------
+  package-diagnostics-exclusions:
+    name: Diagnostics excludes secret-bearing paths
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required exclusions present
+        run: |
+          set -euo pipefail
+          DIAG="$PACKAGE_DIR/05-collect-diagnostics.ps1"
+          for needle in \
+            'config.env"' \
+            'config.env.bak"' \
+            'config.env.new"' \
+            'rollback-config.failed"' \
+            'proc-capture' \
+          ; do
+            if ! grep -F "$needle" "$DIAG" >/dev/null; then
+              echo "MISSING exclusion: $needle" >&2
+              exit 1
+            fi
+          done
+          echo "[OK] diagnostics excludes secret-bearing paths"
+
+  # ----------------------------------------------------------------
+  # package-safe-cleanup
+  # ----------------------------------------------------------------
+  # 06-safe-cleanup.ps1 -RemoveAgentFiles MUST wipe every v2-era
+  # artifact: payload, staging, bin, config.env, config.env.bak,
+  # staging\rollback-config.failed, staging\proc-capture\.
+  # ----------------------------------------------------------------
+  package-safe-cleanup:
+    name: Safe cleanup -RemoveAgentFiles wipes v2 artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Required wipe targets present
+        run: |
+          set -euo pipefail
+          CLN="$PACKAGE_DIR/06-safe-cleanup.ps1"
+          for needle in \
+            '$InstallDir\payload' \
+            '$InstallDir\staging' \
+            '$InstallDir\bin' \
+            '$InstallDir\config.env' \
+            '$InstallDir\config.env.bak' \
+            '$InstallDir\staging\rollback-config.failed' \
+          ; do
+            if ! grep -F "$needle" "$CLN" >/dev/null; then
+              echo "MISSING wipe target: $needle" >&2
+              exit 1
+            fi
+          done
+          # Forbid Start-Service / Stop-Service / sc.exe -- the
+          # cleanup script must route through the Go host CLI (which
+          # itself uses the SCM ControlService API).
+          if grep -E '\b(Start-Service|Stop-Service|sc\.exe)\b' "$CLN" >/dev/null; then
+            echo "06-safe-cleanup.ps1 contains forbidden Start-Service/Stop-Service/sc.exe call" >&2
+            exit 1
+          fi
+          echo "[OK] safe cleanup wipes v2 artifacts via host CLI"
+
+  # ----------------------------------------------------------------
+  # package-smoke-list-parity
+  # ----------------------------------------------------------------
+  # The verification-only smoke list inside the package MUST be
+  # byte-identical to ops/windows-runtime-bundle/runtime-smoke-imports.txt
+  # (correction #63 + Section L).
+  # ----------------------------------------------------------------
+  package-smoke-list-parity:
+    name: Smoke list byte-identical to ops/
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare bytes
+        run: |
+          set -euo pipefail
+          cmp -s "$PACKAGE_DIR/runtime-smoke-imports.txt" \
+                 "ops/windows-runtime-bundle/runtime-smoke-imports.txt"
+          # Reaffirm canonical 103-byte size + LF-only + no BOM.
+          size=$(wc -c < "$PACKAGE_DIR/runtime-smoke-imports.txt" | tr -d ' ')
+          if [ "$size" != "103" ]; then
+            echo "smoke list size $size != 103" >&2
+            exit 1
+          fi
+          if file "$PACKAGE_DIR/runtime-smoke-imports.txt" | grep -q CRLF; then
+            echo "smoke list contains CR bytes" >&2
+            exit 1
+          fi
+          # No BOM in first 3 bytes.
+          if head -c 3 "$PACKAGE_DIR/runtime-smoke-imports.txt" | grep -q $'\xef\xbb\xbf'; then
+            echo "smoke list has UTF-8 BOM" >&2
+            exit 1
+          fi
+          echo "[OK] smoke list 103 bytes, LF-only, no BOM, byte-equal to ops/"
+
+  # ----------------------------------------------------------------
+  # package-ascii-safe
+  # ----------------------------------------------------------------
+  # Every file in the package must be ASCII-only -- the installer it
+  # invokes is locale-independent + ASCII-safe, and the package
+  # itself follows the same doctrine so a TR Windows / DE Windows
+  # operator never sees a smart quote or emoji.
+  # ----------------------------------------------------------------
+  package-ascii-safe:
+    name: Package files are ASCII-only
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan for non-ASCII bytes
+        run: |
+          set -euo pipefail
+          bad=0
+          for f in "$PACKAGE_DIR"/*; do
+            case "$f" in
+              *.bin|*.zip|*.png|*.jpg) continue ;;
+            esac
+            if grep -P -l '[\x80-\xff]' "$f" >/dev/null 2>&1; then
+              echo "non-ASCII bytes in $f" >&2
+              bad=1
+            fi
+          done
+          if [ "$bad" != "0" ]; then exit 1; fi
+          echo "[OK] every package file is ASCII-only"
+
+  # ----------------------------------------------------------------
+  # package-no-agent-key
+  # ----------------------------------------------------------------
+  # No file in the package may carry a real-looking agent key.
+  # test-config.example.json carries explicit CHANGE-ME-* placeholders;
+  # any real-looking key (matching the agent key shape the backend
+  # actually issues) is a leak.
+  # ----------------------------------------------------------------
+  package-no-agent-key:
+    name: Package carries no real agent key
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static key-shape scan
+        run: |
+          set -euo pipefail
+          # The example file MUST use the explicit placeholder.
+          grep -q '"agent_key": "CHANGE-ME-AGENT-KEY"' "$PACKAGE_DIR/test-config.example.json"
+          # No PS file may contain a literal agent_key= line.
+          if grep -E -i '\bagent[_-]?key\s*=\s*"[A-Za-z0-9_-]{8,}' "$PACKAGE_DIR"/*.ps1; then
+            echo "agent_key literal in a PS file" >&2
+            exit 1
+          fi
+          echo "[OK] no real-shape agent key in the package"
+
+  # ----------------------------------------------------------------
+  # package-zip
+  # ----------------------------------------------------------------
+  # Build the v4 archive (windows-agent-v2-manual-test-v4.zip) and
+  # upload it as a workflow artifact. The v3 ZIP is NOT produced.
+  # ----------------------------------------------------------------
+  package-zip:
+    name: Build v4 ZIP (workflow artifact)
+    runs-on: ubuntu-latest
+    needs:
+      - package-sha256sums
+      - package-readme
+      - package-preflight
+      - package-installer-orchestrator
+      - package-post-install
+      - package-diagnostics-exclusions
+      - package-safe-cleanup
+      - package-smoke-list-parity
+      - package-ascii-safe
+      - package-no-agent-key
+      - package-pytest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build windows-agent-v2-manual-test-v4.zip
+        run: |
+          set -euo pipefail
+          ZIP="windows-agent-v2-manual-test-v4.zip"
+          rm -f "$ZIP"
+          (cd "$PACKAGE_DIR" && zip -r "../$ZIP" .)
+          ls -l "$ZIP"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-agent-v2-manual-test-v4
+          path: windows-agent-v2-manual-test-v4.zip
+          retention-days: 30
+
+  # ----------------------------------------------------------------
+  # preflight-windows-2022
+  # ----------------------------------------------------------------
+  # Run 01-preflight.ps1 on a real windows-2022 runner with a stub
+  # test-config.json. The runner has no system Python on the script's
+  # PATH check and no winget installed for the agent context, but the
+  # script MUST emit PRECHECK_RESULT=PASS because v4 does not block
+  # on either (correction #11).
+  # ----------------------------------------------------------------
+  preflight-windows-2022:
+    name: Preflight PASS without Python + winget (windows-2022)
+    runs-on: windows-2022
+    needs: package-preflight
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stub test-config.json
+        shell: powershell
+        run: |
+          $cfg = @{
+            backend_url = "https://example.invalid"
+            agent_id    = "STUB"
+            agent_key   = "STUB"
+          } | ConvertTo-Json
+          Set-Content -LiteralPath "$env:GITHUB_WORKSPACE\$env:PACKAGE_DIR\test-config.json" -Value $cfg -Encoding ASCII
+
+      - name: Run 01-preflight.ps1
+        shell: powershell
+        # The runner cannot reach https://example.invalid, so the
+        # backend-reachability check WILL add a [BLOCK]. That's the
+        # right outcome for an unreachable backend. What we PROVE
+        # here is that the script never adds a Python / winget /
+        # Microsoft-Store-stub [BLOCK]; if those legacy blockers
+        # came back, this job would fail with a different exit code
+        # and a different [BLOCK] line.
+        run: |
+          $ws = "$env:GITHUB_WORKSPACE\$env:PACKAGE_DIR"
+          Push-Location $ws
+          try {
+            $out = & powershell -NoProfile -ExecutionPolicy Bypass -File ".\01-preflight.ps1" 2>&1
+            $code = $LASTEXITCODE
+            Write-Host "exit=$code"
+            $out | ForEach-Object { Write-Host $_ }
+            # Required: NO python / winget / Store [BLOCK].
+            $bad = $out | Where-Object { $_ -match '\[BLOCK\].*(python|winget|Microsoft\s*Store)' }
+            if ($bad) {
+              Write-Host "Legacy Python/winget/Store blocker re-emerged"
+              exit 1
+            }
+            # Confirm the 4 positive-report lines are still printed.
+            foreach ($line in @(
+              "Private Python runtime      : not installed",
+              "Installer action            : private runtime will be downloaded and installed",
+              "System Python required      : No",
+              "winget required             : No"
+            )) {
+              if (-not ($out -match [regex]::Escape($line))) {
+                Write-Host "Missing positive report line: $line"
+                exit 1
+              }
+            }
+            Write-Host "[OK] preflight emitted 4 positive-report lines without legacy blockers"
+          } finally {
+            Pop-Location
+          }

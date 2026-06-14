@@ -1,0 +1,12 @@
+ssl
+socket
+ctypes
+asyncio
+netmanager_agent
+websockets
+netmiko
+paramiko
+cryptography
+bcrypt
+nacl
+psutil
