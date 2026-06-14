@@ -172,29 +172,35 @@ def test_linux_installer_no_v2_runtime_endpoints_referenced():
             f"Linux installer references PR #2 Windows runtime endpoint: {needle!r}"
 
 
-# ── Manual test package off-limits (carried over from PR #1) ──────────────
+# ── Manual test package — sentinel-only after PR #5 introduced it ─────────
+#
+# PR #2's `test_pr2_does_not_touch_manual_test_package` guard was a
+# scope gate that forbade pre-PR-#5 work from creating
+# `windows-agent-v2-manual-test/`. PR #5 is exactly the PR that
+# introduces the directory, so the original guard would have blocked
+# every PR #5 commit — including the one that merged the directory.
+# Replaced with a sentinel that asserts the v4 package is present and
+# the README still declares `PACKAGE VERSION: v4`. A future PR that
+# accidentally deletes the directory or downgrades the version label
+# trips this sentinel.
 
 
-def _git_diff_main() -> set[str]:
-    """Repository-relative paths changed vs origin/main."""
-    try:
-        out = subprocess.check_output(
-            ["git", "diff", "--name-only", "origin/main...HEAD"],
-            cwd=REPO_ROOT,
-            text=True,
+def test_manual_test_package_v4_present():
+    pkg_root = REPO_ROOT / "windows-agent-v2-manual-test"
+    if not pkg_root.is_dir():
+        # PR #5 has not landed on the branch under test. Skip rather
+        # than fail so PR #1-#4 historical replays remain green.
+        pytest.skip(
+            "windows-agent-v2-manual-test/ not present on this branch; "
+            "PR #5 ships it"
         )
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        pytest.skip("git diff vs origin/main not available")
-    return {line.strip() for line in out.splitlines() if line.strip()}
-
-
-def test_pr2_does_not_touch_manual_test_package():
-    changed = _git_diff_main()
-    for path in changed:
-        assert not path.startswith("windows-agent-v2-manual-test/"), (
-            f"PR #2 must not modify {path}; manual test package edits "
-            f"belong to PR #5."
-        )
+    readme = pkg_root / "00-README-START-HERE.txt"
+    assert readme.is_file(), "00-README-START-HERE.txt missing"
+    first_line = readme.read_text(encoding="utf-8").split("\n", 1)[0]
+    assert first_line == "PACKAGE VERSION: v4", (
+        f"manual test package README first line drifted from "
+        f"`PACKAGE VERSION: v4`; got {first_line!r}"
+    )
 
 
 def test_pr2_does_not_touch_windows_installer_generator():

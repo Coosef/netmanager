@@ -1,0 +1,10 @@
+{
+  "backend_url": "https://netmanager.example.app",
+  "agent_id": "CHANGE-ME-AGENT-ID",
+  "agent_key": "CHANGE-ME-AGENT-KEY",
+  "private_runtime_path": "C:\\ProgramData\\NetManagerAgent\\payload\\current\\runtime\\python\\python.exe",
+  "system_python_required": false,
+  "winget_required": false,
+  "path_modification": "none",
+  "third_party_package_offline": true
+}
