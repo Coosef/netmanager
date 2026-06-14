@@ -38,8 +38,15 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install pytest
-        run: pip install pytest
+      - name: Install backend requirements
+        # The test file itself has no backend dep, but backend's root
+        # conftest.py imports `cryptography.fernet.Fernet` at module
+        # load, so pytest collection fails without the full backend
+        # requirements installed. Mirror the win-integrate.yml setup.
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: pytest test_manual_test_package.py
         working-directory: backend
@@ -247,10 +254,14 @@ jobs:
         run: |
           set -euo pipefail
           POST="$PACKAGE_DIR/03-post-install-verify.ps1"
+          # The PS source uses single-backslash paths
+          # (C:\ProgramData\NetManagerAgent etc). grep -E needs `\\`
+          # to match a literal `\` in regex; in bash single-quotes
+          # `'\\'` IS that two-char sequence.
           required=(
-            'C:\\\\ProgramData\\\\NetManagerAgent'
-            'payload\\\\current\\\\runtime\\\\python\\\\python.exe'
-            'payload\\\\current\\\\metadata\\\\runtime-smoke-imports.txt'
+            'C:\\ProgramData\\NetManagerAgent'
+            'payload\\current\\runtime\\python\\python.exe'
+            'payload\\current\\metadata\\runtime-smoke-imports.txt'
             'Invoke-ProcessCaptured'
             "RUNTIME_OK"
             'status","--service-name"'
@@ -332,10 +343,13 @@ jobs:
               exit 1
             fi
           done
-          # Forbid Start-Service / Stop-Service / sc.exe -- the
-          # cleanup script must route through the Go host CLI (which
-          # itself uses the SCM ControlService API).
-          if grep -E '\b(Start-Service|Stop-Service|sc\.exe)\b' "$CLN" >/dev/null; then
+          # Forbid Start-Service / Stop-Service / sc.exe in EXECUTABLE
+          # lines (PS comments may legitimately quote the symbols while
+          # explaining why they are banned -- mirror the
+          # installer-orchestrator job's comment-aware scan).
+          exec_only=$(mktemp)
+          grep -v '^[[:space:]]*#' "$CLN" > "$exec_only"
+          if grep -E '\b(Start-Service|Stop-Service|sc\.exe)\b' "$exec_only" >/dev/null; then
             echo "06-safe-cleanup.ps1 contains forbidden Start-Service/Stop-Service/sc.exe call" >&2
             exit 1
           fi

@@ -95,12 +95,17 @@ try {
 # package source is contacted at install time, and no entry on PATH is
 # read or modified. (Corrections #11 + #32.)
 
-Write-Host "Private Python runtime      : not installed"
-Write-Host "Installer action            : private runtime will be downloaded and installed"
-Write-Host "System Python required      : No"
-Write-Host "winget required             : No"
-Write-Host "Backend reachable           : $backend"
-Write-Host ""
+# The 4 positive-report lines below MUST be emitted on the success
+# stream (not Write-Host) so a parent that captures the child's
+# stdout via `& powershell -File ... 2>&1` sees them. Write-Host
+# writes directly to the Console host and bypasses the success
+# stream entirely on PS 5.1.
+"Private Python runtime      : not installed"
+"Installer action            : private runtime will be downloaded and installed"
+"System Python required      : No"
+"winget required             : No"
+"Backend reachable           : $backend"
+""
 
 foreach ($w in $warnings) { Write-Host "[WARN] $w" -ForegroundColor Yellow }
 
