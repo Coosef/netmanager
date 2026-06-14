@@ -1009,6 +1009,17 @@ async def download_agent_runtime_manifest(
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
             "X-Content-Type-Options": "nosniff",
+            # Mirror the ZIP endpoint's Section D header contract: the installer
+            # Stage 4 reads these X-Charon-* headers off the manifest response and
+            # Stage 5 compares X-Charon-Runtime-Zip-Sha256 against the computed ZIP
+            # hash. Omitting them left $manifestZipSha = $null, so Stage 5's
+            # `-cne $manifestZipSha` was always true (false SHA mismatch) and the
+            # install could never complete. r.ok guarantees r.manifest + r.zip_sha256
+            # (RuntimeIntegrityResult invariant), so no extra guard is required.
+            "X-Charon-Runtime-Version": r.manifest.runtime_version,
+            "X-Charon-Runtime-Zip-Sha256": r.zip_sha256 or "",
+            "X-Charon-Python-Version": r.manifest.python_version,
+            "X-Charon-Compatible-Host-Core-Range": r.manifest.compatible_host_core_range,
         },
     )
 
@@ -3146,12 +3157,30 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
 
         $startResult = Invoke-ProcessCaptured -FilePath $HostExeLive `
             -ArgumentList @("start","--service-name",$ServiceName)
-        if ($startResult.ExitCode -ne 0) {{
+        if ($startResult.ExitCode -eq 0) {{
+            # Validate the start CLI contract symmetrically with install/status
+            # (exit code + exact stdout + empty stderr), not exit-code-only. A
+            # malformed start returning exit 0 with corrupt stdout / non-empty
+            # stderr must not be accepted; Stage 11's Running checks are the
+            # backstop, not the primary contract gate.
+            $startStdoutTrim = $startResult.Stdout.TrimEnd("`r","`n")
+            if ($startStdoutTrim -cne 'Start signal sent to "NetManagerAgent".') {{
+                Write-Host "[ERROR] start stdout mismatch." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            if ($startResult.Stderr.Length -gt 0) {{
+                Write-Host "[ERROR] start stderr not empty." -ForegroundColor Red
+                Read-Host "Press Enter to exit"
+                exit 1
+            }}
+            $L7_NewServiceStartAccepted = $true
+        }}
+        else {{
             Write-Host "[ERROR] start exit $($startResult.ExitCode)." -ForegroundColor Red
             Read-Host "Press Enter to exit"
             exit 1
         }}
-        $L7_NewServiceStartAccepted = $true
 
         # ==========================================================
         # [11/11] Verify Running + Stage-11 COMMIT BARRIER
