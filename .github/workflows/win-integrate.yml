@@ -338,19 +338,57 @@ jobs:
           if ($content -notmatch '--child-arg') {
             throw "Go host CLI install section missing"
           }
-          if ($content -notmatch '\$status10\s*=.*\.Trim\(\)') {
-            throw "10s status assignment with .Trim() missing"
+          # Section H 11-stage status verification: Invoke-ProcessCaptured
+          # captures the host CLI output structurally; .Stdout is then
+          # TrimEnd'd of trailing CR/LF before the byte-exact `-cne`
+          # comparison against "Running". The legacy `$status10 = ... .Trim()`
+          # contract is replaced by `$s10 = Invoke-ProcessCaptured ...` plus
+          # `$s10Trim = $s10.Stdout.TrimEnd(...)` plus `$s10Trim -cne "Running"`.
+          if ($content -notmatch '\$s10\s*=\s*Invoke-ProcessCaptured') {
+            throw "Section H 10s Invoke-ProcessCaptured assignment missing"
           }
-          if ($content -notmatch '\$status10\s+-ne\s+"Running"') {
-            throw "10s exact-match status check missing"
+          if ($content -notmatch '\$s10Trim\s*=\s*\$s10\.Stdout\.TrimEnd') {
+            throw "Section H 10s stdout TrimEnd binding missing"
           }
-          if ($content -notmatch '\$status30\s*=.*\.Trim\(\)') {
-            throw "30s status assignment with .Trim() missing"
+          if ($content -notmatch '\$s10Trim\s+-cne\s+"Running"') {
+            throw "Section H 10s byte-exact Running check missing"
           }
-          if ($content -notmatch '\$status30\s+-ne\s+"Running"') {
-            throw "30s exact-match status check missing"
+          if ($content -notmatch '\$s30\s*=\s*Invoke-ProcessCaptured') {
+            throw "Section H 30s Invoke-ProcessCaptured assignment missing"
           }
-          Write-Host "[OK] All invariant patterns present / removed as required"
+          if ($content -notmatch '\$s30Trim\s*=\s*\$s30\.Stdout\.TrimEnd') {
+            throw "Section H 30s stdout TrimEnd binding missing"
+          }
+          if ($content -notmatch '\$s30Trim\s+-cne\s+"Running"') {
+            throw "Section H 30s byte-exact Running check missing"
+          }
+          # Stage 11 commit-barrier landmarks (correction #69).
+          if ($content -notmatch 'Stage 11\.A/B/C') {
+            throw "Section H Stage 11 commit-barrier label missing"
+          }
+          if ($content -notmatch 'Stage 11\.D') {
+            throw "Section H Stage 11.D LOGICAL_DELETE label missing"
+          }
+          # Stage 9A pre-quiesce process snapshot (correction #72).
+          if ($content -notmatch 'OldHostProcessSnapshot') {
+            throw "Section H 9A.A0 OldHostProcessSnapshot missing"
+          }
+          # Structured Invoke-HostInstall path (correction #66) — bare
+          # `& \$HostExe install` is forbidden; install goes via the helper.
+          if ($content -notmatch 'function Invoke-HostInstall') {
+            throw "Section H Invoke-HostInstall helper missing"
+          }
+          if ($content -match '&\s*\$HostExe(Live|Bak|New)?\s+install\b') {
+            throw "Bare & \$HostExe install pipeline forbidden (correction #66)"
+          }
+          # Legacy 9-stage status variables must NOT return.
+          if ($content -match '\$status10\b') {
+            throw "Legacy 9-stage variable \$status10 leaked back into installer"
+          }
+          if ($content -match '\$status30\b') {
+            throw "Legacy 9-stage variable \$status30 leaked back into installer"
+          }
+          Write-Host "[OK] All Section H 11-stage invariant patterns present / removed as required"
 
       - name: ACL fail-closed + uninstall poll invariants (via Python)
         shell: bash
@@ -377,24 +415,41 @@ jobs:
               sys.exit('ACL catch block must not echo raw exception message to console')
           print('[OK] ACL fail-closed enforced')
 
-          # -- Uninstall exit-code + bounded poll ---------------------
-          if '$uninstallExit = $LASTEXITCODE' not in content:
-              sys.exit('uninstall exit code not captured')
+          # -- Section H 9A uninstall exit-code + bounded poll --------
+          # The Section H 11-stage flow routes every host CLI invocation
+          # through Invoke-ProcessCaptured, so the uninstall exit code is
+          # read from the structured `$unResult.ExitCode` (NEVER the bare
+          # `$LASTEXITCODE` automatic, which the success-stdout literal
+          # `Service "NetManagerAgent" installed.\n` would pollute via a
+          # `& $HostExe install ; $LASTEXITCODE` pipeline regression).
+          if '$unResult = Invoke-ProcessCaptured' not in content:
+              sys.exit('Section H uninstall Invoke-ProcessCaptured assignment missing')
           for code in ('0', '18', '19'):
-              if f'$uninstallExit -eq {code}' not in content:
-                  sys.exit(f'uninstall exit-code branch missing: {code}')
-          if '$LASTEXITCODE -eq 18' not in content:
-              sys.exit('bounded poll missing status-exit-18 check')
+              if f'$unResult.ExitCode -eq {code}' not in content:
+                  sys.exit(f'Section H uninstall exit-code branch missing: {code}')
+          # Bounded poll after uninstall — Invoke-ProcessCaptured is also
+          # the wrapper for the status probe; the deadline ceiling is 30s.
           if 'AddSeconds(30)' not in content:
-              sys.exit('bounded poll missing 30s deadline')
-          # Forbid old fixed Start-Sleep 2 race right after uninstall
-          bad = re.search(
-              r'\$HostExe uninstall[^\n]*\n[^\n]*Start-Sleep\s+-Seconds\s+2(?!\d)',
+              sys.exit('Section H bounded poll missing 30s deadline')
+          # The exit-18 wait condition now reads from the structured result.
+          if '$s.ExitCode -eq 18' not in content:
+              sys.exit('Section H bounded poll missing status-exit-18 check')
+          # The Stage 9A QUIESCE block must use Invoke-ProcessCaptured
+          # for the status probe, not bare host CLI calls.
+          if not re.search(
+              r'Invoke-ProcessCaptured -FilePath \$HostExeLive\s+`\s*\n\s+-ArgumentList @\("status","--service-name",\$ServiceName\)',
               content,
-          )
+          ):
+              sys.exit('Section H 9A status probe must use Invoke-ProcessCaptured')
+          # Forbid the legacy LASTEXITCODE pipeline anywhere in the script.
+          if re.search(r'\$LASTEXITCODE\b', content):
+              sys.exit('$LASTEXITCODE leaked back into Section H template '
+                       '(stdout-pollution forbidden by correction #66)')
+          # Forbid the bare `& $HostExe install` pattern (correction #58).
+          bad = re.search(r'&\s*\$HostExe(Live|Bak|New)?\s+install\b', content)
           if bad:
-              sys.exit(f'old fixed Start-Sleep race still present: {bad.group(0)!r}')
-          print('[OK] uninstall exit-code handling + bounded poll present')
+              sys.exit(f'bare host install pattern returned: {bad.group(0)!r}')
+          print('[OK] Section H 9A uninstall + bounded poll Invoke-ProcessCaptured contract present')
           PY
 
   # ----------------------------------------------------------------
