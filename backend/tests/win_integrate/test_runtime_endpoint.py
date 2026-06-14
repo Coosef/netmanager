@@ -307,6 +307,56 @@ def test_zip_sha256_header_is_upper_case(app_with_overrides, monkeypatch):
     assert sha == hashlib.sha256(f["fx"]["zip_data"]).hexdigest().upper()
 
 
+# ── PR #3 fast-follow regression: manifest endpoint must emit the X-Charon-* ──
+# header contract. The installer's Stage 4 reads these off the MANIFEST response
+# and Stage 5 compares X-Charon-Runtime-Zip-Sha256 against the computed ZIP hash;
+# when the manifest endpoint omitted them, $manifestZipSha was $null and Stage 5's
+# `-cne $manifestZipSha` was always true (false "SHA mismatch"), so the Section H
+# installer could never complete. These tests pin the contract so it can't regress.
+
+def test_manifest_emits_charon_headers(app_with_overrides, monkeypatch):
+    """The manifest endpoint MUST emit the same Section D X-Charon-* headers as
+    the ZIP endpoint (proves the Stage 4 header source is populated)."""
+    f = app_with_overrides
+    monkeypatch.setattr(f["settings"], "WINDOWS_AGENT_V2_ENABLED", True)
+    res = f["client"].get(
+        _manifest_url(f),
+        headers={"X-Agent-Key": f["agent_key"]},
+    )
+    assert res.status_code == 200
+    assert res.headers["x-charon-runtime-version"] == RUNTIME_VERSION
+    assert res.headers["x-charon-runtime-zip-sha256"] == f["fx"]["zip_sha_upper"]
+    assert res.headers["x-charon-python-version"] == "3.12.6"
+    assert res.headers["x-charon-compatible-host-core-range"] == ">=2.0.0 <3.0.0"
+    # Section D: SHA header is UPPER hex and equals the real ZIP digest.
+    sha = res.headers["x-charon-runtime-zip-sha256"]
+    assert sha == sha.upper()
+    assert sha == hashlib.sha256(f["fx"]["zip_data"]).hexdigest().upper()
+
+
+def test_manifest_and_zip_charon_headers_agree_stage5_contract(app_with_overrides, monkeypatch):
+    """Installer Stage 4/5 SHA contract is satisfiable: $manifestZipSha (manifest
+    header) and $zipShaHeader (ZIP header) both equal the actual ZIP digest, so the
+    Stage 5 guard `$actualZipSha -cne $zipShaHeader -or $actualZipSha -cne
+    $manifestZipSha` is FALSE for a correct bundle and the install proceeds."""
+    f = app_with_overrides
+    monkeypatch.setattr(f["settings"], "WINDOWS_AGENT_V2_ENABLED", True)
+    m = f["client"].get(_manifest_url(f), headers={"X-Agent-Key": f["agent_key"]})
+    z = f["client"].get(_zip_url(f), headers={"X-Agent-Key": f["agent_key"]})
+    assert m.status_code == 200 and z.status_code == 200
+    actual = hashlib.sha256(f["fx"]["zip_data"]).hexdigest().upper()
+    assert m.headers["x-charon-runtime-zip-sha256"] == actual
+    assert z.headers["x-charon-runtime-zip-sha256"] == actual
+    # The ZIP endpoint still emits the full contract, and manifest agrees on all four.
+    for h in (
+        "x-charon-runtime-version",
+        "x-charon-runtime-zip-sha256",
+        "x-charon-python-version",
+        "x-charon-compatible-host-core-range",
+    ):
+        assert m.headers[h] == z.headers[h], f"manifest vs zip X-Charon drift: {h}"
+
+
 # ── Integrity failure → 503 (both endpoints) ───────────────────────
 
 

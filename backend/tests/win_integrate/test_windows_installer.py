@@ -73,6 +73,18 @@ def test_no_sc_exe_start():
     assert "sc.exe start" not in s
 
 
+def test_stage_10_start_validates_stdout_and_stderr():
+    """PR #3 fast-follow: the [10/11] start invocation must validate the start CLI
+    contract symmetrically with install/status (exact stdout + empty stderr), not
+    exit-code-only. A start returning exit 0 with corrupt stdout / non-empty stderr
+    must be rejected at the contract gate, not silently accepted."""
+    s = _executable_only(_gen())
+    assert '"start","--service-name"' in s                       # the start call
+    assert "$startResult.Stdout.TrimEnd" in s                    # stdout captured + trimmed
+    assert 'Start signal sent to "NetManagerAgent".' in s        # exact stdout contract (code 0)
+    assert "$startResult.Stderr.Length -gt 0" in s               # stderr emptiness gate
+
+
 def test_no_sc_exe_delete():
     s = _gen()
     assert "sc.exe delete" not in s
