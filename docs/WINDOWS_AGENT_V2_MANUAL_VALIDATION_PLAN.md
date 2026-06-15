@@ -275,11 +275,42 @@ Performed in order; each step records evidence per Section 8.
   tolerant via the PR #1 `utf-8-sig` read).
 - Operator replaces:
   - `"backend_url": "https://netmanager.example.app"` -> staging URL.
+    The URL MUST have NO trailing slash -- a trailing slash causes the
+    installer to concatenate `$BackendUrl/api/v1/...` into a
+    `//api/v1/...` URL (Run T1.02 BLOCKED-WITH-LEAK postmortem root
+    cause). The backend defensively strips trailing slashes when it
+    renders the installer body, but the operator-side
+    `02-run-installer.ps1` reads the field verbatim, so keep it clean.
   - `"agent_id": "CHANGE-ME-AGENT-ID"` -> staging-issued ID.
   - `"agent_key": "CHANGE-ME-AGENT-KEY"` -> staging-issued key.
 - Operator MUST NOT commit, e-mail, screenshot, paste into chat, or
   print the modified `test-config.json`. The file is wiped by
   `06-safe-cleanup.ps1` at the end of the run.
+
+#### 5.4.1 Backend-side staging URL render override
+
+For local docker-compose staging stacks (Run T1.02 setup), the backend's
+request-derived base URL collapses to `http://localhost`, so the rendered
+installer's `$BackendUrl` literal points at the backend container's own
+loopback and is unreachable from the external Windows test machine.
+
+To fix the render at source, set the backend-side environment variable
+before bringing the staging backend up:
+
+```yaml
+# docker-compose.override.yml (staging only -- NEVER commit)
+services:
+  backend:
+    environment:
+      WINDOWS_AGENT_V2_ENABLED: "true"
+      WINDOWS_AGENT_V2_EXTERNAL_BASE_URL: "http://10.2.22.24"
+```
+
+The setting MUST be the backend's externally reachable origin. Trailing
+slashes are normalized away by the backend. Defaults to unset, in which
+case the existing X-Forwarded-Host / request.base_url derivation runs
+unchanged -- production deploys behind a reverse proxy DO NOT need to
+set it.
 
 ### 5.5 Run `01-preflight.ps1`
 

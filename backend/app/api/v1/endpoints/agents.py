@@ -567,6 +567,55 @@ async def get_agent_commands(
 
 # -- Installer download --------------------------------------------------------
 
+
+# WIN-INTEGRATE installer base URL render guard.
+#
+# Normalize the URL that gets baked into the rendered Windows installer's
+# `$BackendUrl` literal. Defense-in-depth on top of `_windows_installer`'s
+# `_psq` single-quote escaping:
+#
+#   1. Trailing slashes are stripped — the installer template builds
+#      request URLs by string concatenation (`"$BackendUrl/api/v1/..."`),
+#      so a `https://x/` value would produce `//api/v1/...` double-slash
+#      URLs (Run T1.02 BLOCKED-WITH-LEAK postmortem root cause #2).
+#   2. The scheme is required to be http or https (other schemes have no
+#      meaning for the installer's HTTPS download calls).
+#   3. Shell-meta / quote / newline characters are rejected — `_psq`
+#      single-quote escaping handles the literal, but a value carrying
+#      a stray `"`, `;`, `|`, `\n`, etc. is almost certainly a
+#      misconfiguration and silently passing it through would mask
+#      that misconfiguration.
+#
+# Misconfiguration responds 503 (matches the "installer temporarily
+# unavailable" semantics the endpoint already uses for flag-off).
+def _normalize_windows_installer_base_url(url: str) -> str:
+    from urllib.parse import urlparse
+    if not url:
+        raise HTTPException(
+            status_code=503,
+            detail="Windows installer base URL not configured.",
+        )
+    normalized = url.rstrip("/")
+    forbidden = set('"\';|`$&\\\n\r<> ')
+    if any(c in normalized for c in forbidden):
+        raise HTTPException(
+            status_code=503,
+            detail="Windows installer base URL contains forbidden character.",
+        )
+    parsed = urlparse(normalized)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=503,
+            detail="Windows installer base URL must use http or https scheme.",
+        )
+    if not parsed.netloc:
+        raise HTTPException(
+            status_code=503,
+            detail="Windows installer base URL is missing host.",
+        )
+    return normalized
+
+
 # HF#10A — public router (gate'siz). X-Agent-Key endpoint içinde doğrulanır.
 @agents_public_router.get("/{agent_id}/download/{platform}")
 async def download_installer(
@@ -688,7 +737,23 @@ async def download_installer(
                 status_code=503,
                 detail="Windows installer temporarily unavailable. Please contact your administrator.",
             )
-        script = _windows_installer(agent_id, agent_key, base_url)
+        # WIN-INTEGRATE installer base URL override.
+        #
+        # When set, the rendered installer's $BackendUrl literal is
+        # forced to the operator-configured external address rather
+        # than the per-request base URL the backend would otherwise
+        # guess at. Staging / docker-compose deployments use this so
+        # the rendered installer is reachable from an external Windows
+        # test machine — without it the base URL can collapse to
+        # "http://localhost" which is unreachable off-host. The value
+        # is normalized (trailing slash strip + scheme + shell-meta
+        # rejection) by `_normalize_windows_installer_base_url`.
+        # Linux installer rendering is NOT touched by this override.
+        installer_base_url = base_url
+        if settings.WINDOWS_AGENT_V2_EXTERNAL_BASE_URL:
+            installer_base_url = settings.WINDOWS_AGENT_V2_EXTERNAL_BASE_URL
+        installer_base_url = _normalize_windows_installer_base_url(installer_base_url)
+        script = _windows_installer(agent_id, agent_key, installer_base_url)
         filename = f"netmanager-agent-{agent_id}-windows.ps1"
         # WINDOWS-INSTALLER-FIX (2026-06-11) — UTF-8 BOM + CRLF +
         # charset so Windows PowerShell 5.1's cp1254/cp1252 fallback
@@ -2172,6 +2237,14 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
     def _psq(s: str) -> str:
         # F1.3 defense - single-quoted PS string'de ' kaçışı ''
         return "'" + s.replace("'", "''") + "'"
+    # Run T1.02 BLOCKED-WITH-LEAK postmortem root cause #2 — defense-
+    # in-depth. The installer template builds endpoint URLs by string
+    # concat (`"$BackendUrl/api/v1/..."`); a trailing slash in
+    # backend_url produces a `//api/v1/...` double-slash URL. The
+    # endpoint already calls `_normalize_windows_installer_base_url`
+    # before getting here, but direct test / future callers of
+    # `_windows_installer()` deserve the same idempotent guard.
+    backend_url = backend_url.rstrip("/")
     p_id = _psq(agent_id)
     p_key = _psq(agent_key)
     p_url = _psq(backend_url)

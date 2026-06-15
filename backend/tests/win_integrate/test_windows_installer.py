@@ -44,6 +44,8 @@ Forbidden patterns (must NEVER appear in executable code):
 """
 import re
 
+import pytest
+
 
 SAMPLE_AGENT_ID = "test-agent-abcd1234"
 SAMPLE_AGENT_KEY = "test-key-9f8e7d6c"
@@ -1041,3 +1043,493 @@ def test_first_line_is_section_h_header():
     s = _gen()
     first = s.lstrip().split("\n")[0]
     assert "Section H 11-stage" in first
+
+
+# ============================================================================
+# URL render hardening + secret-output guards (Run T1.02 BLOCKED-WITH-LEAK
+# postmortem). Two root causes drove the postmortem:
+#
+#   1. Run T1.02 trailing-slash bug — `test-config.json` carried
+#      `backend_url: "http://10.2.22.24/"`; the installer's `$BackendUrl`
+#      string-concat with `/api/v1/...` produced a `//api/v1/...` URL.
+#   2. Run T1.02 secret leak — debug curl of the installer endpoint
+#      piped the rendered installer body (with embedded `$AgentKey`
+#      literal) into chat output.
+#
+# Tests below pin the backend-side fix:
+#
+#   - `_windows_installer()` defensively normalizes the base URL it
+#     receives so a trailing-slash value can't sneak through.
+#   - The `_redact()` helper is used in every new test whose failure
+#     message would otherwise carry the agent_key literal. The doctrine
+#     for ALL future Windows-installer tests is: assertion failure
+#     output is computed from the redacted body, never the raw body.
+# ============================================================================
+
+
+REAL_SHAPE_KEY_FIXTURE = (
+    "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+)
+
+
+def _redact(text: str, *secrets: str) -> str:
+    """Replace every occurrence of each secret with `***REDACTED***`.
+
+    Used by every test in this section whose failure output would
+    otherwise contain a real-shape agent_key. The Run T1.02 leak
+    happened because rendered installer bodies were echoed without
+    a redaction pass — that doctrine is enforced here in the test
+    layer to mirror what production debug code must also do.
+    """
+    out = text
+    for s in secrets:
+        if s:
+            out = out.replace(s, "***REDACTED***")
+    return out
+
+
+# ── _redact helper contract ──────────────────────────────────────────────
+
+
+def test_redact_helper_replaces_every_occurrence():
+    s = REAL_SHAPE_KEY_FIXTURE + " middle " + REAL_SHAPE_KEY_FIXTURE
+    out = _redact(s, REAL_SHAPE_KEY_FIXTURE)
+    assert REAL_SHAPE_KEY_FIXTURE not in out
+    assert out.count("***REDACTED***") == 2
+
+
+def test_redact_helper_handles_empty_secret():
+    assert _redact("untouched body", "") == "untouched body"
+
+
+def test_redact_helper_handles_multiple_secrets():
+    key = REAL_SHAPE_KEY_FIXTURE
+    other = "secondary-secret-token"
+    body = f"a={key} b={other} c={key}"
+    out = _redact(body, key, other)
+    assert key not in out and other not in out
+    assert out.count("***REDACTED***") == 3
+
+
+# ── URL render — $BackendUrl literal embed ───────────────────────────────
+
+
+def test_windows_installer_embeds_backend_url_literal():
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, SAMPLE_BACKEND_URL)
+    safe = _redact(body, SAMPLE_AGENT_KEY)
+    assert f"$BackendUrl = '{SAMPLE_BACKEND_URL}'" in safe
+
+
+def test_windows_installer_normalizes_trailing_slash_host_only():
+    """A backend_url that ends in a trailing slash must NOT appear with
+    the slash in the rendered `$BackendUrl` literal. Run T1.02 root
+    cause #2: the embedded literal was concatenated with `/api/v1/...`
+    producing a `//api/v1/...` URL."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, "https://staging.example.com/",
+    )
+    safe = _redact(body, SAMPLE_AGENT_KEY)
+    assert "$BackendUrl = 'https://staging.example.com'" in safe
+    assert "$BackendUrl = 'https://staging.example.com/'" not in safe
+
+
+def test_windows_installer_normalizes_trailing_slash_path_prefix():
+    """A backend_url whose path component ends in a trailing slash must
+    also be normalized — covers reverse-proxy-with-prefix deployments."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, "https://gw.example.com/api/proxy/",
+    )
+    safe = _redact(body, SAMPLE_AGENT_KEY)
+    assert "$BackendUrl = 'https://gw.example.com/api/proxy'" in safe
+
+
+def test_windows_installer_preserves_path_prefix_without_trailing_slash():
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, "https://gw.example.com/api/proxy",
+    )
+    safe = _redact(body, SAMPLE_AGENT_KEY)
+    assert "$BackendUrl = 'https://gw.example.com/api/proxy'" in safe
+
+
+def test_windows_installer_no_double_slash_in_endpoint_path_concatenations():
+    """The template builds endpoint URLs by string concat with `$BackendUrl`.
+    A double-slash run must never appear after the scheme separator."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, "http://10.2.22.24/",
+    )
+    safe = _redact(body, SAMPLE_AGENT_KEY)
+    # Strip the legitimate `://` so the test isn't fooled by `https://`.
+    after_scheme = safe.replace("https://", "").replace("http://", "")
+    assert "//api/v1/" not in after_scheme, (
+        "rendered installer contains // before /api/v1/ — trailing-slash "
+        "normalization regressed (Run T1.02 root cause #2). "
+        f"safe body length: {len(safe)} bytes."
+    )
+
+
+# ── _normalize_windows_installer_base_url helper contract ────────────────
+
+
+def test_normalize_strip_trailing_slash_host_only():
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    assert _normalize_windows_installer_base_url("https://x.com/") == "https://x.com"
+
+
+def test_normalize_strip_trailing_slash_path_prefix():
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    assert (
+        _normalize_windows_installer_base_url("https://x.com/api/proxy/")
+        == "https://x.com/api/proxy"
+    )
+
+
+def test_normalize_preserves_already_clean_url():
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    assert _normalize_windows_installer_base_url("https://x.com") == "https://x.com"
+
+
+def test_normalize_preserves_port():
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    assert (
+        _normalize_windows_installer_base_url("https://x.com:8443/")
+        == "https://x.com:8443"
+    )
+
+
+def test_normalize_rejects_empty():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    import pytest as _pt
+    with _pt.raises(HTTPException) as ei:
+        _normalize_windows_installer_base_url("")
+    assert ei.value.status_code == 503
+
+
+def test_normalize_rejects_non_http_scheme():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    import pytest as _pt
+    for url in ("ftp://x.com", "javascript:alert(1)", "file:///etc/passwd",
+                "data:text/plain,foo", "ssh://user@host"):
+        with _pt.raises(HTTPException) as ei:
+            _normalize_windows_installer_base_url(url)
+        assert ei.value.status_code == 503, f"scheme not rejected: {url}"
+
+
+def test_normalize_rejects_missing_netloc():
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    import pytest as _pt
+    with _pt.raises(HTTPException) as ei:
+        _normalize_windows_installer_base_url("https://")
+    assert ei.value.status_code == 503
+
+
+def test_normalize_rejects_shell_meta_chars():
+    """Defense-in-depth on top of `_psq` single-quote escaping inside
+    `_windows_installer()`. A value with a stray `'`, `;`, `|`, newline,
+    etc. is almost certainly a misconfiguration."""
+    from fastapi import HTTPException
+    from app.api.v1.endpoints.agents import _normalize_windows_installer_base_url
+    import pytest as _pt
+    for url in (
+        "https://x.com';dropdb",
+        'https://x.com"',
+        "https://x.com|whoami",
+        "https://x.com`id`",
+        "https://x.com$VAR",
+        "https://x.com&touch",
+        "https://x.com\\backslash",
+        "https://x.com\nnewline",
+        "https://x.com\rcr",
+        "https://x.com<tag>",
+        "https://x.com space",
+    ):
+        with _pt.raises(HTTPException) as ei:
+            _normalize_windows_installer_base_url(url)
+        assert ei.value.status_code == 503, f"shell-meta not rejected: {url!r}"
+
+
+# ── Endpoint-level integration tests for the new settings field ──────────
+
+
+@pytest.fixture
+def installer_app_with_overrides(monkeypatch):
+    """Minimal FastAPI app for exercising /download/{platform} with a
+    stubbed agent + DB. Mirrors test_host_endpoint_http.py but for the
+    `download_installer` endpoint."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api.v1.endpoints import agents as agents_mod
+    from app.api.v1.endpoints.agents import agents_public_router
+    from app.core.config import settings
+
+    # Flag default off — each test opts in.
+    monkeypatch.setattr(settings, "WINDOWS_AGENT_V2_ENABLED", False)
+    monkeypatch.setattr(settings, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL", None)
+    monkeypatch.setattr(settings, "AGENT_WS_URL", "")
+
+    FAKE_AGENT_ID = "endpoint-test-agent"
+    FAKE_AGENT_KEY = REAL_SHAPE_KEY_FIXTURE
+
+    class _FakeAgent:
+        id = FAKE_AGENT_ID
+        is_active = True
+        agent_key_hash = "stub-hash"
+
+    class _StubExecute:
+        def __init__(self, v):
+            self._v = v
+        def scalar_one_or_none(self):
+            return self._v
+
+    class _FakeDB:
+        async def execute(self, stmt):
+            if "set_config" in str(stmt):
+                return _StubExecute(None)
+            return _StubExecute(_FakeAgent())
+
+    async def _fake_get_db():
+        yield _FakeDB()
+
+    def _fake_verify(plain, _hashed):
+        return plain == FAKE_AGENT_KEY
+
+    monkeypatch.setattr(agents_mod, "verify_password", _fake_verify)
+
+    app = FastAPI()
+    app.include_router(agents_public_router, prefix="/api/v1/agents")
+    app.dependency_overrides[agents_mod.get_db] = _fake_get_db
+
+    return {
+        "client": TestClient(app),
+        "agent_id": FAKE_AGENT_ID,
+        "agent_key": FAKE_AGENT_KEY,
+        "settings": settings,
+    }
+
+
+def test_endpoint_uses_external_base_url_when_set(
+    installer_app_with_overrides, monkeypatch,
+):
+    """When `WINDOWS_AGENT_V2_EXTERNAL_BASE_URL` is set, the rendered
+    installer's `$BackendUrl` literal MUST equal that value (after
+    trailing-slash normalization), not the request-derived base URL."""
+    s = installer_app_with_overrides["settings"]
+    monkeypatch.setattr(s, "WINDOWS_AGENT_V2_ENABLED", True)
+    monkeypatch.setattr(
+        s, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL", "https://staging.example.com",
+    )
+
+    client = installer_app_with_overrides["client"]
+    aid = installer_app_with_overrides["agent_id"]
+    akey = installer_app_with_overrides["agent_key"]
+
+    r = client.get(
+        f"/api/v1/agents/{aid}/download/windows",
+        headers={"X-Agent-Key": akey},
+    )
+    assert r.status_code == 200
+    # Body carries a UTF-8 BOM + CRLF — decode and normalize line endings
+    # to LF for the substring check (matches what every Windows test does).
+    body = r.content.lstrip(b"\xef\xbb\xbf").decode("utf-8").replace("\r\n", "\n")
+    safe = _redact(body, akey)
+    assert "$BackendUrl = 'https://staging.example.com'" in safe
+    # The request landed at TestClient's "http://testserver" base — that
+    # value MUST NOT have leaked through into the rendered body.
+    assert "testserver" not in safe
+
+
+def test_endpoint_normalizes_external_base_url_trailing_slash(
+    installer_app_with_overrides, monkeypatch,
+):
+    """Even when the operator sets the setting with a trailing slash —
+    `http://10.2.22.24/` was Run T1.02 root cause #2 — the rendered
+    installer must embed the normalized form."""
+    s = installer_app_with_overrides["settings"]
+    monkeypatch.setattr(s, "WINDOWS_AGENT_V2_ENABLED", True)
+    monkeypatch.setattr(s, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL", "http://10.2.22.24/")
+
+    client = installer_app_with_overrides["client"]
+    aid = installer_app_with_overrides["agent_id"]
+    akey = installer_app_with_overrides["agent_key"]
+
+    r = client.get(
+        f"/api/v1/agents/{aid}/download/windows",
+        headers={"X-Agent-Key": akey},
+    )
+    assert r.status_code == 200
+    body = r.content.lstrip(b"\xef\xbb\xbf").decode("utf-8").replace("\r\n", "\n")
+    safe = _redact(body, akey)
+    assert "$BackendUrl = 'http://10.2.22.24'" in safe
+    assert "$BackendUrl = 'http://10.2.22.24/'" not in safe
+
+
+def test_endpoint_falls_back_to_request_url_when_setting_unset(
+    installer_app_with_overrides, monkeypatch,
+):
+    """With `WINDOWS_AGENT_V2_EXTERNAL_BASE_URL` unset (None), the
+    request-derived base URL must drive `$BackendUrl`. Guards against an
+    accidental "always read the setting" regression that would break
+    deployments which legitimately rely on X-Forwarded-Host."""
+    s = installer_app_with_overrides["settings"]
+    monkeypatch.setattr(s, "WINDOWS_AGENT_V2_ENABLED", True)
+    monkeypatch.setattr(s, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL", None)
+
+    client = installer_app_with_overrides["client"]
+    aid = installer_app_with_overrides["agent_id"]
+    akey = installer_app_with_overrides["agent_key"]
+
+    r = client.get(
+        f"/api/v1/agents/{aid}/download/windows",
+        headers={"X-Agent-Key": akey, "X-Forwarded-Host": "fwd-host.example.com",
+                 "X-Forwarded-Proto": "https"},
+    )
+    assert r.status_code == 200
+    body = r.content.lstrip(b"\xef\xbb\xbf").decode("utf-8").replace("\r\n", "\n")
+    safe = _redact(body, akey)
+    # X-Forwarded-Host is the canonical fallback chain entry. The
+    # rendered literal must reflect it (defensive sanitization keeps
+    # only `[A-Za-z0-9.:-]` chars from the header value).
+    assert "$BackendUrl = 'https://fwd-host.example.com'" in safe
+
+
+def test_endpoint_503s_when_external_base_url_misconfigured(
+    installer_app_with_overrides, monkeypatch,
+):
+    """A misconfigured setting (shell-meta / non-http scheme) must
+    fail-closed at 503 — the rendered installer would otherwise be
+    a guaranteed install failure, and `503 - temporarily unavailable`
+    matches the semantics the endpoint already uses for flag-off."""
+    s = installer_app_with_overrides["settings"]
+    monkeypatch.setattr(s, "WINDOWS_AGENT_V2_ENABLED", True)
+    monkeypatch.setattr(
+        s, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL", "ftp://wrong.scheme.example.com",
+    )
+
+    client = installer_app_with_overrides["client"]
+    aid = installer_app_with_overrides["agent_id"]
+    akey = installer_app_with_overrides["agent_key"]
+
+    r = client.get(
+        f"/api/v1/agents/{aid}/download/windows",
+        headers={"X-Agent-Key": akey},
+    )
+    assert r.status_code == 503
+
+
+def test_endpoint_linux_ignores_external_base_url_setting(
+    installer_app_with_overrides, monkeypatch,
+):
+    """The override is Windows-only — Linux installer rendering must
+    NOT use it. Guards Linux byte-equal golden against this PR."""
+    s = installer_app_with_overrides["settings"]
+    monkeypatch.setattr(
+        s, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL", "https://windows-only.example.com",
+    )
+
+    client = installer_app_with_overrides["client"]
+    aid = installer_app_with_overrides["agent_id"]
+    akey = installer_app_with_overrides["agent_key"]
+
+    r = client.get(
+        f"/api/v1/agents/{aid}/download/linux",
+        headers={"X-Agent-Key": akey},
+    )
+    assert r.status_code == 200
+    body = r.content.decode("utf-8")
+    safe = _redact(body, akey)
+    # The Linux installer must not have picked up the Windows-only
+    # setting under any code path.
+    assert "windows-only.example.com" not in safe
+
+
+# ── Secret-output discipline (Run T1.02 root cause #3) ───────────────────
+
+
+def test_windows_installer_embeds_agent_key_exactly_once():
+    """The agent_key MUST be embedded into the rendered installer
+    exactly once — in the `$AgentKey = '<key>'` literal. Anywhere else
+    is a debug-echo / log statement that would have leaked the key into
+    the calling process's stdout when the file is curl'd. Run T1.02
+    leaked the key because the rendered body was echoed without any
+    redaction; this test makes the "agent_key occurrences" surface
+    auditable on every PR."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, REAL_SHAPE_KEY_FIXTURE, SAMPLE_BACKEND_URL,
+    )
+    count = body.count(REAL_SHAPE_KEY_FIXTURE)
+    # Use the redacted view to size the failure output — never embed
+    # the raw key in the AssertionError.
+    safe_len = len(_redact(body, REAL_SHAPE_KEY_FIXTURE))
+    assert count == 1, (
+        f"agent_key appears {count} times in rendered Windows installer "
+        f"(expected exactly 1, in the $AgentKey literal). "
+        f"Redacted body length: {safe_len} bytes. "
+        f"Any new occurrence is a probable secret-leak path — audit the "
+        f"diff for debug `Write-Host $AgentKey`, log lines, or curl-style "
+        f"interpolation."
+    )
+
+
+def test_redacted_failure_output_contains_no_key():
+    """Sanity that the documented `_redact()` doctrine works as a guard:
+    after redaction the agent_key literal is gone, but the placeholder
+    is left behind so failure output is still actionable."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, REAL_SHAPE_KEY_FIXTURE, SAMPLE_BACKEND_URL,
+    )
+    safe = _redact(body, REAL_SHAPE_KEY_FIXTURE)
+    assert REAL_SHAPE_KEY_FIXTURE not in safe
+    assert "$AgentKey   = '***REDACTED***'" in safe
+
+
+# ── Source-level invariants for the new setting field + endpoint hook ────
+
+
+def test_settings_module_declares_external_base_url_field():
+    """The new field is declared with the expected name + default None.
+    Defends against an accidental rename or default-flip in a future PR."""
+    from app.core.config import settings
+    assert hasattr(settings, "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL"), (
+        "config.Settings is missing WINDOWS_AGENT_V2_EXTERNAL_BASE_URL"
+    )
+    # Default must be None so existing deployments keep their current
+    # request-derived base URL behavior.
+    from app.core.config import Settings as _S
+    fields = getattr(_S, "model_fields", None) or getattr(_S, "__fields__", {})
+    field = fields["WINDOWS_AGENT_V2_EXTERNAL_BASE_URL"]
+    default = getattr(field, "default", None)
+    assert default is None, (
+        f"WINDOWS_AGENT_V2_EXTERNAL_BASE_URL default must be None, got {default!r}"
+    )
+
+
+def test_download_installer_reads_external_base_url_setting():
+    """Source-level guard: the endpoint must reference both the new
+    setting and the normalization helper. Catches an accidental import
+    deletion or branch-removal."""
+    import inspect
+    from app.api.v1.endpoints import agents as agents_mod
+    src = inspect.getsource(agents_mod.download_installer)
+    assert "WINDOWS_AGENT_V2_EXTERNAL_BASE_URL" in src, (
+        "download_installer no longer references the external base URL setting"
+    )
+    assert "_normalize_windows_installer_base_url" in src, (
+        "download_installer no longer normalizes the base URL"
+    )
+
+
+def test_normalization_helper_is_module_level():
+    """The helper MUST be module-level (not nested inside the endpoint)
+    so unit tests + future callers can import it directly. Importing
+    from agents.py is the contract."""
+    from app.api.v1.endpoints import agents as agents_mod
+    assert callable(getattr(agents_mod, "_normalize_windows_installer_base_url"))
