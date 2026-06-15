@@ -1533,3 +1533,286 @@ def test_normalization_helper_is_module_level():
     from agents.py is the contract."""
     from app.api.v1.endpoints import agents as agents_mod
     assert callable(getattr(agents_mod, "_normalize_windows_installer_base_url"))
+
+
+# ============================================================================
+# Headless / non-interactive exit + rollback Phase 2 cleanup guarantee
+# (Run T1.03 BLOCKED-WITH-FINDING postmortem).
+#
+# Two coupled problems Run T1.03 surfaced:
+#
+#   1. Read-Host hang. Every exit path in the rendered installer called
+#      `Read-Host "Press Enter to exit"`, which blocks indefinitely when
+#      there is no console attached -- the v4 wrapper's
+#      `Start-Process -Wait` never returned, the validation session went
+#      idle, and the operator had to terminate the chain manually.
+#
+#   2. Rollback Phase 2 cleanup gap. The Section G.7
+#      SUCCESSFUL_CLEAN_INSTALL_ROLLBACK post-condition says
+#      payload\new\, staging\runtime-new.zip, staging\runtime-new.manifest.json,
+#      staging\runtime-new\, staging\config.env.new MUST be absent after a
+#      clean-install rollback. The original implementation only reverses
+#      the M1..M6 markers; if the install aborted BEFORE any M-marker was
+#      set (Stage 6B sanity-fire failure in T1.03), those transients
+#      survived even though ROLLBACK_RESULT=SUCCESSFUL_CLEAN_INSTALL_ROLLBACK
+#      was written.
+#
+# Tests below pin the fix in three layers:
+#
+#   - `Wait-ForUserIfInteractive` helper + `$NonInteractive` gate exist
+#     and gate every prompt.
+#   - No raw `Read-Host "Press Enter to exit"` literals remain.
+#   - Phase 2.0 transient cleanup runs BEFORE the M-reverse block AND
+#     BEFORE the ROLLBACK_RESULT write; if the cleanup fails the
+#     installer degrades to ROLLBACK_INCOMPLETE.
+#   - Section G.7 post-condition is verified at runtime before
+#     SUCCESSFUL_CLEAN_INSTALL_ROLLBACK is written.
+# ============================================================================
+
+
+def test_non_interactive_env_gate_present():
+    """The `$NonInteractive` flag is the single gate every prompt
+    consults. CHARON_NONINTERACTIVE=1 forces headless mode; absent
+    that the gate falls back to [Environment]::UserInteractive."""
+    s = _gen()
+    assert "$env:CHARON_NONINTERACTIVE -eq '1'" in s, (
+        "$NonInteractive must check CHARON_NONINTERACTIVE env var"
+    )
+    assert "[Environment]::UserInteractive" in s, (
+        "$NonInteractive must fall back to UserInteractive"
+    )
+    assert "$NonInteractive" in s
+
+
+def test_wait_for_user_helper_defined():
+    s = _gen()
+    assert "function Wait-ForUserIfInteractive" in s
+    # The helper must be a no-op when $NonInteractive is true.
+    assert "if (-not $NonInteractive)" in s
+    # Read-Host inside the helper is the ONLY surviving Read-Host call.
+    assert "Read-Host $Prompt" in s
+
+
+def test_no_raw_read_host_press_enter_to_exit():
+    """The Read-Host literal that caused Run T1.03's headless hang
+    must NOT appear anywhere in the rendered installer outside the
+    helper body."""
+    s = _gen()
+    assert 'Read-Host "Press Enter to exit"' not in s, (
+        'rendered installer still contains raw Read-Host "Press Enter to exit" '
+        '(Run T1.03 headless-hang regression)'
+    )
+    assert 'Read-Host "Press Enter to close this window"' not in s
+
+
+def test_only_one_read_host_call_remains_in_executable_code():
+    """The only surviving `Read-Host` call in EXECUTABLE code must be
+    the one inside `Wait-ForUserIfInteractive`. Anything else is a new
+    headless-hang code path. (Comments referencing Read-Host as a
+    string don't count.)"""
+    s = _executable_only(_gen())
+    assert s.count("Read-Host") == 1, (
+        f"expected exactly 1 executable Read-Host occurrence "
+        f"(inside Wait-ForUserIfInteractive), got {s.count('Read-Host')} "
+        f"-- a new prompt was added without the helper gate"
+    )
+
+
+def test_every_press_enter_prompt_uses_the_helper():
+    """Every prompt that wants to pause for the operator must route
+    through `Wait-ForUserIfInteractive`. Catches a regression where a
+    new exit path drops in a raw Read-Host."""
+    s = _executable_only(_gen())
+    # `Wait-ForUserIfInteractive` should appear in many exit paths;
+    # we only need the count to be > 1 here (the actual number drifts
+    # as new error paths are added).
+    count = s.count("Wait-ForUserIfInteractive")
+    assert count >= 20, (
+        f"expected many Wait-ForUserIfInteractive calls (the rendered installer "
+        f"has dozens of exit paths); got {count}. Did a refactor drop the helper?"
+    )
+
+
+def test_close_this_window_prompt_uses_the_helper():
+    """The final happy-path pause must also go through the helper.
+    Otherwise the post-install file removal block + the wrapper's
+    Start-Process -Wait would block on a real Read-Host."""
+    s = _gen()
+    assert (
+        'Wait-ForUserIfInteractive -Prompt "Press Enter to close this window"'
+    ) in s
+
+
+# ── Phase 2.0 transient cleanup guarantee ────────────────────────────────
+
+
+def test_phase_2_0_transient_cleanup_block_present():
+    """Run T1.03 root cause: the rollback driver only reversed
+    M-markers. When the abort happened before any M was set, the
+    staging+payload\\new transients survived even though
+    SUCCESSFUL_CLEAN_INSTALL_ROLLBACK was written. The Phase 2.0
+    cleanup block fixes this."""
+    s = _gen()
+    assert "Phase 2.0 - pre-M-reverse transient cleanup" in s, (
+        "Phase 2.0 transient cleanup block missing"
+    )
+
+
+def test_phase_2_0_cleans_all_documented_transients():
+    """Architecture plan Section F lists the transients that must
+    be wiped on any rejection. Phase 2.0 must enumerate the same
+    set so a Stage 6B-abort run leaves a clean staging slate."""
+    s = _gen()
+    # Slice to the Phase 2.0 try block so we know we're matching
+    # inside the new block (not in some unrelated location).
+    start = s.index("Phase 2.0 - pre-M-reverse transient cleanup")
+    end = s.index("# ---- Phase 2 - file reverse-rollback", start)
+    block = s[start:end]
+    for var in ("$PayloadNew", "$StagingExtracted", "$StagingRuntimeZip",
+                "$StagingRuntimeManifest", "$StagingConfigNew"):
+        assert var in block, (
+            f"Phase 2.0 cleanup missing {var}; "
+            f"Section F transient list incomplete"
+        )
+    # The cleanup uses Invoke-LogicalDelete (the existing helper) and
+    # is guarded by Test-Path so non-existent paths are no-ops.
+    assert "Invoke-LogicalDelete" in block
+    assert "Test-Path -LiteralPath" in block
+
+
+def test_phase_2_0_failure_writes_rollback_incomplete():
+    """A failure inside Phase 2.0 (e.g. an open file handle that
+    Invoke-LogicalDelete cannot defeat) must degrade the run to
+    ROLLBACK_INCOMPLETE -- never silently fall through to
+    SUCCESSFUL_CLEAN_INSTALL_ROLLBACK."""
+    s = _gen()
+    start = s.index("Phase 2.0 - pre-M-reverse transient cleanup")
+    end = s.index("# ---- Phase 2 - file reverse-rollback", start)
+    block = s[start:end]
+    assert "ROLLBACK_INCOMPLETE" in block
+    assert "MANUAL INTERVENTION REQUIRED" in block
+    assert "PHASE: 2.0 (transient cleanup)" in block
+    assert "exit 2" in block
+
+
+def test_phase_2_0_runs_before_m_reverse_block():
+    """Ordering is load-bearing. If Phase 2 M-reverse runs first
+    and Phase 2.0 second, an exception in M-reverse could short-
+    circuit the transient cleanup. Phase 2.0 must come first."""
+    s = _gen()
+    p20 = s.index("Phase 2.0 - pre-M-reverse transient cleanup")
+    p2  = s.index("# ---- Phase 2 - file reverse-rollback")
+    assert p20 < p2, "Phase 2.0 must precede Phase 2 M-reverse"
+
+
+def test_phase_2_0_runs_before_rollback_result_write():
+    """Defense-in-depth: the ROLLBACK_RESULT line MUST be written
+    AFTER Phase 2.0. Otherwise a clean rollback claim could be made
+    while transients are still on disk."""
+    s = _gen()
+    p20 = s.index("Phase 2.0 - pre-M-reverse transient cleanup")
+    rb_write = s.index('"ROLLBACK_RESULT=$rbMode"')
+    assert p20 < rb_write
+
+
+# ── Section G.7 post-condition gate ──────────────────────────────────────
+
+
+def test_clean_install_rollback_postcondition_gate_present():
+    s = _gen()
+    assert "Section G.7 post-condition verification" in s, (
+        "G.7 post-condition gate missing"
+    )
+
+
+def test_clean_install_rollback_postcondition_enumerates_required_absent_set():
+    """The gate must check every artifact Section G.7 says must
+    be absent. A missing path here would let SUCCESSFUL_CLEAN_INSTALL_ROLLBACK
+    slip through with that artifact still on disk."""
+    s = _gen()
+    start = s.index("Section G.7 post-condition verification")
+    end = s.index('"ROLLBACK_RESULT=$rbMode"', start)
+    gate = s[start:end]
+    for var in ("$PayloadNew", "$StagingExtracted", "$StagingRuntimeZip",
+                "$StagingRuntimeManifest", "$StagingConfigNew",
+                "$StagingRollbackConfig"):
+        assert var in gate, (
+            f"G.7 post-condition gate missing {var}"
+        )
+
+
+def test_clean_install_rollback_postcondition_failure_degrades_to_incomplete():
+    """If the gate finds any artifact still present, the run MUST
+    write ROLLBACK_INCOMPLETE and exit 2, NOT SUCCESSFUL_CLEAN_INSTALL_ROLLBACK."""
+    s = _gen()
+    start = s.index("Section G.7 post-condition verification")
+    end = s.index('"ROLLBACK_RESULT=$rbMode"', start)
+    gate = s[start:end]
+    assert "ROLLBACK_INCOMPLETE" in gate
+    assert "G.7 post-condition verification" in gate
+    assert "exit 2" in gate
+
+
+def test_clean_install_rollback_only_for_clean_install_mode():
+    """The gate is scoped to CLEAN_INSTALL specifically (the only
+    mode Section G.7 says leaves everything absent). UPGRADE_RUNNING
+    and UPGRADE_STOPPED post-conditions are different and are not
+    in scope for this PR."""
+    s = _gen()
+    assert '$rbMode -ceq "SUCCESSFUL_CLEAN_INSTALL_ROLLBACK"' in s
+
+
+# ── Manual-test wrapper sets CHARON_NONINTERACTIVE=1 ─────────────────────
+
+
+def test_manual_test_wrapper_sets_charon_noninteractive():
+    """02-run-installer.ps1 starts the rendered installer via
+    Start-Process -Wait. Without CHARON_NONINTERACTIVE=1 the child's
+    Wait-ForUserIfInteractive would fall back to UserInteractive,
+    which on a foreground console is true -- exactly the Run T1.03
+    hang scenario. The wrapper MUST set the env var so the helper
+    becomes a no-op for the child."""
+    from pathlib import Path
+    repo_root = Path(__file__).resolve().parents[3]
+    wrapper = repo_root / "windows-agent-v2-manual-test" / "02-run-installer.ps1"
+    body = wrapper.read_text(encoding="utf-8")
+    assert '$env:CHARON_NONINTERACTIVE = "1"' in body, (
+        "02-run-installer.ps1 must set CHARON_NONINTERACTIVE=1 before "
+        "Start-Process so the rendered installer's Wait-ForUserIfInteractive "
+        "becomes a no-op (Run T1.03 hang fix)"
+    )
+    # The env var assignment must happen BEFORE the EXECUTABLE Start-Process
+    # call (not just a comment mentioning it). We look at the call that
+    # binds to `$proc` -- that's the one that spawns the rendered installer.
+    env_set_idx = body.index('$env:CHARON_NONINTERACTIVE = "1"')
+    sp_idx = body.index("$proc = Start-Process")
+    assert env_set_idx < sp_idx, (
+        "CHARON_NONINTERACTIVE must be set BEFORE the $proc = Start-Process call"
+    )
+
+
+# ── Cross-cutting invariants (must still hold after the headless fix) ────
+
+
+def test_headless_fix_does_not_regress_agent_key_occurrence_count():
+    """PR #89 invariant: the agent_key value must appear exactly
+    once in the rendered installer (inside the $AgentKey literal).
+    The Read-Host -> Wait-ForUserIfInteractive refactor MUST NOT
+    add any debug echo / log line that re-introduces the key."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, REAL_SHAPE_KEY_FIXTURE, SAMPLE_BACKEND_URL,
+    )
+    assert body.count(REAL_SHAPE_KEY_FIXTURE) == 1
+
+
+def test_headless_fix_does_not_regress_pr89_url_normalization():
+    """PR #89 invariant: the rendered installer's $BackendUrl literal
+    must be the normalized form, never with a trailing slash."""
+    from app.api.v1.endpoints.agents import _windows_installer
+    body = _windows_installer(
+        SAMPLE_AGENT_ID, SAMPLE_AGENT_KEY, "https://staging.example.com/",
+    )
+    safe = _redact(body, SAMPLE_AGENT_KEY)
+    assert "$BackendUrl = 'https://staging.example.com'" in safe
+    assert "$BackendUrl = 'https://staging.example.com/'" not in safe

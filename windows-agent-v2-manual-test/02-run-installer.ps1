@@ -99,6 +99,15 @@ try {
 # to terminate. The installer's outer try/finally removes its own file
 # from PSCommandPath (which embeds the agent key in its header), so this
 # wrapper does NOT have to touch the installer file again.
+#
+# Run T1.03 finding: the installer pauses on every exit path with
+# Read-Host "Press Enter to exit" so a double-click operator can read
+# the outcome. Started via Start-Process with no console, that pause
+# blocks forever -- which is what T1.03 hit. CHARON_NONINTERACTIVE=1
+# tells the rendered installer to skip every Wait-ForUserIfInteractive
+# call. This wrapper sets it only for the child process; the operator's
+# own console is untouched.
+$env:CHARON_NONINTERACTIVE = "1"
 $psExe = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 $proc = Start-Process -FilePath $psExe `
     -ArgumentList @(
