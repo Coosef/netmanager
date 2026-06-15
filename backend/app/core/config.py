@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -86,6 +86,29 @@ class Settings(BaseSettings):
     # Flip to true only after the manual TR Windows VM end-to-end
     # test has passed and production deploy has been authorised.
     WINDOWS_AGENT_V2_ENABLED: bool = False
+
+    # WIN-INTEGRATE — installer rendering external base URL override.
+    #
+    # Run T1.02 BLOCKED-WITH-LEAK postmortem: in a Mac docker-compose
+    # staging stack the backend's self-derived base URL collapses to
+    # "http://localhost", so the rendered installer's $BackendUrl
+    # literal points at the backend container's own loopback, which
+    # is unreachable from the external Windows test machine. The same
+    # collapse can happen on any deploy where the reverse proxy does
+    # not set X-Forwarded-Host.
+    #
+    # When this setting is non-empty AND the requested platform is
+    # Windows, the installer download endpoint overrides the request-
+    # derived base URL with this value. The setting MUST be the
+    # backend's EXTERNALLY reachable origin (scheme + host + optional
+    # port + optional path prefix). Trailing slashes are normalized
+    # away inside the endpoint.
+    #
+    # Defaults to None — when None, the existing per-request base URL
+    # derivation (server_url query / AGENT_WS_URL / X-Forwarded-Host /
+    # request.base_url) runs unchanged. Linux installer rendering is
+    # NOT affected by this setting under any value.
+    WINDOWS_AGENT_V2_EXTERNAL_BASE_URL: Optional[str] = None
 
     @property
     def allowed_origins_list(self) -> List[str]:
