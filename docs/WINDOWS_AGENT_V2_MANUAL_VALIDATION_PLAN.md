@@ -312,6 +312,34 @@ case the existing X-Forwarded-Host / request.base_url derivation runs
 unchanged -- production deploys behind a reverse proxy DO NOT need to
 set it.
 
+#### 5.4.2 Headless execution + rollback cleanup guarantee
+
+Manual validation runs are headless by default -- there is no console
+to press Enter on. The rendered installer detects this via two signals
+and skips every interactive pause:
+
+- `CHARON_NONINTERACTIVE=1` environment variable. The bundled
+  `02-run-installer.ps1` sets this on the child process automatically,
+  so an operator running the wrapper does NOT need to set it manually.
+- `[Environment]::UserInteractive` is false (CI, scheduled task, SSH
+  session without a pty). The installer treats this as non-interactive
+  even when the env var is unset.
+
+When non-interactive, every `Wait-ForUserIfInteractive` call in the
+installer is a no-op; the installer proceeds straight to exit. An
+operator running the rendered installer manually from a double-click
+console window still sees the "Press Enter to exit" pauses.
+
+The rollback driver guarantees the Section G.7
+`SUCCESSFUL_CLEAN_INSTALL_ROLLBACK` post-condition before writing the
+result line: a Phase 2.0 transient-cleanup block wipes `payload\new\`,
+`staging\runtime-new.zip`, `staging\runtime-new.manifest.json`,
+`staging\runtime-new\` and `staging\config.env.new` (any that exist)
+BEFORE the M-marker reverse block, and a post-condition verifier
+re-checks the absent set before committing the result. If any of these
+artifacts is still present at verification time, the run is degraded
+to `ROLLBACK_INCOMPLETE / MANUAL INTERVENTION REQUIRED` and exits 2.
+
 ### 5.5 Run `01-preflight.ps1`
 
 - Operator runs from inside the extracted v4 directory:

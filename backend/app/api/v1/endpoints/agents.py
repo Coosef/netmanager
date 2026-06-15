@@ -2297,6 +2297,36 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
         # ==========================================================
+        # Non-interactive mode (Run T1.03 finding).
+        # ==========================================================
+        # The installer historically pauses on every exit path with
+        # Wait-ForUserIfInteractive so an operator running it
+        # from a double-click console window gets to read the
+        # outcome before the window closes. Headless execution paths
+        # (CI/SSH wrapper/MDM push) have no console attached and
+        # block indefinitely on Read-Host -- Run T1.03 caught this:
+        # the rendered installer's "Press Enter to exit" pause
+        # stalled the wrapper Start-Process -Wait forever and the
+        # rollback Phase 2 filesystem cleanup never ran.
+        #
+        # `$NonInteractive` is true when either:
+        #   - The CHARON_NONINTERACTIVE environment variable is set
+        #     to "1" (manual-test wrapper sets this), OR
+        #   - PowerShell reports no interactive user is attached
+        #     (UserInteractive == false; CI / scheduled task / SSH
+        #     without a console).
+        # When true, `Wait-ForUserIfInteractive` is a no-op; the
+        # installer proceeds to exit immediately.
+        $NonInteractive = ($env:CHARON_NONINTERACTIVE -eq '1') -or -not [Environment]::UserInteractive
+
+        function Wait-ForUserIfInteractive {{
+            param([string]$Prompt = "Press Enter to exit")
+            if (-not $NonInteractive) {{
+                Read-Host $Prompt | Out-Null
+            }}
+        }}
+
+        # ==========================================================
         # [1/11] Admin check (locale-independent) + self-elevation
         # ==========================================================
         # iwr | iex is NOT supported: PSCommandPath would be empty,
@@ -2311,12 +2341,12 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         if (-not $isAdmin) {{
             if ($env:NETMANAGER_INSTALLER_ELEVATED -eq "1") {{
                 Write-Host "[ERROR] Administrative elevation failed." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             if (-not $PSCommandPath) {{
                 Write-Host "[ERROR] Installer must be downloaded as a file, not piped (iwr | iex unsupported)." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             $env:NETMANAGER_INSTALLER_ELEVATED = "1"
@@ -2528,7 +2558,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             }} catch {{}}
             Write-Host "[ERROR] Install directory ACL could not be secured." -ForegroundColor Red
             Write-Host "[ERROR] Installation aborted before any credential was written." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
 
@@ -2557,7 +2587,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 "UNRESOLVED_PREVIOUS_TRANSACTION"
             )
             Write-Host "[BLOCKED] UNRESOLVED_PREVIOUS_TRANSACTION." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 3
         }}
 
@@ -2622,7 +2652,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 "REASON: $probeError"
             )
             Write-Host "[BLOCKED] SERVICE_REGISTRATION_PROBE_INCONSISTENT: $probeError" -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 3
         }}
 
@@ -2652,7 +2682,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                     "REASON: SERVICE_STATE_NOT_STABLE ($P4_ExitCode / $statusStdoutTrim)"
                 )
                 Write-Host "[BLOCKED] SERVICE_STATE_NOT_STABLE." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 3
             }}
             $L1_ServiceExistedInitially = $true
@@ -2664,7 +2694,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 "REASON: probes neither all-absent nor all-present"
             )
             Write-Host "[BLOCKED] SERVICE_REGISTRATION_PROBE_INCONSISTENT (mixed)." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 3
         }}
 
@@ -2696,7 +2726,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                     "INCONSISTENT_LIVE_STATE"
                 )
                 Write-Host "[BLOCKED] REGISTRATION_NOT_CANONICALLY_RESTORABLE." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 3
             }}
         }}
@@ -2720,7 +2750,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 "UNRESOLVED_PREVIOUS_TRANSACTION"
             )
             Write-Host "[BLOCKED] INCONSISTENT_LIVE_STATE." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 3
         }}
 
@@ -2781,7 +2811,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             $manifestCompatRange = $manifestResp.Headers["X-Charon-Compatible-Host-Core-Range"]
         }} catch {{
             Write-Host "[ERROR] Runtime manifest download failed." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         Write-Host "[OK] Runtime manifest received (version=$manifestVersion)." -ForegroundColor Green
@@ -2801,14 +2831,14 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         }} catch {{
             Write-Host "[ERROR] Runtime bundle ZIP download failed." -ForegroundColor Red
             Remove-Item -LiteralPath $StagingRuntimeZip -Force -ErrorAction SilentlyContinue
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         $actualZipSha = (Get-FileHash -LiteralPath $StagingRuntimeZip -Algorithm SHA256).Hash
         if ($actualZipSha -cne $zipShaHeader -or $actualZipSha -cne $manifestZipSha) {{
             Write-Host "[ERROR] Runtime ZIP SHA-256 mismatch." -ForegroundColor Red
             Remove-Item -LiteralPath $StagingRuntimeZip -Force -ErrorAction SilentlyContinue
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         Write-Host "[OK] Runtime ZIP SHA-256 verified." -ForegroundColor Green
@@ -2949,20 +2979,20 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         }} catch {{
             Write-Host "[ERROR] Host binary download failed." -ForegroundColor Red
             Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         if (-not $expectedHostSha) {{
             Write-Host "[ERROR] Server did not return X-Host-SHA256." -ForegroundColor Red
             Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         $actualHostSha = (Get-FileHash -LiteralPath $HostExeNew -Algorithm SHA256).Hash
         if ($actualHostSha -cne $expectedHostSha) {{
             Write-Host "[ERROR] Host binary integrity check failed." -ForegroundColor Red
             Remove-Item -LiteralPath $HostExeNew -Force -ErrorAction SilentlyContinue
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         Write-Host "[OK] Host binary verified (version=$hostVersion)." -ForegroundColor Green
@@ -2988,7 +3018,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 )
             }} catch {{
                 Write-Host "[BLOCKED] Process snapshot unavailable." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 3
             }}
         }}
@@ -3015,21 +3045,21 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         if ($InitialServiceState -ceq "Running") {{
             if ($OldHostProcessSnapshot.Count -gt 1) {{
                 Write-Host "[BLOCKED] multiple OLD host processes detected." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 3
             }}
         }}
         elseif ($InitialServiceState -ceq "Stopped") {{
             if ($OldHostProcessSnapshot.Count -gt 0 -or $OldVerifiedChildPythonProcessSnapshot.Count -gt 0) {{
                 Write-Host "[BLOCKED] SERVICE_STATE_NOT_STABLE (Stopped but processes exist)." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 3
             }}
         }}
         elseif ($InitialServiceState -ceq "Absent") {{
             if ($OldHostProcessSnapshot.Count -gt 0 -or $OldVerifiedChildPythonProcessSnapshot.Count -gt 0) {{
                 Write-Host "[BLOCKED] orphan host/child process with Absent service." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 3
             }}
         }}
@@ -3047,7 +3077,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             }}
             else {{
                 Write-Host "[ERROR] stop exit $($stopResult.ExitCode)." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
 
@@ -3069,7 +3099,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 }}
                 if (-not $L3_OldServiceObservedStopped) {{
                     Write-Host "[ERROR] A1.post poll timed out." -ForegroundColor Red
-                    Read-Host "Press Enter to exit"
+                    Wait-ForUserIfInteractive
                     exit 1
                 }}
             }}
@@ -3095,7 +3125,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             }}
             else {{
                 Write-Host "[ERROR] uninstall exit $($unResult.ExitCode)." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
 
@@ -3111,7 +3141,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 }}
                 if (-not $L5_OldServiceRegistrationGone) {{
                     Write-Host "[ERROR] A2.post poll timed out." -ForegroundColor Red
-                    Read-Host "Press Enter to exit"
+                    Wait-ForUserIfInteractive
                     exit 1
                 }}
             }}
@@ -3134,7 +3164,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         }}
         if (-not $a3Ok) {{
             Write-Host "[ERROR] A3 process closure timeout." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
 
@@ -3199,12 +3229,12 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             $stdoutTrim = $installResult.Stdout.TrimEnd("`r","`n")
             if ($stdoutTrim -cne 'Service "NetManagerAgent" installed.') {{
                 Write-Host "[ERROR] install stdout mismatch." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             if ($installResult.Stderr.Length -gt 0) {{
                 Write-Host "[ERROR] install stderr not empty." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             $L6_NewServiceInstalled = $true
@@ -3214,17 +3244,17 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             $stderrTrim = $installResult.Stderr.TrimEnd("`r","`n")
             if ($stderrTrim -cne "install: service: already exists") {{
                 Write-Host "[ERROR] install exit-17 stderr mismatch." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             $L6P_NewServiceRegistrationPossiblyExists = $true
             Write-Host "[BLOCKED] install exit 17 - entering Phase 1 status-aware teardown." -ForegroundColor Yellow
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         else {{
             Write-Host "[ERROR] install exit $($installResult.ExitCode)." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
 
@@ -3239,19 +3269,19 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             $startStdoutTrim = $startResult.Stdout.TrimEnd("`r","`n")
             if ($startStdoutTrim -cne 'Start signal sent to "NetManagerAgent".') {{
                 Write-Host "[ERROR] start stdout mismatch." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             if ($startResult.Stderr.Length -gt 0) {{
                 Write-Host "[ERROR] start stderr not empty." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 1
             }}
             $L7_NewServiceStartAccepted = $true
         }}
         else {{
             Write-Host "[ERROR] start exit $($startResult.ExitCode)." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
 
@@ -3266,7 +3296,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         $s10Trim = $s10.Stdout.TrimEnd("`r","`n")
         if ($s10.ExitCode -ne 0 -or $s10Trim -cne "Running" -or $s10.Stderr.Length -gt 0) {{
             Write-Host "[ERROR] 10s status check failed." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
 
@@ -3276,7 +3306,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         $s30Trim = $s30.Stdout.TrimEnd("`r","`n")
         if ($s30.ExitCode -ne 0 -or $s30Trim -cne "Running" -or $s30.Stderr.Length -gt 0) {{
             Write-Host "[ERROR] 30s status check failed." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         $L8_NewServiceObservedRunning = $true
@@ -3292,7 +3322,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
         $expectedImagePath = "$HostExeLive run --service-name $ServiceName --display-name `"$DisplayName`" --description `"$ServiceDescription`" --child-exe $PrivatePython --child-arg -E --child-arg -I --child-arg $Entrypoint --work-dir $AppDir --env-file $ConfigEnvLive --log-dir $LogDir --service-account LocalSystem"
         if ("$($postRow.PathName)" -cne $expectedImagePath -or "$($postRow.StartMode)" -cne "Auto" -or "$($postRow.StartName)" -cne "LocalSystem") {{
             Write-Host "[ERROR] Stage 11.C: registration semantic mismatch." -ForegroundColor Red
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
 
@@ -3363,6 +3393,44 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 }} catch {{}}
             }}
 
+            # ---- Phase 2.0 - pre-M-reverse transient cleanup (Run T1.03 finding) ----
+            # Stage 4, 5, 6A, 6B, and 7 each leave transient artifacts
+            # in $StagingDir and $PayloadNew. If the installer aborts
+            # before Stage 9B M-markers are set (Stage 6B sanity-fire
+            # failure was the Run T1.03 trigger), the Phase 2 M-reverse
+            # block below is a no-op and these transients survive --
+            # violating Section G.7 SUCCESSFUL_CLEAN_INSTALL_ROLLBACK
+            # post-condition. Section F already wipes the same paths
+            # on extraction rejection; the rollback driver must do the
+            # same on any pre-M-marker abort.
+            #
+            # This block runs BEFORE the M-reverse block so that
+            # rollback Phase 2 always reaches a clean staging slate
+            # regardless of which stage triggered the abort.
+            try {{
+                foreach ($t in @(
+                    $PayloadNew,
+                    $StagingExtracted,
+                    $StagingRuntimeZip,
+                    $StagingRuntimeManifest,
+                    $StagingConfigNew
+                )) {{
+                    if (Test-Path -LiteralPath $t) {{
+                        Invoke-LogicalDelete -Path $t
+                    }}
+                }}
+            }} catch {{
+                Write-InstallerRunTxt @(
+                    "ROLLBACK_INCOMPLETE",
+                    "MANUAL INTERVENTION REQUIRED",
+                    "PHASE: 2.0 (transient cleanup)",
+                    "REASON: $($_.Exception.Message)"
+                )
+                Write-Host "[ROLLBACK_INCOMPLETE] MANUAL INTERVENTION REQUIRED." -ForegroundColor Red
+                Wait-ForUserIfInteractive
+                exit 2
+            }}
+
             # ---- Phase 2 - file reverse-rollback (correction #41) ----
             # Reverse only set markers, in reverse M6..M1 order.
             try {{
@@ -3406,7 +3474,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                     "REASON: $($_.Exception.Message)"
                 )
                 Write-Host "[ROLLBACK_INCOMPLETE] MANUAL INTERVENTION REQUIRED." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 2
             }}
 
@@ -3474,8 +3542,42 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                     "REASON: $($_.Exception.Message)"
                 )
                 Write-Host "[ROLLBACK_INCOMPLETE] MANUAL INTERVENTION REQUIRED." -ForegroundColor Red
-                Read-Host "Press Enter to exit"
+                Wait-ForUserIfInteractive
                 exit 2
+            }}
+
+            # ---- Section G.7 post-condition verification (Run T1.03 finding) ----
+            # For CLEAN_INSTALL the rollback must leave NO transient
+            # artifact on disk -- the Run T1.03 BLOCKED-WITH-FINDING
+            # report observed payload\new\ + staging\runtime-new.* on
+            # disk even after ROLLBACK_RESULT was written. The Phase
+            # 2.0 cleanup above prevents that, and this gate makes it
+            # auditable: if any forbidden artifact is still present
+            # we degrade the result to ROLLBACK_INCOMPLETE rather
+            # than claiming a clean rollback.
+            if ($rbMode -ceq "SUCCESSFUL_CLEAN_INSTALL_ROLLBACK") {{
+                $stillPresent = @()
+                foreach ($t in @(
+                    $PayloadNew,
+                    $StagingExtracted,
+                    $StagingRuntimeZip,
+                    $StagingRuntimeManifest,
+                    $StagingConfigNew,
+                    $StagingRollbackConfig
+                )) {{
+                    if (Test-Path -LiteralPath $t) {{ $stillPresent += $t }}
+                }}
+                if ($stillPresent.Count -gt 0) {{
+                    Write-InstallerRunTxt @(
+                        "ROLLBACK_INCOMPLETE",
+                        "MANUAL INTERVENTION REQUIRED",
+                        "PHASE: G.7 post-condition verification",
+                        "REASON: artifacts still present: $($stillPresent -join ', ')"
+                    )
+                    Write-Host "[ROLLBACK_INCOMPLETE] MANUAL INTERVENTION REQUIRED." -ForegroundColor Red
+                    Wait-ForUserIfInteractive
+                    exit 2
+                }}
             }}
 
             Write-InstallerRunTxt @(
@@ -3483,7 +3585,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
                 "REASON: $rbReason"
             )
             Write-Host "[ROLLBACK_OK] $rbMode" -ForegroundColor Green
-            Read-Host "Press Enter to exit"
+            Wait-ForUserIfInteractive
             exit 1
         }}
         finally {{
@@ -3503,7 +3605,7 @@ def _windows_installer(agent_id: str, agent_key: str, backend_url: str) -> str:
             }}
         }}
 
-        Read-Host "Press Enter to close this window"
+        Wait-ForUserIfInteractive -Prompt "Press Enter to close this window"
     """)
 
 
