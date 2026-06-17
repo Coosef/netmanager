@@ -198,7 +198,6 @@ func TestParse_NoSecretLoggedOnRejection(t *testing.T) {
 
 // ── PR-B hardening: critical-path / collision at Parse ──────────────────
 
-
 func TestParse_RejectsInstallDirAtDriveRoot(t *testing.T) {
 	var errOut bytes.Buffer
 	_, err := Parse([]string{"--mode=offline", `--install-dir=C:\`}, &errOut)

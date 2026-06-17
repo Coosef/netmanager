@@ -110,7 +110,6 @@ func TestValidateBackendURL_RejectsMissingHost(t *testing.T) {
 
 // ── PR-B hardening: userinfo / fragment / query reject ──────────────────
 
-
 func TestValidateBackendURL_RejectsUsernameOnly(t *testing.T) {
 	got, err := ValidateBackendURL("https://admin@example.test")
 	if err == nil {

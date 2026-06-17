@@ -92,7 +92,6 @@ func TestValidateInstallPath_AcceptsNonASCIISegments(t *testing.T) {
 
 // ── PR-B hardening: critical-path blocklist ─────────────────────────────
 
-
 func TestIsDriveRoot_DetectsAllCasings(t *testing.T) {
 	for _, p := range []string{
 		`C:\`, `c:\`, `D:\`, `z:\`, `C:/`, `c:/`,
@@ -253,7 +252,6 @@ func TestIsCriticalPath_ErrorMessageNoEcho(t *testing.T) {
 }
 
 // ── PR-B hardening: install/data directory relationship ─────────────────
-
 
 func TestIsParentOrEqual_BasicSegmentAware(t *testing.T) {
 	// Equal: parent of itself.
