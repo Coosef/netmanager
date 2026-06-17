@@ -84,12 +84,6 @@ Secrets handling -- pinned by `internal/bootstrapper/options_test.go`:
 - Future PRs will accept the agent key via stdin pipe, a
   permission-locked file, or an enrollment exchange.
 
-URL handling carries the PR #89 normalisation invariants:
-
-- `--backend-url` must use `http` or `https`.
-- Trailing slashes are stripped before storage.
-- Quote / shell-meta / control characters are rejected.
-
 Path handling enforces:
 
 - Absolute Windows paths only (drive letter + ':' + separator).
@@ -98,6 +92,30 @@ Path handling enforces:
 - No device namespace (`\\?\`, `\\.\`).
 - No control characters / NUL.
 - Non-ASCII segments (Turkish, Cyrillic, etc.) are accepted.
+- **Critical-path blocklist** (PR-B hardening):
+  - Drive root (`C:\`, `D:\`, ...).
+  - Windows tree (`C:\Windows`, `C:\Windows\System32`, `C:\Windows\SysWOW64`).
+  - User profile tree (`C:\Users`, `C:\Users\<name>`, `C:\Users\...\AppData\Local\Temp`).
+  - Program Files / Program Files (x86) / ProgramData **bare roots** (subdirectories like `...\Charon Agent` ARE allowed).
+  - Recycle Bin tree (`C:\$Recycle.Bin`).
+- **Install / data directory collision**: install_dir and data_dir
+  must not be equal; neither may be nested inside the other. The
+  check is case-insensitive and path-segment aware so that
+  `C:\Foo` and `C:\Foobar` are NOT treated as parent/child.
+
+URL handling carries the PR #89 normalisation invariants:
+
+- `--backend-url` must use `http` or `https`.
+- Trailing slashes are stripped before storage.
+- Quote / shell-meta / control characters are rejected.
+- **Userinfo rejection** (PR-B hardening): `https://user@host`
+  and `https://user:pass@host` are rejected. Credentials embedded
+  in URLs leak through proxy logs and shell history; the error
+  message NEVER echoes the username / password back.
+- **Fragment rejection** (PR-B hardening): `https://host#frag` is
+  rejected. The error message does not echo the fragment.
+- **Query string rejection** (PR-B hardening): `https://host?q=1`
+  is rejected. The error message does not echo the query.
 
 ## 5. Architecture detection
 

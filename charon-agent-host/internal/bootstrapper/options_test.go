@@ -195,3 +195,57 @@ func TestParse_NoSecretLoggedOnRejection(t *testing.T) {
 		t.Errorf("errOut leaked secret value: %q", errOut.String())
 	}
 }
+
+// ── PR-B hardening: critical-path / collision at Parse ──────────────────
+
+
+func TestParse_RejectsInstallDirAtDriveRoot(t *testing.T) {
+	var errOut bytes.Buffer
+	_, err := Parse([]string{"--mode=offline", `--install-dir=C:\`}, &errOut)
+	if err == nil {
+		t.Error("install dir at C:\\ must be rejected")
+	}
+}
+
+func TestParse_RejectsInstallDirAtProgramFilesRoot(t *testing.T) {
+	var errOut bytes.Buffer
+	_, err := Parse([]string{"--mode=offline", `--install-dir=C:\Program Files`}, &errOut)
+	if err == nil {
+		t.Error("install dir at C:\\Program Files must be rejected")
+	}
+}
+
+func TestParse_RejectsDataDirInWindowsTree(t *testing.T) {
+	var errOut bytes.Buffer
+	_, err := Parse([]string{"--mode=offline", `--data-dir=C:\Windows\System32`}, &errOut)
+	if err == nil {
+		t.Error("data dir under C:\\Windows must be rejected")
+	}
+}
+
+func TestParse_RejectsCollidingInstallAndData(t *testing.T) {
+	var errOut bytes.Buffer
+	_, err := Parse([]string{
+		"--mode=offline",
+		`--install-dir=C:\Program Files\Charon Agent`,
+		`--data-dir=C:\Program Files\Charon Agent\data`,
+	}, &errOut)
+	if err == nil {
+		t.Error("data nested under install must be rejected at Parse")
+	}
+}
+
+func TestParse_AcceptsValidCharonDirs(t *testing.T) {
+	var errOut bytes.Buffer
+	opts, err := Parse([]string{
+		"--mode=offline",
+		`--install-dir=C:\Program Files\Charon Agent`,
+		`--data-dir=C:\ProgramData\CharonAgent`,
+	}, &errOut)
+	if err != nil {
+		t.Fatalf("documented defaults must pass: %v", err)
+	}
+	if opts.InstallDir == "" || opts.DataDir == "" {
+		t.Error("Parse must propagate install + data dirs")
+	}
+}

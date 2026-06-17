@@ -8,6 +8,7 @@ import (
 	"github.com/Coosef/netmanager/charon-agent-host/internal/bootstrapper/install"
 	"github.com/Coosef/netmanager/charon-agent-host/internal/bootstrapper/platform"
 	"github.com/Coosef/netmanager/charon-agent-host/internal/bootstrapper/runtime"
+	"github.com/Coosef/netmanager/charon-agent-host/internal/bootstrapper/security"
 )
 
 // Probes is the dependency-injection seam between the bootstrapper
@@ -123,6 +124,25 @@ func BuildPlan(opts *Options, p Probes) (install.InstallationPlan, int) {
 	plan.DataDir = defaults.DataDir
 	if opts.DataDir != "" {
 		plan.DataDir = opts.DataDir
+	}
+	// Defence-in-depth: re-run the critical-path + collision checks
+	// on the FINAL (defaults-merged-with-overrides) pair. The CLI
+	// parser catches an explicit user override that is critical or
+	// in collision with the other override; this catches the rare
+	// case where the user overrides one side and the default for
+	// the other side happens to collide (impossible in PR-B but
+	// the contract stays stable across future PRs).
+	if reason := security.IsCriticalPath(plan.InstallDir); reason != "" {
+		plan.Blockers = append(plan.Blockers, "install directory rejected: "+reason)
+		return plan, ExitInvalidInstallPath
+	}
+	if reason := security.IsCriticalPath(plan.DataDir); reason != "" {
+		plan.Blockers = append(plan.Blockers, "data directory rejected: "+reason)
+		return plan, ExitInvalidInstallPath
+	}
+	if reason := security.ValidateDirectoryPair(plan.InstallDir, plan.DataDir); reason != "" {
+		plan.Blockers = append(plan.Blockers, reason)
+		return plan, ExitInvalidInstallPath
 	}
 
 	// Disk probes -- run after the directory pair is selected so we

@@ -98,3 +98,145 @@ func hasControlChar(s string) bool {
 	}
 	return false
 }
+
+// ────────────────────────────────────────────────────────────────────────
+// PR-B security hardening: critical-path blocklist + install/data
+// directory relationship checks.
+//
+// The bootstrapper REFUSES to use any drive root, the Windows system
+// tree, or the bare roots of Program Files / ProgramData / user
+// profile as install or data directories. The list is enumerative
+// rather than heuristic so that "is this path safe?" has a
+// mechanical answer. Subdirectories of Program Files / ProgramData
+// (e.g. "C:\\Program Files\\Charon Agent") remain legal -- those
+// are exactly where the bootstrapper expects to install.
+//
+// Comparison is case-insensitive, trailing-separator-normalised, and
+// path-segment aware so that "C:\\Foo" is NOT mistaken for a parent
+// of "C:\\Foobar".
+//
+// Environment expansion (e.g. %WINDIR%) is NOT applied here. The
+// CLI parser rejects "%" as a forbidden character because absolute
+// Windows paths never legitimately contain it; the caller is
+// expected to pass an expanded path.
+// ────────────────────────────────────────────────────────────────────────
+
+// forbiddenExact is the set of paths that must be REJECTED as install
+// or data directories when matched exactly. Subdirectories of these
+// roots are legal (this is how Program Files / ProgramData carry
+// the application install).
+var forbiddenExact = []string{
+	`c:\program files`,
+	`c:\program files (x86)`,
+	`c:\programdata`,
+}
+
+// forbiddenSubtrees is the set of root paths whose entire tree is
+// off-limits. Includes the Windows system tree (System32 / SysWOW64
+// fall under this), the user profile tree (covers temp + AppData),
+// and the Recycle Bin tree.
+var forbiddenSubtrees = []string{
+	`c:\windows`,
+	`c:\users`,
+	`c:\$recycle.bin`,
+}
+
+// NormalizePathForCompare lowercases the path, replaces forward
+// slashes with backslashes, and strips a trailing separator (unless
+// the path IS a drive root, e.g. "c:\\"). The result is suitable
+// for case-insensitive equality and path-prefix comparison.
+//
+// This is deliberately NOT filepath.Clean: filepath.Clean uses
+// Unix semantics on Linux test runners (treating `\` as a regular
+// character), which would silently produce wrong results. Our hand-
+// rolled normaliser matches Windows semantics on every host.
+func NormalizePathForCompare(p string) string {
+	s := strings.ToLower(strings.TrimSpace(p))
+	s = strings.ReplaceAll(s, "/", `\`)
+	// Strip trailing separator unless the path is exactly a drive
+	// root like "c:\\".
+	if len(s) > 3 && (strings.HasSuffix(s, `\`) || strings.HasSuffix(s, "/")) {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
+// IsDriveRoot returns true for paths that are exactly a drive
+// letter + colon + separator (e.g. "C:\\", "d:\\", "Z:/"). The
+// bootstrapper refuses to use a drive root as install or data
+// directory.
+func IsDriveRoot(p string) bool {
+	s := NormalizePathForCompare(p)
+	if len(s) != 3 {
+		return false
+	}
+	c := s[0]
+	if c < 'a' || c > 'z' {
+		return false
+	}
+	return s[1] == ':' && s[2] == '\\'
+}
+
+// IsCriticalPath returns a non-empty reason string when the path is
+// in the forbidden set; returns the empty string when the path is
+// acceptable. The reason text does NOT include the input path so it
+// is safe to surface in logs/error output without leaking operator-
+// provided data.
+func IsCriticalPath(p string) string {
+	s := NormalizePathForCompare(p)
+	if IsDriveRoot(p) {
+		return "drive root is not allowed as install or data directory"
+	}
+	for _, forbidden := range forbiddenExact {
+		if s == forbidden {
+			return "Program Files / Program Files (x86) / ProgramData root is not allowed; use a subdirectory"
+		}
+	}
+	for _, sub := range forbiddenSubtrees {
+		if s == sub || strings.HasPrefix(s, sub+`\`) {
+			return "Windows system / user profile / Recycle Bin tree is not allowed"
+		}
+	}
+	return ""
+}
+
+// IsParentOrEqual reports whether `parent` equals `child`, OR
+// `parent` is a strict ancestor directory of `child`, using path-
+// segment aware comparison. "C:\\Foo" is NOT considered the parent
+// of "C:\\Foobar" -- the comparison appends a separator before the
+// prefix check so the boundary is segment-aligned.
+func IsParentOrEqual(parent, child string) bool {
+	p := NormalizePathForCompare(parent)
+	c := NormalizePathForCompare(child)
+	if p == "" || c == "" {
+		return false
+	}
+	if p == c {
+		return true
+	}
+	// Append separator if parent is not already a drive root to
+	// force segment-aligned comparison. Drive roots already end in
+	// `\` after normalisation.
+	if !strings.HasSuffix(p, `\`) {
+		p += `\`
+	}
+	return strings.HasPrefix(c, p)
+}
+
+// ValidateDirectoryPair returns a non-empty reason when install_dir
+// and data_dir collide. Collision means: they are equal, OR one is
+// an ancestor of the other (path-segment aware). The function does
+// not echo the input paths in the error text so collision diagnostics
+// stay safe to log.
+func ValidateDirectoryPair(installDir, dataDir string) string {
+	switch {
+	case NormalizePathForCompare(installDir) == NormalizePathForCompare(dataDir):
+		return "install directory and data directory must not be the same path"
+	case IsParentOrEqual(installDir, dataDir):
+		return "data directory must not be nested inside install directory"
+	case IsParentOrEqual(dataDir, installDir):
+		return "install directory must not be nested inside data directory"
+	default:
+		return ""
+	}
+}

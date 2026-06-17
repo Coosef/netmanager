@@ -17,6 +17,12 @@ on:
       - 'charon-agent-host/go.sum'
       - '.github/workflows/charon-agent-bootstrapper.yml'
 
+# Workflow-wide permission hardening. Every job in this workflow
+# only needs to read the repo; cross-compile + artifact upload do
+# not require any write permission on contents / packages / pages.
+permissions:
+  contents: read
+
 defaults:
   run:
     working-directory: charon-agent-host
@@ -116,7 +122,7 @@ jobs:
             exit 1
           fi
 
-      - name: Secret-handling structural guarantees (defence-in-depth)
+      - name: Structural CLI-guard literal verification (NOT a binary secret scan)
         run: |
           # The bootstrapper does not handle agent_key / password /
           # token / JWT in PR-B -- the CLI parser REJECTS them on
@@ -217,7 +223,7 @@ jobs:
             exit 1
           fi
 
-      - name: Secret-handling structural guarantees (defence-in-depth)
+      - name: Structural CLI-guard literal verification (NOT a binary secret scan)
         run: |
           # See the amd64 step comment for the rationale; the same
           # discipline applies to the 386 binary. The single

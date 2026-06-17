@@ -133,13 +133,27 @@ func Parse(args []string, errOut io.Writer) (*Options, error) {
 		if err := security.ValidateInstallPath(*installDir); err != nil {
 			return nil, err
 		}
+		if reason := security.IsCriticalPath(*installDir); reason != "" {
+			return nil, errors.New("install directory rejected: " + reason)
+		}
 		opts.InstallDir = *installDir
 	}
 	if *dataDir != "" {
 		if err := security.ValidateInstallPath(*dataDir); err != nil {
 			return nil, err
 		}
+		if reason := security.IsCriticalPath(*dataDir); reason != "" {
+			return nil, errors.New("data directory rejected: " + reason)
+		}
 		opts.DataDir = *dataDir
+	}
+	// Collision check runs when BOTH overrides are explicit. When
+	// either side falls back to its default, BuildPlan re-runs the
+	// check on the resolved final pair (defence in depth).
+	if opts.InstallDir != "" && opts.DataDir != "" {
+		if reason := security.ValidateDirectoryPair(opts.InstallDir, opts.DataDir); reason != "" {
+			return nil, errors.New(reason)
+		}
 	}
 
 	if *forceArch != "" {
