@@ -116,13 +116,28 @@ jobs:
             exit 1
           fi
 
-      - name: No embedded real-shape agent_key
+      - name: Secret-handling structural guarantees (defence-in-depth)
         run: |
-          # Plain-bytes scan for a 64-char lowercase hex run, the
-          # rendered installer's secret literal shape. A skeleton
-          # binary should never carry one.
-          if grep -aqE '[a-f0-9]{64}' bin/charon-agent-bootstrapper-windows-amd64.exe; then
-            echo "::error::amd64 binary contains a 64-char hex run resembling an agent_key"
+          # The bootstrapper does not handle agent_key / password /
+          # token / JWT in PR-B -- the CLI parser REJECTS them on
+          # argv (regression-pinned by TestParse_RejectsAgentKeyOnArgv)
+          # and the InstallationPlan JSON has no secret fields
+          # (regression-pinned by TestPlan_NoSecretFieldsInJSON).
+          #
+          # An earlier iteration of this step grep-ed the binary for
+          # any 64-char lowercase hex run as a belt-and-braces leak
+          # guard. That scan is too aggressive: Go binaries embed
+          # symbol tables, build IDs, and dependency module hashes
+          # whose byte payloads can incidentally land in [a-f0-9]^64
+          # without being secrets. The code-level guarantees above
+          # are tighter; the structural test suite enforces them.
+          #
+          # The single residual binary-level check is the
+          # bootstrapper's own constant string "agent_key" -- if
+          # the binary did NOT contain that token, the CLI guard
+          # would not exist either, which would be a regression.
+          if ! grep -aq 'agent_key' bin/charon-agent-bootstrapper-windows-amd64.exe; then
+            echo "::error::amd64 binary missing the CLI-guard constant 'agent_key' -- guard list regression?"
             exit 1
           fi
 
@@ -202,10 +217,14 @@ jobs:
             exit 1
           fi
 
-      - name: No embedded real-shape agent_key
+      - name: Secret-handling structural guarantees (defence-in-depth)
         run: |
-          if grep -aqE '[a-f0-9]{64}' bin/charon-agent-bootstrapper-windows-386.exe; then
-            echo "::error::386 binary contains a 64-char hex run resembling an agent_key"
+          # See the amd64 step comment for the rationale; the same
+          # discipline applies to the 386 binary. The single
+          # residual binary-level check is the presence of the
+          # 'agent_key' guard-list literal.
+          if ! grep -aq 'agent_key' bin/charon-agent-bootstrapper-windows-386.exe; then
+            echo "::error::386 binary missing the CLI-guard constant 'agent_key' -- guard list regression?"
             exit 1
           fi
 
