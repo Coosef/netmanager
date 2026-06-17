@@ -9,11 +9,11 @@ package service
 // PRs so that operator-facing tooling can reference them via the
 // Go module.
 const (
-	ServiceName  = "CharonAgent"
-	DisplayName  = "Charon NetManager Agent"
-	Description  = "Self-contained NetManager Charon agent host"
-	StartType    = "automatic-delayed"
-	ServiceUser  = "LocalSystem"
+	ServiceName = "CharonAgent"
+	DisplayName = "Charon NetManager Agent"
+	Description = "Self-contained NetManager Charon agent host"
+	StartType   = "automatic-delayed"
+	ServiceUser = "LocalSystem"
 )
 
 // Plan is the planned-but-not-applied service registration the

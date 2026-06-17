@@ -49,30 +49,30 @@ type ArtifactRequirement struct {
 // Secret values (agent_key, JWT, password, token) MUST NEVER appear
 // in this struct. The CLI gate enforces that policy too.
 type InstallationPlan struct {
-	BackendURL               string                  `json:"backend_url,omitempty"`
-	Blockers                 []string                `json:"blockers"`
-	BootstrapperVersion      string                  `json:"bootstrapper_version"`
-	DataDir                  string                  `json:"data_dir"`
-	Disk                     []platform.DiskInfo     `json:"disk,omitempty"`
-	DryRun                   bool                    `json:"dry_run"`
-	InstallDir               string                  `json:"install_dir"`
-	IsAdmin                  bool                    `json:"is_admin"`
-	IsLocalSystem            bool                    `json:"is_local_system"`
-	NativeArchitecture       platform.Architecture   `json:"native_architecture"`
-	NonInteractive           bool                    `json:"non_interactive"`
-	OSBuild                  uint32                  `json:"os_build"`
-	OSName                   string                  `json:"os_name"`
-	OSVersion                string                  `json:"os_version"`
-	PendingReboot            platform.RebootStatus   `json:"pending_reboot"`
-	Platform                 string                  `json:"platform"`
-	ProcessArchitecture      platform.Architecture   `json:"process_architecture"`
-	RequestedMode            Mode                    `json:"requested_mode"`
-	RequiredArtifacts        []ArtifactRequirement   `json:"required_artifacts"`
-	SchemaVersion            int                     `json:"schema_version"`
+	BackendURL                string                 `json:"backend_url,omitempty"`
+	Blockers                  []string               `json:"blockers"`
+	BootstrapperVersion       string                 `json:"bootstrapper_version"`
+	DataDir                   string                 `json:"data_dir"`
+	Disk                      []platform.DiskInfo    `json:"disk,omitempty"`
+	DryRun                    bool                   `json:"dry_run"`
+	InstallDir                string                 `json:"install_dir"`
+	IsAdmin                   bool                   `json:"is_admin"`
+	IsLocalSystem             bool                   `json:"is_local_system"`
+	NativeArchitecture        platform.Architecture  `json:"native_architecture"`
+	NonInteractive            bool                   `json:"non_interactive"`
+	OSBuild                   uint32                 `json:"os_build"`
+	OSName                    string                 `json:"os_name"`
+	OSVersion                 string                 `json:"os_version"`
+	PendingReboot             platform.RebootStatus  `json:"pending_reboot"`
+	Platform                  string                 `json:"platform"`
+	ProcessArchitecture       platform.Architecture  `json:"process_architecture"`
+	RequestedMode             Mode                   `json:"requested_mode"`
+	RequiredArtifacts         []ArtifactRequirement  `json:"required_artifacts"`
+	SchemaVersion             int                    `json:"schema_version"`
 	SelectedAgentArchitecture platform.Architecture  `json:"selected_agent_architecture"`
-	SupportStatus            platform.SupportStatus  `json:"support_status"`
-	Warnings                 []string                `json:"warnings"`
-	WOW64                    bool                    `json:"wow64"`
+	SupportStatus             platform.SupportStatus `json:"support_status"`
+	Warnings                  []string               `json:"warnings"`
+	WOW64                     bool                   `json:"wow64"`
 }
 
 // Marshal returns the canonical JSON encoding of the plan with 2-
