@@ -307,7 +307,10 @@ PR-A is a pure-additive PR:
 ## References
 
 - [`AGENT_PLATFORM_SUPPORT_MATRIX.md`](AGENT_PLATFORM_SUPPORT_MATRIX.md) — single source of truth for supported OS releases.
+- [`WINDOWS_AGENT_BOOTSTRAPPER.md`](WINDOWS_AGENT_BOOTSTRAPPER.md) — PR-B skeleton bootstrapper (Go, amd64 + 386).
+- [`WINDOWS_AGENT_BOOTSTRAPPER_EXIT_CODES.md`](WINDOWS_AGENT_BOOTSTRAPPER_EXIT_CODES.md) — bootstrapper exit-code contract.
 - [`adr/ADR-001-SELF-CONTAINED-AGENT-RUNTIME.md`](adr/ADR-001-SELF-CONTAINED-AGENT-RUNTIME.md) — decision record for the private-runtime principle.
 - [`backend/app/services/agent_installer/architecture.py`](../backend/app/services/agent_installer/architecture.py) — `OSFamily` / `Architecture` / `Platform` model.
 - [`backend/app/services/agent_installer/support_matrix.py`](../backend/app/services/agent_installer/support_matrix.py) — formal support matrix.
 - [`backend/app/services/windows_runtime/manifest.py`](../backend/app/services/windows_runtime/manifest.py) — detached manifest Pydantic model.
+- [`charon-agent-host/internal/bootstrapper/`](../charon-agent-host/internal/bootstrapper/) — bootstrapper Go packages (platform, install, security, runtime, service).
