@@ -19,7 +19,7 @@ Validators enforce, in addition to the field types:
 from __future__ import annotations
 
 import re
-from typing import Annotated
+from typing import Annotated, Optional
 
 from pydantic import (
     BaseModel,
@@ -87,6 +87,22 @@ class Manifest(BaseModel):
     compatible_host_core_range: str
     entrypoint: str
     files: list[ManifestFileEntry]
+
+    # ── Optional cross-platform fields (PR-A foundation) ──────────────
+    # Added for the multi-PR cross-platform installer refactor. All
+    # default to None so existing Windows amd64 manifests produced by
+    # ops/windows-runtime-bundle/build.py validate UNCHANGED. Future
+    # PRs (PR-C / PR-D) populate these for new architectures + Linux.
+    #
+    # When present, the values are normalised via
+    # `backend/app/services/agent_installer/architecture.py` so the
+    # canonical-string form ("windows-amd64", "linux-386") is the
+    # single source of truth.
+    architecture: Optional[str] = None
+    os_family: Optional[str] = None
+    minimum_os_version: Optional[str] = None
+    minimum_kernel: Optional[str] = None
+    minimum_glibc: Optional[str] = None
 
     # The metadata entry MUST exist (correction #34 — the deployed
     # runtime reads its smoke list from this path).
