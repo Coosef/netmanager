@@ -13,25 +13,30 @@ import "golang.org/x/sys/windows"
 // documented as legacy and may be removed in future Windows
 // releases; the BUILTIN\Administrators well-known SID approach is
 // the stable equivalent.
+//
+// Token sourcing: GetCurrentProcessToken returns a pseudo-handle
+// for the calling process's primary token; no kernel call.
+// IsMember walks the token's group SIDs and reports membership.
 func DetectPrivilege() (Privilege, error) {
 	p := Privilege{}
-	var sid *windows.SID
+	token := windows.GetCurrentProcessToken()
+
 	// S-1-5-32-544 is BUILTIN\Administrators.
+	var adminsSID *windows.SID
 	err := windows.AllocateAndInitializeSid(
 		&windows.SECURITY_NT_AUTHORITY,
 		2,
 		windows.SECURITY_BUILTIN_DOMAIN_RID,
 		windows.DOMAIN_ALIAS_RID_ADMINS,
 		0, 0, 0, 0, 0, 0,
-		&sid,
+		&adminsSID,
 	)
 	if err != nil {
 		return p, err
 	}
-	defer func() { _ = windows.FreeSid(sid) }()
+	defer func() { _ = windows.FreeSid(adminsSID) }()
 
-	token := windows.Token(0) // current process token
-	member, err := token.IsMember(sid)
+	member, err := token.IsMember(adminsSID)
 	if err != nil {
 		return p, err
 	}
