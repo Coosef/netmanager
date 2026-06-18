@@ -1652,6 +1652,11 @@
   transition: opacity .12s;
 }
 .nm-table tbody tr:hover .nm-rowact { opacity: 1; }
+/* PR #98 post-deploy fix — card grids (Locations / Users / Permissions)
+   don't have a `tbody tr:hover` to flip the opacity, so the action
+   icons (delete / edit) stayed invisible after the PR #93+#94+#95+#96
+   rollout. Make `.nm-rowact` always visible inside `.nm-card`. */
+.nm-card .nm-rowact { opacity: 1; }
 .nm-rowact button {
   appearance: none;
   width: 26px; height: 26px;

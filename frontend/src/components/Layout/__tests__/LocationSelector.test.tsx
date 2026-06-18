@@ -120,8 +120,23 @@ describe('LocationSelector — seven states', () => {
     expect(screen.getByText('location_selector.no_access_tag')).toBeTruthy()
   })
 
-  it('(5) tenant set but locations empty → no-assigned tag', () => {
+  it('(5a) super_admin + tenant set + locations empty → neutral "All locations" (NOT no-assigned)', () => {
+    // Post-deploy hotfix — super_admin must never see the alarming
+    // "No assigned location" warning, since their reach is the
+    // platform, not a `user_locations` row. The neutral
+    // `all_locations` tag is the correct surface here.
     siteState.isSuperAdmin = true
+    siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
+    siteState.locations = []
+    render(<LocationSelector />)
+    expect(screen.getByTestId('location-selector-super-admin-empty')).toBeTruthy()
+    expect(screen.getByText('location_selector.all_locations')).toBeTruthy()
+    // The alarming no-assigned tag MUST NOT render for a super-admin.
+    expect(screen.queryByTestId('location-selector-no-assigned')).toBeNull()
+  })
+
+  it('(5b) NON super_admin + tenant set + locations empty → no-assigned tag', () => {
+    siteState.isSuperAdmin = false
     siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
     siteState.locations = []
     render(<LocationSelector />)
