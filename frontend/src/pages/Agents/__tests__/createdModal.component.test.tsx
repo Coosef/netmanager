@@ -176,35 +176,94 @@ describe('CreatedModal — opens', () => {
     expect(screen.getByText('agents.linux_label')).toBeTruthy()
     expect(screen.getByText('agents.windows_label')).toBeTruthy()
   })
+
+  it('Windows tile carries the Yakında / Coming soon badge', () => {
+    // WINDOWS_AGENT_DEVELOPMENT_PAUSED: the Windows tile stays
+    // visible so the user knows Windows support is planned, but
+    // it carries a visual "coming soon" badge. Linux carries no
+    // such badge.
+    renderModal()
+    expect(
+      screen.getByTestId('platform-card-windows-coming-soon-badge'),
+    ).toBeTruthy()
+    expect(
+      screen.queryByTestId('platform-card-linux-coming-soon-badge'),
+    ).toBeNull()
+  })
+
+  it('Windows tile is data-marked coming-soon, Linux is not', () => {
+    // Source-level mark that lets a future "WINDOWS AGENT RESUME GO"
+    // flip the flag in one place. Tests cling to data-coming-soon
+    // rather than the visual styling.
+    renderModal()
+    expect(
+      screen.getByTestId('platform-card-windows').getAttribute('data-coming-soon'),
+    ).toBe('true')
+    expect(
+      screen.getByTestId('platform-card-linux').getAttribute('data-coming-soon'),
+    ).toBe('false')
+  })
 })
 
 
-describe('CreatedModal — Windows path', () => {
-  it('shows ONLY the download button, no copy command block', async () => {
+// ────────────────────────────────────────────────────────────────
+// Windows path -- WINDOWS_AGENT_DEVELOPMENT_PAUSED
+// The installer is under validation; the UI keeps Windows visible
+// but the download button is hard-disabled and no Windows endpoint
+// is contacted under any interaction model.
+// ────────────────────────────────────────────────────────────────
+
+
+describe('CreatedModal — Windows path (coming-soon, NO download)', () => {
+  it('Windows tile selectable; coming-soon Alert shown (NOT the old windows_hint)', async () => {
     renderModal()
     fireEvent.click(screen.getByText('agents.windows_label'))
+    // The Alert message swaps to the explanatory "coming soon"
+    // copy, NOT the old "download and run" hint.
+    expect(
+      await screen.findByText('agents.windows_coming_soon_message'),
+    ).toBeTruthy()
+    expect(screen.queryByText('agents.windows_hint')).toBeNull()
+    expect(
+      screen.queryByText('agents.windows_download_primary_hint'),
+    ).toBeNull()
+  })
 
-    // Download button visible
+  it('Windows download button is rendered, disabled, aria-disabled, with Coming-soon label', async () => {
+    renderModal()
+    fireEvent.click(screen.getByText('agents.windows_label'))
     const btn = await screen.findByTestId('installer-download-button')
+    // The button stays in the DOM (operator can see what would be
+    // available) but is disabled at the DOM + ARIA + AntD layers.
     expect(btn).toBeTruthy()
     expect(btn.textContent).toContain('agents.download_windows')
+    expect((btn as HTMLButtonElement).disabled).toBe(true)
+    expect(btn.getAttribute('aria-disabled')).toBe('true')
+    // Mark for downstream guards that source-grep the DOM.
+    expect(btn.getAttribute('data-platform')).toBe('windows')
+    expect(btn.getAttribute('data-coming-soon')).toBe('true')
+  })
 
-    // No copy block, no copy button, no command code
+  it('Windows: no oneliner copy block, no PowerShell snippet, no command preview', async () => {
+    // Operator spec: "Installer script render etmemeli" — no
+    // installer body of any kind on the Windows path.
+    renderModal()
+    fireEvent.click(screen.getByText('agents.windows_label'))
+    expect(await screen.findByTestId('platform-hint-alert')).toBeTruthy()
     expect(screen.queryByTestId('linux-oneliner-block')).toBeNull()
     expect(screen.queryByText('agents.copy')).toBeNull()
     expect(screen.queryByText('agents.oneliner_label')).toBeNull()
+    // No PowerShell or installer fragment leaks into the DOM.
+    const html = document.body.innerHTML
+    expect(html).not.toMatch(/Invoke-WebRequest/i)
+    expect(html).not.toMatch(/iex\b/i)
+    expect(html).not.toMatch(/charon-runtime-windows-amd64/i)
   })
 
-  it('shows a single authoritative Windows hint (Alert) and no secondary copy', async () => {
-    renderModal()
-    fireEvent.click(screen.getByText('agents.windows_label'))
-    // The Alert with `agents.windows_hint` is the only Windows hint.
-    expect(await screen.findByText('agents.windows_hint')).toBeTruthy()
-    // The previously duplicated button-bottom hint key is gone.
-    expect(screen.queryByText('agents.windows_download_primary_hint')).toBeNull()
-  })
-
-  it('clicking download issues exactly one fetch with the X-Agent-Key header', async () => {
+  it('Windows: clicking the disabled button does NOT call fetch / endpoint', async () => {
+    // Two gates layered: AntD/HTML disabled (browser-level) +
+    // handleDownload early-return (programmatic-click defence).
+    // We assert the combined behaviour: no fetch under any model.
     const { calls, mock } = installFetchMock()
     installURLMock()
     renderModal()
@@ -215,17 +274,33 @@ describe('CreatedModal — Windows path', () => {
       fireEvent.click(btn)
     })
 
-    expect(mock).toHaveBeenCalledTimes(1)
-    expect(calls).toHaveLength(1)
-    expect(calls[0].url).toContain('/api/v1/agents/agent-abc-123/download/windows')
-    // Agent key NEVER in the URL
-    expect(calls[0].url).not.toContain(FAKE_AGENT.agent_key)
-    // Header present
-    const headers = (calls[0].init as any)?.headers
-    expect(headers['X-Agent-Key']).toBe(FAKE_AGENT.agent_key)
+    expect(mock).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
   })
 
-  it('rapid double-click produces exactly one request (concurrent guard)', async () => {
+  it('Windows: programmatic .click() bypassing disabled still does NOT trigger fetch (handleDownload gate)', async () => {
+    // Belt-and-braces: even if a future regression removes the
+    // `disabled` attribute, handleDownload's `if (platform ===
+    // "windows") return` must catch the synthetic click. We force
+    // the click through `el.dispatchEvent(new MouseEvent('click'))`
+    // which fires regardless of the disabled flag in jsdom.
+    const { calls, mock } = installFetchMock()
+    installURLMock()
+    renderModal()
+    fireEvent.click(screen.getByText('agents.windows_label'))
+    const btn = await screen.findByTestId('installer-download-button')
+
+    await act(async () => {
+      btn.dispatchEvent(
+        new MouseEvent('click', { bubbles: true, cancelable: true }),
+      )
+    })
+
+    expect(mock).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
+  })
+
+  it('Windows: rapid double-click produces zero requests (still disabled)', async () => {
     const { mock } = installFetchMock()
     installURLMock()
     renderModal()
@@ -233,26 +308,24 @@ describe('CreatedModal — Windows path', () => {
     const btn = await screen.findByTestId('installer-download-button')
 
     await act(async () => {
-      // fire two clicks back to back without awaiting individually
       const a = Promise.resolve(fireEvent.click(btn))
       const b = Promise.resolve(fireEvent.click(btn))
       await Promise.all([a, b])
     })
 
-    expect(mock.mock.calls.length).toBe(1)
+    expect(mock.mock.calls.length).toBe(0)
   })
 
-  it('byte-for-byte: Blob built from original ArrayBuffer + anchor click occurs', async () => {
+  it('Windows: no Object URL created, no anchor click, no Blob (the helper never runs)', async () => {
     installFetchMock()
     const url = installURLMock()
-    // Spy on anchor click via createElement
     const realCreate = document.createElement.bind(document)
-    const clicks: any[] = []
+    const anchorClicks: any[] = []
     vi.spyOn(document, 'createElement').mockImplementation((tag: any) => {
       const el = realCreate(tag)
       if (tag === 'a') {
         Object.defineProperty(el, 'click', {
-          value: vi.fn(() => clicks.push(el)),
+          value: vi.fn(() => anchorClicks.push(el)),
           writable: true,
           configurable: true,
         })
@@ -263,26 +336,20 @@ describe('CreatedModal — Windows path', () => {
     renderModal()
     fireEvent.click(screen.getByText('agents.windows_label'))
     const btn = await screen.findByTestId('installer-download-button')
+
     await act(async () => {
       fireEvent.click(btn)
     })
 
-    expect(url.created.length).toBe(1)
-    expect(url.revoked.length).toBe(1)
-    expect(clicks.length).toBe(1)
-    const anchor = clicks[0]
-    expect(anchor.download).toBe(
-      'netmanager-agent-agent-abc-123-installer.ps1',
-    )
-    expect(anchor.download).not.toContain(FAKE_AGENT.agent_key)
+    expect(url.created.length).toBe(0)
+    expect(url.revoked.length).toBe(0)
+    expect(anchorClicks.length).toBe(0)
   })
 
-  it('HTTP failure: no Object URL, response body NOT read, generic alert', async () => {
-    const { mock, text } = installFailingFetch()
-    const url = installURLMock()
-    const alertSpy = vi
-      .spyOn(window, 'alert')
-      .mockImplementation(() => {})
+  it('Windows: no alert fires (no error path reached — there is no download to fail)', async () => {
+    installFetchMock()
+    installURLMock()
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
     renderModal()
     fireEvent.click(screen.getByText('agents.windows_label'))
     const btn = await screen.findByTestId('installer-download-button')
@@ -291,42 +358,20 @@ describe('CreatedModal — Windows path', () => {
       fireEvent.click(btn)
     })
 
-    expect(mock).toHaveBeenCalledTimes(1)
-    expect(text).not.toHaveBeenCalled()
-    expect(url.created.length).toBe(0)
-    expect(alertSpy).toHaveBeenCalledTimes(1)
-    const msg = alertSpy.mock.calls[0][0] as string
-    expect(msg).toBe('agents.windows_download_failed')
-    // Crucially: key NOT in alert
-    expect(msg).not.toContain(FAKE_AGENT.agent_key)
+    expect(alertSpy).not.toHaveBeenCalled()
   })
 
-  it('validation failure (no BOM): no Object URL, generic validation alert', async () => {
-    // Fetch returns body WITHOUT a BOM -> validation must reject
-    const mock = vi.fn(async () => ({
-      ok: true,
-      arrayBuffer: async () => new TextEncoder().encode('no bom here').buffer,
-    })) as any
-    // @ts-ignore
-    globalThis.fetch = mock as any
-    const url = installURLMock()
-    const alertSpy = vi
-      .spyOn(window, 'alert')
-      .mockImplementation(() => {})
-
+  it('Windows: agent_key NEVER appears in the DOM (no enrollment-side render leak)', async () => {
     renderModal()
     fireEvent.click(screen.getByText('agents.windows_label'))
-    const btn = await screen.findByTestId('installer-download-button')
-
-    await act(async () => {
-      fireEvent.click(btn)
-    })
-
-    expect(url.created.length).toBe(0)
-    expect(alertSpy).toHaveBeenCalledTimes(1)
-    expect(alertSpy.mock.calls[0][0]).toBe(
-      'agents.windows_validation_failed',
-    )
+    await screen.findByTestId('installer-download-button')
+    // Modal renders the key in the descriptions section by design
+    // (it's an enrollment ack). But the Windows installer surface
+    // must not duplicate it into any installer-body element.
+    const hintAlert = screen.getByTestId('platform-hint-alert')
+    expect(hintAlert.innerHTML).not.toContain(FAKE_AGENT.agent_key)
+    const btn = screen.getByTestId('installer-download-button')
+    expect(btn.innerHTML).not.toContain(FAKE_AGENT.agent_key)
   })
 })
 
@@ -432,119 +477,13 @@ describe('CreatedModal — Linux path UNCHANGED', () => {
 
 
 // ────────────────────────────────────────────────────────────────
-// Loading state (deferred Promise)
+// Loading state (Windows-only suite was removed in the
+// WINDOWS_AGENT_DEVELOPMENT_PAUSED change: there is no Windows
+// download to drive a deferred Promise through. Linux loading
+// behaviour is still covered indirectly by the Linux describe
+// block's "retry after failure is allowed" test.
+//
+// The byte-helper itself (downloadWindowsInstaller) is unchanged
+// and remains covered by windowsInstallerDownload.test.ts so the
+// helper is ready for a future "WINDOWS AGENT RESUME GO".
 // ────────────────────────────────────────────────────────────────
-
-
-describe('CreatedModal -- loading state (deferred resolve / reject)', () => {
-  // tiny deferred helper -- reuse across success and error cases
-  function deferred<T = void>() {
-    let resolve!: (v: T) => void
-    let reject!: (e: any) => void
-    const promise = new Promise<T>((res, rej) => {
-      resolve = res
-      reject = rej
-    })
-    return { promise, resolve, reject }
-  }
-
-  it('Windows: button shows loading until fetch resolves; second click during loading is ignored', async () => {
-    const d = deferred<any>()
-    const url = installURLMock()
-    const mock = vi.fn(() => d.promise as any) as any
-    // @ts-ignore
-    globalThis.fetch = mock as any
-
-    renderModal()
-    fireEvent.click(screen.getByText('agents.windows_label'))
-    const btn = await screen.findByTestId('installer-download-button')
-
-    await act(async () => {
-      fireEvent.click(btn)
-    })
-    expect(mock).toHaveBeenCalledTimes(1)
-    // AntD adds `ant-btn-loading` to the button class while loading.
-    // Second click should be swallowed by the concurrent guard.
-    expect(btn.className).toMatch(/ant-btn-loading/)
-
-    await act(async () => {
-      fireEvent.click(btn)
-    })
-    expect(mock).toHaveBeenCalledTimes(1)
-
-    // Resolve the deferred -> loading clears + Object URL workflow runs
-    const bytes = buildValidInstaller()
-    await act(async () => {
-      d.resolve({
-        ok: true,
-        arrayBuffer: async () =>
-          bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ),
-      })
-      // drain microtasks
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-    expect(btn.className).not.toMatch(/ant-btn-loading/)
-    expect(url.created.length).toBe(1)
-
-    // A subsequent independent click must start a new request.
-    const d2 = deferred<any>()
-    mock.mockImplementationOnce(() => d2.promise)
-    await act(async () => {
-      fireEvent.click(btn)
-    })
-    expect(mock).toHaveBeenCalledTimes(2)
-    await act(async () => {
-      d2.resolve({
-        ok: true,
-        arrayBuffer: async () =>
-          bytes.buffer.slice(
-            bytes.byteOffset,
-            bytes.byteOffset + bytes.byteLength,
-          ),
-      })
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-    expect(btn.className).not.toMatch(/ant-btn-loading/)
-  })
-
-  it('Windows: button clears loading after deferred REJECT and allows retry', async () => {
-    const d = deferred<any>()
-    const mock = vi.fn(() => d.promise as any) as any
-    // @ts-ignore
-    globalThis.fetch = mock as any
-    installURLMock()
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {})
-
-    renderModal()
-    fireEvent.click(screen.getByText('agents.windows_label'))
-    const btn = await screen.findByTestId('installer-download-button')
-
-    await act(async () => {
-      fireEvent.click(btn)
-    })
-    expect(btn.className).toMatch(/ant-btn-loading/)
-
-    // Reject the deferred -> alert fires, loading clears, retry OK.
-    await act(async () => {
-      d.reject(new Error('network'))
-      await Promise.resolve()
-      await Promise.resolve()
-    })
-    expect(btn.className).not.toMatch(/ant-btn-loading/)
-    expect(alertSpy).toHaveBeenCalledTimes(1)
-    expect(alertSpy.mock.calls[0][0]).toBe('agents.windows_download_failed')
-
-    // Retry after failure
-    const d2 = deferred<any>()
-    mock.mockImplementationOnce(() => d2.promise)
-    await act(async () => {
-      fireEvent.click(btn)
-    })
-    expect(mock).toHaveBeenCalledTimes(2)
-  })
-})

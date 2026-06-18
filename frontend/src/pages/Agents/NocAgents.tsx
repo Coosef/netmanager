@@ -6,7 +6,7 @@
 // this is the inventory/overview surface the mockup specifies.
 import { useMemo, useRef, useState } from 'react'
 import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
-import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Space, Popconfirm } from 'antd'
+import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Space, Popconfirm, Tooltip } from 'antd'
 import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
@@ -293,6 +293,16 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
   const downloadingRef = useRef(false)
   const handleDownload = async () => {
     if (!platform || !agent.agent_key) return
+    // WINDOWS_AGENT_DEVELOPMENT_PAUSED: the Windows installer is
+    // under validation and not yet release-ready. The UI button is
+    // disabled (see render below) so this code path is unreachable
+    // through normal interaction; this early-return is the
+    // defence-in-depth gate that ensures a programmatic click —
+    // synthetic test, accessibility tool, browser extension — cannot
+    // reach the download helper, the backend endpoint, or the
+    // server-side agent_key flow. The backend flag
+    // WINDOWS_AGENT_V2_ENABLED=False stays the authoritative gate.
+    if (platform === 'windows') return
     if (downloadingRef.current) return  // Concurrent download guard (sync)
     downloadingRef.current = true
     setDownloading(true)
@@ -305,6 +315,10 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
         //  · sanitises the filename so traversal characters cannot
         //    leak through agent.id
         //  · never reads response body on HTTP failure (no key leak)
+        // NOTE: unreachable while WINDOWS_AGENT_DEVELOPMENT_PAUSED
+        // is in effect. The helper code is preserved verbatim so a
+        // future resume needs no code surgery here — only flipping
+        // the early-return above + restoring the active Button.
         const url = `/api/v1/agents/${agent.id}/download/windows${
           base ? `?server_url=${encodeURIComponent(base)}` : ''
         }`
@@ -365,10 +379,28 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
           { key: 'windows' as const, icon: <WindowsOutlined style={{ fontSize: 28, color: '#3b82f6' }} />, label: t('agents.windows_label'), sub: t('agents.windows_sub') },
         ].map((p) => {
           const selected = platform === p.key
+          // WINDOWS_AGENT_DEVELOPMENT_PAUSED: Windows tile stays
+          // visible (the product still advertises Windows support)
+          // but is rendered in a clearly "coming soon" visual state.
+          // The card stays clickable so a curious operator can
+          // surface the explanatory hint underneath; the download
+          // button on the next row is the hard disable.
+          const isComingSoon = p.key === 'windows'
           return (
             <div key={p.key} onClick={() => setPlatform(p.key)}
-              style={{ flex: 1, textAlign: 'center', cursor: 'pointer', border: selected ? '2px solid #3b82f6' : `1px solid ${C.border}`,
+              data-testid={`platform-card-${p.key}`}
+              data-coming-soon={isComingSoon ? 'true' : 'false'}
+              style={{ flex: 1, textAlign: 'center', cursor: 'pointer', position: 'relative',
+                opacity: isComingSoon && !selected ? 0.78 : 1,
+                border: selected ? '2px solid #3b82f6' : `1px solid ${C.border}`,
                 background: selected ? (isDark ? '#3b82f620' : '#eff6ff') : C.bg2, borderRadius: 8, padding: '14px 8px', transition: 'all 0.15s' }}>
+              {isComingSoon && (
+                <div data-testid={`platform-card-${p.key}-coming-soon-badge`}
+                  style={{ position: 'absolute', top: 6, right: 6, fontSize: 10, padding: '1px 6px',
+                    borderRadius: 4, background: '#fbbf24', color: '#1f2937', fontWeight: 600, letterSpacing: 0.3 }}>
+                  {t('agents.windows_coming_soon_badge')}
+                </div>
+              )}
               <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 8 }}>{p.icon}</div>
               <Text strong style={{ color: C.text }}>{p.label}</Text><br />
               <Text style={{ fontSize: 11, color: C.muted }}>{p.sub}</Text>
@@ -379,10 +411,10 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
       {platform && downloadUrl && (
         <>
           {/* Linux ONLY: copy/paste curl command. Windows users get
-              the .ps1 download button below -- a copy command for
-              Windows would either land the agent key in PowerShell
-              history or require server-side escape sequences whose
-              gaps become injection seams. The file is the safer UX. */}
+              no installer body of any kind while
+              WINDOWS_AGENT_DEVELOPMENT_PAUSED is in effect — no
+              PowerShell snippet, no command preview, nothing the
+              browser or test harness could exfiltrate. */}
           {platform === 'linux' && installCmd && (
             <div style={{ marginBottom: 12 }} data-testid="linux-oneliner-block">
               <Text strong style={{ display: 'block', marginBottom: 6, fontSize: 13, color: C.text }}>{t('agents.oneliner_label')}</Text>
@@ -394,16 +426,42 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
               </div>
             </div>
           )}
-          {/* Single authoritative platform hint -- the previous
-              secondary button-bottom Text duplicated the message
-              and is gone. */}
-          <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }} message={platform === 'linux' ? t('agents.linux_hint') : t('agents.windows_hint')} />
-          <Button type="default" icon={<DownloadOutlined />} block
-            loading={downloading}
-            onClick={handleDownload}
-            data-testid="installer-download-button">
-            {platform === 'linux' ? t('agents.download_linux') : t('agents.download_windows')}
-          </Button>
+          {/* Single authoritative platform hint. Linux keeps its
+              original install hint; Windows shows the explanatory
+              "coming soon / validation in progress" message
+              instead of the old "download and run the .ps1" hint. */}
+          <Alert type="info" showIcon style={{ marginBottom: 12, fontSize: 12 }}
+            data-testid="platform-hint-alert"
+            message={platform === 'linux' ? t('agents.linux_hint') : t('agents.windows_coming_soon_message')} />
+          {/* The download button is split into two render branches.
+              Linux keeps the exact prior behaviour (loading, retry,
+              concurrent guard, byte-perfect helper). Windows is
+              hard-disabled at the DOM level — no onClick, aria-
+              disabled, wrapped in a Tooltip whose title is the
+              short coming-soon helper. handleDownload also gates
+              Windows defensively, so a synthetic .click() on the
+              underlying DOM element cannot reach the helper. */}
+          {platform === 'windows' ? (
+            <Tooltip title={t('agents.windows_coming_soon_tooltip')}
+              data-testid="installer-download-tooltip">
+              <Button type="default" icon={<DownloadOutlined />} block
+                disabled
+                aria-disabled="true"
+                data-testid="installer-download-button"
+                data-platform="windows"
+                data-coming-soon="true">
+                {t('agents.download_windows')}
+              </Button>
+            </Tooltip>
+          ) : (
+            <Button type="default" icon={<DownloadOutlined />} block
+              loading={downloading}
+              onClick={handleDownload}
+              data-testid="installer-download-button"
+              data-platform="linux">
+              {t('agents.download_linux')}
+            </Button>
+          )}
         </>
       )}
     </Modal>

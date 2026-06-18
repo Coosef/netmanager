@@ -1571,7 +1571,10 @@
     "detail_created": "Создано",
     "windows_download_failed": "Не удалось скачать установщик Windows. Попробуйте ещё раз.",
     "windows_validation_failed": "Не удалось проверить установщик Windows. Попробуйте ещё раз.",
-    "linux_download_failed": "Не удалось скачать установщик Linux. Попробуйте ещё раз."
+    "linux_download_failed": "Не удалось скачать установщик Linux. Попробуйте ещё раз.",
+    "windows_coming_soon_badge": "Скоро",
+    "windows_coming_soon_message": "Установщик агента Windows сейчас проходит проверку. Он будет доступен для загрузки на этом экране, когда будет готов.",
+    "windows_coming_soon_tooltip": "Пока недоступно"
   },
   "users": {
     "title": "Пользователи",
