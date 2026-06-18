@@ -186,23 +186,17 @@ func TestValidateBackendURL_FragmentErrorNoEcho(t *testing.T) {
 }
 
 func TestValidateBackendURL_RejectsQueryString(t *testing.T) {
+	// PR-B hardening: every "?" in the input -- including a bare
+	// trailing "?" with no query text -- is rejected. The check is on
+	// the raw string, not url.Parse's RawQuery (which is "" for bare
+	// "?"). A base backend URL has no place for a query-introducer
+	// character.
 	for _, in := range []string{
 		"https://example.test?q=1",
 		"https://example.test/api?token=abc",
 		"https://example.test/?",
 	} {
-		// Note: bare "?" gets parsed but RawQuery is "" -- url.Parse
-		// is lenient. Our guard checks RawQuery != "".
-		_, err := ValidateBackendURL(in)
-		if in == "https://example.test/?" {
-			// bare ? with no query: lenient; allow (trailing-slash
-			// stripped to "https://example.test/?" → "https://example.test/?",
-			// actually our stripper only removes trailing '/' chars
-			// so the literal "?" stays. RawQuery is empty though, so
-			// this passes our guard. Document the corner case.
-			continue
-		}
-		if err == nil {
+		if _, err := ValidateBackendURL(in); err == nil {
 			t.Errorf("query string URL not rejected: %q", in)
 		}
 	}

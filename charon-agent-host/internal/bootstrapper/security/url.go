@@ -55,6 +55,20 @@ func ValidateBackendURL(raw string) (string, error) {
 		return "", errors.New("backend URL is only slashes")
 	}
 
+	// PR-B hardening: refuse any input containing a fragment-introducer
+	// or query-introducer character. We check the raw string -- not the
+	// url.Parse output -- because url.Parse is lenient: a trailing "#"
+	// with no fragment text produces Fragment == "", and a trailing "?"
+	// with no query text produces RawQuery == "". The security intent
+	// is that a base backend URL has NO place for either character;
+	// bare "#" / "?" are equally rejected.
+	if strings.Contains(s, "#") {
+		return "", errors.New("backend URL must not include a fragment")
+	}
+	if strings.Contains(s, "?") {
+		return "", errors.New("backend URL must not include a query string")
+	}
+
 	u, err := url.Parse(s)
 	if err != nil {
 		// Generic message; do NOT echo the raw URL (it may carry
@@ -73,12 +87,6 @@ func ValidateBackendURL(raw string) (string, error) {
 	// CLI does not echo through stderr / log / plan output.
 	if u.User != nil {
 		return "", errors.New("backend URL must not embed credentials (user@host or user:pass@host)")
-	}
-	if u.Fragment != "" {
-		return "", errors.New("backend URL must not include a fragment")
-	}
-	if u.RawQuery != "" {
-		return "", errors.New("backend URL must not include a query string")
 	}
 	return s, nil
 }
