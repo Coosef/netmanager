@@ -7,7 +7,7 @@ import { useTheme } from '@/contexts/ThemeContext'
 const ALL = '__all__'
 
 /**
- * Faz 8 Phase F — the active-location selector.
+ * Faz 8 Phase F + PR #96 — the active-location selector.
  *
  * Backend-driven: the option list is exactly the locations the backend
  * returns for the authenticated user (user_locations source of truth —
@@ -15,12 +15,26 @@ const ALL = '__all__'
  * user's organization is fixed server-side by their token and is never
  * switchable from the UI.
  *
- *   * still resolving        → a spinner;
- *   * no accessible location → a muted, non-interactive tag;
- *   * exactly one location   → shown as static text (no switching UX);
- *   * many locations         → a switcher;
- *   * org-wide roles         → additionally an explicit "Tüm Lokasyonlar"
- *                              (all locations) option — never a fallback.
+ * Seven distinct visual states, in priority order:
+ *
+ *   1. `sitesLoading`        → spinner    ("Lokasyonlar yükleniyor…")
+ *   2. `hasContextFailure`   → error tag  ("Lokasyonlar yüklenemedi")
+ *   3. super-admin + no tenant
+ *                            → tenant-required tag
+ *                              ("Önce firma seçin")
+ *   4. `!hasLocationAccess`  → no-access tag (existing)
+ *   5. `locations.length === 0` AND in a tenant
+ *                            → no-assigned tag
+ *                              ("Atanmış lokasyon yok")
+ *   6. exactly one location  → static text (no switcher)
+ *   7. many locations        → switcher; org-wide roles get an
+ *                              "Tüm Lokasyonlar" option in addition.
+ *
+ * The retired `none_defined` ("No location defined") tag is no longer
+ * surfaced to end users — it conflated three semantically-different
+ * conditions (super-admin no tenant / scoped user no membership /
+ * tenant has no locations yet). The i18n key is kept in the locale
+ * files for one release for back-compat but no code path renders it.
  *
  * Switching calls SiteContext.setLocation, which clears the React Query
  * cache and rebinds live streams so no previous-location data leaks.
@@ -28,19 +42,58 @@ const ALL = '__all__'
 export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   const {
     activeLocationId, setLocation, locations,
-    sitesLoading, hasLocationAccess, isOrgWide,
+    sitesLoading, hasContextFailure,
+    hasLocationAccess, isOrgWide,
+    isSuperAdmin, organization,
   } = useSite()
   const { isDark } = useTheme()
   const { t } = useTranslation()
 
+  // (1) Still resolving — backend has not returned yet.
   if (sitesLoading) {
-    return <Spin size="small" />
+    return (
+      <Space size={6} data-testid="location-selector-loading">
+        <Spin size="small" />
+        <span style={{ fontSize: 12, color: isDark ? '#94a3b8' : '#64748b' }}>
+          {t('location_selector.loading')}
+        </span>
+      </Space>
+    )
   }
 
+  // (2) Backend / API error — the location list could not be fetched.
+  if (hasContextFailure) {
+    return (
+      <Tooltip title={t('location_selector.error_tooltip')}>
+        <Tag icon={<EnvironmentOutlined />} color="error" style={{ margin: 0 }}
+          data-testid="location-selector-error">
+          {t('location_selector.error_tag')}
+        </Tag>
+      </Tooltip>
+    )
+  }
+
+  // (3) Super-admin who hasn't yet selected a tenant context. Distinct
+  // from the legacy `none_defined` tag — "select a tenant first" tells
+  // the operator what to do next, instead of stating a technical fact.
+  if (isSuperAdmin && organization === null) {
+    return (
+      <Tooltip title={t('location_selector.tenant_required_tooltip')}>
+        <Tag icon={<EnvironmentOutlined />} color="processing" style={{ margin: 0 }}
+          data-testid="location-selector-tenant-required">
+          {t('location_selector.tenant_required_tag')}
+        </Tag>
+      </Tooltip>
+    )
+  }
+
+  // (4) Scoped user with no usable location (existing Faz 8 Phase E
+  // contract — backend explicitly returns has_location_access=false).
   if (!hasLocationAccess) {
     return (
       <Tooltip title={t('location_selector.no_access_tooltip')}>
-        <Tag icon={<EnvironmentOutlined />} color="warning" style={{ margin: 0 }}>
+        <Tag icon={<EnvironmentOutlined />} color="warning" style={{ margin: 0 }}
+          data-testid="location-selector-no-access">
           {t('location_selector.no_access_tag')}
         </Tag>
       </Tooltip>
@@ -58,11 +111,26 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
     />
   )
 
-  // Single fixed location for a location-scoped user — show it, no switcher.
+  // (5) Tenant context is set but it has no locations the caller can
+  // reach. Distinct from (4): (4) is "your account is unassigned",
+  // (5) is "the tenant has nothing to show you yet".
+  if (locations.length === 0) {
+    return (
+      <Tooltip title={t('location_selector.no_access_tooltip')}>
+        <Tag icon={<EnvironmentOutlined />} color="warning" style={{ margin: 0 }}
+          data-testid="location-selector-no-assigned">
+          {t('location_selector.no_assigned_tag')}
+        </Tag>
+      </Tooltip>
+    )
+  }
+
+  // (6) Single fixed location for a location-scoped user — show it,
+  // no switcher.
   if (locations.length === 1 && !isOrgWide) {
     const only = locations[0]
     return (
-      <Space size={6}>
+      <Space size={6} data-testid="location-selector-single">
         {dot(only.color)}
         <span style={{ fontSize: 13, color: isDark ? '#cbd5e1' : '#334155' }}>
           {only.name}
@@ -71,18 +139,9 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
     )
   }
 
-  // Org-wide user whose org has no locations yet — nothing to switch.
-  if (locations.length === 0) {
-    return (
-      <Tag color="default" style={{ margin: 0 }}>
-        {t('location_selector.none_defined')}
-      </Tag>
-    )
-  }
-
+  // (7) Multi-location switcher. Org-wide roles additionally get the
+  // explicit "All locations" option — it's NEVER a silent fallback.
   const options = [
-    // "All locations" is offered ONLY to org-wide roles; a location-scoped
-    // user always operates inside exactly one location.
     ...(isOrgWide ? [{ value: ALL, label: t('location_selector.all_locations') }] : []),
     ...locations.map((loc) => ({
       value: String(loc.id),
@@ -96,7 +155,7 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   ]
 
   return (
-    <Space size={6}>
+    <Space size={6} data-testid="location-selector-multi">
       {dot(active?.color)}
       <Select
         value={activeLocationId != null ? String(activeLocationId) : ALL}

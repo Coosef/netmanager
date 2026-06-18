@@ -1574,7 +1574,11 @@
     "linux_download_failed": "Linux kurulum dosyası indirilemedi. Lütfen tekrar deneyin.",
     "windows_coming_soon_badge": "Yakında",
     "windows_coming_soon_message": "Windows Agent kurulumu şu anda doğrulama aşamasındadır. Kullanıma açıldığında bu ekrandan indirilebilecektir.",
-    "windows_coming_soon_tooltip": "Henüz indirilemez"
+    "windows_coming_soon_tooltip": "Henüz indirilemez",
+    "create_tenant_required_title": "Önce firma seçin",
+    "create_tenant_required_desc": "Ajan kurmadan önce bir firma seçmelisiniz. Platform yöneticisi olarak hangi firma bağlamında çalışmak istediğinizi seçtikten sonra ajan kurulumuna devam edebilirsiniz.",
+    "create_no_assigned_locations_title": "Atanmış lokasyon yok",
+    "create_no_assigned_locations_desc": "Hesabınıza atanmış bir lokasyon bulunmuyor. Ajan kurabilmek için bir lokasyona atanmanız gerekir; lütfen organizasyon yöneticinize başvurun."
   },
   "users": {
     "title": "Kullanıcılar",
@@ -2883,7 +2887,13 @@
     "no_access_tooltip": "Hesabınıza atanmış bir lokasyon yok",
     "no_access_tag": "Lokasyon yok",
     "none_defined": "Lokasyon tanımlı değil",
-    "all_locations": "Tüm Lokasyonlar"
+    "all_locations": "Tüm Lokasyonlar",
+    "loading": "Lokasyonlar yükleniyor…",
+    "error_tag": "Lokasyonlar yüklenemedi",
+    "error_tooltip": "Lokasyon listesi sunucudan alınamadı. Lütfen sayfayı yenileyin veya tekrar deneyin.",
+    "tenant_required_tag": "Önce firma seçin",
+    "tenant_required_tooltip": "Platform yöneticisi olarak verileri görüntülemek için önce bir firma bağlamı seçmeniz gerekir.",
+    "no_assigned_tag": "Atanmış lokasyon yok"
   },
   "error_boundary": {
     "title": "Beklenmeyen bir hata oluştu",

@@ -1574,7 +1574,11 @@
     "linux_download_failed": "Could not download the Linux installer. Please try again.",
     "windows_coming_soon_badge": "Coming soon",
     "windows_coming_soon_message": "The Windows Agent installer is currently under validation. It will be available for download from this page when ready.",
-    "windows_coming_soon_tooltip": "Not available yet"
+    "windows_coming_soon_tooltip": "Not available yet",
+    "create_tenant_required_title": "Select a tenant first",
+    "create_tenant_required_desc": "Select a tenant before installing an agent. As a platform administrator, pick which tenant context you want to operate in, and then continue with the agent install.",
+    "create_no_assigned_locations_title": "No assigned location",
+    "create_no_assigned_locations_desc": "Your account has no assigned location. You must be assigned to a location before you can install an agent — please contact your organization administrator."
   },
   "users": {
     "title": "Users",
@@ -2840,7 +2844,13 @@
     "no_access_tooltip": "Your account has no assigned location",
     "no_access_tag": "No location",
     "none_defined": "No location defined",
-    "all_locations": "All Locations"
+    "all_locations": "All Locations",
+    "loading": "Loading locations…",
+    "error_tag": "Locations could not be loaded",
+    "error_tooltip": "The location list could not be fetched from the server. Please refresh the page or try again.",
+    "tenant_required_tag": "Select a tenant first",
+    "tenant_required_tooltip": "As a platform administrator, you need to pick a tenant context before any data is shown.",
+    "no_assigned_tag": "No assigned location"
   },
   "error_boundary": {
     "title": "An unexpected error occurred",

@@ -31,13 +31,30 @@ const hb = (iso: string | null) => (iso ? dayjs(iso).fromNow(true) : '—')
 
 export default function NocAgents() {
   const qc = useQueryClient()
+  const { t } = useTranslation()
   const { message } = App.useApp()
-  const { locations, activeLocationId } = useSite()
+  // PR #96 — pull the role + tenant flags from SiteContext so the
+  // create modal can branch on them. `organization === null` for a
+  // super_admin who has not yet picked a tenant context (the "Select
+  // a tenant first" header state).
+  const { locations, activeLocationId, isSuperAdmin, organization, hasLocationAccess } = useSite()
   // Five-verb agent permission catalogue (location-agent-permissions
   // work). The backend gate is authoritative; these flags only hide /
   // disable the UI surface that would otherwise round-trip to a 403.
   const canInstall = useAuthStore((s) => s.can('agents', 'install'))
   const canRemove = useAuthStore((s) => s.can('agents', 'remove'))
+  // PR #96 — modal blocked-state computation. Two distinct cases:
+  //   (a) super_admin who hasn't picked a tenant yet — "Önce firma
+  //       seçin" — the dropdown would be empty and the create call
+  //       would land outside any organization.
+  //   (b) any user whose accessible-locations list is empty (either
+  //       hasLocationAccess=false from backend, or the tenant has no
+  //       locations yet for this caller) — "Atanmış lokasyon yok".
+  // When either holds we surface an explanatory Alert, disable the
+  // dropdown + submit, and the modal never fires an enrollment call.
+  const tenantMissing = isSuperAdmin && organization === null
+  const noAssignedLocations = !tenantMissing && (!hasLocationAccess || locations.length === 0)
+  const installBlocked = tenantMissing || noAssignedLocations
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newLoc, setNewLoc] = useState<number | undefined>(undefined)
@@ -61,6 +78,15 @@ export default function NocAgents() {
     onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ajan silinemedi'),
   })
   const submitCreate = () => {
+    // PR #96 defence-in-depth: even if a synthetic click bypasses
+    // the disabled OK button, refuse to fire the enrollment mutation
+    // when the tenant context or accessible-locations list is empty.
+    // The Alert above the form is the user-facing explanation; the
+    // toast below is a belt-and-braces guard.
+    if (installBlocked) {
+      message.warning(t('agents.create_tenant_required_title'))
+      return
+    }
     const name = newName.trim()
     const location_id = newLoc ?? activeLocationId ?? undefined
     if (!name) { message.warning('Ajan adı gerekli'); return }
@@ -146,16 +172,53 @@ export default function NocAgents() {
         </div>
       </div>
 
-      {/* Create agent modal (real: agentsApi.create — requires location_id) */}
+      {/* Create agent modal (real: agentsApi.create — requires location_id).
+          PR #96 — the form is wrapped in an installBlocked guard. When the
+          guard is active the modal renders ONLY an explanatory Alert; no
+          input, no dropdown, no API call. The submit button stays in the
+          DOM (per AntD a11y expectations) but is hard-disabled and onOk
+          is a no-op so even a synthetic click cannot reach createMut. */}
       <Modal open={createOpen} title="Yeni Ajan Kur" onCancel={() => setCreateOpen(false)}
-        onOk={submitCreate} confirmLoading={createMut.isPending} okText="Oluştur" cancelText="İptal"
-        okButtonProps={{ disabled: !newName.trim() || (activeLocationId == null && newLoc == null) }}>
+        onOk={installBlocked ? () => {} : submitCreate}
+        confirmLoading={createMut.isPending} okText="Oluştur" cancelText="İptal"
+        okButtonProps={{
+          disabled: installBlocked || !newName.trim() || (activeLocationId == null && newLoc == null),
+          'data-testid': 'agent-create-submit',
+          'data-blocked': installBlocked ? 'true' : 'false',
+        }}>
+        {tenantMissing && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={t('agents.create_tenant_required_title')}
+            description={t('agents.create_tenant_required_desc')}
+            data-testid="agent-create-blocked-tenant-required"
+          />
+        )}
+        {noAssignedLocations && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message={t('agents.create_no_assigned_locations_title')}
+            description={t('agents.create_no_assigned_locations_desc')}
+            data-testid="agent-create-blocked-no-assigned-locations"
+          />
+        )}
         <Input placeholder="Ajan adı (örn. agent-branch-ist)" value={newName} style={{ marginBottom: 12 }}
-          onChange={(e) => setNewName(e.target.value)} onPressEnter={submitCreate} />
+          disabled={installBlocked}
+          onChange={(e) => setNewName(e.target.value)} onPressEnter={installBlocked ? undefined : submitCreate}
+          data-testid="agent-create-name-input"
+        />
         <Select placeholder="Lokasyon seç (zorunlu — agent bir lokasyona bağlanır)" value={newLoc}
+          disabled={installBlocked}
           onChange={setNewLoc} style={{ width: '100%' }}
-          options={locations.map((l) => ({ label: l.name, value: l.id }))} />
-        {activeLocationId != null && (
+          options={locations.map((l) => ({ label: l.name, value: l.id }))}
+          data-testid="agent-create-location-select"
+          notFoundContent={installBlocked ? null : undefined}
+        />
+        {!installBlocked && activeLocationId != null && (
           <div style={{ fontSize: 12, color: 'var(--fg-2)', marginTop: 6 }}>Seçilmezse aktif lokasyon kullanılır.</div>
         )}
       </Modal>
