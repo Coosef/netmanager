@@ -163,8 +163,38 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     enabled: !!token && hydrated,
     retry: 1,
     retryDelay: 500,
-    placeholderData: (prev) => prev,
+    // PR #101 — drop `placeholderData: (prev) => prev`. React Query 5
+    // with a fail-then-recover sequence (initial 401 from a token-
+    // race retry: 1) kept `data` pinned to the `undefined` returned by
+    // `prev` from the very first failed attempt, ignoring the
+    // subsequent 200 OK payload — so SiteContext rendered defaults
+    // (`locations: []`, `is_super_admin: false`) even though the
+    // network log showed multiple successful responses. Removing the
+    // placeholder lets `data` update normally; the org-wide
+    // reconciliation effect below already has its own carve-out
+    // against the infinite refetch loop.
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
+  // PR #101 DIAGNOSTIC — temporary console log so an operator can
+  // confirm the resolved context arrives on the wire AND lands in
+  // SiteContext state. Remove once the flicker root cause is
+  // permanently pinned by a regression test.
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[SiteContext]', {
+      ctx_present: !!ctx,
+      is_super_admin: ctx?.is_super_admin,
+      is_org_wide: ctx?.is_org_wide,
+      organization_name: ctx?.organization?.name,
+      locations_length: ctx?.locations?.length,
+      sitesLoading,
+      isError,
+      activeLocationId,
+      tokenPresent: !!token,
+      hydrated,
+    })
+  }, [ctx, sitesLoading, isError, activeLocationId, token, hydrated])
   // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — error state'i sadece "fetch
   // gerçekten fail oldu + ctx hala yok" durumunda true. retry sonrası 200
   // gelirse `isError: false`. Stale cache sırasında error false kalır.
