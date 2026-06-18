@@ -46,6 +46,8 @@ round-trip never silently removes access.
 Revision ID: f9afuserlangperms
 Revises: f9aeportpol
 """
+import json
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -155,11 +157,21 @@ def _rewrite_permission_sets(conn, transform) -> int:
             continue
         modules["agents"] = after
         permissions["modules"] = modules
+        # The permissions column is `JSON` on Postgres. psycopg2 does
+        # NOT register a default adapter for `dict`, so passing the
+        # Python dict directly to bound parameters raises
+        # `can't adapt type 'dict'`. The earlier code masked this with
+        # an unreachable `if False else permissions` ternary that
+        # silently degraded to the unadapted dict. Serialise via
+        # `json.dumps()` and let Postgres parse the JSON literal back
+        # via `CAST(:p AS json)` — works under both psycopg2 (sync,
+        # used by Alembic) and asyncpg (the runtime async driver) so
+        # the migration is portable across both connections.
         conn.execute(
             sa.text(
-                "UPDATE permission_sets SET permissions = :p WHERE id = :id"
+                "UPDATE permission_sets SET permissions = CAST(:p AS json) WHERE id = :id"
             ),
-            {"p": sa.cast(permissions, sa.JSON) if False else permissions, "id": row.id},
+            {"p": json.dumps(permissions), "id": row.id},
         )
         touched += 1
     return touched
