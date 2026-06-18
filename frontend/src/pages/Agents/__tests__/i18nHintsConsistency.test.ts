@@ -104,3 +104,65 @@ describe('agents.windows_download_primary_hint -- consolidated away', () => {
     })
   }
 })
+
+
+// ────────────────────────────────────────────────────────────────
+// WINDOWS_AGENT_DEVELOPMENT_PAUSED: the three new "coming soon"
+// keys (badge, message, tooltip) must exist in every locale, be
+// non-empty, and be DISTINCT from the legacy windows_hint /
+// windows_download_failed keys so a future change to one set does
+// not silently drift the other.
+// ────────────────────────────────────────────────────────────────
+
+
+describe('agents.windows_coming_soon_* -- present and consistent across locales', () => {
+  const KEYS = [
+    'windows_coming_soon_badge',
+    'windows_coming_soon_message',
+    'windows_coming_soon_tooltip',
+  ] as const
+
+  for (const lang of LOCALES) {
+    for (const key of KEYS) {
+      it(`[${lang}] ${key} is a non-empty string`, () => {
+        const a = loadAgents(lang)
+        expect(typeof a[key]).toBe('string')
+        expect((a[key] ?? '').length).toBeGreaterThan(0)
+      })
+    }
+
+    it(`[${lang}] coming-soon keys do NOT collide with legacy windows_hint`, () => {
+      const a = loadAgents(lang)
+      // The pause copy must differ from the old "download and run"
+      // hint -- otherwise the locale change would be a silent
+      // identity edit.
+      expect(a.windows_coming_soon_message).not.toBe(a.windows_hint)
+      expect(a.windows_coming_soon_tooltip).not.toBe(a.windows_hint)
+    })
+
+    it(`[${lang}] coming-soon message does NOT echo download_failed copy`, () => {
+      const a = loadAgents(lang)
+      expect(a.windows_coming_soon_message).not.toBe(a.windows_download_failed)
+      expect(a.windows_coming_soon_message).not.toBe(a.windows_validation_failed)
+    })
+
+    it(`[${lang}] badge is a short label (<= 32 chars), tooltip is concise (<= 64 chars)`, () => {
+      const a = loadAgents(lang)
+      expect((a.windows_coming_soon_badge ?? '').length).toBeLessThanOrEqual(32)
+      expect((a.windows_coming_soon_tooltip ?? '').length).toBeLessThanOrEqual(64)
+    })
+  }
+
+  it('badge strings differ across locales (no accidental English fallback)', () => {
+    // Each locale picked a deliberate translation of "coming soon".
+    // If two non-en locales accidentally inherited the en string,
+    // this collapses and the test would flag it.
+    const tr = loadAgents('tr').windows_coming_soon_badge
+    const en = loadAgents('en').windows_coming_soon_badge
+    const de = loadAgents('de').windows_coming_soon_badge
+    const ru = loadAgents('ru').windows_coming_soon_badge
+    expect(tr).not.toBe(en)
+    expect(de).not.toBe(en)
+    expect(ru).not.toBe(en)
+  })
+})

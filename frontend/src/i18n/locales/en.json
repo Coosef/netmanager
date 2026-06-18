@@ -1571,7 +1571,10 @@
     "detail_created": "Created",
     "windows_download_failed": "Could not download the Windows installer. Please try again.",
     "windows_validation_failed": "Could not validate the Windows installer. Please try again.",
-    "linux_download_failed": "Could not download the Linux installer. Please try again."
+    "linux_download_failed": "Could not download the Linux installer. Please try again.",
+    "windows_coming_soon_badge": "Coming soon",
+    "windows_coming_soon_message": "The Windows Agent installer is currently under validation. It will be available for download from this page when ready.",
+    "windows_coming_soon_tooltip": "Not available yet"
   },
   "users": {
     "title": "Users",

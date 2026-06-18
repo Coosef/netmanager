@@ -1571,7 +1571,10 @@
     "detail_created": "Oluşturulma",
     "windows_download_failed": "Windows kurulum dosyası indirilemedi. Lütfen tekrar deneyin.",
     "windows_validation_failed": "Windows kurulum dosyası doğrulanamadı. Lütfen tekrar deneyin.",
-    "linux_download_failed": "Linux kurulum dosyası indirilemedi. Lütfen tekrar deneyin."
+    "linux_download_failed": "Linux kurulum dosyası indirilemedi. Lütfen tekrar deneyin.",
+    "windows_coming_soon_badge": "Yakında",
+    "windows_coming_soon_message": "Windows Agent kurulumu şu anda doğrulama aşamasındadır. Kullanıma açıldığında bu ekrandan indirilebilecektir.",
+    "windows_coming_soon_tooltip": "Henüz indirilemez"
   },
   "users": {
     "title": "Kullanıcılar",

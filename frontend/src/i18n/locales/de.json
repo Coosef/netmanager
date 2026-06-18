@@ -1571,7 +1571,10 @@
     "detail_created": "Erstellt",
     "windows_download_failed": "Windows-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen.",
     "windows_validation_failed": "Windows-Installationsdatei konnte nicht validiert werden. Bitte erneut versuchen.",
-    "linux_download_failed": "Die Linux-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen."
+    "linux_download_failed": "Die Linux-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen.",
+    "windows_coming_soon_badge": "Demnächst",
+    "windows_coming_soon_message": "Der Windows-Agent-Installer befindet sich derzeit in der Validierungsphase. Sobald er bereit ist, kann er auf dieser Seite heruntergeladen werden.",
+    "windows_coming_soon_tooltip": "Noch nicht verfügbar"
   },
   "users": {
     "title": "Benutzer",
