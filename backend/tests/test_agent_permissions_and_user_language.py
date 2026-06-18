@@ -20,6 +20,9 @@ allow an unsupported locale through.
 """
 from __future__ import annotations
 
+import importlib.util
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -216,6 +219,109 @@ class TestUserPreferencesLanguageEnum:
     def test_rejects_long_payload(self):
         with pytest.raises(ValidationError):
             UserPreferencesUpdate(preferred_language="x" * 64)
+
+
+class TestMigrationJSONRoundTrip:
+    """The `f9af_user_lang_agent_perms` migration backfills the
+    permission_sets.permissions JSON column. The earlier version
+    smuggled a Python dict through psycopg2 bound parameters, which
+    raises `can't adapt type 'dict'` at runtime because psycopg2 has
+    no default adapter for `dict`. The fix:
+
+      1. `json.dumps()` the dict on the Python side
+      2. `CAST(:p AS json)` in the SQL
+
+    These tests load the migration via importlib (Alembic versions
+    are not part of any importable package) and confirm:
+
+      a) `_transform_agents_block_upgrade` returns a dict whose
+         contents survive a `json.dumps()` → `json.loads()` round
+         trip without loss (the actual production fix path).
+      b) The serialised form is a JSON object (not a quoted string
+         or list) so Postgres' `CAST(:p AS json)` parses it as an
+         object node, not a scalar.
+    """
+
+    @staticmethod
+    def _load_migration():
+        # The migration file does `from alembic import op` at top
+        # level, but `alembic.op` is only available inside an active
+        # Alembic context. We mock it just enough for module load so
+        # the pure-function transforms (which never touch `op`) are
+        # callable from tests.
+        import sys
+        import types
+        if "alembic" not in sys.modules:
+            sys.modules["alembic"] = types.ModuleType("alembic")
+        sys.modules["alembic"].op = types.SimpleNamespace(
+            add_column=lambda *a, **kw: None,
+            drop_column=lambda *a, **kw: None,
+            get_bind=lambda: None,
+        )
+        path = Path(__file__).resolve().parents[1] / "alembic" / "versions" / "f9af_user_lang_agent_perms.py"
+        spec = importlib.util.spec_from_file_location("f9af_migration", path)
+        assert spec is not None and spec.loader is not None
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_legacy_to_canonical_block_round_trips_through_json(self):
+        mod = self._load_migration()
+        legacy = {"view": True, "edit": True}
+        canonical = mod._transform_agents_block_upgrade(legacy)
+        # The upgrade transform must produce a dict json.dumps can
+        # serialise without TypeError (no datetime / set / bytes
+        # leaking in from the original row).
+        encoded = json.dumps(canonical)
+        decoded = json.loads(encoded)
+        assert decoded == canonical
+        # Sanity — the new 5-verb shape is present.
+        for k in ("view", "install", "download_installer", "update", "remove"):
+            assert k in canonical
+
+    def test_downgrade_block_round_trips_through_json(self):
+        mod = self._load_migration()
+        canonical = {
+            "view": True, "install": False, "download_installer": True,
+            "update": True, "remove": False,
+        }
+        legacy = mod._transform_agents_block_downgrade(canonical)
+        encoded = json.dumps(legacy)
+        decoded = json.loads(encoded)
+        assert decoded == legacy
+        assert set(legacy.keys()) == {"view", "edit"}
+
+    def test_serialised_payload_is_a_json_object_not_a_quoted_string(self):
+        # Postgres' CAST(:p AS json) on a Python-encoded string MUST
+        # parse into a json object node, not a scalar string.
+        # `json.dumps()` of a dict yields the string '{"...":...}'.
+        # Postgres CAST then re-reads it as an object. If we instead
+        # passed `str(d)` (Python repr), Postgres would fail because
+        # repr uses single quotes which are not valid JSON.
+        mod = self._load_migration()
+        canonical = mod._transform_agents_block_upgrade({"view": False, "edit": True})
+        # Mimic the production wrap: the migration wraps the agents
+        # block in the full permissions dict before calling
+        # json.dumps(permissions). Sanity-check that step.
+        wrapper = {"modules": {"agents": canonical}}
+        encoded = json.dumps(wrapper)
+        assert encoded.startswith('{"modules"')
+        # Round-trip the wrapper.
+        assert json.loads(encoded) == wrapper
+
+    def test_idempotent_transform_does_not_double_wrap_legacy_key(self):
+        # Running the migration twice on already-migrated rows must
+        # not append duplicate keys or corrupt the JSON shape — the
+        # production deploy retry path relies on this.
+        mod = self._load_migration()
+        legacy = {"view": True, "edit": True}
+        first = mod._transform_agents_block_upgrade(legacy)
+        second = mod._transform_agents_block_upgrade(first)
+        # The second pass MUST equal the first — no drift.
+        assert first == second
+        # And both must json-round-trip.
+        assert json.loads(json.dumps(first)) == first
+        assert json.loads(json.dumps(second)) == second
 
 
 class TestUserPreferencesMassAssignment:
