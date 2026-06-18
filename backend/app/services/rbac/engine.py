@@ -168,11 +168,31 @@ class PermissionEngine:
 
         return None
 
+    # Module/action aliases that survive in PermissionSet rows after a
+    # rename. The location-agent-permissions migration backfills
+    # `agents.edit` → `agents.update`, but pre-migration rows on a
+    # rolling-deploy cluster may still toggle the old key. Aliases
+    # ensure both keys grant equivalent access during the cutover.
+    # Format: alias_name → canonical_name (same module).
+    _MODULE_ACTION_ALIASES: dict[str, dict[str, str]] = {
+        "agents": {"edit": "update", "update": "edit"},
+    }
+
     @staticmethod
     def _check(permissions: dict, module: str, action: str) -> bool:
         modules = permissions.get("modules", {})
         module_perms = modules.get(module, {})
-        return bool(module_perms.get(action, False))
+        if bool(module_perms.get(action, False)):
+            return True
+        # Alias fallback: a row that still carries the legacy key grants
+        # the canonical action (and vice versa) until the cluster fully
+        # migrates. The alias map is module-scoped so an unrelated module
+        # cannot ever leak through.
+        aliases = PermissionEngine._MODULE_ACTION_ALIASES.get(module, {})
+        alias = aliases.get(action)
+        if alias and bool(module_perms.get(alias, False)):
+            return True
+        return False
 
     @staticmethod
     def _all_true() -> dict:

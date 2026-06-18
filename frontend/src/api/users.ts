@@ -52,4 +52,19 @@ export const usersApi = {
     client.patch<{ allowed_ips: string | null }>(
       '/users/me/login-ip', { allowed_ips }
     ).then((r) => r.data),
+
+  // User preferences (location-agent-permissions work). The backend
+  // endpoint is mass-assignment-safe — only `preferred_language` is
+  // accepted; any other key is rejected with a 422. NULL clears the
+  // preference and engages the runtime fallback chain (organization
+  // default → browser Accept-Language → app default 'tr').
+  getMyPreferences: () =>
+    client.get<{ preferred_language: string | null }>(
+      '/users/me/preferences'
+    ).then((r) => r.data),
+
+  updateMyPreferences: (preferred_language: string | null) =>
+    client.patch<{ preferred_language: string | null }>(
+      '/users/me/preferences', { preferred_language }
+    ).then((r) => r.data),
 }

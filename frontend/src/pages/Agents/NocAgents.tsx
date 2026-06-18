@@ -11,6 +11,7 @@ import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
 import { useTheme } from '@/contexts/ThemeContext'
+import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
 import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import AgentDetailModal from './AgentDetailModal'
@@ -32,6 +33,11 @@ export default function NocAgents() {
   const qc = useQueryClient()
   const { message } = App.useApp()
   const { locations, activeLocationId } = useSite()
+  // Five-verb agent permission catalogue (location-agent-permissions
+  // work). The backend gate is authoritative; these flags only hide /
+  // disable the UI surface that would otherwise round-trip to a 403.
+  const canInstall = useAuthStore((s) => s.can('agents', 'install'))
+  const canRemove = useAuthStore((s) => s.can('agents', 'remove'))
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newLoc, setNewLoc] = useState<number | undefined>(undefined)
@@ -129,7 +135,14 @@ export default function NocAgents() {
         <div className="nm-page-actions">
           <button className="nm-btn ghost">Gecikme Haritası</button>
           <button className="nm-btn ghost">Vault Yenile</button>
-          <button className="nm-btn primary" onClick={() => setCreateOpen(true)}>+ Ajan Kur</button>
+          {canInstall && (
+            <button
+              className="nm-btn primary"
+              onClick={() => setCreateOpen(true)}
+              data-testid="agent-install-button"
+              data-perm="agents.install"
+            >+ Ajan Kur</button>
+          )}
         </div>
       </div>
 
@@ -186,13 +199,16 @@ export default function NocAgents() {
                     {a.version && <span className="nm-pill mono" style={{ fontSize: 9.5 }}>{a.version}</span>}
                   </h3>
                   <span onClick={(e) => e.stopPropagation()} style={{ marginLeft: 'auto' }}>
+                    {canRemove && (
                     <Popconfirm title="Ajan silinsin mi?" description="Agent ve atamaları kaldırılır."
                       okText="Sil" cancelText="İptal" okButtonProps={{ danger: true }}
                       onConfirm={() => delMut.mutate(a.id)}>
-                      <span className="nm-card-x" style={{ opacity: 1 }} title="Sil">
+                      <span className="nm-card-x" style={{ opacity: 1 }} title="Sil"
+                        data-testid="agent-remove-button" data-perm="agents.remove">
                         <DeleteOutlined />
                       </span>
                     </Popconfirm>
+                    )}
                   </span>
                 </div>
                 <div style={{ padding: '6px 18px 18px' }}>
@@ -272,6 +288,15 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
   const [copiedCmd, setCopiedCmd] = useState(false)
   const [serverUrl, setServerUrl] = useState(window.location.origin)
   const { t } = useTranslation()
+  // Installer-download permission gate. A user with `agents.install`
+  // can create the agent record (CreatedModal opens only after a
+  // successful enrollment), but they may NOT also be granted
+  // `agents.download_installer` — e.g. an org_admin lets a
+  // helpdesk role enroll and hands the installer download to a
+  // field tech with the download verb. Without the verb the Linux
+  // download button stays in the DOM (so the user sees what they
+  // do not have) but is hard-disabled.
+  const canDownloadInstaller = useAuthStore((s) => s.can('agents', 'download_installer'))
 
   const copy = (text: string, setter: (v: boolean) => void) => {
     navigator.clipboard.writeText(text); setter(true); setTimeout(() => setter(false), 2000)
@@ -438,9 +463,12 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
           ) : (
             <Button type="default" icon={<DownloadOutlined />} block
               loading={downloading}
-              onClick={handleDownload}
+              disabled={!canDownloadInstaller}
+              aria-disabled={!canDownloadInstaller || undefined}
+              onClick={canDownloadInstaller ? handleDownload : undefined}
               data-testid="installer-download-button"
-              data-platform="linux">
+              data-platform="linux"
+              data-perm="agents.download_installer">
               {t('agents.download_linux')}
             </Button>
           )}

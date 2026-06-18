@@ -267,6 +267,21 @@ function ThemedApp() {
     }).catch(() => {/* silently ignore — server unreachable */})
   }, [token, hydrated]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // location-agent-permissions / user-language-profile —
+  // Apply server-persisted user preferred_language as early as the
+  // store has hydrated AND a user object is available. Without this
+  // hook, a fresh login on a new device would surface the localStorage
+  // value (or the 'tr' default) until the user manually re-picks the
+  // language. The change fires through i18next so all already-mounted
+  // components re-render via react-i18next's subscription.
+  useEffect(() => {
+    if (!hydrated || !user) return
+    const preferred = (user as { preferred_language?: string | null }).preferred_language
+    if (preferred && preferred !== i18n.language) {
+      i18n.changeLanguage(preferred)
+    }
+  }, [hydrated, user]) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     const handler = (lng: string) => {
       setAntdLocale(getAntdLocale(lng))

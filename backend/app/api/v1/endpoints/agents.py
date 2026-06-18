@@ -196,6 +196,33 @@ async def _get_agent_scoped(agent_id: str, db: AsyncSession) -> Agent:
     return agent
 
 
+def _require_agent_perm(user, *verbs: str) -> None:
+    """Raise 403 unless the user has ANY of the listed permissions.
+
+    Agent endpoints historically borrowed `device:*` verbs from the
+    flat device-permission catalogue. The location-agent-permissions
+    work introduces a dedicated five-verb `agents:*` catalogue
+    (view / install / download_installer / update / remove). Both
+    verb families stay valid on these endpoints during the rolling
+    cutover so an admin who has only granted the old verbs to a role
+    keeps it working without re-running the migration backfill.
+
+    Pass the canonical (new) verb first so an audit-grep finds the
+    intent at the call site; the alternates after it are the
+    back-compat aliases.
+
+    Each verb is matched via `user.has_permission`, which itself
+    honours the `AGENT_PERMISSION_ALIASES` map in `app.models.user`
+    so the new and legacy spellings are interchangeable.
+    """
+    if not user:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    for verb in verbs:
+        if user.has_permission(verb):
+            return
+    raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+
 def _assert_agent_device_scope(agent: Agent, device, operation: str) -> None:
     """Faz 8 Phase D — reject an agent operation whose target device is
     outside the agent's organization+location sandbox.
@@ -327,8 +354,7 @@ async def restart_agent(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:update"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_agent_perm(current_user, "agents:update", "device:update")
 
     agent = await _get_agent_scoped(agent_id, db)
 
@@ -349,8 +375,7 @@ async def create_agent(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:create"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_agent_perm(current_user, "agents:install", "device:create")
 
     # Faz 7 — bind the agent to exactly one organization + location. The
     # location is resolved here and its org is authoritative; a cross-org
@@ -419,8 +444,7 @@ async def delete_agent(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("device:delete"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_agent_perm(current_user, "agents:remove", "device:delete")
     agent = await _get_agent_scoped(agent_id, db)
     # Faz 7 — soft delete: deactivate + stamp deleted_at (RLS hides it).
     # archived_visible() keeps the post-update row valid mid-statement.
@@ -445,8 +469,7 @@ async def update_agent_security(
     current_user: CurrentUser = None,
 ):
     """Update command mode, allowed commands and allowed source IPs for an agent."""
-    if not current_user.has_permission("device:update"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_agent_perm(current_user, "agents:update", "device:update")
 
     agent = await _get_agent_scoped(agent_id, db)
 
@@ -484,8 +507,7 @@ async def rotate_agent_key(
     current_user: CurrentUser = None,
 ):
     """Rotate agent key. New key returned once; agent will apply it if online."""
-    if not current_user.has_permission("device:update"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_agent_perm(current_user, "agents:update", "device:update")
 
     agent = await _get_agent_scoped(agent_id, db)
 
@@ -516,8 +538,7 @@ async def unlock_agent(
     current_user: CurrentUser = None,
 ):
     """Clear failed_auth_count to unlock a brute-force locked agent."""
-    if not current_user.has_permission("device:update"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    _require_agent_perm(current_user, "agents:update", "device:update")
 
     agent = await _get_agent_scoped(agent_id, db)
 

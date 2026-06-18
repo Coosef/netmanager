@@ -11,15 +11,17 @@
 //   3) Şifre tab     — current + new + confirm (POST /users/me/change-password)
 //   4) MFA tab       — mevcut <MfaTab /> reuse (TOTP enroll/disable/regenerate)
 
-import { useState } from 'react'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { Alert, Button, Card, Form, Input, Space, Tabs, Tag, Tooltip, Typography, App } from 'antd'
+import { useEffect, useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Alert, Button, Card, Form, Input, Radio, Space, Tabs, Tag, Tooltip, Typography, App } from 'antd'
 import {
   UserOutlined, MailOutlined, EnvironmentOutlined, ApartmentOutlined,
   SafetyOutlined, KeyOutlined, LockOutlined, CrownOutlined,
   GlobalOutlined, CheckCircleOutlined, WarningOutlined,
+  TranslationOutlined,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import { useTranslation } from 'react-i18next'
 import { authApi } from '@/api/auth'
 import { usersApi } from '@/api/users'
 import MfaTab from '@/pages/Settings/MfaTab'
@@ -372,6 +374,141 @@ function IpAllowlistTab() {
 }
 
 
+// ── Sub: Language tab ────────────────────────────────────────────────────────
+//
+// System Language / Sistem Dili — server-persisted user-preferred locale.
+// Lives next to Password / MFA / IP Allowlist because it is, like those, a
+// per-user preference that has to survive across devices.
+//
+// The runtime fallback chain (no preference → org default → browser →
+// 'tr') is documented at backend `app.models.user.User.preferred_language`.
+// This tab only handles the explicit-preference layer.
+
+const LANGUAGE_OPTIONS: { code: string; label: string; native: string }[] = [
+  { code: 'tr', label: 'Türkçe',  native: 'Türkçe'   },
+  { code: 'en', label: 'English', native: 'English'  },
+  { code: 'de', label: 'Deutsch', native: 'Deutsch'  },
+  { code: 'ru', label: 'Русский', native: 'Русский'  },
+]
+
+function LanguageTab() {
+  const { t, i18n } = useTranslation()
+  const queryClient = useQueryClient()
+  const { message } = App.useApp()
+
+  // Initial fetch — server-side preference is the source of truth.
+  const { data: prefs, isLoading } = useQuery({
+    queryKey: ['users-me-preferences'],
+    queryFn: () => usersApi.getMyPreferences(),
+  })
+
+  // Local working copy so we can rollback on backend failure without
+  // touching the global runtime.
+  const [draft, setDraft] = useState<string | null>(null)
+  useEffect(() => {
+    if (prefs !== undefined) setDraft(prefs.preferred_language ?? i18n.language)
+  }, [prefs, i18n.language])
+
+  const previousRuntime = i18n.language
+
+  const updateMut = useMutation({
+    mutationFn: (code: string | null) => usersApi.updateMyPreferences(code),
+    onSuccess: (saved) => {
+      const code = saved.preferred_language
+      // Apply runtime change ONLY after the backend persists. If the
+      // backend response carries NULL (cleared preference), keep the
+      // current runtime — the next page load picks up the fallback
+      // chain.
+      if (code) {
+        i18n.changeLanguage(code)
+      }
+      queryClient.invalidateQueries({ queryKey: ['users-me-preferences'] })
+      message.success(t('profile.language_save_success', 'Dil tercihiniz kaydedildi.'))
+    },
+    onError: () => {
+      // Backend rejected the change — revert the runtime so the UI
+      // does not show a language the server doesn't agree with.
+      i18n.changeLanguage(previousRuntime)
+      setDraft(prefs?.preferred_language ?? previousRuntime)
+      message.error(t('profile.language_save_failed', 'Dil tercihi kaydedilemedi. Lütfen tekrar deneyin.'))
+    },
+  })
+
+  const dirty = draft !== null && draft !== (prefs?.preferred_language ?? previousRuntime)
+
+  return (
+    <Space direction="vertical" size={12} style={{ width: '100%' }} data-testid="profile-language-tab">
+      <div>
+        <Title level={5} style={{ marginBottom: 4 }}>
+          <TranslationOutlined style={{ marginRight: 8 }} />
+          {t('profile.language_title', 'Sistem Dili')}
+        </Title>
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {t(
+            'profile.language_helper',
+            'Menüler ve sistem metinleri seçtiğiniz dilde gösterilir. Tercih hesabınıza bağlanır ve diğer cihazlarda da geçerli olur.',
+          )}
+        </Text>
+      </div>
+
+      <Radio.Group
+        value={draft ?? i18n.language}
+        onChange={(e) => setDraft(e.target.value)}
+        disabled={isLoading || updateMut.isPending}
+        data-testid="profile-language-radio-group"
+      >
+        <Space direction="vertical">
+          {LANGUAGE_OPTIONS.map((opt) => (
+            <Radio key={opt.code} value={opt.code} data-testid={`profile-language-${opt.code}`}>
+              <Space>
+                <span>{opt.native}</span>
+                <Text type="secondary" style={{ fontSize: 11 }}>({opt.code})</Text>
+              </Space>
+            </Radio>
+          ))}
+        </Space>
+      </Radio.Group>
+
+      <Space>
+        <Button
+          type="primary"
+          loading={updateMut.isPending}
+          disabled={!dirty}
+          onClick={() => updateMut.mutate(draft)}
+          data-testid="profile-language-save"
+        >
+          {t('common.save', 'Kaydet')}
+        </Button>
+        {prefs?.preferred_language && (
+          <Button
+            onClick={() => {
+              setDraft(null)
+              updateMut.mutate(null)
+            }}
+            disabled={updateMut.isPending}
+            data-testid="profile-language-clear"
+          >
+            {t('profile.language_clear', 'Tercihi temizle')}
+          </Button>
+        )}
+      </Space>
+
+      {prefs?.preferred_language && (
+        <Alert
+          type="info"
+          showIcon
+          message={t(
+            'profile.language_current_persisted',
+            'Sunucuda kayıtlı tercih: {{code}}',
+            { code: prefs.preferred_language },
+          )}
+        />
+      )}
+    </Space>
+  )
+}
+
+
 // ── Main page ───────────────────────────────────────────────────────────────
 export default function ProfilePage() {
   return (
@@ -412,6 +549,11 @@ export default function ProfilePage() {
                 key: 'ip-allowlist',
                 label: <Space><GlobalOutlined />IP Allowlist</Space>,
                 children: <div style={{ padding: 16 }}><IpAllowlistTab /></div>,
+              },
+              {
+                key: 'language',
+                label: <Space><TranslationOutlined />Sistem Dili</Space>,
+                children: <div style={{ padding: 16 }}><LanguageTab /></div>,
               },
             ]}
           />

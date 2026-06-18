@@ -25,6 +25,7 @@ import {
   type SnmpGetResult, type SnmpWalkResult,
 } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
+import { useAuthStore } from '@/store/auth'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -65,6 +66,12 @@ function MetricBar({ label, value, color }: { label: string; value: number; colo
 // ── SecurityTab ───────────────────────────────────────────────────────────────
 
 function SecurityTab({ agent }: { agent: Agent; onClose: () => void }) {
+  // location-agent-permissions: hard-disable every mutating control in
+  // the SecurityTab when the caller lacks `agents.update`. The backend
+  // gate (_require_agent_perm in agents.py) is authoritative; this is
+  // the UX layer so a viewer / install-only operator does not click a
+  // button only to get bounced with a 403.
+  const canUpdate = useAuthStore((s) => s.can('agents', 'update'))
   const { isDark } = useTheme()
   const C = mkC(isDark)
   const { message } = App.useApp()
@@ -150,8 +157,10 @@ function SecurityTab({ agent }: { agent: Agent; onClose: () => void }) {
           message="Agent Kilitli"
           description={`${agent.failed_auth_count} başarısız giriş denemesi nedeniyle bağlantı engelleniyor.`}
           action={
-            <Popconfirm title="Agent kilidini aç?" onConfirm={() => unlockMutation.mutate()} okText="Evet" cancelText="İptal">
-              <Button size="small" icon={<UnlockOutlined />} loading={unlockMutation.isPending}>Kilidi Aç</Button>
+            <Popconfirm title="Agent kilidini aç?" onConfirm={() => unlockMutation.mutate()} okText="Evet" cancelText="İptal" disabled={!canUpdate}>
+              <Button size="small" icon={<UnlockOutlined />} loading={unlockMutation.isPending}
+                disabled={!canUpdate} aria-disabled={!canUpdate || undefined}
+                data-testid="agent-unlock-button" data-perm="agents.update">Kilidi Aç</Button>
             </Popconfirm>
           }
         />
@@ -160,8 +169,10 @@ function SecurityTab({ agent }: { agent: Agent; onClose: () => void }) {
         <Alert type="warning" showIcon
           message={`${agent.failed_auth_count} başarısız giriş denemesi (10'da kilitlenir)`}
           action={
-            <Popconfirm title="Sayacı sıfırla?" onConfirm={() => unlockMutation.mutate()} okText="Evet" cancelText="İptal">
-              <Button size="small">Sıfırla</Button>
+            <Popconfirm title="Sayacı sıfırla?" onConfirm={() => unlockMutation.mutate()} okText="Evet" cancelText="İptal" disabled={!canUpdate}>
+              <Button size="small"
+                disabled={!canUpdate} aria-disabled={!canUpdate || undefined}
+                data-testid="agent-reset-failed-count" data-perm="agents.update">Sıfırla</Button>
             </Popconfirm>
           }
         />
@@ -253,8 +264,12 @@ function SecurityTab({ agent }: { agent: Agent; onClose: () => void }) {
         type="primary"
         icon={<SafetyOutlined />}
         loading={securityMutation.isPending}
-        onClick={() => securityMutation.mutate({ command_mode: mode, allowed_commands: commands, allowed_ips: allowedIps })}
+        disabled={!canUpdate}
+        aria-disabled={!canUpdate || undefined}
+        onClick={canUpdate ? () => securityMutation.mutate({ command_mode: mode, allowed_commands: commands, allowed_ips: allowedIps }) : undefined}
         style={{ background: '#8b5cf6', borderColor: '#8b5cf6' }}
+        data-testid="agent-save-security-button"
+        data-perm="agents.update"
       >
         Güvenlik Politikasını Kaydet
       </Button>
@@ -278,8 +293,11 @@ function SecurityTab({ agent }: { agent: Agent; onClose: () => void }) {
           okText="Evet, Rotasyon Yap"
           cancelText="İptal"
           okButtonProps={{ danger: true }}
+          disabled={!canUpdate}
         >
-          <Button danger icon={<KeyOutlined />} loading={rotateMutation.isPending}>
+          <Button danger icon={<KeyOutlined />} loading={rotateMutation.isPending}
+            disabled={!canUpdate} aria-disabled={!canUpdate || undefined}
+            data-testid="agent-rotate-key-button" data-perm="agents.update">
             Yeni Key Üret
           </Button>
         </Popconfirm>
