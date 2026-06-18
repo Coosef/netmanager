@@ -1574,7 +1574,11 @@
     "linux_download_failed": "Die Linux-Installationsdatei konnte nicht heruntergeladen werden. Bitte erneut versuchen.",
     "windows_coming_soon_badge": "Demnächst",
     "windows_coming_soon_message": "Der Windows-Agent-Installer befindet sich derzeit in der Validierungsphase. Sobald er bereit ist, kann er auf dieser Seite heruntergeladen werden.",
-    "windows_coming_soon_tooltip": "Noch nicht verfügbar"
+    "windows_coming_soon_tooltip": "Noch nicht verfügbar",
+    "create_tenant_required_title": "Bitte zuerst einen Mandanten wählen",
+    "create_tenant_required_desc": "Bitte wählen Sie einen Mandanten, bevor Sie einen Agenten installieren. Als Plattform-Administrator wählen Sie zuerst den Mandanten-Kontext aus, in dem Sie arbeiten möchten, und fahren Sie dann mit der Installation des Agenten fort.",
+    "create_no_assigned_locations_title": "Kein zugewiesener Standort",
+    "create_no_assigned_locations_desc": "Ihrem Konto ist kein Standort zugewiesen. Bevor Sie einen Agenten installieren können, müssen Sie einem Standort zugewiesen werden — bitte wenden Sie sich an Ihren Organisations-Administrator."
   },
   "users": {
     "title": "Benutzer",
@@ -2804,7 +2808,13 @@
     "no_access_tooltip": "Ihrem Konto ist kein Standort zugewiesen",
     "no_access_tag": "Kein Standort",
     "none_defined": "Kein Standort definiert",
-    "all_locations": "Alle Standorte"
+    "all_locations": "Alle Standorte",
+    "loading": "Standorte werden geladen…",
+    "error_tag": "Standorte konnten nicht geladen werden",
+    "error_tooltip": "Die Standortliste konnte nicht vom Server abgerufen werden. Bitte laden Sie die Seite neu oder versuchen Sie es erneut.",
+    "tenant_required_tag": "Bitte zuerst einen Mandanten wählen",
+    "tenant_required_tooltip": "Als Plattform-Administrator müssen Sie zuerst einen Mandanten-Kontext auswählen, bevor Daten angezeigt werden.",
+    "no_assigned_tag": "Kein zugewiesener Standort"
   },
   "error_boundary": {
     "title": "Ein unerwarteter Fehler ist aufgetreten",

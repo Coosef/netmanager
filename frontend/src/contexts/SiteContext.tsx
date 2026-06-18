@@ -67,6 +67,17 @@ interface SiteCtx {
   hasLocationAccess: boolean
   /** super-admin / org-admin — operates across the whole organization. */
   isOrgWide: boolean
+  /** PR #96 — header / agent-modal role-aware UX. True when the active
+   * user is a platform super-admin. Distinct from `isOrgWide` because
+   * an org_admin is org-wide but is NEVER a tenant chooser. */
+  isSuperAdmin: boolean
+  /** PR #96 — `null` for a super-admin who has not yet picked a tenant
+   * to operate inside. For every other role this is the user's home
+   * organization stamped by the auth token, and is always populated.
+   * LocationSelector + the agent-create modal use the `(isSuperAdmin
+   * && organization === null)` pair to surface the "Önce firma seçin
+   * / Select a tenant first" guard. */
+  organization: { id: number; name: string; slug: string } | null
   /** T10 — org plan'ındaki feature durumları {key: bool}. Eksik anahtar
    * = açık (opt-out). Nav filtresi bunu okur. */
   features: Record<string, boolean>
@@ -98,6 +109,8 @@ const SiteContext = createContext<SiteCtx>({
   allowedLocationIds: [],
   hasLocationAccess: true,
   isOrgWide: false,
+  isSuperAdmin: false,
+  organization: null,
   features: {},
   sitesLoading: false,
   sitesError: false,
@@ -157,6 +170,14 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const allowedLocationIds: number[] = ctx?.allowed_location_ids ?? []
   const hasLocationAccess: boolean = ctx?.has_location_access ?? true
   const isOrgWide: boolean = ctx?.is_org_wide ?? false
+  // PR #96 — surface the role identity + tenant context the backend
+  // already returns in CurrentContext so the header and the agent-
+  // create modal can branch on it. Pre-hydration / pre-fetch both
+  // resolve to `false` / `null` — the safe-by-default value that
+  // matches the "still resolving" branch in LocationSelector.
+  const isSuperAdmin: boolean = ctx?.is_super_admin ?? false
+  const organization: { id: number; name: string; slug: string } | null =
+    ctx?.organization ?? null
   const features: Record<string, boolean> = ctx?.features ?? {}
   const sites: string[] = locations.map((l) => l.name)
 
@@ -234,6 +255,8 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         allowedLocationIds,
         hasLocationAccess,
         isOrgWide,
+        isSuperAdmin,
+        organization,
         features,
         sitesLoading,
         sitesError,
