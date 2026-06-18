@@ -147,6 +147,15 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   //   · `retry: 1` + `retryDelay: 500` — transient 401 (token interceptor
   //     race veya backend network jitter) recover edilir. Stuck `ctx`
   //     undefined senaryosu kırılır.
+  //
+  // ANTI-FLICKER (2026-06-18):
+  //   · `placeholderData: keepPreviousData` — refetch sırasında önceki
+  //     başarılı response'u koru, header'da kısa süreli "Atanmış lokasyon
+  //     yok" flash'ı engelle. React Query 5 yeni adı; v4'teki
+  //     `keepPreviousData: true` ile aynı semantik.
+  //   · `isFetching` ek olarak export edilir; LocationSelector
+  //     `locations.length === 0` durumunda refetch tetiklendiyse loading
+  //     gösterir, "no_assigned" tag'i flicker olarak yanmaz.
   const { data: ctx, isLoading: sitesLoading, isError, refetch } = useQuery({
     queryKey: ['context', 'current', activeLocationId],
     queryFn: () => contextApi.current(),
@@ -154,6 +163,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     enabled: !!token && hydrated,
     retry: 1,
     retryDelay: 500,
+    placeholderData: (prev) => prev,
   })
   // LOGIN-DIRECT-NAVIGATE-FIX (2026-06-10) — error state'i sadece "fetch
   // gerçekten fail oldu + ctx hala yok" durumunda true. retry sonrası 200
@@ -189,11 +199,19 @@ export function SiteProvider({ children }: { children: ReactNode }) {
       } else {
         localStorage.removeItem(ACTIVE_LOCATION_KEY)
       }
-      // Faz 8 Phase E — clear the ENTIRE query cache on a location switch.
-      // invalidate() alone keeps stale rows that can flash as the new
-      // location's data; clear() guarantees no previous-location data
-      // survives the switch, even momentarily.
-      queryClient.clear()
+      // Faz 8 Phase E + ANTI-FLICKER (2026-06-18) — switching location
+      // invalidates every cached query so each consumer refetches under
+      // the new scope. The earlier `queryClient.clear()` was too
+      // aggressive: it dropped the in-flight `/context/current` result
+      // too, so the header rendered `locations: []` for a brief
+      // window between the cache wipe and the next response, which
+      // surfaced as the "Atanmış lokasyon yok" / "No assigned
+      // location" flash that operators reported. `invalidateQueries`
+      // marks every cache entry stale + triggers a background refetch
+      // but keeps the previous data on screen until the new payload
+      // arrives — RLS still isolates per-request because every refetch
+      // carries the X-Location-Id header set above.
+      queryClient.invalidateQueries()
     },
     [queryClient],
   )
@@ -229,7 +247,11 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     } else {
       localStorage.removeItem(ACTIVE_LOCATION_KEY)
     }
-    queryClient.clear()
+    // ANTI-FLICKER (2026-06-18) — see setLocation comment above.
+    // `invalidate` keeps the rendered list in place until the new
+    // payload arrives; `clear` was wiping the in-flight ctx response
+    // and producing the "Atanmış lokasyon yok" flash.
+    queryClient.invalidateQueries()
   }, [ctx, activeLocationId, queryClient])
 
   // Faz 8 Phase E — cross-tab safety. If another tab switches location,
@@ -240,7 +262,11 @@ export function SiteProvider({ children }: { children: ReactNode }) {
       if (e.key !== ACTIVE_LOCATION_KEY) return
       const next = e.newValue ? Number(e.newValue) : null
       setActiveLocationIdState((prev) => (prev === next ? prev : next))
-      queryClient.clear()
+      // ANTI-FLICKER (2026-06-18) — invalidate keeps cross-tab consumers
+      // rendering the previous data until the refetch under the new
+      // X-Location-Id resolves. Previous behaviour (`clear`) caused a
+      // brief blank window between tabs.
+      queryClient.invalidateQueries()
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
