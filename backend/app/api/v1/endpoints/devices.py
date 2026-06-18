@@ -8,6 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -426,9 +427,41 @@ async def create_device(
     # per-org quota is enforced below via enforce_org_can_create
     # (Faz 8 Phase H), which is the single source of truth.
 
-    existing = await db.execute(select(Device).where(Device.ip_address == payload.ip_address))
+    # Phase E + post-deploy 2026-06-18 — the duplicate-IP guard must
+    # scope to the (org_id, location_id) tuple the new device will land
+    # in, because the underlying DB constraint is `uq_devices_org_loc_ip`
+    # (Faz 8 Phase B/G). The earlier check used a global `ip_address`
+    # match which both rejected legitimate same-IP devices in other
+    # locations AND missed soft-deleted rows in the SAME location —
+    # producing a generic 500 IntegrityError when the unique constraint
+    # tripped at commit. Keep the active-context resolution above
+    # untouched so the (org_id, location_id) we filter by is the SAME
+    # tuple the new row will land in.
+    # NB: the resolved org_id / location_id come from the request
+    # context computed a few lines below; we re-derive them here so the
+    # check runs BEFORE we spend cycles building the Device row, and so
+    # the error message can name the right location.
+    if ctx is None or ctx.organization_id is None:
+        raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
+    _check_org_id = ctx.organization_id
+    _check_location_id = require_active_location(ctx)
+    existing = await db.execute(
+        select(Device).where(
+            Device.organization_id == _check_org_id,
+            Device.location_id == _check_location_id,
+            Device.ip_address == payload.ip_address,
+            Device.deleted_at.is_(None),
+        )
+    )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="Device with this IP already exists")
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Bu lokasyonda {payload.ip_address} IP adresine sahip bir "
+                f"cihaz zaten kayıtlı. Mevcut kaydı kullanın veya farklı bir "
+                f"IP girin."
+            ),
+        )
 
     # Faz 8 phase B/G — explicit organization/location ownership. A device
     # belongs to exactly one org + one location, resolved from the
@@ -438,10 +471,8 @@ async def create_device(
     # active location is already validated against user_locations by the
     # Phase E resolver, so a device can only land in a location the user
     # may actually use — no default-org / default-location fallback.
-    if ctx is None or ctx.organization_id is None:
-        raise HTTPException(status_code=400, detail="Etkin bir organizasyon bağlamı yok")
-    org_id = ctx.organization_id
-    location_id = require_active_location(ctx)
+    org_id = _check_org_id
+    location_id = _check_location_id
 
     # Faz 8 Phase H — organization quota + lifecycle: refuse a new device
     # when the org is suspended/archived or its device quota is reached.
@@ -489,7 +520,30 @@ async def create_device(
         credential_profile_id=payload.credential_profile_id,
     )
     db.add(device)
-    await db.commit()
+    # post-deploy 2026-06-18 — defence-in-depth for the
+    # `uq_devices_org_loc_ip` unique constraint. The active-context
+    # check above filters `deleted_at IS NULL`, but the DB constraint
+    # itself is NOT partial: a SOFT-DELETED device in the same
+    # (org, location, ip) tuple still occupies the slot. Catch the
+    # IntegrityError, roll the failed transaction back, and surface a
+    # 409 with the localized message so the user knows to either
+    # restore or hard-delete the prior row instead of seeing an opaque
+    # 500. Any other IntegrityError is re-raised (would still surface
+    # as a 500, but only for genuinely unexpected constraint trips).
+    try:
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        if "uq_devices_org_loc_ip" in str(exc.orig):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Bu lokasyonda {payload.ip_address} IP adresine sahip "
+                    f"(silinmiş olabilir) bir cihaz kaydı zaten var. Önce "
+                    f"mevcut kaydı tamamen kaldırın veya farklı bir IP girin."
+                ),
+            ) from exc
+        raise
     await db.refresh(device)
     await log_action(db, current_user, "device_created", "device", device.id, device.hostname, request=request)
     return device
