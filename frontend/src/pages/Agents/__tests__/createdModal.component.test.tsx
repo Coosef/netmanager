@@ -94,19 +94,6 @@ function installFetchMock(): {
   return { calls, mock }
 }
 
-function installFailingFetch(opts: { ok?: boolean; throwOnText?: boolean } = {}) {
-  const text = vi.fn(async () => 'should-not-be-read')
-  const mock = vi.fn(async () => ({
-    ok: opts.ok ?? false,
-    status: 500,
-    text,
-    arrayBuffer: async () => new ArrayBuffer(0),
-  })) as any
-  // @ts-ignore
-  globalThis.fetch = mock as any
-  return { mock, text }
-}
-
 function installURLMock() {
   const created: string[] = []
   const revoked: string[] = []

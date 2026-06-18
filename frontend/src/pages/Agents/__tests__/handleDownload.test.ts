@@ -16,9 +16,15 @@ const SRC = readFileSync(
 )
 
 describe('NocAgents — source guards (component test is authoritative)', () => {
-  it('imports the byte-perfect helper', () => {
-    expect(SRC).toMatch(/from\s+['"]\.\/windowsInstallerDownload['"]/)
-    expect(SRC).toContain('downloadWindowsInstaller')
+  it('does NOT import or call the byte-perfect Windows helper while WINDOWS_AGENT_DEVELOPMENT_PAUSED', () => {
+    // The call site is intentionally absent so that the disabled
+    // Windows button + handleDownload early-return cannot
+    // accidentally regress into a live download. The helper itself
+    // (windowsInstallerDownload.ts) is preserved verbatim and its
+    // dedicated test file still runs — a future WINDOWS AGENT
+    // RESUME GO commit re-adds the import + call site.
+    expect(SRC).not.toMatch(/from\s+['"]\.\/windowsInstallerDownload['"]/)
+    expect(SRC).not.toContain('downloadWindowsInstaller(')
   })
 
   it('only imports buildLinuxInstallCmd from installCmd (Windows builder gone)', () => {
@@ -59,16 +65,21 @@ describe('NocAgents — source guards (component test is authoritative)', () => 
     expect(SRC).toMatch(/platform === 'linux'\s*&&\s*installCmd/)
   })
 
-  it('uses i18n keys for platform-aware error messages', () => {
-    // Authoritative hint is the single Alert in the JSX
-    // (`agents.windows_hint` / `agents.linux_hint`). The previously
-    // duplicate `agents.windows_download_primary_hint` reference is
-    // gone now that the hint lives in only one place.
+  it('uses i18n keys for the active Linux failure + coming-soon Windows hint', () => {
+    // The duplicate "primary hint" key was consolidated away. The
+    // Windows failure keys are NOT referenced from NocAgents.tsx
+    // while WINDOWS_AGENT_DEVELOPMENT_PAUSED is in effect (no
+    // Windows download => no Windows failure path) — but the i18n
+    // keys themselves are preserved in the locale files for a
+    // future resume.
     expect(SRC).not.toContain("t('agents.windows_download_primary_hint')")
-    // Each platform now has its own download-failure key.
-    expect(SRC).toContain("t('agents.windows_download_failed')")
-    expect(SRC).toContain("t('agents.windows_validation_failed')")
+    expect(SRC).not.toContain("t('agents.windows_download_failed')")
+    expect(SRC).not.toContain("t('agents.windows_validation_failed')")
+    // Linux is the only active platform; its failure key still drives the alert.
     expect(SRC).toContain("t('agents.linux_download_failed')")
+    // The Windows path now points at the coming-soon copy instead.
+    expect(SRC).toContain("t('agents.windows_coming_soon_message')")
+    expect(SRC).toContain("t('agents.windows_coming_soon_tooltip')")
   })
 
   it('selects the failure key based on the active platform', () => {

@@ -15,7 +15,11 @@ import { useTranslation } from 'react-i18next'
 import { RobotOutlined, CopyOutlined, ConsoleSqlOutlined, WindowsOutlined, DownloadOutlined, DeleteOutlined } from '@ant-design/icons'
 import AgentDetailModal from './AgentDetailModal'
 import { buildLinuxInstallCmd } from './installCmd'
-import { downloadWindowsInstaller } from './windowsInstallerDownload'
+// WINDOWS_AGENT_DEVELOPMENT_PAUSED: the byte-perfect Windows helper
+// (downloadWindowsInstaller) is preserved verbatim at ./windowsInstallerDownload
+// and its dedicated tests still run; only the call site in CreatedModal
+// is gone while the installer is under validation. A future WINDOWS
+// AGENT RESUME GO commit re-adds the import + the Windows download branch.
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -307,45 +311,23 @@ export function CreatedModal({ agent, onClose }: { agent: Agent & { agent_key: s
     downloadingRef.current = true
     setDownloading(true)
     try {
-      if (platform === 'windows') {
-        // WIN-FRONTEND: byte-perfect download. The helper:
-        //  · uses res.arrayBuffer() and builds the Blob from the
-        //    ORIGINAL buffer (no text() / re-encode)
-        //  · validates a temporary decoded copy
-        //  · sanitises the filename so traversal characters cannot
-        //    leak through agent.id
-        //  · never reads response body on HTTP failure (no key leak)
-        // NOTE: unreachable while WINDOWS_AGENT_DEVELOPMENT_PAUSED
-        // is in effect. The helper code is preserved verbatim so a
-        // future resume needs no code surgery here — only flipping
-        // the early-return above + restoring the active Button.
-        const url = `/api/v1/agents/${agent.id}/download/windows${
-          base ? `?server_url=${encodeURIComponent(base)}` : ''
-        }`
-        await downloadWindowsInstaller({
-          agentId: agent.id,
-          agentKey: agent.agent_key,
-          url,
-        })
-      } else {
-        // Linux: mevcut downloadInstallerFile davranışı korundu.
-        await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
-      }
-    } catch (e: any) {
-      // Generic, platform-aware user-facing message. The error tag
-      // never carries the agent key or the backend response body.
-      // The Linux failure path previously surfaced the Windows
-      // download/validation strings; each platform now has its own
-      // i18n key.
-      const tag = e?.kind ?? e?.message
-      const friendly =
-        platform === 'windows'
-          ? tag === 'validation'
-            ? t('agents.windows_validation_failed')
-            : t('agents.windows_download_failed')
-          : t('agents.linux_download_failed')
+      // WINDOWS_AGENT_DEVELOPMENT_PAUSED: the Windows branch
+      // (call to downloadWindowsInstaller, platform-aware error
+      // mapping) is removed because the early-return above makes
+      // it unreachable and TypeScript's strict noUnusedLocals
+      // refuses dead code. A future WINDOWS AGENT RESUME GO commit
+      // restores it; the byte-perfect helper itself
+      // (windowsInstallerDownload.ts) is preserved verbatim along
+      // with its dedicated tests, so the resume needs no surgery
+      // on the helper module.
+      await agentsApi.downloadInstallerFile(agent.id, agent.agent_key, platform, base)
+    } catch {
+      // Linux failure surfaces the Linux-specific i18n key. The
+      // error object is intentionally ignored so its message
+      // (which may carry response body fragments) can never reach
+      // the alert. The agent key never enters the catch block.
       // eslint-disable-next-line no-alert
-      alert(friendly)
+      alert(t('agents.linux_download_failed'))
     } finally {
       setDownloading(false)
       downloadingRef.current = false
