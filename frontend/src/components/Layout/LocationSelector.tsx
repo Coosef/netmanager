@@ -111,10 +111,25 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
     />
   )
 
-  // (5) Tenant context is set but it has no locations the caller can
-  // reach. Distinct from (4): (4) is "your account is unassigned",
-  // (5) is "the tenant has nothing to show you yet".
+  // (5) Tenant context is set but no locations come back from
+  // /context/current. Distinct from (4): (4) is "your account is
+  // unassigned", (5) is "the tenant has nothing to show you yet".
+  //
+  // Super-admins are not "assigned" to locations the way a
+  // location-scoped user is — their reach is the platform. Surfacing
+  // an alarming "No assigned location" tag to a super-admin who has
+  // just opened the panel is misleading (the screen behind it still
+  // shows real data via the unscoped `/locations/` endpoint). Fall
+  // back to the neutral "All locations" indicator for that role.
   if (locations.length === 0) {
+    if (isSuperAdmin) {
+      return (
+        <Tag color="default" style={{ margin: 0 }}
+          data-testid="location-selector-super-admin-empty">
+          {t('location_selector.all_locations')}
+        </Tag>
+      )
+    }
     return (
       <Tooltip title={t('location_selector.no_access_tooltip')}>
         <Tag icon={<EnvironmentOutlined />} color="warning" style={{ margin: 0 }}
