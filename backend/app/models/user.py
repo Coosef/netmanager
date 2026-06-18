@@ -43,6 +43,15 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         # T8.4 F2 — locations:view artık explicit izin; viewer da görür
         # (lokasyon switcher sidebar için gerekli) ama org_admin tam yönetir.
         "locations:view", "locations:edit", "locations:delete",
+        # Agent management — five-verb catalogue. Org admin holds the
+        # full set; location admin gets four (remove withheld by
+        # default, see below); viewer gets read-only. The legacy
+        # `agents:edit` grant is preserved as a back-compat verb in
+        # `has_permission()` via the alias map below so any place that
+        # still asks for "agents:edit" keeps working until the call
+        # sites migrate.
+        "agents:view", "agents:install", "agents:download_installer",
+        "agents:update", "agents:remove",
     ],
     SystemRole.LOCATION_ADMIN: [
         "device:view", "device:create", "device:edit", "device:connect",
@@ -51,6 +60,16 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         "task:view", "task:create",
         "audit:view", "monitor:view", "approval:view",
         "locations:view",  # kendi atanmış lokasyonlarını görür (scope RLS'de)
+        # Location admins manage the agents in THEIR locations; the
+        # default grant covers the four lifecycle verbs they need to
+        # bring an agent on-line and keep it healthy. `agents:remove`
+        # is withheld by default — an org_admin must grant it
+        # explicitly via a permission_set override. Rationale: removal
+        # is destructive (soft-delete + audit record) and the install
+        # field tech who toggles installer downloads shouldn't be one
+        # accidental click away from de-enrolling a production agent.
+        "agents:view", "agents:install", "agents:download_installer",
+        "agents:update",
     ],
     SystemRole.VIEWER: [
         # T8.4 F2 / CyberStrike pentest — viewer minimal grant'a indirildi.
@@ -61,10 +80,39 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, list[str]] = {
         # ile permission_set frontend görünümü hizalı.
         "device:view", "config:view", "monitor:view",
         "locations:view",  # sidebar location switcher için
+        # Viewer sees agents but cannot enroll, download, change or
+        # remove. The download verb is deliberately NOT granted to
+        # viewer — a viewer who could pull the installer file (and
+        # therefore the embedded agent_key) is functionally an
+        # enroller, which contradicts the "read-only" contract.
+        "agents:view",
     ],
     SystemRole.MEMBER: [
+        # Deprecated alias of VIEWER. Permission grants kept in sync so
+        # any row still carrying system_role='member' does not silently
+        # gain or lose access at migration time.
         "device:view", "config:view", "monitor:view", "locations:view",
+        "agents:view",
     ],
+}
+
+
+# ── Back-compat permission aliases ────────────────────────────────────────
+# A user who has been granted the legacy `agents:edit` verb (either via
+# SYSTEM_ROLE_PERMISSIONS or via an old PermissionSet row that still
+# carries {"agents": {"edit": true}}) implicitly satisfies any check for
+# `agents:update`. The aliases run in both directions inside
+# `has_permission()` so call sites can adopt the new verbs at their own
+# pace without breaking existing customers.
+#
+# The migration backfills `agents.edit=true` → `agents.update=true` on
+# PermissionSet rows so the alias is a transitional safety net, not a
+# permanent dependency. Removing the alias later requires zero call-site
+# audits because every place that checks one verb already accepts the
+# other.
+AGENT_PERMISSION_ALIASES: dict[str, list[str]] = {
+    "agents:update": ["agents:edit"],
+    "agents:edit":   ["agents:update"],
 }
 
 
@@ -134,13 +182,44 @@ class User(Base):
     # Yeni hesap / reset sonrası login'de zorla şifre değiştir
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # ── Preferred UI language (location-agent-permissions work) ──────────────
+    # Server-persisted user-preferred locale code. Allowed values match the
+    # frontend i18n locale set (currently tr, en, de, ru). NULL means
+    # "no explicit preference" and the runtime falls back through the
+    # ordered chain documented in `users.preferences` endpoint:
+    #   1. user.preferred_language
+    #   2. organization.default_language (future, not in this column today)
+    #   3. browser Accept-Language
+    #   4. application default ('tr')
+    # The column is intentionally a short VARCHAR(8) — long enough for
+    # BCP-47 regional tags like 'pt-BR' if we ever support them, but
+    # short enough that an attacker cannot stuff a payload into it.
+    # The endpoint that updates this column rejects anything outside the
+    # supported set; the column itself stays permissive so existing rows
+    # are not invalidated if the supported set later contracts.
+    preferred_language: Mapped[Optional[str]] = mapped_column(
+        String(8), nullable=True
+    )
+
     def has_permission(self, permission: str) -> bool:
         """Simple permission check driven by the user's system role.
         Returns True if the role's default grants include `permission`
         (or wildcard `*` for super-admin). For per-location / per-user
-        overrides, callers should use `PermissionEngine.resolve` directly."""
+        overrides, callers should use `PermissionEngine.resolve` directly.
+
+        Alias-aware: a role granted `agents:edit` (the legacy verb)
+        also satisfies a check for `agents:update`, and vice versa.
+        The alias map is `AGENT_PERMISSION_ALIASES` above; see its
+        docstring for the migration rationale."""
         perms = SYSTEM_ROLE_PERMISSIONS.get(self.system_role, [])
-        return "*" in perms or permission in perms
+        if "*" in perms:
+            return True
+        if permission in perms:
+            return True
+        for alias in AGENT_PERMISSION_ALIASES.get(permission, ()):
+            if alias in perms:
+                return True
+        return False
 
     @property
     def role(self) -> str:

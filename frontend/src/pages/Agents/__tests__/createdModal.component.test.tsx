@@ -39,6 +39,21 @@ vi.mock('@/api/agents', () => ({
   },
 }))
 
+// Auth store — Linux describe tests assume the user has the
+// `agents.download_installer` verb; the explicit denial path for
+// that verb is covered by its own describe later.
+vi.mock('@/store/auth', () => ({
+  useAuthStore: (selector?: (s: any) => unknown) => {
+    const fakeStore = {
+      // The component only consumes `can()` via a selector. Default to
+      // permissive so the Linux path tests measure the active-download
+      // behaviour, not the permission gate.
+      can: () => true,
+    }
+    return selector ? selector(fakeStore) : fakeStore
+  },
+}))
+
 
 // ────────────────────────────────────────────────────────────────
 // Helpers

@@ -14,6 +14,12 @@ type AuthUser = {
   role: SystemRole          // back-compat alias of system_role
   system_role: SystemRole
   org_id?: number | null
+  // location-agent-permissions / user-language-profile work —
+  // server-persisted user UI preference. NULL = no explicit pick;
+  // App.tsx applies the value to i18next on every (re-)hydration
+  // so a fresh login on a new device honours the stored language
+  // immediately instead of waiting for the user to re-pick it.
+  preferred_language?: string | null
 }
 
 interface AuthState {
@@ -72,9 +78,24 @@ const DEFAULT_ROLE_GRANTS: Record<SystemRole, (module: string, action: string) =
     if (action === 'view') return true
     if (['users', 'locations', 'settings', 'permissions'].includes(module)) return false
     if (module === 'devices' && action === 'delete') return false
+    // Agent Management — backend LOCATION_ADMIN gets view/install/
+    // download_installer/update but NOT remove. The destructive verb
+    // requires an explicit org_admin grant via a permission_set
+    // override. Mirroring backend SYSTEM_ROLE_PERMISSIONS so the UI
+    // hides the action a backend 403 would otherwise reject after a
+    // round-trip.
+    if (module === 'agents' && action === 'remove') return false
     return true
   },
-  viewer: (module, action) => action === 'view' && VIEWER_VIEW_MODULES.has(module),
+  viewer: (module, action) => {
+    // Agents are explicitly added to the viewer's read-only allowlist
+    // so the menu item / list page stays visible. Backend SYSTEM_ROLE_
+    // PERMISSIONS grants `agents:view` to VIEWER. Without this special
+    // case the viewer would lose the Agents tab when permissions are
+    // still loading on first paint.
+    if (module === 'agents' && action === 'view') return true
+    return action === 'view' && VIEWER_VIEW_MODULES.has(module)
+  },
 }
 
 // Map any legacy / loose value to a live SystemRole. Mirrors the backend

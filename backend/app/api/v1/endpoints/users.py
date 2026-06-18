@@ -12,7 +12,15 @@ from app.models.location import Location
 from app.models.shared.organization import Organization
 from app.models.user import SystemRole, User
 from app.models.user_location import UserLocation
-from app.schemas.user import AdminPasswordReset, UserCreate, UserPasswordChange, UserResponse, UserUpdate
+from app.schemas.user import (
+    AdminPasswordReset,
+    UserCreate,
+    UserPasswordChange,
+    UserPreferencesResponse,
+    UserPreferencesUpdate,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.audit_service import log_action
 
 # M6-B4 — privileged-role values, as strings. UserCreate / UserUpdate
@@ -339,6 +347,81 @@ async def update_my_login_ip(
         "user", current_user.id, current_user.username, request=request,
     )
     return {"allowed_ips": current_user.allowed_ips}
+
+
+@router.get("/me/preferences", response_model=UserPreferencesResponse)
+async def get_my_preferences(current_user: CurrentUser):
+    """Return the authenticated user's UI preferences.
+
+    Currently only `preferred_language` is exposed. The endpoint is
+    intentionally narrow: it does NOT echo `id`, `role`,
+    `organization_id` or any other identity attribute, so a caller
+    that has only the preferences scope cannot accidentally fingerprint
+    the user via this path.
+
+    NULL means "no explicit preference" — the frontend then falls back
+    to the documented chain (organization default → browser → app).
+    """
+    return UserPreferencesResponse(preferred_language=current_user.preferred_language)
+
+
+@router.patch("/me/preferences", response_model=UserPreferencesResponse)
+async def update_my_preferences(
+    payload: UserPreferencesUpdate,
+    request: Request,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """Update the authenticated user's UI preferences.
+
+    Mass-assignment safety:
+      - `UserPreferencesUpdate.model_config['extra'] = 'forbid'` rejects
+        any field other than `preferred_language` with a 422 — so a
+        crafted body cannot smuggle a `role`, `organization_id`,
+        `allowed_ips`, or any other UserUpdate field through this path.
+      - The endpoint never reads `current_user` for write — it loads
+        the persisted user row via the primary key and only mutates
+        `preferred_language` on it. Even an attacker-controlled
+        `current_user.id` (which is impossible without a valid JWT)
+        would still be confined to that single attribute.
+
+    Authorization:
+      - Any authenticated user can update their OWN preferences.
+      - This endpoint is NOT a vehicle for updating someone else's
+        preferences — that would require a separate admin endpoint
+        gated by `users:edit` and is intentionally out of scope here.
+
+    Audit:
+      - A `user_preferences_self_updated` audit row is written. The
+        previous + new language codes are recorded; no other user
+        attribute is logged so the audit trail does not become a
+        leak vector.
+    """
+    previous_language = current_user.preferred_language
+
+    user = (await db.execute(select(User).where(User.id == current_user.id))).scalar_one()
+
+    # Only mutate `preferred_language`. The validator already
+    # normalised the value (lowercased / verified against
+    # SUPPORTED_LANGUAGES) — `None` is the "clear preference" path.
+    user.preferred_language = payload.preferred_language
+
+    await db.commit()
+    await log_action(
+        db,
+        user,
+        "user_preferences_self_updated",
+        "user",
+        user.id,
+        user.username,
+        request=request,
+        details={
+            "field": "preferred_language",
+            "previous": previous_language,
+            "current": user.preferred_language,
+        },
+    )
+    return UserPreferencesResponse(preferred_language=user.preferred_language)
 
 
 @router.get("/me/login-ip")

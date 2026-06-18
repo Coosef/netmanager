@@ -53,12 +53,27 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
   { key: 'reports',          label: 'Raporlar',           actions: [{ key: 'view', label: 'Görüntüle' }] },
   { key: 'users',            label: 'Kullanıcılar',       actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }, { key: 'delete', label: 'Sil' }, { key: 'invite', label: 'Davet' }] },
   { key: 'locations',        label: 'Lokasyonlar',        actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }, { key: 'delete', label: 'Sil' }] },
-  { key: 'agents',           label: 'Ajanlar',            actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }] },
+  // Agent Management / Agent Yönetimi — five-verb catalogue. The
+  // legacy `edit` toggle is migrated into `update` server-side; the
+  // PermissionEngine alias map keeps either verb granting access
+  // during the rolling cutover so editing this group in the UI does
+  // not require coordinated backend + frontend rollout.
+  { key: 'agents',           label: 'Ajan Yönetimi',      actions: [
+    { key: 'view',               label: 'Görüntüle' },
+    { key: 'install',            label: 'Kur' },
+    { key: 'download_installer', label: 'Kurulum Paketi İndir' },
+    { key: 'update',             label: 'Güncelle' },
+    { key: 'remove',             label: 'Kaldır' },
+  ] },
   { key: 'settings',         label: 'Ayarlar',            actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }] },
   { key: 'driver_templates', label: 'Sürücü Şablonları',  actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }] },
 ]
 
-const ALL_ACTIONS = ['view', 'edit', 'delete', 'create', 'ssh', 'run', 'cancel', 'invite']
+const ALL_ACTIONS = [
+  'view', 'edit', 'delete', 'create', 'ssh', 'run', 'cancel', 'invite',
+  // Agent Management catalogue (location-agent-permissions work)
+  'install', 'download_installer', 'update', 'remove',
+]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
   return !!(perms?.modules?.[mod] as Record<string, boolean> | undefined)?.[action]
