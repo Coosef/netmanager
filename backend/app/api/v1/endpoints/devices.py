@@ -474,6 +474,48 @@ async def create_device(
     org_id = _check_org_id
     location_id = _check_location_id
 
+    # post-deploy 2026-06-19 — explicit cross-tenant consistency check
+    # for the (device.org, device.location, device.agent) triple.
+    # The system has duplicate display names across orgs (e.g. two
+    # "Mövempic" locations, two "movempic" agents) and a super_admin's
+    # active-location header may resolve to a location owned by an
+    # organisation OTHER than the user's own. Without this guard a
+    # device row could be inserted with `org=1, loc=12` while location
+    # 12 is owned by org=6 — the agent then refuses ssh_command at
+    # runtime with `agent-scope rejected: device org/location (1/12)
+    # outside agent session sandbox (6/12)` and Cloudflare 502s the
+    # client. The two checks below fail closed BEFORE the row is
+    # inserted, with a clear localized message that tells the operator
+    # which tenant the rejection came from.
+    location_obj = await db.get(Location, location_id)
+    if location_obj is None:
+        raise HTTPException(status_code=400, detail="Seçilen lokasyon bulunamadı.")
+    if location_obj.organization_id != org_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Seçilen lokasyon ({location_obj.name}) farklı bir "
+                f"organizasyona ait. Aynı isimde başka bir lokasyon "
+                f"olabilir — header'daki lokasyon seçicisinden kendi "
+                f"organizasyonunuza ait lokasyonu seçtiğinizden emin "
+                f"olun ve cihazı tekrar ekleyin."
+            ),
+        )
+    if payload.agent_id:
+        from app.models.agent import Agent  # local — circular-safe
+        agent_obj = await db.get(Agent, payload.agent_id)
+        if agent_obj is None:
+            raise HTTPException(status_code=400, detail="Seçilen ajan bulunamadı.")
+        if agent_obj.organization_id != org_id or agent_obj.location_id != location_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Seçilen ajan ({agent_obj.name}) bu lokasyona ait "
+                    f"değil. Aynı isimde başka bir ajan olabilir — "
+                    f"lütfen aynı lokasyonda kayıtlı olan ajanı seçin."
+                ),
+            )
+
     # Faz 8 Phase H — organization quota + lifecycle: refuse a new device
     # when the org is suspended/archived or its device quota is reached.
     # A platform super-admin may override (the override is audit-logged).
