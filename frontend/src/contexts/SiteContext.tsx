@@ -98,6 +98,22 @@ interface SiteCtx {
   allowedLocationIds: number[]
   /** False when a location-scoped user has no usable location. */
   hasLocationAccess: boolean
+  /** True when `/context/current` has returned a non-undefined payload.
+   *
+   * SITE-CONTEXT-HYDRATION-GUARD v2 (2026-06-19) — a stricter
+   * companion to `sitesLoading`. The former goes false the instant
+   * React Query 5 reports `isLoading: false` AND token is non-null,
+   * which leaves a brief in-render window where ctx is still
+   * `undefined` (transient token blip from a Zustand re-subscription
+   * race, query-cache eviction during a location switch, or an in-
+   * flight refetch with no `placeholderData`). Down-stream components
+   * that branch on "ctx is empty" need a different signal: was the
+   * backend ever asked, and did it answer? `ctxResolved` is exactly
+   * that — `!!ctx`. LocationSelector branch (1) AND the NocAgents
+   * create-modal blocked-state both AND-gate on it so a transient
+   * undefined never commits to a final empty state.
+   */
+  ctxResolved: boolean
   /** super-admin / org-admin — operates across the whole organization. */
   isOrgWide: boolean
   /** PR #96 — header / agent-modal role-aware UX. True when the active
@@ -141,6 +157,7 @@ const SiteContext = createContext<SiteCtx>({
   locations: [],
   allowedLocationIds: [],
   hasLocationAccess: true,
+  ctxResolved: false,
   isOrgWide: false,
   isSuperAdmin: false,
   organization: null,
@@ -258,6 +275,11 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   const locations: AccessibleLocation[] = ctx?.locations ?? []
   const allowedLocationIds: number[] = ctx?.allowed_location_ids ?? []
   const hasLocationAccess: boolean = ctx?.has_location_access ?? true
+  // SITE-CONTEXT-HYDRATION-GUARD v2 (2026-06-19) — see SiteCtx interface
+  // for the full rationale. Down-stream consumers AND-gate their "final
+  // empty" branches on this so a transient ctx-undefined (token blip,
+  // refetch with no placeholder) never falls through to a warning.
+  const ctxResolved: boolean = !!ctx
   const isOrgWide: boolean = ctx?.is_org_wide ?? false
   // PR #96 — surface the role identity + tenant context the backend
   // already returns in CurrentContext so the header and the agent-
@@ -391,6 +413,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         locations,
         allowedLocationIds,
         hasLocationAccess,
+        ctxResolved,
         isOrgWide,
         isSuperAdmin,
         organization,

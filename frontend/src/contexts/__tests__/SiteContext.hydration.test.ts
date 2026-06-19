@@ -131,3 +131,34 @@ describe('SiteContext — isActiveLocationStale predicate + cleanup useEffect', 
     expect(cleanupBlock![0]).not.toMatch(/invalidateQueries/)
   })
 })
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD v2 — ctxResolved flag ──────────────────
+//
+// Operator-confirmed (2026-06-19) console fragment during a location
+// switch:
+//   [SiteContext] {tokenPresent: false, sitesLoading: false,
+//                  ctx_present: false, hydrated: true, ...}
+//
+// `sitesLoading` alone goes false the instant the query is `enabled:
+// false` (token transient null) → branch 5 of LocationSelector +
+// noAssignedLocations of NocAgents both fire for one render cycle.
+// `ctxResolved: !!ctx` is the stricter "did the backend answer?" flag
+// that down-stream components AND-gate on.
+describe('SiteContext — v2 ctxResolved flag', () => {
+  it('ctxResolved boolean field SiteCtx interface\'ine eklenmiş', () => {
+    expect(SRC).toMatch(/ctxResolved:\s*boolean/)
+  })
+
+  it('ctxResolved local türetimi `!!ctx`', () => {
+    expect(SRC).toMatch(/const ctxResolved:\s*boolean\s*=\s*!!ctx/)
+  })
+
+  it('Provider value içinde ctxResolved expose edilir', () => {
+    expect(SRC).toMatch(/^\s+ctxResolved,$/m)
+  })
+
+  it('default context value\'da ctxResolved=false (transient default)', () => {
+    expect(SRC).toMatch(/createContext<SiteCtx>\(\{[\s\S]+?ctxResolved:\s*false/)
+  })
+})

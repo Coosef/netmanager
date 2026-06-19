@@ -42,7 +42,7 @@ const ALL = '__all__'
 export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   const {
     activeLocationId, setLocation, locations,
-    sitesLoading, hasContextFailure,
+    sitesLoading, hasContextFailure, ctxResolved,
     hasLocationAccess, isOrgWide,
     isSuperAdmin, organization,
   } = useSite()
@@ -50,7 +50,21 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   const { t } = useTranslation()
 
   // (1) Still resolving — backend has not returned yet.
-  if (sitesLoading) {
+  //
+  // SITE-CONTEXT-HYDRATION-GUARD v2 (2026-06-19) — the second clause
+  // catches the transient ctx-undefined window where `sitesLoading` is
+  // already false (React Query 5 disabled query, or post-invalidate
+  // settled state) BUT we have not yet observed a definitive
+  // CurrentContext payload. Without this branch the priority chain
+  // falls through to branch (5) and surfaces the alarming
+  // `no_assigned_tag` orange warning for a single render cycle every
+  // time the auth/query subsystem hiccups (operator-confirmed
+  // 2026-06-19 — `[SiteContext] {tokenPresent: false, sitesLoading:
+  // false, ctx_present: false}` log fragment from a real session). The
+  // `!hasContextFailure` carve-out keeps branch (2) as the authoritative
+  // error fall-through — we never mask a genuine fetch failure as
+  // "still loading".
+  if (sitesLoading || (!ctxResolved && !hasContextFailure)) {
     return (
       <Space size={6} data-testid="location-selector-loading">
         <Spin size="small" />

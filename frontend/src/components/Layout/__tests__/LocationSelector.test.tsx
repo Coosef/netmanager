@@ -31,6 +31,11 @@ const siteState: {
   locations: { id: number; name: string; color: string | null; city: null; country: null; device_count: number }[]
   sitesLoading: boolean
   hasContextFailure: boolean
+  /** SITE-CONTEXT-HYDRATION-GUARD v2 (2026-06-19) — `!!ctx`. Tests
+   * that exercise branches 3+ MUST set this to `true` so the new
+   * transient guard in branch 1 lets them through. Branches 1 (loading)
+   * and 2 (error) win regardless of `ctxResolved`. */
+  ctxResolved: boolean
   hasLocationAccess: boolean
   isOrgWide: boolean
   isSuperAdmin: boolean
@@ -41,6 +46,7 @@ const siteState: {
   locations: [],
   sitesLoading: false,
   hasContextFailure: false,
+  ctxResolved: true,
   hasLocationAccess: true,
   isOrgWide: false,
   isSuperAdmin: false,
@@ -57,6 +63,7 @@ function resetSiteState() {
   siteState.locations = []
   siteState.sitesLoading = false
   siteState.hasContextFailure = false
+  siteState.ctxResolved = true
   siteState.hasLocationAccess = true
   siteState.isOrgWide = false
   siteState.isSuperAdmin = false
@@ -182,6 +189,104 @@ describe('LocationSelector — seven states', () => {
     render(<LocationSelector />)
     expect(screen.getByTestId('location-selector-error')).toBeTruthy()
     expect(screen.queryByTestId('location-selector-tenant-required')).toBeNull()
+  })
+})
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD v2 transient cases ───────────────────
+
+
+describe('LocationSelector — transient ctx-undefined guard (v2)', () => {
+  // Operator-observed (2026-06-19) console fragment during a location
+  // switch:
+  //   [SiteContext] {ctx_present: false, tokenPresent: false,
+  //                  sitesLoading: false, hydrated: true, ...}
+  // Without the v2 guard, branch 5 would fire ("no_assigned_tag" /
+  // orange warning) for a single render before the next state lands.
+  // The v2 patch widens branch 1 to ALSO fire when `!ctxResolved &&
+  // !hasContextFailure`.
+
+  it('(1+) ctxResolved=false + sitesLoading=false + no failure → spinner (transient guard)', () => {
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    siteState.hasContextFailure = false
+    siteState.locations = []
+    siteState.isSuperAdmin = false
+    render(<LocationSelector />)
+    // Spinner wins; the alarming no_assigned warning MUST NOT render.
+    expect(screen.getByTestId('location-selector-loading')).toBeTruthy()
+    expect(screen.queryByTestId('location-selector-no-assigned')).toBeNull()
+  })
+
+  it('(1+) ctxResolved=false + super_admin shape + no failure → spinner (NOT tenant-required)', () => {
+    // The super_admin transient is the operator-confirmed scenario:
+    // ctx is briefly undefined → isSuperAdmin defaults to false →
+    // tenantMissing also defaults to false → previously fell through
+    // to branch 5. v2 guard fires branch 1 spinner instead.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    siteState.hasContextFailure = false
+    siteState.locations = []
+    siteState.isSuperAdmin = false   // transient default
+    siteState.organization = null    // transient default
+    render(<LocationSelector />)
+    expect(screen.getByTestId('location-selector-loading')).toBeTruthy()
+    expect(screen.queryByTestId('location-selector-no-assigned')).toBeNull()
+    expect(screen.queryByTestId('location-selector-tenant-required')).toBeNull()
+  })
+
+  it('(2 over 1+) hasContextFailure=true + ctxResolved=false → error tag wins (v2 guard yields)', () => {
+    // The transient guard MUST NOT mask a real fetch failure as
+    // "still loading" — `hasContextFailure` short-circuits the new
+    // branch-1 clause so users actually see the retryable error.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    siteState.hasContextFailure = true
+    render(<LocationSelector />)
+    expect(screen.getByTestId('location-selector-error')).toBeTruthy()
+    expect(screen.queryByTestId('location-selector-loading')).toBeNull()
+  })
+
+  it('(7 over 1+) ctxResolved=true → guard releases → multi switcher fires normally', () => {
+    // Sanity: once ctx is resolved the transient guard is OFF and the
+    // existing branches resume — no regression on the happy path.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = true
+    siteState.locations = [
+      { id: 1, name: 'Istanbul', color: '#22c55e', city: null, country: null, device_count: 4 },
+      { id: 2, name: 'Ankara',  color: '#3b82f6', city: null, country: null, device_count: 2 },
+    ]
+    siteState.activeLocationId = 1
+    siteState.isOrgWide = true
+    siteState.isSuperAdmin = true
+    siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
+    render(<LocationSelector />)
+    expect(screen.getByTestId('location-selector-multi')).toBeTruthy()
+    expect(screen.queryByTestId('location-selector-loading')).toBeNull()
+  })
+
+  it('transient → resolved transition: spinner first, multi switcher after', () => {
+    // Stand-in for the React render-cycle transition the operator saw.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    siteState.locations = []
+    const { rerender } = render(<LocationSelector />)
+    expect(screen.getByTestId('location-selector-loading')).toBeTruthy()
+
+    // After the next backend tick, ctx lands.
+    siteState.ctxResolved = true
+    siteState.locations = [
+      { id: 1, name: 'Istanbul', color: null, city: null, country: null, device_count: 0 },
+      { id: 2, name: 'Ankara',  color: null, city: null, country: null, device_count: 0 },
+    ]
+    siteState.isOrgWide = true
+    siteState.isSuperAdmin = true
+    siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
+    rerender(<LocationSelector />)
+    expect(screen.queryByTestId('location-selector-loading')).toBeNull()
+    expect(screen.getByTestId('location-selector-multi')).toBeTruthy()
+    // The brief transient never committed to the warning state.
+    expect(screen.queryByTestId('location-selector-no-assigned')).toBeNull()
   })
 })
 
