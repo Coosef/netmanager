@@ -37,7 +37,10 @@ export default function NocAgents() {
   // create modal can branch on them. `organization === null` for a
   // super_admin who has not yet picked a tenant context (the "Select
   // a tenant first" header state).
-  const { locations, activeLocationId, isSuperAdmin, organization, hasLocationAccess } = useSite()
+  const {
+    locations, activeLocationId, isSuperAdmin, organization, hasLocationAccess,
+    sitesLoading, ctxResolved,
+  } = useSite()
   // Five-verb agent permission catalogue (location-agent-permissions
   // work). The backend gate is authoritative; these flags only hide /
   // disable the UI surface that would otherwise round-trip to a 403.
@@ -52,8 +55,34 @@ export default function NocAgents() {
   //       locations yet for this caller) — "Atanmış lokasyon yok".
   // When either holds we surface an explanatory Alert, disable the
   // dropdown + submit, and the modal never fires an enrollment call.
-  const tenantMissing = isSuperAdmin && organization === null
-  const noAssignedLocations = !tenantMissing && (!hasLocationAccess || locations.length === 0)
+  //
+  // SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — gate BOTH computations
+  // on `ctxSettled` (= ctxResolved && !sitesLoading). During the
+  // hydration window OR a transient ctx-undefined render (operator-
+  // confirmed: `tokenPresent: false, sitesLoading: false, ctx_present:
+  // false` on a location-switch refetch) `isSuperAdmin`, `organization`,
+  // `locations`, and `hasLocationAccess` all carry their safe defaults
+  // (`false` / `null` / `[]` / `true`) and the previous formula
+  // deterministically lit up `noAssignedLocations` until the backend
+  // response arrived. Operators read that ~16-300 ms "Atanmış lokasyon
+  // yok" Alert as a hard refusal and refresh in a loop.
+  //
+  // Two gates instead of one:
+  //   · !sitesLoading — covers Zustand-persist hydration + active
+  //     `/context/current` fetch
+  //   · ctxResolved   — covers the post-settled transient where the
+  //     query reports idle but ctx is still undefined (token blip,
+  //     post-invalidate flush)
+  //
+  // Mirroring the LocationSelector priority chain (loading wins over
+  // every later state) plus the new ctx-resolved gate, the modal stays
+  // in a neutral state during BOTH the hydration window AND the
+  // transient post-invalidate window. The blocked-state Alerts only
+  // commit once the backend's CurrentContext is in hand.
+  const ctxSettled = ctxResolved && !sitesLoading
+  const tenantMissing = ctxSettled && isSuperAdmin && organization === null
+  const noAssignedLocations =
+    ctxSettled && !tenantMissing && (!hasLocationAccess || locations.length === 0)
   const installBlocked = tenantMissing || noAssignedLocations
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')

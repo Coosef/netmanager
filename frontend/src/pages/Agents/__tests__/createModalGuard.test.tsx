@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntApp } from 'antd'
+import type { ReactNode } from 'react'
 
 import NocAgents from '../NocAgents'
 
@@ -74,6 +75,15 @@ const siteState: {
   isOrgWide: boolean
   isSuperAdmin: boolean
   organization: { id: number; name: string; slug: string } | null
+  /** SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — true during the
+   * Zustand-persist rehydration window or while `/context/current` is
+   * in flight. NocAgents must not commit to a "blocked" Alert until
+   * this is false. */
+  sitesLoading: boolean
+  /** SITE-CONTEXT-HYDRATION-GUARD v2 (2026-06-19) — `!!ctx`. Tests
+   * that exercise blocked states MUST set this to `true`; the modal
+   * only commits to `installBlocked` when `ctxResolved && !sitesLoading`. */
+  ctxResolved: boolean
 } = {
   activeLocationId: null,
   setLocation: vi.fn(),
@@ -82,6 +92,8 @@ const siteState: {
   isOrgWide: false,
   isSuperAdmin: false,
   organization: null,
+  sitesLoading: false,
+  ctxResolved: true,
 }
 
 vi.mock('@/contexts/SiteContext', () => ({
@@ -96,6 +108,8 @@ function resetSiteState() {
   siteState.isOrgWide = false
   siteState.isSuperAdmin = false
   siteState.organization = null
+  siteState.sitesLoading = false
+  siteState.ctxResolved = true
 }
 
 
@@ -239,6 +253,164 @@ describe('Agent create modal — caller with no accessible locations', () => {
 
 
 // ─── Happy path — caller HAS a tenant + locations ────────────────────────
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) ────────────────────────────
+
+
+describe('Agent create modal — SITE-CONTEXT-HYDRATION-GUARD window', () => {
+  // During the hydration window all SiteContext defaults light up the
+  // "no-assigned" branch deterministically (locations=[], !isSuperAdmin,
+  // !hasLocationAccess?? defaults). The patch gates BOTH `tenantMissing`
+  // and `noAssignedLocations` on `!sitesLoading`. Below: sitesLoading=true
+  // + every other field at its hydration-window default must produce
+  // NEITHER blocked Alert. The form is still rendered (input + select)
+  // but in a neutral state — the user can type a name; the submit will
+  // disable on `activeLocationId == null && newLoc == null` as before
+  // (a real config error, not a transient hydration artefact).
+
+  it('sitesLoading=true + all defaults → NO blocked Alert, NO tenant-required Alert', async () => {
+    siteState.sitesLoading = true
+    // Defaults — same shape the SiteContext provider hands out before
+    // /context/current resolves.
+    siteState.isSuperAdmin = false
+    siteState.organization = null
+    siteState.hasLocationAccess = true
+    siteState.locations = []
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+  })
+
+  it('sitesLoading=true + super_admin shape + null organization → NO tenant-required Alert', async () => {
+    // A super_admin landing on the page: token present, but the
+    // CurrentContext fetch hasn't returned yet, so all sub-fields
+    // (including `organization`) read null. Without the gate the modal
+    // would surface "Önce firma seçin" during this window even though
+    // the backend hasn't been asked.
+    siteState.sitesLoading = true
+    siteState.isSuperAdmin = true
+    siteState.organization = null
+    siteState.isOrgWide = true
+    siteState.locations = []
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+  })
+
+  it('hydration finishes (sitesLoading false → true → false) — blocked Alert may then surface', async () => {
+    // Confirm the gate releases once context is resolved. Same fixture
+    // as the no-tenant case above EXCEPT sitesLoading is now false →
+    // the gate is open → the existing PR #96 contract resumes.
+    siteState.sitesLoading = false
+    siteState.isSuperAdmin = true
+    siteState.organization = null
+    siteState.isOrgWide = true
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(await screen.findByTestId('agent-create-blocked-tenant-required')).toBeTruthy()
+  })
+})
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD v2 — transient ctx-undefined ──────────
+
+
+describe('Agent create modal — v2 ctxResolved gate (transient defence)', () => {
+  // Operator-confirmed (2026-06-19) console fragment during a location
+  // switch:
+  //   [SiteContext] {tokenPresent: false, sitesLoading: false,
+  //                  ctx_present: false, ...}
+  // ctxResolved is the second gate that catches THIS render: query
+  // settled (sitesLoading=false) but ctx is still undefined for one
+  // tick. Without the gate the modal flashes `agent-create-blocked-
+  // no-assigned-locations` for ~16ms which operators read as a
+  // permanent refusal.
+
+  it('ctxResolved=false + sitesLoading=false + defaults → NO blocked Alerts', async () => {
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    siteState.isSuperAdmin = false
+    siteState.organization = null
+    siteState.hasLocationAccess = true
+    siteState.locations = []
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+  })
+
+  it('ctxResolved=false + super_admin shape → NO tenant-required', async () => {
+    // Mirror of the LocationSelector transient test — the super_admin
+    // shape with `organization: null` reads as `tenantMissing` once
+    // ctx resolves. While ctx is undefined the gate keeps the Alert
+    // suppressed.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    siteState.isSuperAdmin = true
+    siteState.organization = null
+    siteState.isOrgWide = true
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+  })
+
+  it('transient → resolved transition: blocked Alert may surface only after BOTH gates release', async () => {
+    // sitesLoading=true → blocked masked; flips false but ctxResolved
+    // still false → blocked still masked; finally ctxResolved flips
+    // true (with the operator-confirmed super_admin + 8-loc shape) →
+    // no blocked Alert (happy path resumes).
+    siteState.sitesLoading = true
+    siteState.ctxResolved = false
+    siteState.isSuperAdmin = false
+    siteState.organization = null
+    siteState.locations = []
+    const { rerender } = renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+
+    // Query settled but ctx undefined transient frame.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = false
+    rerender(<QueryClientProviderForTest><NocAgentsForTest /></QueryClientProviderForTest>)
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+
+    // ctx lands with the real operator data.
+    siteState.sitesLoading = false
+    siteState.ctxResolved = true
+    siteState.isSuperAdmin = true
+    siteState.isOrgWide = true
+    siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
+    siteState.locations = [
+      { id: 2, name: 'ForTow',                 color: null, city: null, country: null, device_count: 0 },
+      { id: 3, name: 'Luxury',                 color: null, city: null, country: null, device_count: 0 },
+      { id: 5, name: 'Unassigned — default',   color: null, city: null, country: null, device_count: 0 },
+    ]
+    rerender(<QueryClientProviderForTest><NocAgentsForTest /></QueryClientProviderForTest>)
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+  })
+})
+
+
+// Pure-render harness for the rerender() chain above. AntApp is the
+// only thing renderNocAgents() adds that isn't already supplied by the
+// outer QueryClientProvider — keep the shape identical so the rerender
+// doesn't unmount/remount the modal accidentally.
+function QueryClientProviderForTest({ children }: { children: ReactNode }) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
+  })
+  return (
+    <QueryClientProvider client={qc}>
+      <AntApp>{children}</AntApp>
+    </QueryClientProvider>
+  )
+}
+function NocAgentsForTest() { return <NocAgents /> }
 
 
 describe('Agent create modal — caller WITH a tenant and locations', () => {
