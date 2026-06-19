@@ -37,7 +37,10 @@ export default function NocAgents() {
   // create modal can branch on them. `organization === null` for a
   // super_admin who has not yet picked a tenant context (the "Select
   // a tenant first" header state).
-  const { locations, activeLocationId, isSuperAdmin, organization, hasLocationAccess } = useSite()
+  const {
+    locations, activeLocationId, isSuperAdmin, organization, hasLocationAccess,
+    sitesLoading,
+  } = useSite()
   // Five-verb agent permission catalogue (location-agent-permissions
   // work). The backend gate is authoritative; these flags only hide /
   // disable the UI surface that would otherwise round-trip to a 403.
@@ -52,8 +55,22 @@ export default function NocAgents() {
   //       locations yet for this caller) — "Atanmış lokasyon yok".
   // When either holds we surface an explanatory Alert, disable the
   // dropdown + submit, and the modal never fires an enrollment call.
-  const tenantMissing = isSuperAdmin && organization === null
-  const noAssignedLocations = !tenantMissing && (!hasLocationAccess || locations.length === 0)
+  //
+  // SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — gate BOTH computations
+  // on `!sitesLoading`. During the hydration window (token present but
+  // Zustand persist not yet finished, or `/context/current` still in
+  // flight) `isSuperAdmin`, `organization`, `locations`, and
+  // `hasLocationAccess` all carry their safe defaults (`false` / `null`
+  // / `[]` / `true`) and the previous formula deterministically lit up
+  // `noAssignedLocations` until the backend response arrived. Operators
+  // read that ~50-300 ms "Atanmış lokasyon yok" Alert as a hard refusal
+  // and refresh in a loop. Mirroring the LocationSelector priority
+  // chain (loading wins over every later state), the modal stays in a
+  // neutral state during hydration and only commits to a blocked state
+  // once the context is resolved.
+  const tenantMissing = !sitesLoading && isSuperAdmin && organization === null
+  const noAssignedLocations =
+    !sitesLoading && !tenantMissing && (!hasLocationAccess || locations.length === 0)
   const installBlocked = tenantMissing || noAssignedLocations
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')

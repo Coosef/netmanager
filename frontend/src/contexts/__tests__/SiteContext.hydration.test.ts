@@ -69,3 +69,65 @@ describe('SiteContext — shouldReconcileLocation regresyon (Faz 8 davranışı 
     expect(SRC).toContain('allowed_location_ids')
   })
 })
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) ──────────────────────────
+//
+// LocationSelector branch (5) AND NocAgents create modal both compute
+// their "blocked" state from `locations.length === 0 + isSuperAdmin =
+// false`. During the hydration window (token present + Zustand persist
+// not yet finished) `ctx` is undefined → both flags carry their safe
+// defaults → branches fire → operator reads it as a hard refusal.
+//
+// Fix: redefine `sitesLoading` so the priority-chain "still resolving"
+// branch fires throughout the hydration window in addition to the
+// React Query loading state.
+describe('SiteContext — sitesLoading hidrasyon penceresini de kapsar', () => {
+  it('useQuery isLoading destructure adı `queryLoading` (intermediate var)', () => {
+    expect(SRC).toMatch(/isLoading:\s*queryLoading/)
+    // Eski doğrudan `isLoading: sitesLoading` regresyon guard'ı.
+    expect(SRC).not.toMatch(/isLoading:\s*sitesLoading\b/)
+  })
+
+  it('sitesLoading semantik: !!token && (!hydrated || queryLoading)', () => {
+    expect(SRC).toMatch(
+      /const sitesLoading:\s*boolean\s*=\s*!!token\s*&&\s*\(!hydrated\s*\|\|\s*queryLoading\)/,
+    )
+  })
+
+  it('SITE-CONTEXT-HYDRATION-GUARD imzası dosyada yorum olarak var', () => {
+    expect(SRC).toContain('SITE-CONTEXT-HYDRATION-GUARD')
+  })
+
+  it('LocationSelector + NocAgents için sitesLoading hala provider değerinde export ediliyor', () => {
+    // Provider value içinde sitesLoading hala consumer'a verilmeli;
+    // semantik genişledi, alan adı aynı kaldı.
+    expect(SRC).toMatch(/sitesLoading,/)
+  })
+})
+
+
+// ─── Stale activeLocationId cleanup (covers org-wide gap) ───────────────
+
+
+describe('SiteContext — isActiveLocationStale predicate + cleanup useEffect', () => {
+  it('isActiveLocationStale export edilir', () => {
+    expect(SRC).toMatch(/export function isActiveLocationStale/)
+  })
+
+  it('cleanup useEffect predicate üzerinden delege eder', () => {
+    expect(SRC).toMatch(/if \(!isActiveLocationStale\(ctx, activeLocationId\)\) return/)
+  })
+
+  it('cleanup queryClient.invalidateQueries\\(\\) çağırmaz (sadece UI repair)', () => {
+    // Stale id cleanup, scope değiştirmek için DEĞIL — sadece UI'da
+    // phantom id'yi siler. invalidateQueries() çağrısı eklerse
+    // org-wide refetch döngüsü riskini geri getirir.
+    // Bu testin amacı: yeni cleanup bloğunda invalidate yok.
+    const cleanupBlock = SRC.match(
+      /if \(!isActiveLocationStale\(ctx, activeLocationId\)\) return[\s\S]+?\}, \[ctx, activeLocationId\]\)/,
+    )
+    expect(cleanupBlock).not.toBeNull()
+    expect(cleanupBlock![0]).not.toMatch(/invalidateQueries/)
+  })
+})

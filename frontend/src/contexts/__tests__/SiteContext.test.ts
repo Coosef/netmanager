@@ -19,7 +19,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import type { CurrentContext } from '../../api/context'
-import { shouldReconcileLocation } from '../SiteContext'
+import { shouldReconcileLocation, isActiveLocationStale } from '../SiteContext'
 
 function ctx(overrides: Partial<CurrentContext>): CurrentContext {
   return {
@@ -117,5 +117,101 @@ describe('shouldReconcileLocation', () => {
         3,
       ),
     ).toBe(true)
+  })
+})
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) ──────────────────────────
+//
+// Regression coverage for `isActiveLocationStale`. The predicate fills
+// the gap left by `shouldReconcileLocation` for org-wide users: a
+// super_admin / org_admin whose `localStorage[ACTIVE_LOCATION_KEY]`
+// points at a soft-deleted (or otherwise revoked) location row no
+// longer reaches that location's data, and the regular reconciliation
+// effect intentionally skips them. This predicate decides when the
+// stale-id cleanup effect should fire and reset the local state to the
+// backend-resolved default.
+describe('isActiveLocationStale', () => {
+  const loc = (id: number, name: string) => ({
+    id, name, color: null, city: null, country: null, device_count: 0,
+  })
+
+  it('returns false when ctx is null / undefined (still loading)', () => {
+    expect(isActiveLocationStale(null, 7)).toBe(false)
+    expect(isActiveLocationStale(undefined, 7)).toBe(false)
+  })
+
+  it('returns false when activeLocationId is null (nothing stored)', () => {
+    expect(
+      isActiveLocationStale(
+        ctx({ locations: [loc(1, 'Istanbul'), loc(2, 'Ankara')] }),
+        null,
+      ),
+    ).toBe(false)
+  })
+
+  it('returns false when the stored id is present in ctx.locations', () => {
+    expect(
+      isActiveLocationStale(
+        ctx({ locations: [loc(1, 'Istanbul'), loc(2, 'Ankara')] }),
+        2,
+      ),
+    ).toBe(false)
+  })
+
+  // ── The regression — org-wide super_admin whose stored id points at a
+  //    soft-deleted location row that the backend no longer returns ────
+  it('returns true for org-wide super_admin whose stored id is absent from ctx.locations', () => {
+    expect(
+      isActiveLocationStale(
+        ctx({
+          is_super_admin: true,
+          is_org_wide: true,
+          allowed_location_ids: [],
+          locations: [loc(2, 'ForTow'), loc(3, 'Luxury'), loc(5, 'Unassigned')],
+          // stored id 9 was a soft-deleted "Mövempic" — operator deleted
+          // it; the backend no longer surfaces it.
+        }),
+        9,
+      ),
+    ).toBe(true)
+  })
+
+  it('returns true for a location-scoped user whose stored id is absent', () => {
+    expect(
+      isActiveLocationStale(
+        ctx({
+          is_org_wide: false,
+          allowed_location_ids: [1, 2],
+          locations: [loc(1, 'Istanbul'), loc(2, 'Ankara')],
+        }),
+        99,
+      ),
+    ).toBe(true)
+  })
+
+  it('does NOT confuse a falsy id zero with a missing id', () => {
+    // Defensive — id=0 is unusual but valid. The predicate must use
+    // .some not includes-with-coercion.
+    expect(
+      isActiveLocationStale(
+        ctx({ locations: [loc(0, 'Root')] }),
+        0,
+      ),
+    ).toBe(false)
+  })
+
+  it('is decoupled from is_org_wide — covers BOTH org-wide and scoped users', () => {
+    // shouldReconcileLocation short-circuits for org-wide users to
+    // protect the infinite-loop guard. isActiveLocationStale must NOT
+    // honor that carve-out — that is the whole point of the new
+    // predicate.
+    const orgWideCtx = ctx({
+      is_org_wide: true,
+      allowed_location_ids: [],
+      locations: [loc(1, 'A')],
+    })
+    expect(shouldReconcileLocation(orgWideCtx, 99)).toBe(false)
+    expect(isActiveLocationStale(orgWideCtx, 99)).toBe(true)
   })
 })

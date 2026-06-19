@@ -55,6 +55,39 @@ export function shouldReconcileLocation(
   return !ctx.allowed_location_ids.includes(activeLocationId)
 }
 
+/**
+ * SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — predicate that gates the
+ * stale `localStorage[ACTIVE_LOCATION_KEY]` cleanup for org-wide users.
+ *
+ * Distinct from `shouldReconcileLocation` because the latter's
+ * load-bearing `is_org_wide` short-circuit (the guard against the
+ * infinite refetch loop) leaves a real gap: a super_admin / org_admin
+ * whose stored active location id points at a row that has since been
+ * soft-deleted (or revoked, or just never re-emitted by the backend)
+ * will carry that phantom id forever. AntD's <Select> in
+ * LocationSelector branch (7) renders an unselected `value` and the
+ * X-Location-Id header on every downstream request scopes to a row
+ * that no longer exists.
+ *
+ * The predicate returns true ONLY when ctx is resolved, the stored id
+ * is non-null, AND that id is not present in the backend-authoritative
+ * `ctx.locations` list. Callers fall back to `ctx.active_location_id`
+ * (which itself may be null for the implicit "all locations" org-wide
+ * scope).
+ *
+ * Pure for unit testing — the SiteContext stale cleanup `useEffect`
+ * delegates the decision to this predicate so the logic is exercised
+ * without rendering React.
+ */
+export function isActiveLocationStale(
+  ctx: CurrentContext | null | undefined,
+  activeLocationId: number | null,
+): boolean {
+  if (!ctx) return false
+  if (activeLocationId == null) return false
+  return !ctx.locations.some((l) => l.id === activeLocationId)
+}
+
 interface SiteCtx {
   /** The active location id; null = backend-resolved default / all. */
   activeLocationId: number | null
@@ -156,7 +189,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   //   · `isFetching` ek olarak export edilir; LocationSelector
   //     `locations.length === 0` durumunda refetch tetiklendiyse loading
   //     gösterir, "no_assigned" tag'i flicker olarak yanmaz.
-  const { data: ctx, isLoading: sitesLoading, isError, refetch } = useQuery({
+  const { data: ctx, isLoading: queryLoading, isError, refetch } = useQuery({
     queryKey: ['context', 'current', activeLocationId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
@@ -180,6 +213,22 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // confirm the resolved context arrives on the wire AND lands in
   // SiteContext state. Remove once the flicker root cause is
   // permanently pinned by a regression test.
+  // SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — when token is present
+  // but Zustand persist has not yet finished rehydrating, the query is
+  // `enabled: false` and React Query 5 reports `isLoading: false`
+  // (`isPending && isFetching`, and a disabled query is not fetching).
+  // Down-stream consumers that branch on `sitesLoading` previously
+  // skipped their "still resolving" branch in this window and fell
+  // through to "no_assigned_tag" (LocationSelector branch 5) or
+  // `installBlocked` (NocAgents create modal) even though we had not
+  // yet decided. Treating the hydration window as a loading window
+  // keeps the priority chain in LocationSelector honest and prevents
+  // the agent-create modal from rendering an alarming Alert before the
+  // backend has even been asked.
+  //
+  // Hidrasyon penceresinde + sorgu çalışırken sitesLoading=true. Token
+  // hiç yoksa (kullanıcı login değil) loading false — bağlam beklemiyoruz.
+  const sitesLoading: boolean = !!token && (!hydrated || queryLoading)
   useEffect(() => {
     // eslint-disable-next-line no-console
     console.log('[SiteContext]', {
@@ -283,6 +332,38 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     // and producing the "Atanmış lokasyon yok" flash.
     queryClient.invalidateQueries()
   }, [ctx, activeLocationId, queryClient])
+
+  // SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — stale activeLocationId
+  // cleanup that covers the gap left by `shouldReconcileLocation`.
+  //
+  // The regular reconciliation effect above intentionally short-circuits
+  // for org-wide users (`is_org_wide` === true → never reconcile, see
+  // `shouldReconcileLocation` for the load-bearing rationale). That
+  // preserves the infinite-loop guard, but it also means a super_admin
+  // / org_admin whose `localStorage[ACTIVE_LOCATION_KEY]` points at a
+  // location that has since been soft-deleted (e.g. operator deleted
+  // the location while another tab was open) carries a phantom id
+  // forever. The AntD <Select> in LocationSelector branch (7) renders
+  // an unselected `value` and every list-query that derives its
+  // X-Location-Id header from this id scopes to a deleted row.
+  //
+  // The cleanup is narrowly-scoped: it only runs when ctx is loaded,
+  // a non-null activeLocationId is set, AND that id is not present in
+  // the backend-authoritative `ctx.locations`. It falls back to the
+  // backend-resolved default (`ctx.active_location_id`, which may itself
+  // be `null` for the "all locations" implicit org-wide scope). No
+  // `queryClient.invalidateQueries()` here — we are repairing a UI-only
+  // stale-state mismatch, not changing the request scope.
+  useEffect(() => {
+    if (!isActiveLocationStale(ctx, activeLocationId)) return
+    const fallback = ctx!.active_location_id
+    setActiveLocationIdState(fallback)
+    if (fallback != null) {
+      localStorage.setItem(ACTIVE_LOCATION_KEY, String(fallback))
+    } else {
+      localStorage.removeItem(ACTIVE_LOCATION_KEY)
+    }
+  }, [ctx, activeLocationId])
 
   // Faz 8 Phase E — cross-tab safety. If another tab switches location,
   // adopt it here and drop this tab's cache so two tabs can never render

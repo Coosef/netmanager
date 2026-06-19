@@ -74,6 +74,11 @@ const siteState: {
   isOrgWide: boolean
   isSuperAdmin: boolean
   organization: { id: number; name: string; slug: string } | null
+  /** SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — true during the
+   * Zustand-persist rehydration window or while `/context/current` is
+   * in flight. NocAgents must not commit to a "blocked" Alert until
+   * this is false. */
+  sitesLoading: boolean
 } = {
   activeLocationId: null,
   setLocation: vi.fn(),
@@ -82,6 +87,7 @@ const siteState: {
   isOrgWide: false,
   isSuperAdmin: false,
   organization: null,
+  sitesLoading: false,
 }
 
 vi.mock('@/contexts/SiteContext', () => ({
@@ -96,6 +102,7 @@ function resetSiteState() {
   siteState.isOrgWide = false
   siteState.isSuperAdmin = false
   siteState.organization = null
+  siteState.sitesLoading = false
 }
 
 
@@ -239,6 +246,66 @@ describe('Agent create modal — caller with no accessible locations', () => {
 
 
 // ─── Happy path — caller HAS a tenant + locations ────────────────────────
+
+
+// ─── SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) ────────────────────────────
+
+
+describe('Agent create modal — SITE-CONTEXT-HYDRATION-GUARD window', () => {
+  // During the hydration window all SiteContext defaults light up the
+  // "no-assigned" branch deterministically (locations=[], !isSuperAdmin,
+  // !hasLocationAccess?? defaults). The patch gates BOTH `tenantMissing`
+  // and `noAssignedLocations` on `!sitesLoading`. Below: sitesLoading=true
+  // + every other field at its hydration-window default must produce
+  // NEITHER blocked Alert. The form is still rendered (input + select)
+  // but in a neutral state — the user can type a name; the submit will
+  // disable on `activeLocationId == null && newLoc == null` as before
+  // (a real config error, not a transient hydration artefact).
+
+  it('sitesLoading=true + all defaults → NO blocked Alert, NO tenant-required Alert', async () => {
+    siteState.sitesLoading = true
+    // Defaults — same shape the SiteContext provider hands out before
+    // /context/current resolves.
+    siteState.isSuperAdmin = false
+    siteState.organization = null
+    siteState.hasLocationAccess = true
+    siteState.locations = []
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+  })
+
+  it('sitesLoading=true + super_admin shape + null organization → NO tenant-required Alert', async () => {
+    // A super_admin landing on the page: token present, but the
+    // CurrentContext fetch hasn't returned yet, so all sub-fields
+    // (including `organization`) read null. Without the gate the modal
+    // would surface "Önce firma seçin" during this window even though
+    // the backend hasn't been asked.
+    siteState.sitesLoading = true
+    siteState.isSuperAdmin = true
+    siteState.organization = null
+    siteState.isOrgWide = true
+    siteState.locations = []
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(screen.queryByTestId('agent-create-blocked-tenant-required')).toBeNull()
+    expect(screen.queryByTestId('agent-create-blocked-no-assigned-locations')).toBeNull()
+  })
+
+  it('hydration finishes (sitesLoading false → true → false) — blocked Alert may then surface', async () => {
+    // Confirm the gate releases once context is resolved. Same fixture
+    // as the no-tenant case above EXCEPT sitesLoading is now false →
+    // the gate is open → the existing PR #96 contract resumes.
+    siteState.sitesLoading = false
+    siteState.isSuperAdmin = true
+    siteState.organization = null
+    siteState.isOrgWide = true
+    renderNocAgents()
+    fireEvent.click(await screen.findByTestId('agent-install-button'))
+    expect(await screen.findByTestId('agent-create-blocked-tenant-required')).toBeTruthy()
+  })
+})
 
 
 describe('Agent create modal — caller WITH a tenant and locations', () => {
