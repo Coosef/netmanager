@@ -48,11 +48,10 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import {
-  render, screen, cleanup, act, fireEvent, waitFor,
+  render, screen, cleanup, fireEvent, waitFor,
 } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntApp } from 'antd'
-import type { ReactNode } from 'react'
 
 import DeviceForm from '../DeviceForm'
 
@@ -133,18 +132,6 @@ function renderForm(props: { device?: any; onSuccess?: () => void } = {}) {
         <DeviceForm device={props.device ?? null} onSuccess={props.onSuccess ?? (() => {})} />
       </AntApp>
     </QueryClientProvider>,
-  )
-}
-
-
-function Wrapper({ children }: { children: ReactNode }) {
-  const qc = new QueryClient({
-    defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
-  })
-  return (
-    <QueryClientProvider client={qc}>
-      <AntApp>{children}</AntApp>
-    </QueryClientProvider>
   )
 }
 
