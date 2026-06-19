@@ -25,6 +25,18 @@ export interface Agent {
   last_connected_at: string | null
   last_disconnected_at: string | null
   total_connections: number
+
+  // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — additive expose from
+  // the backend `AgentResponse` schema so the /devices Cihaz Ekle form
+  // can pre-filter the primary-agent + fallback-agent dropdowns down to
+  // agents that match the operator-selected location's tenant scope.
+  // Both `null` for legacy agents created before the org-stamp landed;
+  // the form treats `null` as "not assignable to a specific tenant" and
+  // excludes them from the dropdown. Backend devices.py cross-tenant
+  // guards (PR #102) remain authoritative — these fields are UX preview
+  // only, NEVER a substitute for the server-side reject.
+  organization_id: number | null
+  location_id: number | null
 }
 
 export interface AgentMetrics {
