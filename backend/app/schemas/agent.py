@@ -34,6 +34,16 @@ class AgentResponse(BaseModel):
     last_disconnected_at: Optional[datetime] = None
     total_connections: int = 0
 
+    # DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — additive expose of the
+    # agent's tenant scope so the /devices Cihaz Ekle form can filter the
+    # primary-agent + fallback-agent dropdowns down to agents that match
+    # the operator-selected location's organization_id + location_id BEFORE
+    # the request leaves the browser. Backend cross-tenant guards in
+    # devices.py (PR #102) remain the authoritative gate; this field is
+    # for client-side preview only. No secret/auth/key fields are exposed.
+    organization_id: Optional[int] = None
+    location_id: Optional[int] = None
+
     model_config = {"from_attributes": True}
 
 

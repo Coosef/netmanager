@@ -28,11 +28,32 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // agents/credProfiles/locations dropdown'larında loading flash riski).
   // POST başarılı olduktan SONRA (drawer kapanınca) opsiyonel olarak setLocation
   // çağrılır → kullanıcı yeni cihazı listede görür.
-  const { setLocation, activeLocationId } = useSite()
+  //
+  // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — `organization` +
+  // `ctxResolved` joined the consumer so the dropdowns can be scoped
+  // to the operator's active tenant. Backend cross-tenant guards in
+  // devices.py (PR #102) remain the authoritative gate; the filter
+  // here is a UX preview that surfaces a friendlier 400 BEFORE the
+  // request leaves the browser.
+  const {
+    setLocation, activeLocationId, organization, ctxResolved, isSuperAdmin,
+  } = useSite()
+
+  // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — the active tenant
+  // org id, resolved once. Used for the locations + agents fetch
+  // params AND the submit-time guard. For every role except a
+  // super-admin who has not picked a tenant context yet, this is
+  // non-null whenever `ctxResolved` is true.
+  const activeOrgId = organization?.id ?? null
+  // Super-admin without a tenant context is a hard block (mirror of
+  // PR #96 agent-create modal). Backend would 400 the create call;
+  // we surface the explanation here BEFORE the user types a hostname.
+  const tenantMissing = ctxResolved && isSuperAdmin && organization === null
 
   const { data: agents = [] } = useQuery({
-    queryKey: ['agents'],
+    queryKey: ['agents', activeOrgId],
     queryFn: agentsApi.list,
+    enabled: ctxResolved,
   })
 
   const { data: credProfiles = [] } = useQuery({
@@ -40,19 +61,68 @@ export default function DeviceForm({ device, onSuccess }: Props) {
     queryFn: credentialProfilesApi.list,
   })
 
+  // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — the location list
+  // is fetched with the `organization_id` filter the API already
+  // supports, scoped to the operator's active tenant. For super-admin
+  // browsing one tenant at a time this means the dropdown shows that
+  // tenant's locations ONLY — the cross-tenant "Mövempic" surprise
+  // (org=1 deleted, org=6 active, same name) becomes impossible at
+  // the UX layer. Backend still rejects authoritatively.
   const { data: locationsData } = useQuery({
-    queryKey: ['locations'],
-    queryFn: () => locationsApi.list(),
+    queryKey: ['locations', { organization_id: activeOrgId }],
+    queryFn: () =>
+      locationsApi.list(
+        activeOrgId != null ? { organization_id: activeOrgId } : undefined,
+      ),
     staleTime: 30_000,
+    enabled: ctxResolved && activeOrgId != null,
   })
+
+  // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — derived view: the
+  // raw API list further constrained to NON-soft-deleted rows (the
+  // backend already filters by `deleted_at IS NULL` but pinning it
+  // client-side adds belt + braces for any future RLS regression).
+  const scopedLocations = (locationsData?.items ?? []).filter(
+    (l) => activeOrgId != null && l.organization_id === activeOrgId,
+  )
+
+  // Watch the selected location_id reactively so the agent dropdown,
+  // the submit guard, and the location-change reset effect all see
+  // the same value without dance-around-the-form-state hacks.
+  const selectedLocationId = Form.useWatch('location_id', form) as number | undefined
 
   // T10 C7.B — Güvenlik politikası atama bölümü Drawer'dan çıkarıldı; yeni evi
   // Device Detail > Güvenlik Politikası sekmesi (/devices/:id?tab=security).
   // Bu Drawer "hızlı düzenle" + "yeni cihaz" olarak kalır.
 
+  // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — only show agents
+  // that match the operator's active tenant org AND the operator-
+  // selected location. Three layers of filtering, each with a clear
+  // semantic:
+  //   1. agent.organization_id === activeOrgId
+  //      — RLS already keeps super_admin from seeing other tenants'
+  //        agents in most paths, but the additive expose of
+  //        `organization_id` on AgentResponse lets us mirror the
+  //        backend devices.py:509 guard here too.
+  //   2. agent.location_id === selectedLocationId  (when a location
+  //      is picked) — the backend insists primary+backup agents
+  //      belong to the SAME location as the device, so showing
+  //      agents from other locations only invites the rejection
+  //      the user just saw.
+  //   3. Legacy agents (organization_id === null) are excluded —
+  //      they cannot satisfy backend's `agent.org_id == device.org_id`
+  //      check and a click would only reach the same reject path.
+  const compatibleAgents = activeOrgId == null
+    ? []
+    : agents.filter((a) => {
+        if (a.organization_id !== activeOrgId) return false
+        if (selectedLocationId == null) return true
+        return a.location_id === selectedLocationId
+      })
+
   const agentOptions = [
     { label: t('devices.form.agent_none'), value: '' },
-    ...agents.map((a) => ({
+    ...compatibleAgents.map((a) => ({
       label: (
         <span>
           <RobotOutlined style={{ marginRight: 6, color: a.status === 'online' ? '#52c41a' : '#f5222d' }} />
@@ -69,7 +139,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
     })),
   ]
 
-  const fallbackAgentOptions = agents.map((a) => ({
+  const fallbackAgentOptions = compatibleAgents.map((a) => ({
     label: (
       <span>
         <RobotOutlined style={{ marginRight: 6, color: a.status === 'online' ? '#52c41a' : '#f5222d' }} />
@@ -94,7 +164,54 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   const hasCredentialProfile = watchedCredentialProfileId != null
 
   const mutation = useMutation({
-    mutationFn: (values: Record<string, unknown>) => {
+    mutationFn: async (values: Record<string, unknown>) => {
+      // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — three guard
+      // layers. None of them replaces the backend devices.py:490-517
+      // reject; they exist to surface a friendlier message BEFORE
+      // the request leaves the browser and to keep a half-typed form
+      // from being thrown away by an unexplained 400.
+      //
+      // The guards mirror exactly the backend predicates so the
+      // operator-facing UX matches what the server would have said
+      // anyway — modulo a localized + targeted message instead of
+      // the server's compound "Mövempic farklı bir organizasyona
+      // ait — header'daki lokasyon seçicisinden …" sentence.
+      if (!device) {
+        if (tenantMissing) {
+          throw new Error(t('devices.form.scope_guard_tenant_required'))
+        }
+        const locationId = typeof values.location_id === 'number'
+          ? values.location_id
+          : undefined
+        if (locationId != null) {
+          const inScope = scopedLocations.some((l) => l.id === locationId)
+          if (!inScope) {
+            throw new Error(t('devices.form.scope_guard_location_not_in_context'))
+          }
+        }
+        const checkAgent = (agentId: unknown): string | null => {
+          if (typeof agentId !== 'string' || !agentId) return null
+          const agent = agents.find((a) => a.id === agentId)
+          if (!agent) return null
+          if (agent.organization_id !== activeOrgId) {
+            return t('devices.form.scope_guard_agent_incompatible')
+          }
+          if (locationId != null && agent.location_id !== locationId) {
+            return t('devices.form.scope_guard_agent_incompatible')
+          }
+          return null
+        }
+        const primaryFail = checkAgent(values.agent_id)
+        if (primaryFail) throw new Error(primaryFail)
+        const backups = Array.isArray(values.fallback_agent_ids)
+          ? (values.fallback_agent_ids as unknown[])
+          : []
+        for (const b of backups) {
+          const fail = checkAgent(b)
+          if (fail) throw new Error(fail)
+        }
+      }
+
       const payload = { ...values }
       if (payload.agent_id === '') payload.agent_id = null
       if (payload.layer === '') payload.layer = null
@@ -208,9 +325,40 @@ export default function DeviceForm({ device, onSuccess }: Props) {
             form.setFieldValue('os_type', allowed[0] ?? null)
           }
         }
+        // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — when the
+        // operator changes the location, the previously-selected agent
+        // (primary + fallback) may belong to a different location's
+        // tenant scope. Resetting the selections forces a fresh pick
+        // from the now-filtered dropdown so the form can never carry
+        // a stale cross-location agent reference into submit.
+        // Edit-mode is exempt: the device's location is immutable
+        // through this form (changed only by "Lokasyona Taşı"), so
+        // the agent selection follows the existing device, not the
+        // form field.
+        if ('location_id' in changed && !device) {
+          form.setFieldValue('agent_id', '')
+          form.setFieldValue('fallback_agent_ids', [])
+        }
       }}
       onFinish={(values) => mutation.mutate(values)}
     >
+      {/* DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — super_admin
+          without an active tenant context cannot create a device. The
+          form fields stay rendered so the operator sees what they
+          would have filled, but the Alert explains the gate and the
+          submit-time guard rejects with the same message. Edit-mode
+          is exempt — an existing device already has a tenant. */}
+      {!device && tenantMissing && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={t('devices.form.scope_guard_tenant_required')}
+          description={t('devices.form.scope_guard_tenant_required_desc')}
+          data-testid="device-create-blocked-tenant-required"
+        />
+      )}
+
       <Form.Item label={t('devices.form.device_type')} name="device_type" rules={[{ required: true }]}>
         <Select options={DEVICE_TYPE_OPTIONS} />
       </Form.Item>
@@ -275,19 +423,53 @@ export default function DeviceForm({ device, onSuccess }: Props) {
       >
         <Select
           allowClear
-          disabled={!!device}
+          disabled={!!device || tenantMissing}
           placeholder={t('devices.form.org_location_placeholder')}
-          options={[
-            ...(locationsData?.items ?? []).map((l) => ({
-              value: l.id,
-              label: (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: l.color || '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
-                  {l.name}
-                </span>
-              ),
-            })),
-          ]}
+          options={(() => {
+            // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — three
+            // semantic rules baked into the option set:
+            //   1. Only `scopedLocations` (active tenant) are eligible;
+            //      cross-org rows from the raw API list (which the
+            //      query already filters server-side, but pinning
+            //      client-side adds belt+braces) NEVER appear.
+            //   2. Same-name duplicates within the active tenant
+            //      get a `· #id` disambiguator appended so the
+            //      operator can tell them apart at a glance. Cross-
+            //      tenant duplicates are already excluded by rule 1.
+            //   3. Soft-deleted rows are filtered by the backend list
+            //      endpoint; should the backend ever regress, the
+            //      `organization_id !== activeOrgId` filter for rule
+            //      1 still excludes a stale row because soft-deleted
+            //      rows are excluded server-side from the list.
+            const nameCounts = scopedLocations.reduce<Record<string, number>>(
+              (m, l) => {
+                m[l.name] = (m[l.name] ?? 0) + 1
+                return m
+              },
+              {},
+            )
+            return scopedLocations.map((l) => {
+              const isDup = (nameCounts[l.name] ?? 0) > 1
+              return {
+                value: l.id,
+                label: (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: l.color || '#3b82f6', display: 'inline-block', flexShrink: 0 }} />
+                    {l.name}
+                    {isDup && (
+                      <span
+                        style={{ color: 'var(--fg-3,#94a3b8)', fontSize: 11 }}
+                        data-testid={`location-disambig-${l.id}`}
+                      >
+                        · #{l.id}
+                      </span>
+                    )}
+                  </span>
+                ),
+              }
+            })
+          })()}
+          data-testid="device-create-location-select"
         />
       </Form.Item>
 
@@ -374,7 +556,11 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         name="agent_id"
         tooltip={t('devices.form.agent_tooltip')}
       >
-        <Select options={agentOptions} />
+        <Select
+          options={agentOptions}
+          disabled={!device && (tenantMissing || selectedLocationId == null)}
+          data-testid="device-create-agent-select"
+        />
       </Form.Item>
 
       <Form.Item
@@ -387,6 +573,8 @@ export default function DeviceForm({ device, onSuccess }: Props) {
           allowClear
           placeholder={t('devices.form.fallback_agents_placeholder')}
           options={fallbackAgentOptions}
+          disabled={!device && (tenantMissing || selectedLocationId == null)}
+          data-testid="device-create-fallback-agents-select"
         />
       </Form.Item>
 
