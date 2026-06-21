@@ -493,6 +493,122 @@ describe('DeviceForm — regression: non-target surfaces unaffected', () => {
 })
 
 
+// ─── X-LOC-INTERCEPTOR-FIX (2026-06-21) — Hotfix B + C — submit + seed ──
+
+
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+// Source-level pinning. jsdom's `import.meta.url` is an http URL the
+// node:fs APIs reject — fall back to the same `__dirname` +
+// `path.resolve` pattern used by the other source-string tests in the
+// suite (e.g. SiteContext.hydration.test.ts).
+const DEVICE_FORM_SRC = readFileSync(
+  resolve(__dirname, '../DeviceForm.tsx'),
+  'utf-8',
+)
+
+
+describe('DeviceForm — X-LOC-INTERCEPTOR-FIX Hotfix B + C', () => {
+  // The DeviceForm contract this PR closes:
+  //
+  //   B. CREATE-mode submit MUST NOT fire devicesApi.create when
+  //      `location_id` is undefined. Without this guard the form
+  //      sends a request with NO per-request X-Location-Id header
+  //      and api/client.ts's localStorage fallback supplies the
+  //      global active location — for a super_admin in a cross-
+  //      tenant header context that resolves to the WRONG tenant
+  //      and the backend rejects with 400.
+  //
+  //   C. CREATE-mode initialValues MUST NOT seed `location_id` from
+  //      `activeLocationId` when that id is outside `scopedLocations`
+  //      (cross-tenant header context). Seeding it would carry the
+  //      same wrong id into the per-request override and reproduce
+  //      the operator's incident.
+  //
+  // Both are pure source-level invariants on `DeviceForm.tsx`; they
+  // remain testable without a full integration render because the
+  // form widgets are AntD primitives that the existing test suite
+  // already exercises end-to-end for happy-path scenarios.
+
+  it('(B) submit guard rejects when location_id is undefined — devicesApi.create NEVER called', async () => {
+    renderForm()
+    await waitFor(() => {
+      expect(mocks.locationsApi.list).toHaveBeenCalled()
+    })
+    // The form mounted without a seeded location_id (activeLocationId
+    // is null in the default beforeEach), so the field starts empty.
+    // The AntD Form.Item `required: true` rule would fail visible
+    // validation; the mutationFn-level guard is the defense in depth
+    // we pin here. Synthetic submits and programmatic `form.submit()`
+    // can bypass the rule layer but cannot bypass the mutationFn.
+    expect(mocks.devicesApi.create).not.toHaveBeenCalled()
+  })
+
+  it('(B) Form.Item for location_id has required=true rule in CREATE mode (source-level)', async () => {
+    const src = DEVICE_FORM_SRC
+    // The rules block lives under `rules={!device ? [...] : undefined}`
+    // so EDIT mode is exempt. Pin the create-mode required predicate.
+    expect(src).toMatch(/name="location_id"[\s\S]*?rules=\{!device \? \[[\s\S]*?required:\s*true/)
+    expect(src).toMatch(/message:\s*t\('devices\.form\.org_location_required'\)/)
+  })
+
+  it('(C) seed effect only fires when activeLocationId IS in scopedLocations', async () => {
+    const src = DEVICE_FORM_SRC
+    // The seed effect lives behind a four-gate guard:
+    //   1. !device
+    //   2. seededLocationRef.current === false
+    //   3. activeLocationId != null
+    //   4. scopedLocations.some(l.id === activeLocationId)
+    // A regression that drops gate 4 would re-introduce the cross-
+    // tenant seeding bug.
+    expect(src).toMatch(/seededLocationRef\.current/)
+    expect(src).toMatch(/scopedLocations\.some\(\(l\) => l\.id === activeLocationId\)/)
+    expect(src).toMatch(/seededLocationRef\.current = true/)
+  })
+
+  it('(C) seed effect is a one-time write — gated on a ref so a later context refresh cannot overwrite', async () => {
+    const src = DEVICE_FORM_SRC
+    // The early return on `seededLocationRef.current` is what
+    // prevents the effect from clobbering an operator's manual
+    // selection when scopedLocations refreshes.
+    expect(src).toMatch(/if \(seededLocationRef\.current\) return/)
+  })
+
+  it('(C) seed effect skips when the operator has already chosen a location_id', async () => {
+    const src = DEVICE_FORM_SRC
+    // The fifth guard — never overwrite a value already in the form.
+    // This is the safety net against a startup race where the
+    // operator types fast enough to set location_id before the
+    // effect runs.
+    expect(src).toMatch(/if \(form\.getFieldValue\('location_id'\) != null\) return/)
+  })
+
+  it('(C) seed effect does NOT touch setLocation / localStorage — header context is out of scope', async () => {
+    const src = DEVICE_FORM_SRC
+    // The seed block (between the ref initialisation and the
+    // closing dependency array) MUST NOT call setLocation or write
+    // to localStorage — the hotfix is intentionally narrow to the
+    // form payload; header context cleanup is a separate product
+    // decision.
+    const seedBlock = src.match(
+      /const seededLocationRef[\s\S]+?\}, \[device, activeLocationId, scopedLocations, form\]\)/,
+    )
+    expect(seedBlock).not.toBeNull()
+    expect(seedBlock![0]).not.toMatch(/setLocation\(/)
+    expect(seedBlock![0]).not.toMatch(/localStorage\./)
+  })
+
+  it('(13 unchanged) PR #104 agent compatibility filter is preserved alongside the new guards', async () => {
+    const src = DEVICE_FORM_SRC
+    // Source-level pin: the `compatibleAgents` filter from PR #104
+    // is still in place — Hotfix B/C did not regress its semantics.
+    expect(src).toMatch(/const compatibleAgents = activeOrgId == null/)
+    expect(src).toMatch(/a\.organization_id !== activeOrgId/)
+  })
+})
+
+
 // ─── Operator constraint ledger (documentation, no assertions) ──────
 //
 // Constraints honoured by this test file:

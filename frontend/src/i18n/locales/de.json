@@ -665,6 +665,7 @@
       "org_location_tooltip_edit": "Verwende die Aktion \"Standort verschieben\" in der Geräteliste",
       "org_location_tooltip_new": "Das Gerät wird am gewählten Standort erstellt. Bei Erfolg filtert die Liste auf diesen Standort.",
       "org_location_placeholder": "Standort auswählen",
+      "org_location_required": "Bitte wählen Sie einen Standort, um ein Gerät hinzuzufügen.",
       "scope_guard_tenant_required": "Bitte zuerst einen Mandanten-Kontext wählen.",
       "scope_guard_tenant_required_desc": "Als Plattform-Administrator wählen Sie zuerst einen Mandanten-Kontext, bevor Sie ein Gerät hinzufügen. Wählen Sie den Mandanten in der Kopfzeile und versuchen Sie es erneut.",
       "scope_guard_location_not_in_context": "Der gewählte Standort ist im aktuellen Mandanten-Kontext nicht gültig. Bitte wählen Sie einen berechtigten Standort aus der Liste.",
