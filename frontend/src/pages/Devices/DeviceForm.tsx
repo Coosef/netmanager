@@ -9,6 +9,7 @@ import { credentialProfilesApi } from '@/api/credentialProfiles'
 import { locationsApi } from '@/api/locations'
 import { formatApiError } from '@/api/_errors'
 import { useSite } from '@/contexts/SiteContext'
+import { useRouteOrgId } from '@/hooks/useRouteOrgId'
 import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS, OS_TYPE_OPTIONS, VENDOR_OPTIONS, VENDOR_OS_MAP } from '@/types'
 import { useTranslation } from 'react-i18next'
@@ -53,14 +54,29 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // params AND the submit-time guard. For every role except a
   // super-admin who has not picked a tenant context yet, this is
   // non-null whenever `ctxResolved` is true.
-  const activeOrgId = organization?.id ?? null
+  //
+  // PR-A REVISED (2026-06-22) — URL-AUTHORITATIVE PRECEDENCE.
+  //   routeOrgId (from /app/org/:organizationId/*) takes PRIMARY
+  //   authority. `organization.id` (from /context/current) is the
+  //   fallback ONLY when routeOrgId is null (legacy / platform shell).
+  //   `scopeOrgId` is the resolved value used for queryKey + queryFn
+  //   `organization_id` filter — guaranteeing the locations + agents
+  //   dropdowns scope to the URL's tenant, not a stale localStorage-
+  //   driven tenant the operator switched away from.
+  const routeOrgId = useRouteOrgId()
+  const scopeOrgId = routeOrgId ?? (organization?.id ?? null)
+  // Backward-compatible alias for the submit-time guard below.
+  const activeOrgId = scopeOrgId
   // Super-admin without a tenant context is a hard block (mirror of
   // PR #96 agent-create modal). Backend would 400 the create call;
   // we surface the explanation here BEFORE the user types a hostname.
   const tenantMissing = ctxResolved && isPlatformSuperAdmin && organization === null
 
   const { data: agents = [] } = useQuery({
-    queryKey: ['agents', activeOrgId],
+    // PR-A REVISED — queryKey carries routeOrgId so cache partitions
+    // per URL-authoritative tenant. Inside /app/org/6/devices the
+    // dropdown CANNOT serve org=1's previously-cached agents.
+    queryKey: ['org', routeOrgId, 'agents'],
     queryFn: agentsApi.list,
     enabled: ctxResolved,
   })
@@ -77,14 +93,19 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // tenant's locations ONLY — the cross-tenant "Mövempic" surprise
   // (org=1 deleted, org=6 active, same name) becomes impossible at
   // the UX layer. Backend still rejects authoritatively.
+  //
+  // PR-A REVISED — queryKey carries routeOrgId; queryFn uses
+  // scopeOrgId (routeOrgId ?? activeOrgId fallback). The request
+  // organization_id filter is therefore URL-authoritative inside
+  // /app/org/:id/*; a stale localStorage org id cannot leak.
   const { data: locationsData } = useQuery({
-    queryKey: ['locations', { organization_id: activeOrgId }],
+    queryKey: ['org', routeOrgId, 'locations'],
     queryFn: () =>
       locationsApi.list(
-        activeOrgId != null ? { organization_id: activeOrgId } : undefined,
+        scopeOrgId != null ? { organization_id: scopeOrgId } : undefined,
       ),
     staleTime: 30_000,
-    enabled: ctxResolved && activeOrgId != null,
+    enabled: ctxResolved && scopeOrgId != null,
   })
 
   // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — derived view: the
@@ -92,7 +113,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // backend already filters by `deleted_at IS NULL` but pinning it
   // client-side adds belt + braces for any future RLS regression).
   const scopedLocations = (locationsData?.items ?? []).filter(
-    (l) => activeOrgId != null && l.organization_id === activeOrgId,
+    (l) => scopeOrgId != null && l.organization_id === scopeOrgId,
   )
 
   // Watch the selected location_id reactively so the agent dropdown,

@@ -52,6 +52,7 @@ import {
 } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntApp } from 'antd'
+import { MemoryRouter } from 'react-router-dom'
 
 import DeviceForm from '../DeviceForm'
 
@@ -122,16 +123,23 @@ function resetSiteState() {
 }
 
 
-function renderForm(props: { device?: any; onSuccess?: () => void } = {}) {
+function renderForm(props: { device?: any; onSuccess?: () => void; initialPath?: string } = {}) {
+  // PR-A REVISED: DeviceForm now calls useRouteOrgId() which requires
+  // a React Router context. MemoryRouter at `/` makes routeOrgId === null
+  // (legacy route — falls back to organization.id from siteState), so
+  // the location/agent scope still matches `siteState.organization.id`
+  // and the existing assertions hold.
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   })
   return render(
-    <QueryClientProvider client={qc}>
-      <AntApp>
-        <DeviceForm device={props.device ?? null} onSuccess={props.onSuccess ?? (() => {})} />
-      </AntApp>
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={[props.initialPath ?? '/']}>
+      <QueryClientProvider client={qc}>
+        <AntApp>
+          <DeviceForm device={props.device ?? null} onSuccess={props.onSuccess ?? (() => {})} />
+        </AntApp>
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 

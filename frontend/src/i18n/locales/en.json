@@ -297,7 +297,9 @@
     "health_ok": "Healthy",
     "health_warn": "Warning",
     "health_crit": "Critical",
-    "score": "Score"
+    "score": "Score",
+    "coming_soon_badge": "Coming soon",
+    "coming_soon_tooltip": "This module is not yet available; a follow-up PR will enable it."
   },
   "dashboard": {
     "title": "Network Dashboard",
@@ -3008,5 +3010,87 @@
       "desc_placeholder": "Description (optional — site, location, etc.)",
       "footer_hint": "You can assign devices to this rack later from the Devices page."
     }
+  },
+  "platform": {
+    "brand_sublabel": "platform control",
+    "nav": {
+      "overview": "Platform Overview",
+      "organizations": "Organizations",
+      "users": "Platform Users",
+      "roles": "Roles & Permissions",
+      "licenses": "Licenses & Quotas",
+      "global_health": "Global Health",
+      "global_audit": "Global Audit",
+      "retention": "Data Retention",
+      "settings": "Platform Settings"
+    },
+    "overview": {
+      "title": "Platform Overview",
+      "subtitle": "A summary of every organization you manage.",
+      "metric_total_orgs": "Total Organizations",
+      "metric_active_orgs": "Active Organizations",
+      "metric_inactive_orgs": "Inactive Organizations",
+      "coming_soon_message": "License usage, retention status, and global health panel ship in follow-up releases.",
+      "tenant_list_title": "Organizations",
+      "loading": "Loading…",
+      "empty": "No organizations defined yet.",
+      "org_status_active": "Active",
+      "org_status_inactive": "Inactive"
+    },
+    "organizations": {
+      "title": "Organizations",
+      "subtitle": "Browse every organization on the platform and enter their workspaces.",
+      "col_name": "Name",
+      "col_slug": "Slug",
+      "col_status": "Status",
+      "search_placeholder": "Search organizations…",
+      "count_label": "{{count}} organizations",
+      "action_detail": "Details",
+      "status_active": "Active",
+      "status_inactive": "Inactive"
+    },
+    "organization_detail": {
+      "back": "Back to organizations",
+      "invalid_id": "Invalid organization ID.",
+      "fetch_error": "Could not fetch organization details.",
+      "not_found": "Organization not found (deleted or not authorized).",
+      "field_id": "ID",
+      "field_name": "Name",
+      "field_slug": "Slug",
+      "field_status": "Status",
+      "status_active": "Active",
+      "status_inactive": "Inactive",
+      "cta_section_title": "Workspace",
+      "cta_description": "Open this organization's operations panel. The URL is authoritative for org context.",
+      "cta_open_workspace": "Open workspace",
+      "inactive_warning": "This organization is inactive; the workspace cannot be opened."
+    }
+  },
+  "operations": {
+    "brand_sublabel": "operations panel",
+    "nav": {
+      "dashboard": "Dashboard",
+      "devices": "Network Inventory",
+      "agents": "Proxy Agents",
+      "topology": "Topology",
+      "discovery": "Discovery",
+      "monitoring": "Monitoring & Analytics",
+      "alerts": "Alerts & Incidents",
+      "config": "Configuration",
+      "automation": "Automation",
+      "security": "Security",
+      "reports": "Reports",
+      "tools": "Operations Tools",
+      "org_users": "Org Users",
+      "org_audit": "Org Audit",
+      "tasks": "Tasks",
+      "ipam": "IPAM",
+      "vlan": "VLAN"
+    },
+    "org_badge_loading": "Loading org context…",
+    "org_badge_readonly": "Fixed",
+    "org_badge_action_switch_org": "Switch organization",
+    "org_badge_action_platform_admin": "Platform Management",
+    "org_badge_action_org_detail": "Organization details"
   }
 }

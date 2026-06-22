@@ -9,7 +9,7 @@ import {
   SoundOutlined, NotificationOutlined, FullscreenOutlined, SettingOutlined,
 } from '@ant-design/icons'
 import CustomizePanel from '@/components/CustomizePanel'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useIsMobile } from '@/hooks/useIsMobile'
 import { useAuthStore } from '@/store/auth'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -19,6 +19,8 @@ import { useTheme } from '@/contexts/ThemeContext'
 import { useCustomize } from '@/contexts/CustomizeContext'
 import LocationSelector from './LocationSelector'
 import OrganizationSelector from './OrganizationSelector'
+import OrgBadge from './OrgBadge'
+import { detectPanelMode } from '@/utils/panelMode'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 
@@ -41,12 +43,23 @@ const HEADER_CSS = `
 export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSearch?: () => void; onOpenMobileNav?: () => void }) {
   const { user, logout } = useAuthStore()
   const navigate = useNavigate()
+  const location = useLocation()
   const qc = useQueryClient()
   const { isDark, toggle } = useTheme()
   const { message } = App.useApp()
   const { t, i18n } = useTranslation()
   const isMobile = useIsMobile()
   const { soundEnabled, setSoundEnabled, applyLayout } = useCustomize()
+
+  // PR-A — panelMode-aware header. The tenant-context widgets switch by
+  // surface:
+  //   - platform   → no LocationSelector, no OrganizationSelector
+  //                  (super-admin operates ABOVE every tenant).
+  //   - operations → OrgBadge (URL-authoritative; role-aware dropdown)
+  //                  + LocationSelector scoped to the URL org. NO
+  //                  OrganizationSelector — URL is authoritative.
+  //   - legacy     → existing OrganizationSelector + LocationSelector.
+  const panelMode = detectPanelMode(location.pathname)
 
   const [notifOpen, setNotifOpen] = useState(false)
   const [customizeOpen, setCustomizeOpen] = useState(false)
@@ -310,16 +323,13 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
         </div>
       )}
 
-      {/* PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — Super-admin
-          Organization Switcher. Renders before the LocationSelector so
-          the operator's left-to-right scan reads "Org → Location" —
-          the natural tenant-then-scope mental model. Returns null for
-          non-super-admin users; LocationSelector remains the only
-          tenant-aware control they see. */}
-      <OrganizationSelector />
-
-      {/* Active-location selector — compact (Faz 8 Phase F) */}
-      <LocationSelector isMobile={isMobile} />
+      {/* PR-A — panelMode-aware tenant context widgets.
+          - legacy     → existing OrganizationSelector + LocationSelector
+          - operations → OrgBadge (URL-authoritative) + LocationSelector
+          - platform   → none (super-admin operates ABOVE every tenant) */}
+      {panelMode === 'legacy' && <OrganizationSelector />}
+      {panelMode === 'operations' && <OrgBadge />}
+      {panelMode !== 'platform' && <LocationSelector isMobile={isMobile} />}
 
       {/* Search — mockup nm-search: tıklanınca ⌘K palette açar */}
       {!isMobile ? (

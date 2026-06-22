@@ -96,12 +96,19 @@ describe('SiteContext — PHASE1A setOrganization callback contract', () => {
 })
 
 
-describe('SiteContext — PHASE1A useQuery key carries activeOrgId', () => {
-  it('queryKey ends with [..., activeLocationId, activeOrgId]', () => {
-    // A regression that drops activeOrgId from the key would cause a
-    // super-admin's org switch to read stale cached ctx for the
-    // previous tenant — operator confusion + cross-tenant data leak.
+describe('SiteContext — PR-A REVISED queryKey carries routeOrgId (URL-authoritative)', () => {
+  it('queryKey is [context, current, routeOrgId, activeLocationId]', () => {
+    // PR-A REVISED: queryKey carries `routeOrgId` (URL-authoritative)
+    // first then `activeLocationId`. Replaces the PHASE1A shape
+    // `[..., activeLocationId, activeOrgId]` per the operator
+    // addendum that closed the cache-leak window in PR #108 review.
     expect(SRC).toMatch(
+      /queryKey:\s*\['context',\s*'current',\s*routeOrgId,\s*activeLocationId\]/,
+    )
+  })
+
+  it('queryKey does NOT include activeOrgId (legacy slot removed)', () => {
+    expect(SRC).not.toMatch(
       /queryKey:\s*\['context',\s*'current',\s*activeLocationId,\s*activeOrgId\]/,
     )
   })

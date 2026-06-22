@@ -1,7 +1,10 @@
 /**
- * RootRedirect — auth + hidrasyon temelli güvenli `/` route handler.
+ * RootRedirect — auth + hidrasyon + ROLE temelli güvenli `/` route handler.
  *
- * P0 LOGIN-AUTH-LOOP-FIX sözleşmesini sabitler.
+ * P0 LOGIN-AUTH-LOOP-FIX sözleşmesini sabitler. PR-A (2026-06-22):
+ * rolü gözeten matrise dönüştürüldü:
+ *   super_admin  → /platform/overview
+ *   normal user  → /app/org/<orgId>/dashboard (URL-authoritative)
  *
  * Test stratejisi: Mevcut codebase pattern'iyle uyumlu (import-smoke +
  * kaynak kod string-match — bkz. sw-killswitch.test.ts). React hook
@@ -32,16 +35,17 @@ describe('RootRedirect — sözleşme kaynak düzeyinde sabit', () => {
     expect(SRC).toMatch(/const hydrated = useHasHydrated\(\)/)
   })
 
-  it('useAuthStore üzerinden token okuması yapılır', () => {
+  it('useAuthStore üzerinden token + user okuması yapılır', () => {
     expect(SRC).toContain("from '@/store/auth'")
     expect(SRC).toMatch(/useAuthStore\(\(s\)\s*=>\s*s\.token\)/)
+    expect(SRC).toMatch(/useAuthStore\(\(s\)\s*=>\s*s\.user\)/)
   })
 
-  it('token-first karar matrisi: token VAR ise hidrasyon kontrolünden ÖNCE /dashboard', () => {
-    // AUTH-GUARD-TOKEN-FIRST-FIX (2026-06-10): token kontrolü ilk sırada
-    expect(SRC).toMatch(
-      /if\s*\(token\)\s*return\s*<Navigate\s+to="\/dashboard"\s+replace\s*\/>[\s\S]*?if\s*\(!hydrated\)/,
-    )
+  it('useSite üzerinden ctxResolved + activeOrgId + isPlatformSuperAdmin okunur', () => {
+    expect(SRC).toContain("from '@/contexts/SiteContext'")
+    expect(SRC).toContain('ctxResolved')
+    expect(SRC).toContain('activeOrgId')
+    expect(SRC).toContain('isPlatformSuperAdmin')
   })
 
   it('token YOK + !hydrated → görünür Spin (blank YOK)', () => {
@@ -50,33 +54,34 @@ describe('RootRedirect — sözleşme kaynak düzeyinde sabit', () => {
     expect(SRC).toContain("data-testid=\"root-redirect-loading\"")
   })
 
-  it("authenticated → <Navigate to=\"/dashboard\" replace />", () => {
-    expect(SRC).toMatch(/<Navigate\s+to="\/dashboard"\s+replace\s*\/>/)
-  })
-
-  it("unauthenticated → <Navigate to=\"/login\" replace />", () => {
+  it('token YOK + hydrated → /login', () => {
     expect(SRC).toMatch(/<Navigate\s+to="\/login"\s+replace\s*\/>/)
   })
 
-  it("`/` rotasına ASLA navigate YAPMAZ (infinite loop guard)", () => {
-    // Tüm <Navigate> kullanımları `/dashboard` veya `/login` — salt `'/'` YOK.
-    // Regex sıkı: `to="/"` ardından whitespace veya `/>` gelecek
-    // (`to="/dashboard"` match'lemesin).
-    expect(SRC).not.toMatch(/<Navigate\s+to="\/"[\s/]/)
-    // navigate('/') runtime çağrısı YOK. Yorum/dokümantasyon satırlarında
-    // (`//` veya `*`) örnek olarak geçebilir — onları filter et.
-    const code = SRC
-      .split('\n')
-      .filter((l) => !/^\s*(\*|\/\/)/.test(l.trim()))
-      .join('\n')
-    expect(code).not.toMatch(/\bnavigate\(['"]\/['"][,)]/)
+  it('super_admin (ROLE) → /platform/overview', () => {
+    expect(SRC).toMatch(/<Navigate\s+to="\/platform\/overview"\s+replace\s*\/>/)
+    expect(SRC).toMatch(/user\.system_role\s*===\s*'super_admin'/)
   })
 
-  it("`replace` her iki Navigate'te de kullanılır (history pollution yok)", () => {
-    // <Navigate ... /> tag'ları yakala (kapanış `/>` öncesi içerikte `/`
-    // olabilir — `to="/dashboard"`). Eksik açgözlü grupla.
+  it('normal kullanıcı + org_id → /app/org/<id>/dashboard', () => {
+    expect(SRC).toMatch(
+      /<Navigate\s+to=\{`\/app\/org\/\$\{resolvedOrgId\}\/dashboard`\}\s+replace\s*\/>/,
+    )
+  })
+
+  it('resolution order: user.org_id → activeOrgId (JWT öncelik)', () => {
+    expect(SRC).toMatch(/user\.org_id\s*\?\?\s*activeOrgId\s*\?\?\s*null/)
+  })
+
+  it("`/` rotasına ASLA navigate YAPMAZ (infinite loop guard)", () => {
+    // Salt `to="/"` regex'i ile match olmayacak — `to="/login"`,
+    // `to="/platform/overview"`, vb. izin verilir.
+    expect(SRC).not.toMatch(/<Navigate\s+to="\/"[\s/]/)
+  })
+
+  it("`replace` her Navigate'te kullanılır (history pollution yok)", () => {
     const navigateMatches = SRC.match(/<Navigate\s[^>]*?\/>/g) || []
-    expect(navigateMatches.length).toBeGreaterThanOrEqual(2)
+    expect(navigateMatches.length).toBeGreaterThanOrEqual(3)
     for (const m of navigateMatches) {
       expect(m).toContain('replace')
     }

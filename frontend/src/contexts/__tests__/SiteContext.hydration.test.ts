@@ -48,13 +48,15 @@ describe('SiteContext — hidrasyon guard + retry sözleşmesi', () => {
     expect(SRC).toMatch(/retryDelay:\s*500/)
   })
 
-  it('queryKey activeLocationId + activeOrgId taşıyor (regresyon: pattern korundu)', () => {
-    // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — queryKey now also
-    // carries `activeOrgId` so a super-admin's org switch refetches
-    // ctx under the new X-Org-Id. Existing PR #103 contract on the
-    // queryFn + staleTime is preserved separately below.
+  it('queryKey routeOrgId + activeLocationId taşıyor (PR-A REVISED URL-authoritative)', () => {
+    // PR-A REVISED (2026-06-22) — queryKey now carries `routeOrgId`
+    // (URL-authoritative) FIRST then `activeLocationId`. The pre-
+    // revision shape `[..., activeLocationId, activeOrgId]` is removed:
+    // the URL is the authority inside /app/org/:id/*, the legacy
+    // activeOrgId localStorage preference falls back via the
+    // interceptor for routes outside the operations panel only.
     expect(SRC).toMatch(
-      /queryKey:\s*\['context',\s*'current',\s*activeLocationId,\s*activeOrgId\]/,
+      /queryKey:\s*\['context',\s*'current',\s*routeOrgId,\s*activeLocationId\]/,
     )
   })
 

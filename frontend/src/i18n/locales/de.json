@@ -297,7 +297,9 @@
     "health_ok": "Gesund",
     "health_warn": "Achtung",
     "health_crit": "Kritisch",
-    "score": "Wert"
+    "score": "Wert",
+    "coming_soon_badge": "Bald verfügbar",
+    "coming_soon_tooltip": "Dieses Modul ist noch nicht verfügbar; ein folgender PR wird es aktivieren."
   },
   "dashboard": {
     "title": "Netzwerk-Dashboard",
@@ -2972,5 +2974,87 @@
       "desc_placeholder": "Beschreibung (optional — Site, Standort, etc.)",
       "footer_hint": "Geräte kannst du später auf der Geräte-Seite diesem Rack zuweisen."
     }
+  },
+  "platform": {
+    "brand_sublabel": "Plattform-Steuerung",
+    "nav": {
+      "overview": "Plattform-Übersicht",
+      "organizations": "Firmen",
+      "users": "Plattform-Benutzer",
+      "roles": "Rollen & Berechtigungen",
+      "licenses": "Lizenzen & Kontingente",
+      "global_health": "Globaler Status",
+      "global_audit": "Globaler Audit",
+      "retention": "Datenaufbewahrung",
+      "settings": "Plattform-Einstellungen"
+    },
+    "overview": {
+      "title": "Plattform-Übersicht",
+      "subtitle": "Zusammenfassung aller von Ihnen verwalteten Firmen.",
+      "metric_total_orgs": "Firmen gesamt",
+      "metric_active_orgs": "Aktive Firmen",
+      "metric_inactive_orgs": "Inaktive Firmen",
+      "coming_soon_message": "Lizenznutzung, Aufbewahrungsstatus und globaler Status-Panel folgen in späteren Releases.",
+      "tenant_list_title": "Firmen",
+      "loading": "Laden…",
+      "empty": "Noch keine Firmen definiert.",
+      "org_status_active": "Aktiv",
+      "org_status_inactive": "Inaktiv"
+    },
+    "organizations": {
+      "title": "Firmen",
+      "subtitle": "Alle Firmen auf der Plattform durchsuchen und ihre Arbeitsbereiche öffnen.",
+      "col_name": "Name",
+      "col_slug": "Slug",
+      "col_status": "Status",
+      "search_placeholder": "Firma suchen…",
+      "count_label": "{{count}} Firmen",
+      "action_detail": "Details",
+      "status_active": "Aktiv",
+      "status_inactive": "Inaktiv"
+    },
+    "organization_detail": {
+      "back": "Zurück zu Firmen",
+      "invalid_id": "Ungültige Firmen-ID.",
+      "fetch_error": "Firmendetails konnten nicht abgerufen werden.",
+      "not_found": "Firma nicht gefunden (gelöscht oder keine Berechtigung).",
+      "field_id": "ID",
+      "field_name": "Name",
+      "field_slug": "Slug",
+      "field_status": "Status",
+      "status_active": "Aktiv",
+      "status_inactive": "Inaktiv",
+      "cta_section_title": "Arbeitsbereich",
+      "cta_description": "Operations-Panel dieser Firma öffnen. Die URL ist maßgeblich für den Org-Kontext.",
+      "cta_open_workspace": "Arbeitsbereich öffnen",
+      "inactive_warning": "Diese Firma ist inaktiv; der Arbeitsbereich kann nicht geöffnet werden."
+    }
+  },
+  "operations": {
+    "brand_sublabel": "Operations-Panel",
+    "nav": {
+      "dashboard": "Dashboard",
+      "devices": "Netzwerk-Inventar",
+      "agents": "Proxy-Agenten",
+      "topology": "Topologie",
+      "discovery": "Discovery",
+      "monitoring": "Monitoring & Analytik",
+      "alerts": "Alarme & Vorfälle",
+      "config": "Konfiguration",
+      "automation": "Automation",
+      "security": "Sicherheit",
+      "reports": "Berichte",
+      "tools": "Operations-Tools",
+      "org_users": "Firma-Benutzer",
+      "org_audit": "Firma-Audit",
+      "tasks": "Aufgaben",
+      "ipam": "IPAM",
+      "vlan": "VLAN"
+    },
+    "org_badge_loading": "Lade Org-Kontext…",
+    "org_badge_readonly": "Fest",
+    "org_badge_action_switch_org": "Firma wechseln",
+    "org_badge_action_platform_admin": "Plattform-Verwaltung",
+    "org_badge_action_org_detail": "Firmendetails"
   }
 }

@@ -297,7 +297,9 @@
     "health_ok": "Исправно",
     "health_warn": "Внимание",
     "health_crit": "Критично",
-    "score": "Балл"
+    "score": "Балл",
+    "coming_soon_badge": "Скоро",
+    "coming_soon_tooltip": "Этот модуль ещё не готов; будет включён в одном из следующих PR."
   },
   "dashboard": {
     "title": "Панель управления сетью",
@@ -2972,5 +2974,87 @@
       "desc_placeholder": "Описание (необязательно — площадка, локация и т.п.)",
       "footer_hint": "Устройства можно назначить этой стойке позже на странице Устройства."
     }
+  },
+  "platform": {
+    "brand_sublabel": "управление платформой",
+    "nav": {
+      "overview": "Обзор платформы",
+      "organizations": "Организации",
+      "users": "Пользователи платформы",
+      "roles": "Роли и права",
+      "licenses": "Лицензии и квоты",
+      "global_health": "Глобальное состояние",
+      "global_audit": "Глобальный аудит",
+      "retention": "Хранение данных",
+      "settings": "Настройки платформы"
+    },
+    "overview": {
+      "title": "Обзор платформы",
+      "subtitle": "Сводка по всем организациям, которыми вы управляете.",
+      "metric_total_orgs": "Всего организаций",
+      "metric_active_orgs": "Активные организации",
+      "metric_inactive_orgs": "Неактивные организации",
+      "coming_soon_message": "Использование лицензий, статус хранения и глобальная панель состояния — в следующих релизах.",
+      "tenant_list_title": "Организации",
+      "loading": "Загрузка…",
+      "empty": "Организации не заданы.",
+      "org_status_active": "Активна",
+      "org_status_inactive": "Неактивна"
+    },
+    "organizations": {
+      "title": "Организации",
+      "subtitle": "Просматривайте все организации платформы и заходите в их рабочие области.",
+      "col_name": "Название",
+      "col_slug": "Slug",
+      "col_status": "Статус",
+      "search_placeholder": "Поиск организации…",
+      "count_label": "{{count}} организаций",
+      "action_detail": "Детали",
+      "status_active": "Активна",
+      "status_inactive": "Неактивна"
+    },
+    "organization_detail": {
+      "back": "Назад к организациям",
+      "invalid_id": "Неверный идентификатор организации.",
+      "fetch_error": "Не удалось получить детали организации.",
+      "not_found": "Организация не найдена (удалена или нет доступа).",
+      "field_id": "ID",
+      "field_name": "Название",
+      "field_slug": "Slug",
+      "field_status": "Статус",
+      "status_active": "Активна",
+      "status_inactive": "Неактивна",
+      "cta_section_title": "Рабочая область",
+      "cta_description": "Открыть operations-панель этой организации. URL — источник истины для контекста.",
+      "cta_open_workspace": "Открыть рабочую область",
+      "inactive_warning": "Организация неактивна; рабочую область открыть нельзя."
+    }
+  },
+  "operations": {
+    "brand_sublabel": "панель операций",
+    "nav": {
+      "dashboard": "Dashboard",
+      "devices": "Сетевой инвентарь",
+      "agents": "Proxy-агенты",
+      "topology": "Топология",
+      "discovery": "Discovery",
+      "monitoring": "Мониторинг и аналитика",
+      "alerts": "Оповещения",
+      "config": "Конфигурация",
+      "automation": "Автоматизация",
+      "security": "Безопасность",
+      "reports": "Отчёты",
+      "tools": "Инструменты",
+      "org_users": "Пользователи организации",
+      "org_audit": "Аудит организации",
+      "tasks": "Задачи",
+      "ipam": "IPAM",
+      "vlan": "VLAN"
+    },
+    "org_badge_loading": "Загрузка контекста организации…",
+    "org_badge_readonly": "Фиксированный",
+    "org_badge_action_switch_org": "Сменить организацию",
+    "org_badge_action_platform_admin": "Управление платформой",
+    "org_badge_action_org_detail": "Детали организации"
   }
 }

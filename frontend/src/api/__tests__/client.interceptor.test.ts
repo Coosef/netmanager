@@ -155,20 +155,66 @@ describe('getCallerOrgHeader — same case-insensitive contract as Location', ()
 // ─── PLATFORM/OPERATIONS-PHASE1A — interceptor X-Org-Id propagation ─────
 
 
-describe('client.ts interceptor — X-Org-Id caller-respect (source-level)', () => {
-  it('reads ACTIVE_ORG_KEY from localStorage for the fallback', async () => {
+describe('client.ts interceptor — X-Org-Id URL-authoritative precedence (PR-A REVISED)', () => {
+  it('extracts routeOrgId from window.location.pathname BEFORE localStorage', async () => {
+    // PR-A REVISED contract: when the URL is /app/org/:organizationId/*,
+    // the interceptor MUST attach X-Org-Id = routeOrgId. localStorage
+    // is consulted ONLY when the URL is NOT inside the operations
+    // panel. This closes the cache-leak window where a stale
+    // ACTIVE_ORG_KEY could scope a request to the wrong tenant.
     const src = await import('node:fs').then((fs) =>
       fs.readFileSync(
         new URL('../client.ts', import.meta.url),
         'utf-8',
       ),
     )
-    expect(src).toMatch(/getCallerOrgHeader\(config\.headers\)/)
-    expect(src).toMatch(/if \(callerOrg == null\)/)
-    expect(src).toMatch(/localStorage\.getItem\(ACTIVE_ORG_KEY\)/)
-    expect(src).toMatch(/config\.headers\['X-Org-Id'\] = org/)
+    expect(src).toMatch(/import\s*\{\s*extractRouteOrgId\s*\}/)
+    expect(src).toMatch(/extractRouteOrgId\(window\.location\.pathname\)/)
   })
 
+  it('routeOrgId branch fires BEFORE the localStorage fallback', async () => {
+    const src = await import('node:fs').then((fs) =>
+      fs.readFileSync(
+        new URL('../client.ts', import.meta.url),
+        'utf-8',
+      ),
+    )
+    // The order MUST be: callerOrg → routeOrgId from URL → localStorage.
+    // Pin the structural order via regex.
+    expect(src).toMatch(
+      /if \(callerOrg == null\)[\s\S]*?extractRouteOrgId[\s\S]*?if \(routeOrgId != null\)[\s\S]*?else[\s\S]*?localStorage\.getItem\(ACTIVE_ORG_KEY\)/,
+    )
+  })
+
+  it('localStorage.getItem(ACTIVE_ORG_KEY) lives INSIDE the routeOrgId-null else branch (fallback only)', async () => {
+    const src = await import('node:fs').then((fs) =>
+      fs.readFileSync(
+        new URL('../client.ts', import.meta.url),
+        'utf-8',
+      ),
+    )
+    // Defensive negative invariant: the localStorage read must NOT be
+    // outside the routeOrgId === null branch — a regression that
+    // re-introduces an unconditional localStorage read would silently
+    // re-open the cross-tenant cache leak.
+    expect(src).toMatch(
+      /if \(routeOrgId != null\)\s*\{[\s\S]*?\}\s*else\s*\{[\s\S]*?localStorage\.getItem\(ACTIVE_ORG_KEY\)/,
+    )
+  })
+
+  it('routeOrgId is coerced to String when attached to the header', async () => {
+    const src = await import('node:fs').then((fs) =>
+      fs.readFileSync(
+        new URL('../client.ts', import.meta.url),
+        'utf-8',
+      ),
+    )
+    expect(src).toMatch(/config\.headers\['X-Org-Id'\] = String\(routeOrgId\)/)
+  })
+})
+
+
+describe('client.ts interceptor — legacy X-Org-Id caller-respect (preserved)', () => {
   it('the X-Org-Id branch follows the same shape as the X-Location-Id branch', async () => {
     // The two header attachments are deliberately written as two
     // parallel `if (caller == null) { fallback }` blocks. A regression
