@@ -22,6 +22,12 @@ import LoginPage from '@/pages/Login'
 import DashboardPage from '@/pages/Dashboard'
 import RootRedirect from '@/routes/RootRedirect'
 import ProtectedRouteLoading from '@/routes/ProtectedRouteLoading'
+import PlatformShell from '@/routes/PlatformShell'
+import OrgRouteShell from '@/routes/OrgRouteShell'
+import LegacyRedirect from '@/routes/LegacyRedirect'
+import PlatformOverviewPage from '@/pages/Platform/PlatformOverviewPage'
+import PlatformOrganizationsPage from '@/pages/Platform/PlatformOrganizationsPage'
+import PlatformOrganizationDetailPage from '@/pages/Platform/PlatformOrganizationDetailPage'
 import DevicesPage from '@/pages/Devices'
 import DeviceDetailPage from '@/pages/Devices/DeviceDetailPage'
 // T10 C7.B — eski /devices/:id/ports yeni Detail sayfasındaki Ports sekmesine yönlendir.
@@ -310,10 +316,53 @@ function ThemedApp() {
                   Dashboard render etmiyor; RootRedirect auth+hidrasyona
                   göre `/dashboard` veya `/login`'e güvenli navigate yapar.
                   Login success direkt `/dashboard`'a gider, `/` üzerinden
-                  geçmez — page-reload döngüsü kırılır. */}
+                  geçmez — page-reload döngüsü kırılır.
+
+                  PR-A (2026-06-22) — RootRedirect rolü gözeten matrise
+                  dönüştürüldü:
+                    super_admin       → /platform/overview
+                    normal user       → /app/org/<orgId>/dashboard */}
               <Route index element={<RootRedirect />} />
-              <Route path="dashboard" element={<DashboardPage />} />
-              <Route path="devices" element={<DevicesPage />} />
+
+              {/* PR-A — PLATFORM control plane. super_admin-only. The
+                  inactive items (Platform Kullanıcıları / Roller / Lisanslar
+                  / Kotalar / Global Sağlık / Global Audit / Platform
+                  Ayarları / Retention) intentionally have NO routes per
+                  PLATFORM NAV SCOPE SAFETY ADDENDUM — they appear in the
+                  PlatformSidebar as Yakında disabled items only. */}
+              <Route path="platform" element={<PlatformShell />}>
+                <Route index element={<Navigate to="/platform/overview" replace />} />
+                <Route path="overview" element={<PlatformOverviewPage />} />
+                <Route path="organizations" element={<PlatformOrganizationsPage />} />
+                <Route path="organizations/:organizationId" element={<PlatformOrganizationDetailPage />} />
+              </Route>
+
+              {/* PR-A — URL-AUTHORITATIVE operations panel. The
+                  :organizationId in the URL is the SOLE source of org
+                  context — SiteContext.activeOrgId is kept in sync via
+                  OrgRouteShell. Normal users may only enter their own
+                  org route; super_admin may scope into any org. The
+                  inactive operations modules (Topology / Discovery / ...)
+                  appear as Yakında disabled items in OperationsSidebar —
+                  NO `/app/org/:id/<inactive>` routes are registered per
+                  OPERATIONS LEGACY ESCAPE SAFETY ADDENDUM. */}
+              <Route path="app/org/:organizationId" element={<OrgRouteShell />}>
+                <Route index element={<Navigate to="dashboard" replace />} />
+                <Route path="dashboard" element={<DashboardPage />} />
+                <Route path="devices" element={<DevicesPage />} />
+                <Route path="agents" element={<AgentsPage />} />
+              </Route>
+
+              {/* PR-A — legacy bookmark / external-link compatibility.
+                  Three legacy entry points now redirect to their canonical
+                  URL-authoritative target; the other legacy operations
+                  routes below stay UNCHANGED but become unreachable from
+                  OperationsSidebar (per OPERATIONS LEGACY ESCAPE SAFETY
+                  ADDENDUM). */}
+              <Route path="dashboard" element={<LegacyRedirect segment="dashboard" />} />
+              <Route path="devices" element={<LegacyRedirect segment="devices" />} />
+              <Route path="agents" element={<LegacyRedirect segment="agents" />} />
+
               {/* T10 C7.B — kalıcı Device Detail sayfası (sekmeli). */}
               <Route path="devices/:deviceId" element={<RoleRoute minRole="viewer"><DeviceDetailPage /></RoleRoute>} />
               <Route path="tasks" element={<TasksPage />} />
@@ -338,7 +387,9 @@ function ThemedApp() {
               {/* T10 C7.B — eski ports route'unu yeni Detail sayfasındaki Ports sekmesine yönlendir
                   (eski bookmark'lar kırılmaz). Gerçek Ports sekmesi içeriği C7.C'de gelecek. */}
               <Route path="devices/:deviceId/ports" element={<RedirectToPortsTab />} />
-              <Route path="agents" element={<PermRoute module="agents" action="view"><AgentsPage /></PermRoute>} />
+              {/* PR-A — /agents legacy route artık LegacyRedirect (yukarıda).
+                  Doğrudan AgentsPage route'u kaldırıldı; canonical hedef
+                  /app/org/:id/agents olur. */}
               {/* Sprint 1A-fix2 — /settings şimdilik super_admin-only.
                   Kullanıcı-yönelik ayarlar ileride ayrı "Ayarlar" menüsüne
                   taşınacak; o sprintte hangi alt-bölümler hangi role açılır

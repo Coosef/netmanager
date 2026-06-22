@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import Sidebar from './Sidebar'
+import PlatformSidebar from './PlatformSidebar'
+import OperationsSidebar from './OperationsSidebar'
 import TopNav from './TopNav'
 import AppHeader from './Header'
 import LocationGate from './LocationGate'
 import MenuGroupNav from './MenuGroupNav'
+import { detectPanelMode } from '@/utils/panelMode'
 import CommandPalette from '@/components/CommandPalette'
 import CustomizePanel from '@/components/CustomizePanel'
 import NocWallOverlay from '@/components/NocWallOverlay'
@@ -90,6 +93,13 @@ function AppLayoutInner() {
   const [customizeOpen, setCustomizeOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
 
+  // PR-A — panelMode dictates which sidebar surface is rendered. The
+  // 12-group legacy Sidebar continues to serve every route outside
+  // /platform/* and /app/org/:id/*; the new flat sidebars enforce the
+  // "Yarım çalışan ekran çıkarma" + "Operations Legacy Escape Safety"
+  // contracts for the new surfaces.
+  const panelMode = detectPanelMode(location.pathname)
+
   const BOTTOM_NAV_ITEMS = useMemo(() => [
     { key: '/',         icon: <DashboardOutlined />,  label: t('mobile_nav.home') },
     { key: '/devices',  icon: <LaptopOutlined />,     label: t('mobile_nav.devices') },
@@ -131,10 +141,17 @@ function AppLayoutInner() {
     >
       <style>{LAYOUT_CSS}</style>
       <div className={`nm-root menu-${menuPosition}`}>
-        {/* menu=side iken Sidebar (sol), menu=top iken Sidebar gizleniyor
-            (.menu-top .nm-sidebar { display: none } noc.css'te) ve TopNav
-            üstte yatay dropdown'larla geliyor. AppHeader iki modda da var. */}
-        <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        {/* PR-A — panelMode-aware sidebar switching. Platform and
+            Operations get their own flat sidebars with the comingSoon
+            contract; every other (legacy) route keeps the 12-group
+            Sidebar untouched so PR-A is a purely additive foundation. */}
+        {panelMode === 'platform' ? (
+          <PlatformSidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        ) : panelMode === 'operations' ? (
+          <OperationsSidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        ) : (
+          <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
+        )}
         <div className="nm-main" style={{
           gridTemplateRows: menuPosition === 'top' ? 'auto auto 1fr' : 'auto 1fr',
         }}>
@@ -145,13 +162,21 @@ function AppLayoutInner() {
           />
           <div className="nm-workspace">
             {/* Faz 3 menu restructure: yatay tab strip — aktif grup tab'ları.
-                Dashboard veya bilinmeyen route'ta render edilmez (null döner). */}
-            <MenuGroupNav />
+                Dashboard veya bilinmeyen route'ta render edilmez (null döner).
+                PR-A: platform + operations panels have their own sidebar item
+                model; MenuGroupNav stays legacy-only. */}
+            {panelMode === 'legacy' && <MenuGroupNav />}
             <div key={location.pathname} style={{ animation: 'pageEnterFade 0.28s ease both', minHeight: '100%' }}>
-              {/* Faz 8 Phase F — gate every page on a resolved location context. */}
-              <LocationGate>
+              {/* PR-A — platform panel is org-context-agnostic by design
+                  (the super-admin operates ABOVE every tenant). Skip the
+                  LocationGate there; operations + legacy still gate. */}
+              {panelMode === 'platform' ? (
                 <Outlet />
-              </LocationGate>
+              ) : (
+                <LocationGate>
+                  <Outlet />
+                </LocationGate>
+              )}
             </div>
           </div>
         </div>

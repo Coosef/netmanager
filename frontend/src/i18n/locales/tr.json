@@ -297,7 +297,9 @@
     "health_ok": "Sağlıklı",
     "health_warn": "Dikkat",
     "health_crit": "Kritik",
-    "score": "Skor"
+    "score": "Skor",
+    "coming_soon_badge": "Yakında",
+    "coming_soon_tooltip": "Bu modül için sayfa henüz hazır değil; bir sonraki PR'da aktif olacak."
   },
   "dashboard": {
     "title": "Network Dashboard",
@@ -3051,5 +3053,87 @@
       "desc_placeholder": "Açıklama (opsiyonel — site, konum, vb.)",
       "footer_hint": "Cihazları sonra Cihazlar sayfasından bu kabine atayabilirsin."
     }
+  },
+  "platform": {
+    "brand_sublabel": "platform kontrol",
+    "nav": {
+      "overview": "Platform Genel Bakış",
+      "organizations": "Firmalar",
+      "users": "Platform Kullanıcıları",
+      "roles": "Roller ve Yetkiler",
+      "licenses": "Lisanslar ve Kotalar",
+      "global_health": "Global Sağlık",
+      "global_audit": "Global Audit",
+      "retention": "Veri Saklama",
+      "settings": "Platform Ayarları"
+    },
+    "overview": {
+      "title": "Platform Genel Bakış",
+      "subtitle": "Yönettiğiniz tüm firmaların özet görünümü.",
+      "metric_total_orgs": "Toplam Firma",
+      "metric_active_orgs": "Aktif Firma",
+      "metric_inactive_orgs": "Pasif Firma",
+      "coming_soon_message": "Lisans kullanımı, retention durumu ve global sağlık paneli sonraki sürümlerde gelir.",
+      "tenant_list_title": "Firmalar",
+      "loading": "Yükleniyor…",
+      "empty": "Henüz tanımlı firma yok.",
+      "org_status_active": "Aktif",
+      "org_status_inactive": "Pasif"
+    },
+    "organizations": {
+      "title": "Firmalar",
+      "subtitle": "Platformdaki tüm firmaları görüntüleyin ve çalışma alanlarına geçin.",
+      "col_name": "Firma Adı",
+      "col_slug": "Slug",
+      "col_status": "Durum",
+      "search_placeholder": "Firma ara…",
+      "count_label": "{{count}} firma",
+      "action_detail": "Detay",
+      "status_active": "Aktif",
+      "status_inactive": "Pasif"
+    },
+    "organization_detail": {
+      "back": "Firmalara dön",
+      "invalid_id": "Geçersiz firma kimliği.",
+      "fetch_error": "Firma bilgileri alınamadı.",
+      "not_found": "Bu firma bulunamadı (silinmiş veya yetkiniz yok).",
+      "field_id": "ID",
+      "field_name": "Ad",
+      "field_slug": "Slug",
+      "field_status": "Durum",
+      "status_active": "Aktif",
+      "status_inactive": "Pasif",
+      "cta_section_title": "Çalışma Alanı",
+      "cta_description": "Bu firmanın operations panelini açın. URL üzerinden firma bağlamı korunur.",
+      "cta_open_workspace": "Çalışma alanını aç",
+      "inactive_warning": "Bu firma pasif durumda; çalışma alanına geçilemez."
+    }
+  },
+  "operations": {
+    "brand_sublabel": "operasyon paneli",
+    "nav": {
+      "dashboard": "Dashboard",
+      "devices": "Ağ Envanteri",
+      "agents": "Proxy Ajanlar",
+      "topology": "Topoloji",
+      "discovery": "Keşif",
+      "monitoring": "İzleme ve Analitik",
+      "alerts": "Uyarı ve Olay",
+      "config": "Konfigürasyon",
+      "automation": "Otomasyon",
+      "security": "Güvenlik",
+      "reports": "Raporlar",
+      "tools": "Operasyon Araçları",
+      "org_users": "Firma Kullanıcıları",
+      "org_audit": "Firma Audit",
+      "tasks": "Görevler",
+      "ipam": "IPAM",
+      "vlan": "VLAN"
+    },
+    "org_badge_loading": "Firma bağlamı yükleniyor…",
+    "org_badge_readonly": "Sabit",
+    "org_badge_action_switch_org": "Firma değiştir",
+    "org_badge_action_platform_admin": "Platform Yönetimi",
+    "org_badge_action_org_detail": "Bu firmanın detayları"
   }
 }
