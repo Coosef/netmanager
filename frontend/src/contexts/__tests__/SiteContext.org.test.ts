@@ -112,12 +112,16 @@ describe('SiteContext — PHASE1A non-super-admin cleanup effect', () => {
   it('removes ACTIVE_ORG_KEY for non-super-admin sessions on hydration', () => {
     // The cleanup effect fires when:
     //   1. ctxResolved (backend answered)
-    //   2. !isSuperAdmin (user is not a super-admin)
+    //   2. !isPlatformSuperAdmin (user is not a super-admin by ROLE)
+    //      — switched from `is_super_admin` (BYPASS state) by
+    //      ORG-CONTEXT-FALLBACK-FIX (2026-06-22). The pre-fix gate
+    //      mistook a scoped super-admin's bypass-off state for "not
+    //      a super-admin" and wiped activeOrgId on every refetch.
     //   3. activeOrgId != null (stale value sitting in localStorage)
     // → clear the state + localStorage. A demoted user / shared
     // browser profile cannot retain a previous super-admin's scope.
     const cleanupEffect = SRC.match(
-      /useEffect\(\(\) => \{\s*if \(!ctxResolved\) return\s*if \(isSuperAdmin\) return[\s\S]+?\}, \[ctxResolved, isSuperAdmin, activeOrgId\]\)/,
+      /useEffect\(\(\) => \{\s*if \(!ctxResolved\) return\s*if \(isPlatformSuperAdmin\) return[\s\S]+?\}, \[ctxResolved, isPlatformSuperAdmin, activeOrgId\]\)/,
     )
     expect(cleanupEffect).not.toBeNull()
     expect(cleanupEffect![0]).toMatch(/setActiveOrgIdState\(null\)/)
@@ -149,6 +153,77 @@ describe('SiteContext — PHASE1A interface + default + provider value', () => {
   it('provider value re-exports activeOrgId + setOrganization', () => {
     expect(SRC).toMatch(/^\s+activeOrgId,$/m)
     expect(SRC).toMatch(/^\s+setOrganization,$/m)
+  })
+})
+
+
+// ─── ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — role vs bypass split ────
+
+
+describe('SiteContext — ORG-CONTEXT-FALLBACK-FIX role vs bypass split', () => {
+  // Operator-confirmed regression in PR #106 production smoke:
+  //   1. Super-admin picks ATG Hotels in the new switcher
+  //   2. /context/current responds with `system_role: "super_admin"`
+  //      AND `is_super_admin: false` (backend correctly drops the RLS
+  //      bypass once the super-admin is scoped into a tenant)
+  //   3. The pre-fix SiteContext read `is_super_admin` as the "is
+  //      this user a super-admin?" signal, the cleanup useEffect
+  //      mistook the bypass-off state for "user is not a super-admin
+  //      at all", wiped activeOrgId, dropped the X-Org-Id header on
+  //      the next refetch, and looped the operator back to Platform
+  //      Mode with all 8 cross-org locations visible.
+  //
+  // The fix introduces `isPlatformSuperAdmin` (ROLE identity, derived
+  // from `ctx.system_role === 'super_admin'`) alongside the existing
+  // `isSuperAdmin` (BYPASS state, unchanged). Every UI consumer
+  // switched over to the role flag; the bypass flag remains exported
+  // for the rare edge cases that genuinely need to know "is the
+  // current request running in super-admin RLS bypass mode?".
+
+  it('SiteCtx interface declares isPlatformSuperAdmin: boolean', () => {
+    expect(SRC).toMatch(/isPlatformSuperAdmin:\s*boolean/)
+  })
+
+  it('isPlatformSuperAdmin is derived from ctx?.system_role === \'super_admin\'', () => {
+    expect(SRC).toMatch(
+      /const isPlatformSuperAdmin:\s*boolean\s*=\s*ctx\?\.system_role\s*===\s*'super_admin'/,
+    )
+  })
+
+  it('isSuperAdmin derivation UNCHANGED — still reads ctx.is_super_admin (bypass state)', () => {
+    expect(SRC).toMatch(/const isSuperAdmin:\s*boolean\s*=\s*ctx\?\.is_super_admin\s*\?\?\s*false/)
+  })
+
+  it('createContext default includes isPlatformSuperAdmin: false', () => {
+    expect(SRC).toMatch(
+      /createContext<SiteCtx>\(\{[\s\S]+?isPlatformSuperAdmin:\s*false/,
+    )
+  })
+
+  it('provider value re-exports isPlatformSuperAdmin', () => {
+    expect(SRC).toMatch(/^\s+isPlatformSuperAdmin,$/m)
+  })
+
+  it('cleanup effect gate switched from isSuperAdmin to isPlatformSuperAdmin', () => {
+    // The full regex on the cleanup useEffect already pins both the
+    // gate AND the dependency array — this duplicates it as a
+    // negative-invariant guard so a future regression that flips
+    // ONE of them (gate but not deps, or vice versa) still trips a
+    // failing test.
+    expect(SRC).toMatch(/if \(isPlatformSuperAdmin\) return/)
+    // The pre-fix gate MUST NOT come back via a copy-paste.
+    const cleanupBlock = SRC.match(
+      /\/\/ PLATFORM\/OPERATIONS-PHASE1A \(2026-06-22\) — non-super-admin cleanup\.[\s\S]+?\}, \[ctxResolved, isPlatformSuperAdmin, activeOrgId\]\)/,
+    )
+    expect(cleanupBlock).not.toBeNull()
+    expect(cleanupBlock![0]).not.toMatch(/if \(isSuperAdmin\) return/)
+    expect(cleanupBlock![0]).not.toMatch(/\[ctxResolved, isSuperAdmin, activeOrgId\]/)
+  })
+
+  it('the scoped-super-admin contract is explicitly named in the fix comment', () => {
+    // Belt + braces — the fix comment names the operator-confirmed
+    // bug so a future reader understands the gate's history.
+    expect(SRC).toMatch(/ORG-CONTEXT-FALLBACK-FIX/)
   })
 })
 

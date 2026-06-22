@@ -38,7 +38,14 @@ export default function NocAgents() {
   // super_admin who has not yet picked a tenant context (the "Select
   // a tenant first" header state).
   const {
-    locations, activeLocationId, isSuperAdmin, organization, hasLocationAccess,
+    // ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — switched the consumed
+    // name from `isSuperAdmin` (BYPASS state) to `isPlatformSuperAdmin`
+    // (ROLE identity) for the tenant-required guard below. A scoped
+    // super-admin's `is_super_admin` is false at the backend; role
+    // identity is what the gate actually means.
+    locations, activeLocationId,
+    isPlatformSuperAdmin: isSuperAdmin,
+    organization, hasLocationAccess,
     sitesLoading, ctxResolved,
   } = useSite()
   // Five-verb agent permission catalogue (location-agent-permissions

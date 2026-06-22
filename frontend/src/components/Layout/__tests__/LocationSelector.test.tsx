@@ -38,7 +38,7 @@ const siteState: {
   ctxResolved: boolean
   hasLocationAccess: boolean
   isOrgWide: boolean
-  isSuperAdmin: boolean
+  isPlatformSuperAdmin: boolean
   organization: { id: number; name: string; slug: string } | null
 } = {
   activeLocationId: null,
@@ -49,7 +49,7 @@ const siteState: {
   ctxResolved: true,
   hasLocationAccess: true,
   isOrgWide: false,
-  isSuperAdmin: false,
+  isPlatformSuperAdmin: false,
   organization: null,
 }
 
@@ -66,7 +66,7 @@ function resetSiteState() {
   siteState.ctxResolved = true
   siteState.hasLocationAccess = true
   siteState.isOrgWide = false
-  siteState.isSuperAdmin = false
+  siteState.isPlatformSuperAdmin = false
   siteState.organization = null
 }
 
@@ -112,7 +112,7 @@ describe('LocationSelector — seven states', () => {
   })
 
   it('(3) super-admin + no organization → tenant-required tag', () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     siteState.isOrgWide = true
     render(<LocationSelector />)
@@ -132,7 +132,7 @@ describe('LocationSelector — seven states', () => {
     // "No assigned location" warning, since their reach is the
     // platform, not a `user_locations` row. The neutral
     // `all_locations` tag is the correct surface here.
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
     siteState.locations = []
     render(<LocationSelector />)
@@ -143,7 +143,7 @@ describe('LocationSelector — seven states', () => {
   })
 
   it('(5b) NON super_admin + tenant set + locations empty → no-assigned tag', () => {
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
     siteState.locations = []
     render(<LocationSelector />)
@@ -174,7 +174,7 @@ describe('LocationSelector — seven states', () => {
   it('priority — loading wins over every later state', () => {
     siteState.sitesLoading = true
     siteState.hasContextFailure = true
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     render(<LocationSelector />)
     expect(screen.getByTestId('location-selector-loading')).toBeTruthy()
@@ -184,7 +184,7 @@ describe('LocationSelector — seven states', () => {
 
   it('priority — error wins over tenant-required and no-assigned', () => {
     siteState.hasContextFailure = true
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     render(<LocationSelector />)
     expect(screen.getByTestId('location-selector-error')).toBeTruthy()
@@ -211,7 +211,7 @@ describe('LocationSelector — transient ctx-undefined guard (v2)', () => {
     siteState.ctxResolved = false
     siteState.hasContextFailure = false
     siteState.locations = []
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     render(<LocationSelector />)
     // Spinner wins; the alarming no_assigned warning MUST NOT render.
     expect(screen.getByTestId('location-selector-loading')).toBeTruthy()
@@ -220,14 +220,14 @@ describe('LocationSelector — transient ctx-undefined guard (v2)', () => {
 
   it('(1+) ctxResolved=false + super_admin shape + no failure → spinner (NOT tenant-required)', () => {
     // The super_admin transient is the operator-confirmed scenario:
-    // ctx is briefly undefined → isSuperAdmin defaults to false →
+    // ctx is briefly undefined → isPlatformSuperAdmin defaults to false →
     // tenantMissing also defaults to false → previously fell through
     // to branch 5. v2 guard fires branch 1 spinner instead.
     siteState.sitesLoading = false
     siteState.ctxResolved = false
     siteState.hasContextFailure = false
     siteState.locations = []
-    siteState.isSuperAdmin = false   // transient default
+    siteState.isPlatformSuperAdmin = false   // transient default
     siteState.organization = null    // transient default
     render(<LocationSelector />)
     expect(screen.getByTestId('location-selector-loading')).toBeTruthy()
@@ -258,7 +258,7 @@ describe('LocationSelector — transient ctx-undefined guard (v2)', () => {
     ]
     siteState.activeLocationId = 1
     siteState.isOrgWide = true
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
     render(<LocationSelector />)
     expect(screen.getByTestId('location-selector-multi')).toBeTruthy()
@@ -280,7 +280,7 @@ describe('LocationSelector — transient ctx-undefined guard (v2)', () => {
       { id: 2, name: 'Ankara',  color: null, city: null, country: null, device_count: 0 },
     ]
     siteState.isOrgWide = true
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
     rerender(<LocationSelector />)
     expect(screen.queryByTestId('location-selector-loading')).toBeNull()
@@ -299,14 +299,14 @@ describe('LocationSelector — retired `none_defined` string is no longer surfac
     {
       name: 'super-admin + no org',
       setup: () => {
-        siteState.isSuperAdmin = true
+        siteState.isPlatformSuperAdmin = true
         siteState.organization = null
       },
     },
     {
       name: 'super-admin + org + no locations',
       setup: () => {
-        siteState.isSuperAdmin = true
+        siteState.isPlatformSuperAdmin = true
         siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
         siteState.locations = []
       },

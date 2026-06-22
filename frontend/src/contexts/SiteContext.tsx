@@ -137,6 +137,20 @@ interface SiteCtx {
    * user is a platform super-admin. Distinct from `isOrgWide` because
    * an org_admin is org-wide but is NEVER a tenant chooser. */
   isSuperAdmin: boolean
+  /** ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — the user's platform role
+   * identity, derived from `ctx.system_role === 'super_admin'`.
+   *
+   * Distinct from `isSuperAdmin` (which mirrors the backend's
+   * `ctx.is_super_admin` — the CURRENTLY-ACTIVE RLS bypass flag).
+   * When a super-admin scopes into another tenant via X-Org-Id, the
+   * backend drops the bypass (`sup = False` at
+   * `request_context.py:157`), so `ctx.is_super_admin` flips to false
+   * EVEN THOUGH the user's role is still `super_admin`. Every
+   * consumer that asks "is this user a platform super-admin?"
+   * (widget visibility, role-gated cleanup, tenant-required gates)
+   * must read `isPlatformSuperAdmin`. Consumers that need the
+   * scope-active flag (rare) read `isSuperAdmin`. */
+  isPlatformSuperAdmin: boolean
   /** PR #96 — `null` for a super-admin who has not yet picked a tenant
    * to operate inside. For every other role this is the user's home
    * organization stamped by the auth token, and is always populated.
@@ -179,6 +193,7 @@ const SiteContext = createContext<SiteCtx>({
   ctxResolved: false,
   isOrgWide: false,
   isSuperAdmin: false,
+  isPlatformSuperAdmin: false,
   organization: null,
   features: {},
   sitesLoading: false,
@@ -326,6 +341,15 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // resolve to `false` / `null` — the safe-by-default value that
   // matches the "still resolving" branch in LocationSelector.
   const isSuperAdmin: boolean = ctx?.is_super_admin ?? false
+  // ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — role identity, distinct
+  // from the bypass-state flag above. See the SiteCtx interface for
+  // why every existing UI consumer of `isSuperAdmin` was switched to
+  // `isPlatformSuperAdmin` in the same commit: a scoped super-admin
+  // (X-Org-Id active) flips `is_super_admin` to false at the backend,
+  // and the pre-fix UI mistook that for "demoted to non-super-admin"
+  // — triggering the cleanup effect that wiped `activeOrgId` and
+  // looped the operator back to Platform Mode on every location pick.
+  const isPlatformSuperAdmin: boolean = ctx?.system_role === 'super_admin'
   const organization: { id: number; name: string; slug: string } | null =
     ctx?.organization ?? null
   const features: Record<string, boolean> = ctx?.features ?? {}
@@ -501,13 +525,23 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   //      does not retain a stale scope.
   //   3. Shared browser profiles (kiosk / family) cannot inherit a
   //      previous super-admin's org pick.
+  //
+  // ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — the gate now reads
+  // `isPlatformSuperAdmin` (role identity), NOT `isSuperAdmin` (the
+  // currently-active RLS bypass flag). The pre-fix gate fired the
+  // moment a scoped super-admin's /context/current response carried
+  // `is_super_admin: false` — wiping `activeOrgId`, dropping the
+  // X-Org-Id header on the next request, and looping the operator
+  // back to Platform Mode every time they touched the LocationSelector.
+  // Role identity stays stable across scope flips, so the cleanup
+  // only fires for users who are not super-admins at all.
   useEffect(() => {
     if (!ctxResolved) return
-    if (isSuperAdmin) return
+    if (isPlatformSuperAdmin) return
     if (activeOrgId == null) return
     setActiveOrgIdState(null)
     localStorage.removeItem(ACTIVE_ORG_KEY)
-  }, [ctxResolved, isSuperAdmin, activeOrgId])
+  }, [ctxResolved, isPlatformSuperAdmin, activeOrgId])
 
   return (
     <SiteContext.Provider
@@ -522,6 +556,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
         ctxResolved,
         isOrgWide,
         isSuperAdmin,
+        isPlatformSuperAdmin,
         organization,
         features,
         sitesLoading,

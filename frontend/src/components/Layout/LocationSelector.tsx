@@ -44,7 +44,16 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
     activeLocationId, setLocation, locations,
     sitesLoading, hasContextFailure, ctxResolved,
     hasLocationAccess, isOrgWide,
-    isSuperAdmin, organization,
+    // ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — switched from
+    // `isPlatformSuperAdmin` (BYPASS state) to `isPlatformSuperAdmin` (ROLE
+    // identity) for the "Önce firma seçin" tag AND the "All Locations"
+    // fallback tag below. A scoped super-admin's backend response now
+    // carries `is_super_admin: false`, which would have lit the
+    // alarming "Atanmış lokasyon yok" warning for a tenant that simply
+    // happens to have zero locations — the platform-admin friendly
+    // "All Locations" / "Tüm Lokasyonlar" indicator is the correct
+    // surface in that case.
+    isPlatformSuperAdmin, organization,
   } = useSite()
   const { isDark } = useTheme()
   const { t } = useTranslation()
@@ -90,7 +99,7 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   // (3) Super-admin who hasn't yet selected a tenant context. Distinct
   // from the legacy `none_defined` tag — "select a tenant first" tells
   // the operator what to do next, instead of stating a technical fact.
-  if (isSuperAdmin && organization === null) {
+  if (isPlatformSuperAdmin && organization === null) {
     return (
       <Tooltip title={t('location_selector.tenant_required_tooltip')}>
         <Tag icon={<EnvironmentOutlined />} color="processing" style={{ margin: 0 }}
@@ -136,7 +145,7 @@ export default function LocationSelector({ isMobile }: { isMobile?: boolean }) {
   // shows real data via the unscoped `/locations/` endpoint). Fall
   // back to the neutral "All locations" indicator for that role.
   if (locations.length === 0) {
-    if (isSuperAdmin) {
+    if (isPlatformSuperAdmin) {
       return (
         <Tag color="default" style={{ margin: 0 }}
           data-testid="location-selector-super-admin-empty">
