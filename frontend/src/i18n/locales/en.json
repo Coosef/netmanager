@@ -668,6 +668,7 @@
       "org_location_tooltip_edit": "Use the \"Move Location\" action in the device list to change location",
       "org_location_tooltip_new": "The device is created in the selected location. On success, the list filters to that location.",
       "org_location_placeholder": "Select a location",
+      "org_location_required": "Please select a location to add a device.",
       "scope_guard_tenant_required": "A tenant context must be selected first.",
       "scope_guard_tenant_required_desc": "As a platform administrator, pick a tenant context before adding a device. Choose the tenant from the header and try again.",
       "scope_guard_location_not_in_context": "The selected location is not valid for the current tenant context. Please choose an authorized location from the list.",

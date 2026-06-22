@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react'
 import { Alert, App, Button, Divider, Form, Input, InputNumber, Select, Switch, Tag, Tooltip } from 'antd'
 import { SafetyCertificateOutlined, WarningOutlined, SafetyOutlined } from '@ant-design/icons'  // SafetyOutlined hâlâ "Kimlik Profili" başlığında kullanılıyor
 import { RobotOutlined } from '@ant-design/icons'
@@ -91,6 +92,42 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // the same value without dance-around-the-form-state hacks.
   const selectedLocationId = Form.useWatch('location_id', form) as number | undefined
 
+  // X-LOC-INTERCEPTOR-FIX (2026-06-21) — Hotfix C: stale-aware default
+  // seeding. When the operator opens the create form, the global
+  // `activeLocationId` (header-driven) may belong to a DIFFERENT
+  // tenant's location than the one the form is scoped to (e.g. a
+  // super_admin browsing org=6 Mövempic in the header while their
+  // home org=1 form scopes the dropdown to org=1 locations). Using
+  // that cross-tenant id as the form's `location_id` default would
+  // produce the exact 400 the form is supposed to prevent.
+  //
+  // Rule: seed the default ONLY when `activeLocationId` is in
+  // `scopedLocations` (i.e. same active tenant). Otherwise leave the
+  // field empty so the new `rules: [{required: true}]` block forces
+  // the operator to pick from the in-scope dropdown.
+  //
+  // Implementation:
+  //   1. `scopedLocations` loads asynchronously; the seeding effect
+  //      runs once per mount, gated on a ref so a later context
+  //      refresh cannot overwrite an operator's manual pick.
+  //   2. Edit-mode (`device != null`) is exempt — the existing
+  //      device's location is the source of truth, handled by the
+  //      initialValues block below.
+  //   3. The effect NEVER writes to localStorage / setLocation;
+  //      header context cleanup is a separate product decision and
+  //      out of scope for this hotfix.
+  const seededLocationRef = useRef(false)
+  useEffect(() => {
+    if (device) return
+    if (seededLocationRef.current) return
+    if (activeLocationId == null) return
+    if (!scopedLocations.length) return
+    if (!scopedLocations.some((l) => l.id === activeLocationId)) return
+    if (form.getFieldValue('location_id') != null) return
+    form.setFieldValue('location_id', activeLocationId)
+    seededLocationRef.current = true
+  }, [device, activeLocationId, scopedLocations, form])
+
   // T10 C7.B — Güvenlik politikası atama bölümü Drawer'dan çıkarıldı; yeni evi
   // Device Detail > Güvenlik Politikası sekmesi (/devices/:id?tab=security).
   // Bu Drawer "hızlı düzenle" + "yeni cihaz" olarak kalır.
@@ -183,11 +220,22 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         const locationId = typeof values.location_id === 'number'
           ? values.location_id
           : undefined
-        if (locationId != null) {
-          const inScope = scopedLocations.some((l) => l.id === locationId)
-          if (!inScope) {
-            throw new Error(t('devices.form.scope_guard_location_not_in_context'))
-          }
+        // X-LOC-INTERCEPTOR-FIX (2026-06-21) — defense-in-depth: the
+        // form's `rules: [{ required: true }]` on `location_id` is the
+        // primary block, but the AntD validation can be bypassed by a
+        // synthetic submit or a programmatic `form.submit()`. Without
+        // a location in the form values, the per-request X-Location-Id
+        // override is undefined and the api/client.ts fallback would
+        // send the GLOBAL active location (potentially cross-tenant
+        // for a super_admin in another tenant's location context).
+        // Reject up front with the same localized i18n key the form
+        // validation surfaces.
+        if (locationId == null) {
+          throw new Error(t('devices.form.org_location_required'))
+        }
+        const inScope = scopedLocations.some((l) => l.id === locationId)
+        if (!inScope) {
+          throw new Error(t('devices.form.scope_guard_location_not_in_context'))
         }
         const checkAgent = (agentId: unknown): string | null => {
           if (typeof agentId !== 'string' || !agentId) return null
@@ -420,6 +468,12 @@ export default function DeviceForm({ device, onSuccess }: Props) {
         tooltip={device
           ? t('devices.form.org_location_tooltip_edit')
           : t('devices.form.org_location_tooltip_new')}
+        rules={!device ? [
+          {
+            required: true,
+            message: t('devices.form.org_location_required'),
+          },
+        ] : undefined}
       >
         <Select
           allowClear
