@@ -2889,6 +2889,14 @@
     "error_desc": "Lokasyon bilgisi yüklenemedi. Lütfen yeniden deneyin.",
     "retry": "Yenile"
   },
+  "org_selector": {
+    "loading": "Firma yükleniyor…",
+    "empty_tag": "Firma yok",
+    "empty_tooltip": "Hesabınızla görünür bir firma yok. Platform yöneticisiyle iletişime geçin.",
+    "platform_mode": "Platform Modu (tüm firmalar)",
+    "inactive_badge": "Pasif",
+    "label": "Firma"
+  },
   "location_selector": {
     "no_access_tooltip": "Hesabınıza atanmış bir lokasyon yok",
     "no_access_tag": "Lokasyon yok",

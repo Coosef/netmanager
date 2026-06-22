@@ -18,6 +18,7 @@ import { usersApi } from '@/api/users'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useCustomize } from '@/contexts/CustomizeContext'
 import LocationSelector from './LocationSelector'
+import OrganizationSelector from './OrganizationSelector'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
 
@@ -308,6 +309,14 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
           ))}
         </div>
       )}
+
+      {/* PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — Super-admin
+          Organization Switcher. Renders before the LocationSelector so
+          the operator's left-to-right scan reads "Org → Location" —
+          the natural tenant-then-scope mental model. Returns null for
+          non-super-admin users; LocationSelector remains the only
+          tenant-aware control they see. */}
+      <OrganizationSelector />
 
       {/* Active-location selector — compact (Faz 8 Phase F) */}
       <LocationSelector isMobile={isMobile} />

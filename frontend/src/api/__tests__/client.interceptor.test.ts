@@ -22,7 +22,12 @@
  */
 import { describe, it, expect, vi } from 'vitest'
 
-import { getCallerLocationHeader, ACTIVE_LOCATION_KEY } from '../client'
+import {
+  getCallerLocationHeader,
+  getCallerOrgHeader,
+  ACTIVE_LOCATION_KEY,
+  ACTIVE_ORG_KEY,
+} from '../client'
 
 
 // Mock the auth store the interceptor reads — tests don't need a
@@ -99,6 +104,87 @@ describe('ACTIVE_LOCATION_KEY — stable localStorage key', () => {
     // where SiteContext writes one key and the interceptor reads
     // another — every request would carry no location header.
     expect(ACTIVE_LOCATION_KEY).toBe('nm-active-location-id')
+  })
+
+  it('PLATFORM/OPERATIONS-PHASE1A — ACTIVE_ORG_KEY is `nm-active-org-id`', () => {
+    expect(ACTIVE_ORG_KEY).toBe('nm-active-org-id')
+  })
+})
+
+
+// ─── PLATFORM/OPERATIONS-PHASE1A — getCallerOrgHeader parity ────────────
+
+
+describe('getCallerOrgHeader — same case-insensitive contract as Location', () => {
+  it('returns the caller value for canonical `X-Org-Id`', () => {
+    expect(getCallerOrgHeader({ 'X-Org-Id': '6' })).toBe('6')
+  })
+
+  it('returns the caller value for lowercase `x-org-id`', () => {
+    expect(getCallerOrgHeader({ 'x-org-id': '5' })).toBe('5')
+  })
+
+  it('returns the caller value for mixed-case `X-ORG-ID`', () => {
+    expect(getCallerOrgHeader({ 'X-ORG-ID': '7' })).toBe('7')
+  })
+
+  it('returns undefined when absent / null / empty', () => {
+    expect(getCallerOrgHeader({})).toBeUndefined()
+    expect(getCallerOrgHeader(null)).toBeUndefined()
+    expect(getCallerOrgHeader({ 'X-Org-Id': '' })).toBeUndefined()
+  })
+
+  it('reads via `.get(name)` for AxiosHeaders-like objects', () => {
+    const axiosHeadersLike = {
+      get: (name: string) => (name.toLowerCase() === 'x-org-id' ? '9' : undefined),
+    }
+    expect(getCallerOrgHeader(axiosHeadersLike)).toBe('9')
+  })
+
+  it('parity — Location + Org helpers behave identically for an X-Foo input', () => {
+    // The two helpers share an internal predicate; pin the parity so a
+    // future regression that diverges them (e.g. case-sensitivity drift
+    // for one of them) lights up immediately.
+    const noHeader = {}
+    expect(getCallerLocationHeader(noHeader)).toBe(getCallerOrgHeader(noHeader))
+    expect(getCallerLocationHeader(null)).toBe(getCallerOrgHeader(null))
+  })
+})
+
+
+// ─── PLATFORM/OPERATIONS-PHASE1A — interceptor X-Org-Id propagation ─────
+
+
+describe('client.ts interceptor — X-Org-Id caller-respect (source-level)', () => {
+  it('reads ACTIVE_ORG_KEY from localStorage for the fallback', async () => {
+    const src = await import('node:fs').then((fs) =>
+      fs.readFileSync(
+        new URL('../client.ts', import.meta.url),
+        'utf-8',
+      ),
+    )
+    expect(src).toMatch(/getCallerOrgHeader\(config\.headers\)/)
+    expect(src).toMatch(/if \(callerOrg == null\)/)
+    expect(src).toMatch(/localStorage\.getItem\(ACTIVE_ORG_KEY\)/)
+    expect(src).toMatch(/config\.headers\['X-Org-Id'\] = org/)
+  })
+
+  it('the X-Org-Id branch follows the same shape as the X-Location-Id branch', async () => {
+    // The two header attachments are deliberately written as two
+    // parallel `if (caller == null) { fallback }` blocks. A regression
+    // that collapses one into the other (or skips the caller-respect
+    // gate) would re-introduce the PR #105 clobber bug for either
+    // header.
+    const src = await import('node:fs').then((fs) =>
+      fs.readFileSync(
+        new URL('../client.ts', import.meta.url),
+        'utf-8',
+      ),
+    )
+    const callerLocCount = (src.match(/callerLoc == null/g) ?? []).length
+    const callerOrgCount = (src.match(/callerOrg == null/g) ?? []).length
+    expect(callerLocCount).toBe(1)
+    expect(callerOrgCount).toBe(1)
   })
 })
 

@@ -11,6 +11,23 @@ const client = axios.create({
 export const ACTIVE_LOCATION_KEY = 'nm-active-location-id'
 
 /**
+ * PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — the active organization id
+ * for super-admins. The SiteContext keeps it in sync; the interceptor
+ * below attaches it as `X-Org-Id` so the backend's
+ * `request_context.resolve_location_context(x_org_id=...)` path can drop
+ * the super-admin RLS bypass and scope into the requested tenant — the
+ * unblocking primitive for the "add device to Mövempic" use case.
+ *
+ * Normal users do NOT need this key — their tenant is fixed server-side
+ * by the JWT and an injected X-Org-Id is silently ignored by the backend
+ * (`resolve_location_context` gates on `sup AND x_org_id is not None`).
+ * The SiteContext defensively removes the key from localStorage when the
+ * caller is not a super-admin, so a previously-super-admin session that
+ * was demoted cannot keep a stale org id.
+ */
+export const ACTIVE_ORG_KEY = 'nm-active-org-id'
+
+/**
  * X-LOC-INTERCEPTOR-FIX (2026-06-21) — return the caller-supplied
  * X-Location-Id header, honoring case-insensitivity AND both header
  * shapes axios may have already normalized the config into:
@@ -37,17 +54,46 @@ export const ACTIVE_LOCATION_KEY = 'nm-active-location-id'
 export function getCallerLocationHeader(
   headers: unknown,
 ): string | undefined {
+  return getCallerHeader(headers, 'X-Location-Id')
+}
+
+/**
+ * PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — caller-supplied X-Org-Id
+ * detection, mirror of `getCallerLocationHeader`. The interceptor at the
+ * bottom of this module uses it to skip the localStorage fallback when
+ * the caller already attached a per-request org override (e.g. a
+ * platform-admin background job that explicitly scopes into a single
+ * tenant). Same case-insensitive + shape-agnostic contract as the
+ * location helper — the test suite verifies the parity directly.
+ */
+export function getCallerOrgHeader(
+  headers: unknown,
+): string | undefined {
+  return getCallerHeader(headers, 'X-Org-Id')
+}
+
+/**
+ * Shared shape-agnostic header lookup. Extracted so the two public
+ * helpers stay in lock-step on case-insensitivity and AxiosHeaders
+ * handling. A future regression that drifts the two is caught by the
+ * `parity` block in `client.interceptor.test.ts`.
+ */
+function getCallerHeader(
+  headers: unknown,
+  name: string,
+): string | undefined {
   if (headers == null) return undefined
+  const lowered = name.toLowerCase()
   // AxiosHeaders shape — `.get(name)` is case-insensitive in axios 1.x.
   const maybeGet = (headers as { get?: (name: string) => unknown }).get
   if (typeof maybeGet === 'function') {
-    const v = maybeGet.call(headers, 'X-Location-Id')
+    const v = maybeGet.call(headers, name)
     return typeof v === 'string' && v.length > 0 ? v : undefined
   }
   // Plain-object shape — manual case-insensitive scan.
   const obj = headers as Record<string, unknown>
   for (const key of Object.keys(obj)) {
-    if (key.toLowerCase() === 'x-location-id') {
+    if (key.toLowerCase() === lowered) {
       const v = obj[key]
       if (typeof v === 'string' && v.length > 0) return v
     }
@@ -77,6 +123,22 @@ client.interceptors.request.use((config) => {
     const loc = localStorage.getItem(ACTIVE_LOCATION_KEY)
     if (loc) {
       config.headers['X-Location-Id'] = loc
+    }
+  }
+  // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — same caller-respect
+  // contract for X-Org-Id. The localStorage value is the active
+  // organization the super-admin picked in the Organization Switcher;
+  // attaching it instructs the backend `resolve_location_context` to
+  // drop the super-admin RLS bypass and scope into that tenant. The
+  // header is OMITTED when localStorage is empty so a non-super-admin
+  // (whose SiteContext deletes the key on hydration) does not send a
+  // stale id — the backend would ignore it anyway, but this keeps the
+  // wire shape clean for log review.
+  const callerOrg = getCallerOrgHeader(config.headers)
+  if (callerOrg == null) {
+    const org = localStorage.getItem(ACTIVE_ORG_KEY)
+    if (org) {
+      config.headers['X-Org-Id'] = org
     }
   }
   return config
