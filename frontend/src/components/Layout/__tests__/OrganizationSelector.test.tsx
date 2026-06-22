@@ -56,12 +56,12 @@ vi.mock('@/api/organizations', () => ({
 
 
 const siteState: {
-  isSuperAdmin: boolean
+  isPlatformSuperAdmin: boolean
   activeOrgId: number | null
   setOrganization: ReturnType<typeof vi.fn>
   ctxResolved: boolean
 } = {
-  isSuperAdmin: false,
+  isPlatformSuperAdmin: false,
   activeOrgId: null,
   setOrganization: vi.fn(),
   ctxResolved: true,
@@ -74,7 +74,7 @@ vi.mock('@/contexts/SiteContext', () => ({
 
 
 function resetSiteState() {
-  siteState.isSuperAdmin = false
+  siteState.isPlatformSuperAdmin = false
   siteState.activeOrgId = null
   siteState.setOrganization = vi.fn()
   siteState.ctxResolved = true
@@ -112,7 +112,7 @@ afterEach(() => {
 
 describe('OrganizationSelector — visibility', () => {
   it('(1) non-super-admin → renders null (widget is invisible)', () => {
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     const { container } = render(<Wrapper><OrganizationSelector /></Wrapper>)
     // The widget should not contribute ANY DOM — confirm by absence
     // of any of its data-testid markers.
@@ -122,14 +122,14 @@ describe('OrganizationSelector — visibility', () => {
   })
 
   it('(2) super-admin + hydration window → loading placeholder', () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.ctxResolved = false
     render(<Wrapper><OrganizationSelector /></Wrapper>)
     expect(screen.getByTestId('org-selector-loading')).toBeTruthy()
   })
 
   it('(2) ctxResolved = false also gates the underlying useQuery', () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.ctxResolved = false
     render(<Wrapper><OrganizationSelector /></Wrapper>)
     // The query MUST NOT fire during the hydration window — otherwise
@@ -141,7 +141,7 @@ describe('OrganizationSelector — visibility', () => {
 
 describe('OrganizationSelector — backend API failure / empty', () => {
   it('(3) super-admin + empty org list → empty tag', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     mocks.organizationsApi.list.mockResolvedValueOnce([])
     render(<Wrapper><OrganizationSelector /></Wrapper>)
     // Wait for React Query state to settle (isLoading → false +
@@ -155,7 +155,7 @@ describe('OrganizationSelector — backend API failure / empty', () => {
 
 describe('OrganizationSelector — happy path', () => {
   it('(4) super-admin + 2 orgs + activeOrgId set → select renders', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.activeOrgId = 6
     mocks.organizationsApi.list.mockResolvedValueOnce([
       { id: 1, name: 'Varsayılan Organizasyon', slug: 'default', is_active: true },
@@ -168,7 +168,7 @@ describe('OrganizationSelector — happy path', () => {
   })
 
   it('(5) super-admin + Platform Mode (activeOrgId === null) → select still renders', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.activeOrgId = null
     mocks.organizationsApi.list.mockResolvedValueOnce([
       { id: 1, name: 'Varsayılan', slug: 'default', is_active: true },
@@ -179,7 +179,7 @@ describe('OrganizationSelector — happy path', () => {
   })
 
   it('(8) inactive orgs render with an `Inactive` badge in the dropdown options', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     mocks.organizationsApi.list.mockResolvedValueOnce([
       { id: 1, name: 'Active', slug: 'a', is_active: true },
       { id: 2, name: 'Sunset', slug: 's', is_active: false },
@@ -199,10 +199,56 @@ describe('OrganizationSelector — happy path', () => {
 })
 
 
+// ─── ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — scoped super-admin ─────────
+
+
+describe('OrganizationSelector — ORG-CONTEXT-FALLBACK-FIX scoped scenario', () => {
+  // After picking ATG Hotels in production, the backend correctly
+  // returns `is_super_admin: false` (the RLS bypass dropped) while
+  // `system_role: "super_admin"` stays. The widget MUST remain
+  // visible — operator must be able to switch BACK out of the
+  // tenant. The pre-fix gate hid the widget and looped the operator
+  // to Platform Mode.
+
+  it('scoped super-admin (isPlatformSuperAdmin=true) → widget remains visible', async () => {
+    siteState.isPlatformSuperAdmin = true
+    siteState.activeOrgId = 6
+    mocks.organizationsApi.list.mockResolvedValueOnce([
+      { id: 1, name: 'Varsayılan', slug: 'default', is_active: true },
+      { id: 6, name: 'ATG Hotels', slug: 'atg-hotels', is_active: true },
+    ])
+    render(<Wrapper><OrganizationSelector /></Wrapper>)
+    await waitFor(() => {
+      expect(screen.getByTestId('org-selector')).toBeTruthy()
+    })
+  })
+
+  it('scoped super-admin + activeOrgId=6 → select renders with activeOrgId, NOT Platform Mode', async () => {
+    siteState.isPlatformSuperAdmin = true
+    siteState.activeOrgId = 6
+    mocks.organizationsApi.list.mockResolvedValueOnce([
+      { id: 6, name: 'ATG Hotels', slug: 'atg-hotels', is_active: true },
+    ])
+    render(<Wrapper><OrganizationSelector /></Wrapper>)
+    await waitFor(() => {
+      expect(screen.getByTestId('org-selector-select')).toBeTruthy()
+    })
+    // value computation source-level pinned in the source-level block.
+  })
+
+  it('non-super-admin (isPlatformSuperAdmin=false) → widget invisible', () => {
+    siteState.isPlatformSuperAdmin = false
+    render(<Wrapper><OrganizationSelector /></Wrapper>)
+    expect(screen.queryByTestId('org-selector')).toBeNull()
+    expect(screen.queryByTestId('org-selector-loading')).toBeNull()
+  })
+})
+
+
 describe('OrganizationSelector — source-level invariants', () => {
   it('returns null for non-super-admin BEFORE doing any work', async () => {
     const src = ORG_SELECTOR_SRC
-    expect(src).toMatch(/if \(!isSuperAdmin\) return null/)
+    expect(src).toMatch(/if \(!isPlatformSuperAdmin\) return null/)
   })
 
   it('platform-mode option calls setOrganization(null)', async () => {
@@ -213,9 +259,9 @@ describe('OrganizationSelector — source-level invariants', () => {
     )
   })
 
-  it('useQuery is gated on isSuperAdmin && ctxResolved', async () => {
+  it('useQuery is gated on isPlatformSuperAdmin && ctxResolved', async () => {
     const src = ORG_SELECTOR_SRC
-    expect(src).toMatch(/enabled:\s*isSuperAdmin && ctxResolved/)
+    expect(src).toMatch(/enabled:\s*isPlatformSuperAdmin && ctxResolved/)
   })
 
   it('inactive orgs render with the inactive_badge i18n key', async () => {

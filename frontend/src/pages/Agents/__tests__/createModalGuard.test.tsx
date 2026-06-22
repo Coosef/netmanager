@@ -73,7 +73,7 @@ const siteState: {
   locations: { id: number; name: string; color: string | null; city: null; country: null; device_count: number }[]
   hasLocationAccess: boolean
   isOrgWide: boolean
-  isSuperAdmin: boolean
+  isPlatformSuperAdmin: boolean
   organization: { id: number; name: string; slug: string } | null
   /** SITE-CONTEXT-HYDRATION-GUARD (2026-06-19) — true during the
    * Zustand-persist rehydration window or while `/context/current` is
@@ -90,7 +90,7 @@ const siteState: {
   locations: [],
   hasLocationAccess: true,
   isOrgWide: false,
-  isSuperAdmin: false,
+  isPlatformSuperAdmin: false,
   organization: null,
   sitesLoading: false,
   ctxResolved: true,
@@ -106,7 +106,7 @@ function resetSiteState() {
   siteState.locations = []
   siteState.hasLocationAccess = true
   siteState.isOrgWide = false
-  siteState.isSuperAdmin = false
+  siteState.isPlatformSuperAdmin = false
   siteState.organization = null
   siteState.sitesLoading = false
   siteState.ctxResolved = true
@@ -161,7 +161,7 @@ afterEach(() => {
 
 describe('Agent create modal — super_admin without a tenant context', () => {
   it('+ Ajan Kur opens the modal; tenant-required Alert renders; no other UI', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     siteState.isOrgWide = true
     renderNocAgents()
@@ -175,7 +175,7 @@ describe('Agent create modal — super_admin without a tenant context', () => {
   })
 
   it('submit button is disabled and carries data-blocked=true', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     renderNocAgents()
     fireEvent.click(await screen.findByTestId('agent-install-button'))
@@ -185,7 +185,7 @@ describe('Agent create modal — super_admin without a tenant context', () => {
   })
 
   it('clicking the (disabled) submit does NOT call agentsApi.create', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     renderNocAgents()
     fireEvent.click(await screen.findByTestId('agent-install-button'))
@@ -197,7 +197,7 @@ describe('Agent create modal — super_admin without a tenant context', () => {
   })
 
   it('synthetic dispatchEvent click on the submit also does not call create', async () => {
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     renderNocAgents()
     fireEvent.click(await screen.findByTestId('agent-install-button'))
@@ -215,7 +215,7 @@ describe('Agent create modal — super_admin without a tenant context', () => {
 
 describe('Agent create modal — caller with no accessible locations', () => {
   it('shows no-assigned Alert; tenant-required Alert NOT rendered', async () => {
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
     siteState.hasLocationAccess = false
     siteState.locations = []
@@ -226,7 +226,7 @@ describe('Agent create modal — caller with no accessible locations', () => {
   })
 
   it('submit + dropdown + name input are all disabled', async () => {
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     siteState.organization = { id: 1, name: 'Acme', slug: 'acme' }
     siteState.hasLocationAccess = false
     siteState.locations = []
@@ -260,7 +260,7 @@ describe('Agent create modal — caller with no accessible locations', () => {
 
 describe('Agent create modal — SITE-CONTEXT-HYDRATION-GUARD window', () => {
   // During the hydration window all SiteContext defaults light up the
-  // "no-assigned" branch deterministically (locations=[], !isSuperAdmin,
+  // "no-assigned" branch deterministically (locations=[], !isPlatformSuperAdmin,
   // !hasLocationAccess?? defaults). The patch gates BOTH `tenantMissing`
   // and `noAssignedLocations` on `!sitesLoading`. Below: sitesLoading=true
   // + every other field at its hydration-window default must produce
@@ -273,7 +273,7 @@ describe('Agent create modal — SITE-CONTEXT-HYDRATION-GUARD window', () => {
     siteState.sitesLoading = true
     // Defaults — same shape the SiteContext provider hands out before
     // /context/current resolves.
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     siteState.organization = null
     siteState.hasLocationAccess = true
     siteState.locations = []
@@ -290,7 +290,7 @@ describe('Agent create modal — SITE-CONTEXT-HYDRATION-GUARD window', () => {
     // would surface "Önce firma seçin" during this window even though
     // the backend hasn't been asked.
     siteState.sitesLoading = true
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     siteState.isOrgWide = true
     siteState.locations = []
@@ -305,7 +305,7 @@ describe('Agent create modal — SITE-CONTEXT-HYDRATION-GUARD window', () => {
     // as the no-tenant case above EXCEPT sitesLoading is now false →
     // the gate is open → the existing PR #96 contract resumes.
     siteState.sitesLoading = false
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     siteState.isOrgWide = true
     renderNocAgents()
@@ -332,7 +332,7 @@ describe('Agent create modal — v2 ctxResolved gate (transient defence)', () =>
   it('ctxResolved=false + sitesLoading=false + defaults → NO blocked Alerts', async () => {
     siteState.sitesLoading = false
     siteState.ctxResolved = false
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     siteState.organization = null
     siteState.hasLocationAccess = true
     siteState.locations = []
@@ -349,7 +349,7 @@ describe('Agent create modal — v2 ctxResolved gate (transient defence)', () =>
     // suppressed.
     siteState.sitesLoading = false
     siteState.ctxResolved = false
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.organization = null
     siteState.isOrgWide = true
     renderNocAgents()
@@ -365,7 +365,7 @@ describe('Agent create modal — v2 ctxResolved gate (transient defence)', () =>
     // no blocked Alert (happy path resumes).
     siteState.sitesLoading = true
     siteState.ctxResolved = false
-    siteState.isSuperAdmin = false
+    siteState.isPlatformSuperAdmin = false
     siteState.organization = null
     siteState.locations = []
     const { rerender } = renderNocAgents()
@@ -381,7 +381,7 @@ describe('Agent create modal — v2 ctxResolved gate (transient defence)', () =>
     // ctx lands with the real operator data.
     siteState.sitesLoading = false
     siteState.ctxResolved = true
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.isOrgWide = true
     siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
     siteState.locations = [

@@ -12,10 +12,13 @@ import { organizationsApi } from '@/api/organizations'
  * group nav and the `LocationSelector`.
  *
  * Visibility rules:
- *   1. Renders ONLY when `useSite().isSuperAdmin === true`. For normal
- *      users the widget returns `null` — their tenant is fixed
- *      server-side by their JWT and any client-side switcher would be
- *      misleading at best, a footgun at worst.
+ *   1. Renders ONLY when `useSite().isPlatformSuperAdmin === true`
+ *      (ROLE identity, not the currently-active RLS bypass flag —
+ *      a scoped super-admin still has the role and must keep the
+ *      switcher visible so they can switch back). For normal users
+ *      the widget returns `null` — their tenant is fixed server-side
+ *      by their JWT and any client-side switcher would be misleading
+ *      at best, a footgun at worst.
  *   2. While the context is still resolving (`ctxResolved === false`),
  *      the widget renders a tiny placeholder to avoid the same
  *      hydration-window flicker PR #103 closed for the location
@@ -39,7 +42,15 @@ import { organizationsApi } from '@/api/organizations'
  *     global health, license overview).
  */
 export default function OrganizationSelector() {
-  const { isSuperAdmin, activeOrgId, setOrganization, ctxResolved } = useSite()
+  // ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — switched from
+  // `isSuperAdmin` (BYPASS state) to `isPlatformSuperAdmin` (ROLE
+  // identity). The pre-fix gate hid the widget the moment a scoped
+  // super-admin's /context/current response carried
+  // `is_super_admin: false`, which then triggered the SiteContext
+  // cleanup effect that wiped activeOrgId and looped the operator
+  // back to Platform Mode. Both `enabled` AND the visibility
+  // short-circuit MUST use the role-based flag.
+  const { isPlatformSuperAdmin, activeOrgId, setOrganization, ctxResolved } = useSite()
   const { isDark } = useTheme()
   const { t } = useTranslation()
 
@@ -47,14 +58,14 @@ export default function OrganizationSelector() {
     queryKey: ['platform', 'organizations'],
     queryFn: organizationsApi.list,
     staleTime: 60_000,
-    enabled: isSuperAdmin && ctxResolved,
+    enabled: isPlatformSuperAdmin && ctxResolved,
   })
 
   // Non-super-admin (normal user): the tenant is fixed by JWT. Render
   // nothing — the user sees only their home org's data and any client-
   // side switcher would imply switchability that does not exist for
   // them.
-  if (!isSuperAdmin) return null
+  if (!isPlatformSuperAdmin) return null
 
   // Hydration window — keep the slot reserved so the surrounding
   // header layout does not jump when ctx finally resolves.

@@ -37,7 +37,15 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // here is a UX preview that surfaces a friendlier 400 BEFORE the
   // request leaves the browser.
   const {
-    setLocation, activeLocationId, organization, ctxResolved, isSuperAdmin,
+    // ORG-CONTEXT-FALLBACK-FIX (2026-06-22) — switched from
+    // `isSuperAdmin` (BYPASS state) to `isPlatformSuperAdmin` (ROLE
+    // identity) for the tenant-required guard below. A scoped
+    // super-admin's `is_super_admin` is false at the backend, so the
+    // pre-fix code skipped the guard for them — incorrect when
+    // `organization` is unexpectedly null. Role identity is the
+    // semantically correct gate.
+    setLocation, activeLocationId, organization, ctxResolved,
+    isPlatformSuperAdmin,
   } = useSite()
 
   // DEVICE-CREATE-LOCATION-SCOPE-FIX (2026-06-19) — the active tenant
@@ -49,7 +57,7 @@ export default function DeviceForm({ device, onSuccess }: Props) {
   // Super-admin without a tenant context is a hard block (mirror of
   // PR #96 agent-create modal). Backend would 400 the create call;
   // we surface the explanation here BEFORE the user types a hostname.
-  const tenantMissing = ctxResolved && isSuperAdmin && organization === null
+  const tenantMissing = ctxResolved && isPlatformSuperAdmin && organization === null
 
   const { data: agents = [] } = useQuery({
     queryKey: ['agents', activeOrgId],

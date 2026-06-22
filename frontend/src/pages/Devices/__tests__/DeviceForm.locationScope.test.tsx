@@ -98,13 +98,13 @@ const siteState: {
   setLocation: ReturnType<typeof vi.fn>
   organization: { id: number; name: string; slug: string } | null
   ctxResolved: boolean
-  isSuperAdmin: boolean
+  isPlatformSuperAdmin: boolean
 } = {
   activeLocationId: null,
   setLocation: vi.fn(),
   organization: null,
   ctxResolved: false,
-  isSuperAdmin: false,
+  isPlatformSuperAdmin: false,
 }
 
 
@@ -118,7 +118,7 @@ function resetSiteState() {
   siteState.setLocation = vi.fn()
   siteState.organization = { id: 1, name: 'Varsayılan Organizasyon', slug: 'default' }
   siteState.ctxResolved = true
-  siteState.isSuperAdmin = true
+  siteState.isPlatformSuperAdmin = true
 }
 
 
@@ -348,7 +348,7 @@ describe('DeviceForm — soft-deleted location is not surfaced', () => {
 describe('DeviceForm — super_admin without tenant context', () => {
   it('(8) renders the tenant-required Alert and disables location + agent selects', async () => {
     siteState.organization = null
-    siteState.isSuperAdmin = true
+    siteState.isPlatformSuperAdmin = true
     siteState.ctxResolved = true
     renderForm()
     await waitFor(() => {
