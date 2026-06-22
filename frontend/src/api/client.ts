@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { useAuthStore } from '@/store/auth'
+import { extractRouteOrgId } from '@/utils/panelMode'
 
 const client = axios.create({
   baseURL: '/api/v1',
@@ -125,20 +126,40 @@ client.interceptors.request.use((config) => {
       config.headers['X-Location-Id'] = loc
     }
   }
-  // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — same caller-respect
-  // contract for X-Org-Id. The localStorage value is the active
-  // organization the super-admin picked in the Organization Switcher;
-  // attaching it instructs the backend `resolve_location_context` to
-  // drop the super-admin RLS bypass and scope into that tenant. The
-  // header is OMITTED when localStorage is empty so a non-super-admin
-  // (whose SiteContext deletes the key on hydration) does not send a
-  // stale id — the backend would ignore it anyway, but this keeps the
-  // wire shape clean for log review.
+  // PR-A REVISED (2026-06-22) — URL-AUTHORITATIVE X-Org-Id.
+  //
+  // Source-of-truth precedence (high → low):
+  //   1. Caller-supplied X-Org-Id header (per-request override; the
+  //      same caller-respect contract PR #105 / #106 established for
+  //      X-Location-Id, extended to X-Org-Id in PHASE-1A).
+  //   2. URL routeOrgId — extracted synchronously from
+  //      `window.location.pathname`. Inside `/app/org/:organizationId/*`
+  //      this is the SOLE authority: a previously-cached or stale
+  //      `localStorage[ACTIVE_ORG_KEY]` MUST NOT scope a request to a
+  //      tenant the URL is not currently displaying. This closes the
+  //      cache-leak window operator flagged in the PR #108 review.
+  //   3. localStorage preference hint — a non-URL-bound fallback used
+  //      only when the user is OUTSIDE the operations panel (legacy
+  //      routes, super-admin who has picked a tenant via the legacy
+  //      OrganizationSelector but has not yet entered /app/org/*).
+  //
+  // The synchronous URL read is safe because every request originates
+  // from a React tree mounted inside BrowserRouter — by the time the
+  // interceptor fires, `window.location.pathname` reflects the route
+  // the user is operating on. SSR is not a concern here (frontend is
+  // SPA-only).
   const callerOrg = getCallerOrgHeader(config.headers)
   if (callerOrg == null) {
-    const org = localStorage.getItem(ACTIVE_ORG_KEY)
-    if (org) {
-      config.headers['X-Org-Id'] = org
+    const routeOrgId = typeof window !== 'undefined'
+      ? extractRouteOrgId(window.location.pathname)
+      : null
+    if (routeOrgId != null) {
+      config.headers['X-Org-Id'] = String(routeOrgId)
+    } else {
+      const org = localStorage.getItem(ACTIVE_ORG_KEY)
+      if (org) {
+        config.headers['X-Org-Id'] = org
+      }
     }
   }
   return config

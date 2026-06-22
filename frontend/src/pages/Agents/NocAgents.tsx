@@ -10,6 +10,7 @@ import { App, Modal, Input, Button, Typography, Select, Alert, Descriptions, Spa
 import { agentsApi, type Agent } from '@/api/agents'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
+import { useRouteOrgId } from '@/hooks/useRouteOrgId'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useAuthStore } from '@/store/auth'
 import { useTranslation } from 'react-i18next'
@@ -91,6 +92,13 @@ export default function NocAgents() {
   const noAssignedLocations =
     ctxSettled && !tenantMissing && (!hasLocationAccess || locations.length === 0)
   const installBlocked = tenantMissing || noAssignedLocations
+  // PR-A REVISED — URL-authoritative org scope. The agents-list query
+  // partitions on routeOrgId so React Query cannot serve org=6's cached
+  // payload when the URL has moved to /app/org/1/agents. The interceptor
+  // also reads routeOrgId from window.location, so the X-Org-Id header
+  // arrives at the backend in the same scope the cache is keyed under.
+  const routeOrgId = useRouteOrgId()
+
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newLoc, setNewLoc] = useState<number | undefined>(undefined)
@@ -103,14 +111,14 @@ export default function NocAgents() {
     onSuccess: (a) => {
       setCreatedAgent(a as Agent & { agent_key: string })
       setCreateOpen(false); setNewName(''); setNewLoc(undefined)
-      qc.invalidateQueries({ queryKey: ['agents-list'] })
+      qc.invalidateQueries({ queryKey: ['org', routeOrgId, 'agents-list'] })
       message.success('Ajan oluşturuldu')
     },
     onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ajan oluşturulamadı'),
   })
   const delMut = useMutation({
     mutationFn: (id: string) => agentsApi.delete(id),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['agents-list'] }); message.success('Ajan silindi') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['org', routeOrgId, 'agents-list'] }); message.success('Ajan silindi') },
     onError: (e) => message.error((e as { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Ajan silinemedi'),
   })
   const submitCreate = () => {
@@ -130,7 +138,7 @@ export default function NocAgents() {
     createMut.mutate({ name, location_id })
   }
 
-  const { data: agents = [] } = useQuery({ queryKey: ['agents-list'], queryFn: agentsApi.list, refetchInterval: 30000 })
+  const { data: agents = [] } = useQuery({ queryKey: ['org', routeOrgId, 'agents-list'], queryFn: agentsApi.list, refetchInterval: 30000 })
   const { data: devicesData } = useQuery({ queryKey: ['devices-for-agents'], queryFn: () => devicesApi.list({ limit: 2000 }) })
   const { data: latencyMap = [] } = useQuery({ queryKey: ['agents-latency-map'], queryFn: agentsApi.getLatencyMap, refetchInterval: 60000 })
   const { data: versionData } = useQuery({ queryKey: ['agent-current-version'], queryFn: agentsApi.getCurrentVersion })

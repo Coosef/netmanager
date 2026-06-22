@@ -300,7 +300,13 @@ function ThemedApp() {
     <ConfigProvider locale={antdLocale as any} theme={isDark ? DARK_TOKENS : LIGHT_TOKENS}>
       <style>{isDark ? GLOBAL_CSS_DARK : GLOBAL_CSS_LIGHT}</style>
       <AntApp>
+        {/* PR-A REVISED — SiteProvider is now mounted INSIDE BrowserRouter
+            so it can call useLocation() and derive routeOrgId for its
+            queryKey + cleanup gating. The provider remains pure state
+            (Zustand-free); React Router context is the only new
+            dependency. */}
         <BrowserRouter>
+          <SiteProvider>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/invite" element={<InviteAcceptPage />} />
@@ -440,6 +446,7 @@ function ThemedApp() {
               <Route path="escalation-rules" element={<RoleRoute minRole="org_admin"><EscalationRulesPage /></RoleRoute>} />
             </Route>
           </Routes>
+          </SiteProvider>
         </BrowserRouter>
       </AntApp>
     </ConfigProvider>
@@ -447,14 +454,14 @@ function ThemedApp() {
 }
 
 export default function App() {
+  // PR-A REVISED — SiteProvider moved into ThemedApp (inside
+  // BrowserRouter) so it can derive routeOrgId from useLocation.
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider>
           <CustomizeProvider>
-            <SiteProvider>
-              <ThemedApp />
-            </SiteProvider>
+            <ThemedApp />
           </CustomizeProvider>
         </ThemeProvider>
       </QueryClientProvider>

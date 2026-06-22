@@ -14,6 +14,7 @@ import {
 } from '@/api/context'
 import { useAuthStore } from '@/store/auth'
 import { useHasHydrated } from '@/hooks/useHasHydrated'
+import { useRouteOrgId } from '@/hooks/useRouteOrgId'
 import { ACTIVE_LOCATION_KEY, ACTIVE_ORG_KEY } from '@/api/client'
 
 /**
@@ -89,13 +90,29 @@ export function isActiveLocationStale(
 }
 
 interface SiteCtx {
+  /** PR-A REVISED (2026-06-22) — URL-derived org scope.
+   *
+   * When the user is inside `/app/org/:organizationId/*`, this carries
+   * the URL's organizationId — the SOLE source of truth for org context
+   * in the operations panel. `null` for every legacy / platform route.
+   *
+   * Every operations-shell consumer (DevicesPage, NocAgents, DeviceForm,
+   * SiteContext's own ctx query) MUST scope their query keys + API
+   * requests on `routeOrgId` when non-null. `activeOrgId` is preserved
+   * as a localStorage-backed preference hint for legacy entry points
+   * only — inside `/app/org/*`, it is NEVER consulted. */
+  routeOrgId: number | null
   /** PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — the active organization
    * id for super-admins. `null` means "no override" → backend uses the
    * super-admin RLS bypass (sees every tenant). When non-null, the
    * Axios interceptor attaches it as `X-Org-Id` and the backend drops
    * the bypass + scopes into that tenant — the unblocking primitive
    * for the "Mövempic / org=6 from a super-admin's session" use case
-   * the operator hit on the PR #105 production smoke. */
+   * the operator hit on the PR #105 production smoke.
+   *
+   * PR-A REVISED: localStorage-backed preference hint only. Inside
+   * `/app/org/:organizationId/*` the URL-authoritative `routeOrgId`
+   * wins for every query / request. */
   activeOrgId: number | null
   /** Switch the super-admin's active organization scope. Side-effects:
    *   1. activeLocationId is cleared (the old tenant's location id is
@@ -183,6 +200,7 @@ interface SiteCtx {
 }
 
 const SiteContext = createContext<SiteCtx>({
+  routeOrgId: null,
   activeOrgId: null,
   setOrganization: () => {},
   activeLocationId: null,
@@ -206,6 +224,11 @@ const SiteContext = createContext<SiteCtx>({
 })
 
 export function SiteProvider({ children }: { children: ReactNode }) {
+  // PR-A REVISED — routeOrgId comes from the URL via React Router. The
+  // provider is mounted INSIDE BrowserRouter (App.tsx) so this hook
+  // resolves on every render to the live route's :organizationId, or
+  // null for legacy / platform routes.
+  const routeOrgId = useRouteOrgId()
   const { token } = useAuthStore()
   // DASHBOARD-INIT-ROUTER-FIX (2026-06-10) — Zustand persist hidrasyon
   // tamamlanmadan `token` selector eski/null değer dönebiliyor. Hidrasyon
@@ -256,12 +279,19 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   //     `locations.length === 0` durumunda refetch tetiklendiyse loading
   //     gösterir, "no_assigned" tag'i flicker olarak yanmaz.
   const { data: ctx, isLoading: queryLoading, isError, refetch } = useQuery({
-    // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — queryKey carries
-    // `activeOrgId` so a super-admin's org switch refetches the context
-    // under the new `X-Org-Id` header. The cache stays separated per
-    // tenant scope; the queryClient.invalidateQueries() in
-    // setOrganization triggers the actual refetch.
-    queryKey: ['context', 'current', activeLocationId, activeOrgId],
+    // PR-A REVISED (2026-06-22) — URL-authoritative scope. The queryKey
+    // carries `routeOrgId` FIRST so React Query's cache partitions per
+    // tenant URL: visiting `/app/org/6/devices` then `/app/org/1/devices`
+    // produces two distinct cache entries, the org=6 payload cannot
+    // leak into the org=1 render, and the operator's cache-leak risk
+    // call-out from PR #108 review is closed.
+    //
+    // `activeLocationId` follows for in-org location scope. The legacy
+    // `activeOrgId` is intentionally NOT in the key — inside the
+    // operations panel the URL is authoritative; outside it (routeOrgId
+    // === null), the interceptor falls back to localStorage[ACTIVE_ORG_KEY]
+    // and the backend receives a consistent X-Org-Id either way.
+    queryKey: ['context', 'current', routeOrgId, activeLocationId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
     enabled: !!token && hydrated,
@@ -546,6 +576,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   return (
     <SiteContext.Provider
       value={{
+        routeOrgId,
         activeOrgId,
         setOrganization,
         activeLocationId,

@@ -23,6 +23,7 @@ import { locationsApi } from '@/api/locations'
 import { snmpApi } from '@/api/snmp'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
+import { useRouteOrgId } from '@/hooks/useRouteOrgId'
 import type { Device } from '@/types'
 import { DEVICE_TYPE_OPTIONS } from '@/types'
 import { useTranslation } from 'react-i18next'
@@ -844,6 +845,13 @@ export default function DevicesPage() {
   const { isDark } = useTheme()
   const { t } = useTranslation()
   const { activeSite } = useSite()
+  // PR-A REVISED — URL-authoritative org scope. When inside
+  // `/app/org/:organizationId/*`, every devices-list / devices-stats
+  // query MUST partition on routeOrgId so React Query cache cannot
+  // leak a previous tenant's payload into the current one. Legacy
+  // routes (routeOrgId === null) fall back to the unscoped key — the
+  // interceptor's localStorage fallback then carries X-Org-Id.
+  const routeOrgId = useRouteOrgId()
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
   const [search, setSearch] = useState(searchParams.get('search') || '')
@@ -900,19 +908,22 @@ export default function DevicesPage() {
 
   useTaskProgress(backupTaskId, {
     title: t('devices.bulk_backup'),
-    invalidateKeys: [['devices'], ['devices-stats']],
+    invalidateKeys: [
+      ['org', routeOrgId, 'devices-list'],
+      ['org', routeOrgId, 'devices-stats'],
+    ],
     onDone: () => setBackupTaskId(null),
   })
 
   const { data, isLoading } = useQuery({
-    queryKey: ['devices', search, vendor, status, deviceTypeFilter, tag, page, activeSite],
+    queryKey: ['org', routeOrgId, 'devices-list', search, vendor, status, deviceTypeFilter, tag, page, activeSite],
     queryFn: () => devicesApi.list({ search: search || undefined, vendor, status, device_type: deviceTypeFilter, tag, skip: (page - 1) * pageSize, limit: pageSize, site: activeSite || undefined }),
     refetchInterval: 30000,
   })
 
   // Stats — fetch all for counters
   const { data: allData } = useQuery({
-    queryKey: ['devices-stats', activeSite],
+    queryKey: ['org', routeOrgId, 'devices-stats', activeSite],
     queryFn: () => devicesApi.list({ limit: 2000, site: activeSite || undefined }),
     staleTime: 30000,
   })
@@ -961,7 +972,7 @@ export default function DevicesPage() {
 
   const deleteMutation = useMutation({
     mutationFn: devicesApi.delete,
-    onSuccess: () => { message.success(t('devices.deleted')); queryClient.invalidateQueries({ queryKey: ['devices'] }); queryClient.invalidateQueries({ queryKey: ['devices-stats'] }) },
+    onSuccess: () => { message.success(t('devices.deleted')); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] }); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] }) },
     onError: (err: any) => message.error(apiErr(err, t('common.delete_failed'))),
   })
 
@@ -972,8 +983,8 @@ export default function DevicesPage() {
     onSuccess: (d) => {
       const label = LIFECYCLE_BASE[d.lifecycle_status || 'production']?.labelKey
       message.success(`${d.hostname}: ${label ? t(label) : d.lifecycle_status}`)
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
-      queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] })
     },
     onError: (err: any) => message.error(apiErr(err, t('devices.lifecycle.update_failed'))),
   })
@@ -983,8 +994,8 @@ export default function DevicesPage() {
     onSuccess: () => {
       message.success(t('common.success'))
       setSelectedRowKeys([])
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
-      queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] })
     },
     onError: (err: any) => message.error(apiErr(err, t('devices.bulk_delete_error'))),
   })
@@ -1001,7 +1012,7 @@ export default function DevicesPage() {
       setBulkTagOpen(false)
       setBulkTagValue('')
       setSelectedRowKeys([])
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
     },
     onError: (err: any) => message.error(apiErr(err, t('common.error'))),
   })
@@ -1027,7 +1038,7 @@ export default function DevicesPage() {
     mutationFn: devicesApi.fetchInfo,
     onSuccess: (device) => {
       message.success(t('devices.toast.fetch_info_success', { hostname: device.hostname }))
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
     },
     onError: (err: any) => message.error(apiErr(err, t('common.error'))),
   })
@@ -1037,8 +1048,8 @@ export default function DevicesPage() {
     mutationFn: (file: File) => devicesApi.importCsv(file),
     onSuccess: (res) => {
       setCsvResult(res)
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
-      queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
+      queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] })
     },
     onError: (err: any) => message.error(apiErr(err, t('devices.csv.import_error'))),
   })
@@ -1181,7 +1192,7 @@ export default function DevicesPage() {
               { label: t('common.unknown'), value: 'unknown' },
             ]}
           />
-          <Button icon={<ReloadOutlined />} onClick={() => { queryClient.invalidateQueries({ queryKey: ['devices'] }); queryClient.invalidateQueries({ queryKey: ['devices-stats'] }) }} />
+          <Button icon={<ReloadOutlined />} onClick={() => { queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] }); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] }) }} />
           <Tooltip title={t('devices.toolbar.csv_export_tooltip')}>
             <Button icon={<DownloadOutlined />} onClick={exportCsv}>
               {t('devices.toolbar.csv_export_btn')}
@@ -1282,7 +1293,7 @@ export default function DevicesPage() {
       )}
 
       <Drawer title={editDevice ? t('devices.edit') : t('devices.add_new')} open={drawerOpen} onClose={() => setDrawerOpen(false)} width={520} destroyOnHidden>
-        <DeviceForm device={editDevice} onSuccess={() => { setDrawerOpen(false); queryClient.invalidateQueries({ queryKey: ['devices'] }); queryClient.invalidateQueries({ queryKey: ['devices-stats'] }) }} />
+        <DeviceForm device={editDevice} onSuccess={() => { setDrawerOpen(false); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] }); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] }) }} />
       </Drawer>
 
       {/* Faz 8 Phase G — audited device-location move */}
@@ -1295,8 +1306,8 @@ export default function DevicesPage() {
         onClose={() => setWizardOpen(false)}
         onSuccess={() => {
           setWizardOpen(false)
-          queryClient.invalidateQueries({ queryKey: ['devices'] })
-          queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+          queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
+          queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] })
         }}
       />
 
@@ -1318,7 +1329,7 @@ export default function DevicesPage() {
         <BulkAgentModal
           selectedIds={selectedRowKeys as number[]}
           onClose={() => setBulkAgentOpen(false)}
-          onSuccess={() => { setBulkAgentOpen(false); setSelectedRowKeys([]); queryClient.invalidateQueries({ queryKey: ['devices'] }) }}
+          onSuccess={() => { setBulkAgentOpen(false); setSelectedRowKeys([]); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] }) }}
         />
       )}
 
@@ -1326,7 +1337,7 @@ export default function DevicesPage() {
         <BulkCredentialModal
           selectedIds={selectedRowKeys as number[]}
           onClose={() => setBulkCredOpen(false)}
-          onSuccess={() => { setBulkCredOpen(false); setSelectedRowKeys([]); queryClient.invalidateQueries({ queryKey: ['devices'] }) }}
+          onSuccess={() => { setBulkCredOpen(false); setSelectedRowKeys([]); queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] }) }}
         />
       )}
 
@@ -1336,8 +1347,8 @@ export default function DevicesPage() {
           onClose={() => {
             setBulkFetchOpen(false)
             setSelectedRowKeys([])
-            queryClient.invalidateQueries({ queryKey: ['devices'] })
-            queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+            queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
+            queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] })
           }}
         />
       )}
@@ -1503,8 +1514,8 @@ export default function DevicesPage() {
           onClose={() => setBulkLifecycleOpen(false)}
           onSuccess={() => {
             setBulkLifecycleOpen(false); setSelectedRowKeys([])
-            queryClient.invalidateQueries({ queryKey: ['devices'] })
-            queryClient.invalidateQueries({ queryKey: ['devices-stats'] })
+            queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
+            queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-stats'] })
           }}
         />
       )}
@@ -1516,7 +1527,7 @@ export default function DevicesPage() {
           onClose={() => setBulkMoveOpen(false)}
           onSuccess={() => {
             setBulkMoveOpen(false); setSelectedRowKeys([])
-            queryClient.invalidateQueries({ queryKey: ['devices'] })
+            queryClient.invalidateQueries({ queryKey: ['org', routeOrgId, 'devices-list'] })
           }}
         />
       )}

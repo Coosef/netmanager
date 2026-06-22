@@ -23,7 +23,9 @@ interface ProgressMsg {
 export function useTaskProgress(taskId: number | null, options?: {
   title?: string
   onDone?: () => void
-  invalidateKeys?: string[][]
+  // PR-A REVISED — allow numeric / null segments so routeOrgId-aware
+  // query keys (`['org', routeOrgId, 'devices-list']`) can be invalidated.
+  invalidateKeys?: ReadonlyArray<ReadonlyArray<string | number | null>>
 }) {
   const qc = useQueryClient()
   const notifKey = `task-progress-${taskId}`

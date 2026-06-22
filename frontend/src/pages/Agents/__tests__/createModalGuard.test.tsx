@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, cleanup, act, fireEvent } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { App as AntApp } from 'antd'
+import { MemoryRouter } from 'react-router-dom'
 import type { ReactNode } from 'react'
 
 import NocAgents from '../NocAgents'
@@ -119,15 +120,22 @@ function renderNocAgents() {
   // message context — without it the mutation onError calls explode
   // with "message.error is not a function" during the happy-path
   // test (which actually fires the mutate).
+  //
+  // PR-A REVISED: NocAgents now calls useRouteOrgId() which requires
+  // a React Router context. MemoryRouter at `/` makes routeOrgId === null
+  // (legacy route), exercising the same code path these guards
+  // originally tested.
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   })
   return render(
-    <QueryClientProvider client={qc}>
-      <AntApp>
-        <NocAgents />
-      </AntApp>
-    </QueryClientProvider>,
+    <MemoryRouter initialEntries={['/']}>
+      <QueryClientProvider client={qc}>
+        <AntApp>
+          <NocAgents />
+        </AntApp>
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 
@@ -401,13 +409,17 @@ describe('Agent create modal — v2 ctxResolved gate (transient defence)', () =>
 // outer QueryClientProvider — keep the shape identical so the rerender
 // doesn't unmount/remount the modal accidentally.
 function QueryClientProviderForTest({ children }: { children: ReactNode }) {
+  // PR-A REVISED: NocAgents now needs a Router context (useRouteOrgId).
+  // Mirror renderNocAgents() shape so rerender() keeps the modal mounted.
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } },
   })
   return (
-    <QueryClientProvider client={qc}>
-      <AntApp>{children}</AntApp>
-    </QueryClientProvider>
+    <MemoryRouter initialEntries={['/']}>
+      <QueryClientProvider client={qc}>
+        <AntApp>{children}</AntApp>
+      </QueryClientProvider>
+    </MemoryRouter>
   )
 }
 function NocAgentsForTest() { return <NocAgents /> }
