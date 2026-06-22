@@ -2846,6 +2846,14 @@
     "error_desc": "Location data could not be loaded. Please try again.",
     "retry": "Retry"
   },
+  "org_selector": {
+    "loading": "Loading organization…",
+    "empty_tag": "No organization",
+    "empty_tooltip": "Your account cannot see any organization. Please contact a platform administrator.",
+    "platform_mode": "Platform mode (all organizations)",
+    "inactive_badge": "Inactive",
+    "label": "Organization"
+  },
   "location_selector": {
     "no_access_tooltip": "Your account has no assigned location",
     "no_access_tag": "No location",

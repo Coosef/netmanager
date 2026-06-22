@@ -48,8 +48,14 @@ describe('SiteContext — hidrasyon guard + retry sözleşmesi', () => {
     expect(SRC).toMatch(/retryDelay:\s*500/)
   })
 
-  it('queryKey activeLocationId taşıyor (regresyon: pattern korundu)', () => {
-    expect(SRC).toMatch(/queryKey:\s*\['context',\s*'current',\s*activeLocationId\]/)
+  it('queryKey activeLocationId + activeOrgId taşıyor (regresyon: pattern korundu)', () => {
+    // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — queryKey now also
+    // carries `activeOrgId` so a super-admin's org switch refetches
+    // ctx under the new X-Org-Id. Existing PR #103 contract on the
+    // queryFn + staleTime is preserved separately below.
+    expect(SRC).toMatch(
+      /queryKey:\s*\['context',\s*'current',\s*activeLocationId,\s*activeOrgId\]/,
+    )
   })
 
   it('queryFn contextApi.current çağrısı korundu', () => {

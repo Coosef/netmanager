@@ -14,7 +14,7 @@ import {
 } from '@/api/context'
 import { useAuthStore } from '@/store/auth'
 import { useHasHydrated } from '@/hooks/useHasHydrated'
-import { ACTIVE_LOCATION_KEY } from '@/api/client'
+import { ACTIVE_LOCATION_KEY, ACTIVE_ORG_KEY } from '@/api/client'
 
 /**
  * Decide whether the locally-stored `activeLocationId` needs to be
@@ -89,6 +89,23 @@ export function isActiveLocationStale(
 }
 
 interface SiteCtx {
+  /** PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — the active organization
+   * id for super-admins. `null` means "no override" → backend uses the
+   * super-admin RLS bypass (sees every tenant). When non-null, the
+   * Axios interceptor attaches it as `X-Org-Id` and the backend drops
+   * the bypass + scopes into that tenant — the unblocking primitive
+   * for the "Mövempic / org=6 from a super-admin's session" use case
+   * the operator hit on the PR #105 production smoke. */
+  activeOrgId: number | null
+  /** Switch the super-admin's active organization scope. Side-effects:
+   *   1. activeLocationId is cleared (the old tenant's location id is
+   *      almost never a valid pick for the new tenant)
+   *   2. localStorage gets the new id (or removed when `null`)
+   *   3. queryClient.invalidateQueries() — every operational dataset
+   *      refetches under the new X-Org-Id; we deliberately do NOT
+   *      `queryClient.clear()` so the PR #103 anti-flicker contract
+   *      survives. */
+  setOrganization: (orgId: number | null) => void
   /** The active location id; null = backend-resolved default / all. */
   activeLocationId: number | null
   setLocation: (id: number | null) => void
@@ -152,6 +169,8 @@ interface SiteCtx {
 }
 
 const SiteContext = createContext<SiteCtx>({
+  activeOrgId: null,
+  setOrganization: () => {},
   activeLocationId: null,
   setLocation: () => {},
   locations: [],
@@ -187,6 +206,21 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     return v ? Number(v) : null
   })
 
+  // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — the active organization
+  // id picked by a super-admin from the Organization Switcher. Persists
+  // across reloads via localStorage; the Axios interceptor attaches it
+  // as `X-Org-Id` on every request so the backend's
+  // `resolve_location_context` scopes into that tenant.
+  //
+  // Non-super-admin sessions defensively prune this key on hydration —
+  // a previously-super-admin user that was demoted (or a user who
+  // somehow inherited a teammate's localStorage in a shared browser
+  // profile) cannot keep a stale org id.
+  const [activeOrgId, setActiveOrgIdState] = useState<number | null>(() => {
+    const v = localStorage.getItem(ACTIVE_ORG_KEY)
+    return v ? Number(v) : null
+  })
+
   // Faz 8 Phase E — the location list + scope come from /context/current,
   // which derives them from user_locations. The query key carries the
   // active location so a switch refetches the context under the new scope.
@@ -207,7 +241,12 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   //     `locations.length === 0` durumunda refetch tetiklendiyse loading
   //     gösterir, "no_assigned" tag'i flicker olarak yanmaz.
   const { data: ctx, isLoading: queryLoading, isError, refetch } = useQuery({
-    queryKey: ['context', 'current', activeLocationId],
+    // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — queryKey carries
+    // `activeOrgId` so a super-admin's org switch refetches the context
+    // under the new `X-Org-Id` header. The cache stays separated per
+    // tenant scope; the queryClient.invalidateQueries() in
+    // setOrganization triggers the actual refetch.
+    queryKey: ['context', 'current', activeLocationId, activeOrgId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
     enabled: !!token && hydrated,
@@ -291,6 +330,38 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     ctx?.organization ?? null
   const features: Record<string, boolean> = ctx?.features ?? {}
   const sites: string[] = locations.map((l) => l.name)
+
+  // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — super-admin's
+  // Organization Switcher entry-point. Three coordinated side-effects:
+  //   1. Set the new org id in state + localStorage (or clear it).
+  //   2. CLEAR `activeLocationId` — the previous tenant's location id
+  //      almost never maps to a valid pick in the new tenant; carrying
+  //      it forward would produce the same cross-tenant 400 PR #102's
+  //      guard rejects. (`scopedLocations` in DeviceForm + the
+  //      LocationSelector dropdown would have hidden it anyway, but we
+  //      prefer the explicit clear so the X-Location-Id header is
+  //      omitted on the first request under the new scope.)
+  //   3. `queryClient.invalidateQueries()` — mirrors `setLocation`'s
+  //      PR #103 anti-flicker contract: every cached query refetches
+  //      under the new `X-Org-Id` header, but the previously-rendered
+  //      data stays on screen until the new payload arrives. We never
+  //      `queryClient.clear()` here — that would drop the in-flight
+  //      ctx response and reintroduce the "Atanmış lokasyon yok" flash.
+  const setOrganization = useCallback(
+    (orgId: number | null) => {
+      setActiveOrgIdState(orgId)
+      if (orgId != null) {
+        localStorage.setItem(ACTIVE_ORG_KEY, String(orgId))
+      } else {
+        localStorage.removeItem(ACTIVE_ORG_KEY)
+      }
+      // Clear the active location too — see rule (2) above.
+      setActiveLocationIdState(null)
+      localStorage.removeItem(ACTIVE_LOCATION_KEY)
+      queryClient.invalidateQueries()
+    },
+    [queryClient],
+  )
 
   const setLocation = useCallback(
     (id: number | null) => {
@@ -405,9 +476,44 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('storage', onStorage)
   }, [queryClient])
 
+  // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — cross-tab safety for the
+  // active organization id (mirror of the activeLocationId handler
+  // above). Two tabs cannot end up scoped into different tenants for
+  // the same session.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== ACTIVE_ORG_KEY) return
+      const next = e.newValue ? Number(e.newValue) : null
+      setActiveOrgIdState((prev) => (prev === next ? prev : next))
+      queryClient.invalidateQueries()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [queryClient])
+
+  // PLATFORM/OPERATIONS-PHASE1A (2026-06-22) — non-super-admin cleanup.
+  // The `nm-active-org-id` key only makes sense for super-admins (the
+  // backend `resolve_location_context` ignores X-Org-Id for normal
+  // users anyway). If the session resolves as non-super-admin BUT the
+  // localStorage still holds an org id, clear it on hydration so:
+  //   1. The interceptor stops sending the dead header.
+  //   2. A user who was previously a super-admin and is now demoted
+  //      does not retain a stale scope.
+  //   3. Shared browser profiles (kiosk / family) cannot inherit a
+  //      previous super-admin's org pick.
+  useEffect(() => {
+    if (!ctxResolved) return
+    if (isSuperAdmin) return
+    if (activeOrgId == null) return
+    setActiveOrgIdState(null)
+    localStorage.removeItem(ACTIVE_ORG_KEY)
+  }, [ctxResolved, isSuperAdmin, activeOrgId])
+
   return (
     <SiteContext.Provider
       value={{
+        activeOrgId,
+        setOrganization,
         activeLocationId,
         setLocation,
         locations,

@@ -2810,6 +2810,14 @@
     "error_desc": "Standortdaten konnten nicht geladen werden. Bitte erneut versuchen.",
     "retry": "Erneut versuchen"
   },
+  "org_selector": {
+    "loading": "Mandant wird geladen…",
+    "empty_tag": "Kein Mandant",
+    "empty_tooltip": "Ihr Konto sieht keine Mandanten. Bitte wenden Sie sich an einen Plattform-Administrator.",
+    "platform_mode": "Plattform-Modus (alle Mandanten)",
+    "inactive_badge": "Inaktiv",
+    "label": "Mandant"
+  },
   "location_selector": {
     "no_access_tooltip": "Ihrem Konto ist kein Standort zugewiesen",
     "no_access_tag": "Kein Standort",
