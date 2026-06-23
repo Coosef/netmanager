@@ -2,8 +2,22 @@ import type { ReactNode } from 'react'
 import { Result, Button, Spin } from 'antd'
 import { EnvironmentOutlined, ReloadOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
+import { useLocation } from 'react-router-dom'
 import { useSite } from '@/contexts/SiteContext'
 import { useAuthStore } from '@/store/auth'
+
+/**
+ * P0.1 HOTFIX (2026-06-23) — Pure-redirect pathnames that must NEVER
+ * be wrapped in the LocationGate spinner. These routes render a single
+ * `<Navigate>` component (`LegacyRedirect`) and produce no real content;
+ * blocking them behind sitesLoading creates the exact deadlock the P0.1
+ * hotfix exists to close.
+ */
+const LEGACY_PURE_REDIRECT_PATHS: ReadonlySet<string> = new Set([
+  '/dashboard',
+  '/devices',
+  '/agents',
+])
 
 /**
  * Faz 8 Phase F — gate the application content on a resolved location
@@ -27,6 +41,19 @@ export default function LocationGate({ children }: { children: ReactNode }) {
     hasContextFailure,
   } = useSite()
   const { t } = useTranslation()
+  const location = useLocation()
+
+  // P0.1 HOTFIX (2026-06-23) — bypass the gate for legacy pure-redirect
+  // pathnames so the `LegacyRedirect` <Navigate> mounts even while
+  // `sitesLoading` is still true (auth in-flight, hydration race, ctx
+  // 401-loop, etc.). Without this bypass, the redirect component never
+  // gets a chance to fire and the operator is pinned to the
+  // "Lokasyon bağlamı çözümleniyor…" spinner indefinitely. The redirect
+  // target itself (`/app/org/:id/...` or `/platform/overview`) is the
+  // place where real content + the real location gate live.
+  if (LEGACY_PURE_REDIRECT_PATHS.has(location.pathname)) {
+    return <>{children}</>
+  }
 
   if (sitesLoading) {
     return (
