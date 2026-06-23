@@ -12,6 +12,7 @@
  */
 import { render, screen, cleanup, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { MemoryRouter } from 'react-router-dom'
 
 // react-i18next mock'lu — jsdom env'da i18n/index.ts modülünün localStorage
 // erişimini bypass eder. Test'ler key string'leri ile çalışır.
@@ -69,7 +70,16 @@ function reset() {
 
 
 function renderGate(children: React.ReactNode = <div data-testid="child">CHILD</div>) {
-  return render(<LocationGate>{children}</LocationGate>)
+  // P0.1 — LocationGate now reads useLocation() to bypass pure-redirect
+  // pathnames. Tests must wrap in MemoryRouter so the hook resolves.
+  // Use a non-bypass pathname here so the rest of the gate's branches
+  // still get exercised (the bypass cases live in
+  // LocationGate.redirectBypass.test.tsx).
+  return render(
+    <MemoryRouter initialEntries={['/topology']}>
+      <LocationGate>{children}</LocationGate>
+    </MemoryRouter>,
+  )
 }
 
 
