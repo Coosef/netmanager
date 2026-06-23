@@ -6,7 +6,15 @@
  * NULL = "atanmamış" → resolver org default'una düşer (UI'da açıkça yazılı).
  * Per-port override sayısı bilgi olarak gösterilir (CRUD = Portlar sekmesi).
  *
- * Yetki: viewer dropdown'ları görür ama Save disabled; org_admin+ kaydeder.
+ * Yetki: viewer dropdown'ları görür ama Save disabled; backend
+ * `device:edit` granted kullanıcı (org_admin+ veya granted location_admin)
+ * kaydeder.
+ *
+ * P2-F1 HOTFIX (2026-06-23) — Save aksiyonu önceden `isOrgAdmin()` ile
+ * kilitliydi. Backend kayıt yolu `PATCH /devices/{id}` zaten `device:edit`
+ * kontrol ediyor; UI gate aynı kontrata bağlandı (`can('devices','edit')`)
+ * böylece backend SYSTEM_ROLE_PERMISSIONS ile tutarlı.
+ *
  * Feature gate: bu sekme yalnız `security_policy` özelliği açıkken render edilir
  * (DeviceDetailPage'te `features['security_policy'] !== false` filtresiyle).
  */
@@ -28,8 +36,10 @@ export default function SecurityPoliciesTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { isOrgAdmin } = useAuthStore()
-  const canWrite = isOrgAdmin()
+  // P2-F1 HOTFIX (2026-06-23) — Save aksiyonu device PATCH'i ile yapılır,
+  // backend gate'i `device:edit`. UI buna hizalandı; granted location_admin
+  // de policy ataması yapabilir.
+  const canWrite = useAuthStore((s) => s.can('devices', 'edit'))
 
   const { data: switchPolicies = [] } = useQuery({
     queryKey: ['secpol', 'switch'],

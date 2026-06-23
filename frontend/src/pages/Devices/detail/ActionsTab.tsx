@@ -5,7 +5,25 @@
  * taşı, arşive al, sil. W3.3 hotfix (2026-06-01): disabled "Port Shutdown /
  * Quarantine" placeholder kaldırıldı — gerçek aksiyonlar W3.4 ActionsTab
  * restructure ile gelecek.
- * Viewer: read-only — bilgi banner. org_admin+ aksiyon yapabilir.
+ *
+ * P2-F1 HOTFIX (2026-06-23) — Per-action permission gates.
+ * Previously every write button was gated on `isOrgAdmin()`, which forced
+ * a `location_admin` user (e.g. one assigned `permission_set 3 / Tam Yetki`
+ * on their location) into a read-only state even when the backend grants
+ * them `device:connect`, `device:edit`, `device:move`. The gate now reads
+ * from `useAuthStore.can(module, action)` per backend
+ * SYSTEM_ROLE_PERMISSIONS so the UI matches what the API would actually
+ * accept. Backend permission enforcement is still the source of truth —
+ * a button that the UI shows enabled but the backend rejects 403s
+ * through normal error handling.
+ *
+ *   Bilgi Çek          → can('devices', 'connect')   (POST /devices/{id}/fetch-info; backend gate device:connect)
+ *   Lifecycle apply    → can('devices', 'edit')      (PATCH /devices/{id}/lifecycle; backend gate device:edit)
+ *   Lokasyon taşı      → can('devices', 'move')      (POST /devices/{id}/move-location; backend gate device:move)
+ *   Sil / Arşivle      → can('devices', 'delete')    (DELETE /devices/{id}; backend gate device:delete)
+ *
+ * Viewer + a location_admin without the matching grants stays read-only;
+ * the read-only banner is shown when ALL four write actions are denied.
  */
 import { useMemo, useState } from 'react'
 import { Card, Button, Space, Tag, Popconfirm, message, Tooltip, Alert, Select } from 'antd'
@@ -31,8 +49,13 @@ export default function ActionsTab({ device }: { device: Device }) {
   const opsNavigate = useOperationsNavigate()
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { isOrgAdmin } = useAuthStore()
-  const canWrite = isOrgAdmin()
+  // P2-F1 HOTFIX (2026-06-23) — granular permission gates, see file header.
+  const canFetchInfo = useAuthStore((s) => s.can('devices', 'connect'))
+  const canLifecycle = useAuthStore((s) => s.can('devices', 'edit'))
+  const canMove      = useAuthStore((s) => s.can('devices', 'move'))
+  const canDelete    = useAuthStore((s) => s.can('devices', 'delete'))
+  // Read-only banner: ALL four write actions denied (typical viewer).
+  const isReadOnly = !canFetchInfo && !canLifecycle && !canMove && !canDelete
 
   const LIFECYCLE_OPTIONS = useMemo(() => [
     { value: 'production', label: t('devices.detail.actions_tab.lifecycle.production') },
@@ -83,7 +106,7 @@ export default function ActionsTab({ device }: { device: Device }) {
 
   return (
     <div style={{ padding: '8px 0 16px', maxWidth: 880 }}>
-      {!canWrite && (
+      {isReadOnly && (
         <Alert
           type="info" showIcon style={{ marginBottom: 16, fontSize: 12 }}
           message={t('devices.detail.actions_tab.readonly_alert')}
@@ -98,7 +121,7 @@ export default function ActionsTab({ device }: { device: Device }) {
             </Button>
           </Tooltip>
           <Tooltip title={t('devices.detail.actions_tab.tooltip_info')}>
-            <Button icon={<SyncOutlined />} disabled={!canWrite} loading={infoMut.isPending} onClick={() => infoMut.mutate()}>
+            <Button icon={<SyncOutlined />} disabled={!canFetchInfo} loading={infoMut.isPending} onClick={() => infoMut.mutate()}>
               {t('devices.detail.actions_tab.btn_fetch_info')}
             </Button>
           </Tooltip>
@@ -117,14 +140,14 @@ export default function ActionsTab({ device }: { device: Device }) {
             onChange={(v) => setNextLifecycle(v)}
             options={LIFECYCLE_OPTIONS}
             style={{ width: 280 }}
-            disabled={!canWrite}
+            disabled={!canLifecycle}
           />
           <Popconfirm
             title={<span>{ident} → <strong>{nextLifecycle}</strong> {t('devices.detail.actions_tab.lifecycle_confirm_suffix')}</span>}
             okText={t('devices.detail.actions_tab.update_ok')} onConfirm={() => lifecycleMut.mutate(nextLifecycle)}
-            disabled={!canWrite || nextLifecycle === (device as any).lifecycle_status}
+            disabled={!canLifecycle || nextLifecycle === (device as any).lifecycle_status}
           >
-            <Button type="primary" disabled={!canWrite || nextLifecycle === (device as any).lifecycle_status} loading={lifecycleMut.isPending}>
+            <Button type="primary" disabled={!canLifecycle || nextLifecycle === (device as any).lifecycle_status} loading={lifecycleMut.isPending}>
               {t('common.apply')}
             </Button>
           </Popconfirm>
@@ -134,7 +157,7 @@ export default function ActionsTab({ device }: { device: Device }) {
       <Card size="small" title={t('devices.detail.actions_tab.place_archive_title')} style={{ marginBottom: 16 }}>
         <Space wrap>
           <Tooltip title={t('devices.detail.actions_tab.tooltip_move_location')}>
-            <Button icon={<EnvironmentOutlined />} disabled={!canWrite}
+            <Button icon={<EnvironmentOutlined />} disabled={!canMove}
               onClick={() => message.info(t('devices.detail.actions_tab.move_info'))}>
               {t('devices.row.move_location')}
             </Button>
@@ -142,9 +165,9 @@ export default function ActionsTab({ device }: { device: Device }) {
           <Popconfirm
             title={<span>{ident} {t('devices.detail.actions_tab.archive_confirm_suffix')}</span>}
             okText={t('devices.card.archive_ok')} onConfirm={() => lifecycleMut.mutate('archived')}
-            disabled={!canWrite}
+            disabled={!canDelete}
           >
-            <Button icon={<InboxOutlined />} disabled={!canWrite}>{t('devices.card.archive_ok')}</Button>
+            <Button icon={<InboxOutlined />} disabled={!canDelete}>{t('devices.card.archive_ok')}</Button>
           </Popconfirm>
         </Space>
       </Card>
@@ -156,9 +179,9 @@ export default function ActionsTab({ device }: { device: Device }) {
             title={<span>{ident} <strong>{t('devices.detail.actions_tab.delete_strong')}</strong> {t('devices.detail.actions_tab.delete_confirm_suffix')}</span>}
             okText={t('common.delete')} okButtonProps={{ danger: true }}
             onConfirm={() => deleteMut.mutate()}
-            disabled={!canWrite}
+            disabled={!canDelete}
           >
-            <Button icon={<DeleteOutlined />} danger disabled={!canWrite} loading={deleteMut.isPending}>
+            <Button icon={<DeleteOutlined />} danger disabled={!canDelete} loading={deleteMut.isPending}>
               {t('devices.detail.actions_tab.btn_delete_device')}
             </Button>
           </Popconfirm>
