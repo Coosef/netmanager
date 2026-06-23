@@ -32,6 +32,13 @@ describe('isOperationalQueryKey — predicate matrix', () => {
     [['platform', 'organizations'], false],
     [['platform', 'overview', 'metrics'], false],
     [['platform'], false],
+    // P0 HOTFIX (2026-06-23) — context query PRESERVED. queryKey is
+    // routeOrgId-partitioned so cross-org leak is impossible at the
+    // cache layer; removing it during the bridge was the load-bearing
+    // source of the production /context/current loop.
+    [['context', 'current', 1, 7], false],
+    [['context', 'current', 6, null], false],
+    [['context'], false],
   ])('preserved key %j → operational = %s', (key, expected) => {
     expect(isOperationalQueryKey(key)).toBe(expected)
   })
@@ -50,8 +57,8 @@ describe('isOperationalQueryKey — predicate matrix', () => {
     [['report-summary', 'site-b']],
     [['ipam-zones']],
     [['audit-log', 1]],
-    // Context query — operational, partitioned by routeOrgId itself
-    [['context', 'current', 6, 7]],
+    // P0 HOTFIX: context query is NO LONGER operational — moved to
+    // preserved allowlist (queryKey already routeOrgId-partitioned).
     // Header / dashboard widgets — operational
     [['header-recent-events']],
     [['monitor-events-cards', 'critical', 24]],
@@ -79,6 +86,7 @@ describe('PRESERVED_PREFIXES_FOR_TEST — allowlist surface', () => {
       'feature-flags',
       'platform',
       'credential-profiles',
+      'context',  // P0 HOTFIX — added 2026-06-23
     ]) {
       expect(PRESERVED_PREFIXES_FOR_TEST).toContain(prefix)
     }
@@ -98,29 +106,30 @@ describe('clearOperationalQueryCache — QueryClient integration', () => {
     qc.setQueryData(['my-permissions'], { canEdit: true })
     qc.setQueryData(['platform', 'organizations'], [{ id: 6, name: 'ATG' }])
     qc.setQueryData(['feature-flags'], { ai_assistant: true })
+    // P0 HOTFIX — context query is now PRESERVED (routeOrgId-partitioned).
+    qc.setQueryData(['context', 'current', 6, 7], { organization: { id: 6 } })
 
     qc.setQueryData(['org', 6, 'devices-list'], [{ id: 1 }])
     qc.setQueryData(['topology-graph', 'main'], { nodes: 100 })
     qc.setQueryData(['monitor-stats', 'site'], { events: 5 })
-    qc.setQueryData(['context', 'current', 6, 7], { organization: { id: 6 } })
 
     // Pre-flight count.
     expect(qc.getQueryCache().getAll()).toHaveLength(7)
 
     clearOperationalQueryCache(qc)
 
-    // Preserved survive.
+    // Preserved survive (auth + global + context).
     expect(qc.getQueryData(['my-permissions'])).toBeDefined()
     expect(qc.getQueryData(['platform', 'organizations'])).toBeDefined()
     expect(qc.getQueryData(['feature-flags'])).toBeDefined()
+    expect(qc.getQueryData(['context', 'current', 6, 7])).toBeDefined()
 
     // Operational gone.
     expect(qc.getQueryData(['org', 6, 'devices-list'])).toBeUndefined()
     expect(qc.getQueryData(['topology-graph', 'main'])).toBeUndefined()
     expect(qc.getQueryData(['monitor-stats', 'site'])).toBeUndefined()
-    expect(qc.getQueryData(['context', 'current', 6, 7])).toBeUndefined()
 
-    expect(qc.getQueryCache().getAll()).toHaveLength(3)
+    expect(qc.getQueryCache().getAll()).toHaveLength(4)
   })
 
   it('calls cancelQueries BEFORE removeQueries (order is load-bearing)', () => {

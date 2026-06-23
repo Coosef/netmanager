@@ -54,8 +54,70 @@ describe('OrgRouteShell — cache bridge contract', () => {
     expect(SRC).toMatch(/isPlatformSuperAdmin/)
   })
 
-  it('lastCommittedOrgRef short-circuits same-org navigation (no cache wipe)', () => {
-    expect(SRC).toMatch(/lastCommittedOrgRef\.current === routeOrgId/)
+  it('P0 HOTFIX — transitionStartedOrgRef short-circuits same-org navigation (no cache wipe)', () => {
+    expect(SRC).toMatch(/transitionStartedOrgRef\.current === routeOrgId/)
+  })
+
+  it('P0 HOTFIX — old lastCommittedOrgRef identifier is GONE (only mentioned in historical comments)', () => {
+    // The old name implied the ref was set on validation success only.
+    // P0 hotfix renames to `transitionStartedOrgRef` AND moves the
+    // assignment to the START of the transition (optimistic lock) so
+    // dependency-cycle re-fires short-circuit immediately.
+    // The old identifier may still appear in historical-context comments
+    // (renamed from / load-bearing bug). Strip comments before asserting.
+    const codeOnly = SRC.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(codeOnly).not.toMatch(/lastCommittedOrgRef/)
+  })
+})
+
+describe('OrgRouteShell — P0 HOTFIX optimistic transition lock', () => {
+  it('transitionStartedOrgRef assigned BEFORE clearOperationalQueryCache (optimistic lock at top of effect)', () => {
+    // The lock must be acquired BEFORE the cache wipe + state updates
+    // so any dep-change re-entry during the same render cycle hits the
+    // short-circuit guard. Without this, isPlatformSuperAdmin /
+    // activeOrgId flicker during the cache-wipe → ctx-refetch cycle
+    // re-entered the transition body, kept wiping the ctx query, and
+    // hammered /context/current at ~6 req/sec in production.
+    // Strip comments before order-asserting.
+    const codeOnly = SRC.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
+    const assignIdx = codeOnly.indexOf('transitionStartedOrgRef.current = routeOrgId')
+    const wipeIdx = codeOnly.indexOf('clearOperationalQueryCache(queryClient)')
+    expect(assignIdx).toBeGreaterThan(0)
+    expect(wipeIdx).toBeGreaterThan(0)
+    expect(assignIdx).toBeLessThan(wipeIdx)
+  })
+
+  it('guard appears BEFORE the optimistic assignment (early-return on same routeOrgId)', () => {
+    const codeOnly = SRC.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
+    const guardIdx = codeOnly.indexOf('transitionStartedOrgRef.current === routeOrgId')
+    const assignIdx = codeOnly.indexOf('transitionStartedOrgRef.current = routeOrgId')
+    expect(guardIdx).toBeGreaterThan(0)
+    expect(assignIdx).toBeGreaterThan(0)
+    expect(guardIdx).toBeLessThan(assignIdx)
+  })
+
+  it('validation-success branch does NOT re-assign the ref (already committed at transition start)', () => {
+    // The success branch only flips gateState to 'ready'; the
+    // optimistic ref was already set at transition start. A regression
+    // that adds `transitionStartedOrgRef.current = routeOrgId` inside
+    // the success branch would still work but signals confusion.
+    const successBlock = SRC.match(/if \(organization\?\.id === routeOrgId\) \{([\s\S]*?)\} else if/)?.[1] ?? ''
+    expect(successBlock).not.toMatch(/transitionStartedOrgRef\.current = routeOrgId/)
+    expect(successBlock).toMatch(/setGateState\('ready'\)/)
+  })
+
+  it('error/retry handler resets transitionStartedOrgRef to null', () => {
+    // P0 HOTFIX retry contract: clearing the ref releases the optimistic
+    // lock so the next dep-change tick re-fires the transition.
+    expect(SRC).toMatch(/onRetry=\{\(\) => \{[\s\S]+?transitionStartedOrgRef\.current = null/)
+  })
+
+  it('error/retry handler re-acquires the lock after cache wipe (before setGateState validating)', () => {
+    // Defensive: the retry handler RE-SETS the ref to routeOrgId AFTER
+    // the cache wipe so the imminent dep-change re-fire short-circuits.
+    expect(SRC).toMatch(
+      /onRetry=\{[\s\S]+?clearOperationalQueryCache\(queryClient\)[\s\S]+?transitionStartedOrgRef\.current = routeOrgId/,
+    )
   })
 })
 
@@ -86,10 +148,18 @@ describe('OrgRouteShell — validation gate', () => {
     expect(SRC).toMatch(/organization\?\.id === routeOrgId/)
   })
 
-  it('only commits lastCommittedOrgRef after successful validation', () => {
-    // Pattern: organization?.id === routeOrgId → setGateState('ready') →
-    // lastCommittedOrgRef.current = routeOrgId in same branch
-    expect(SRC).toMatch(/lastCommittedOrgRef\.current = routeOrgId/)
+  it('P0 HOTFIX: validation success flips gateState to ready (ref already committed at transition start)', () => {
+    // After P0 hotfix, the validation effect does NOT re-assign the ref
+    // (it was already set at transition start via the optimistic lock).
+    // It only transitions gateState to 'ready' on a successful match.
+    // Strip comments before order-asserting (the success branch carries
+    // an explanatory comment block that would otherwise blow the gap).
+    const codeOnly = SRC.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
+    const cmpIdx = codeOnly.indexOf('organization?.id === routeOrgId')
+    const readyIdx = codeOnly.indexOf("setGateState('ready')")
+    expect(cmpIdx).toBeGreaterThan(0)
+    expect(readyIdx).toBeGreaterThan(0)
+    expect(cmpIdx).toBeLessThan(readyIdx)
   })
 
   it('waits for ctxResolved before validating', () => {
