@@ -41,9 +41,28 @@ function usePageTheme() {
 
 // ─── Definitions ──────────────────────────────────────────────────────────────
 
+// P2-CATALOG-A (2026-06-23) — canonical key alignment. Five new
+// actions added to `devices` and `config_backups` so the stored
+// payload covers every verb the backend has_permission() catalogue
+// and the frontend `can()` call sites reference. The Alembic
+// migration f9ag_canonical_permission_keys backfills existing rows.
 const MODULES: { key: string; label: string; actions: { key: string; label: string }[] }[] = [
-  { key: 'devices',          label: 'Cihazlar',           actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }, { key: 'delete', label: 'Sil' }, { key: 'ssh', label: 'SSH' }] },
-  { key: 'config_backups',   label: 'Yedekler',           actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }, { key: 'delete', label: 'Sil' }] },
+  { key: 'devices',          label: 'Cihazlar',           actions: [
+    { key: 'view',    label: 'Görüntüle' },
+    { key: 'create',  label: 'Oluştur' },
+    { key: 'edit',    label: 'Düzenle' },
+    { key: 'delete',  label: 'Sil' },
+    { key: 'ssh',     label: 'SSH' },
+    { key: 'connect', label: 'Bilgi Çek' },
+    { key: 'move',    label: 'Taşı' },
+  ] },
+  { key: 'config_backups',   label: 'Yedekler',           actions: [
+    { key: 'view',    label: 'Görüntüle' },
+    { key: 'edit',    label: 'Düzenle' },
+    { key: 'delete',  label: 'Sil' },
+    { key: 'backup',  label: 'Yedek Al' },
+    { key: 'restore', label: 'Geri Yükle' },
+  ] },
   { key: 'tasks',            label: 'Görevler',           actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'create', label: 'Oluştur' }, { key: 'cancel', label: 'İptal' }] },
   { key: 'playbooks',        label: 'Playbooklar',        actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'run', label: 'Çalıştır' }, { key: 'edit', label: 'Düzenle' }, { key: 'delete', label: 'Sil' }] },
   { key: 'topology',         label: 'Topoloji',           actions: [{ key: 'view', label: 'Görüntüle' }] },
@@ -73,6 +92,9 @@ const ALL_ACTIONS = [
   'view', 'edit', 'delete', 'create', 'ssh', 'run', 'cancel', 'invite',
   // Agent Management catalogue (location-agent-permissions work)
   'install', 'download_installer', 'update', 'remove',
+  // P2-CATALOG-A (2026-06-23) — devices.{connect,move} +
+  // config_backups.{backup,restore} canonical-key catalogue.
+  'connect', 'move', 'backup', 'restore',
 ]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
@@ -124,7 +146,9 @@ function PermMatrix({
               <th key={a} style={{ textAlign: 'center', padding: '8px 4px', color: t.textMuted, fontWeight: 500, borderBottom: `1px solid ${t.border}`, minWidth: 58, fontSize: 11 }}>
                 {a === 'view' ? 'Görüntüle' : a === 'edit' ? 'Düzenle' : a === 'delete' ? 'Sil' :
                   a === 'create' ? 'Oluştur' : a === 'ssh' ? 'SSH' : a === 'run' ? 'Çalıştır' :
-                  a === 'cancel' ? 'İptal' : a === 'invite' ? 'Davet' : a}
+                  a === 'cancel' ? 'İptal' : a === 'invite' ? 'Davet' :
+                  a === 'connect' ? 'Bilgi Çek' : a === 'move' ? 'Taşı' :
+                  a === 'backup' ? 'Yedek Al' : a === 'restore' ? 'Geri Yükle' : a}
               </th>
             ))}
             {!readOnly && (

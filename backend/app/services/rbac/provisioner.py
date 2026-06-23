@@ -136,10 +136,16 @@ def _viewer_permissions() -> dict:
 
 
 def _operator_permissions() -> dict:
+    # P2-CATALOG-A — `devices.connect` rides alongside `devices.ssh`
+    # (the operator preset has always opened the SSH session for
+    # commands), and the freshly-canonical backup/restore verbs map to
+    # the legacy `edit` grant. `devices.move` + `devices.create` stay
+    # FALSE on the operator preset — destructive ownership-class verbs
+    # that need explicit opt-in via the permission set editor.
     p = copy.deepcopy(DEFAULT_PERMISSIONS)
     grants = {
-        "devices":        {"view": True, "ssh": True},
-        "config_backups": {"view": True, "edit": True},
+        "devices":        {"view": True, "ssh": True, "connect": True},
+        "config_backups": {"view": True, "edit": True, "backup": True, "restore": True},
         "tasks":          {"view": True, "create": True},
         "playbooks":      {"view": True, "run": True},
         "topology":       {"view": True},
