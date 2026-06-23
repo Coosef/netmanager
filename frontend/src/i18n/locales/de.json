@@ -3055,6 +3055,13 @@
     "org_badge_readonly": "Fest",
     "org_badge_action_switch_org": "Firma wechseln",
     "org_badge_action_platform_admin": "Plattform-Verwaltung",
-    "org_badge_action_org_detail": "Firmendetails"
+    "org_badge_action_org_detail": "Firmendetails",
+    "gate": {
+      "transitioning": "Kontext für Firma {{orgId}} wird zurückgesetzt…",
+      "validating": "Firmenkontext wird überprüft…",
+      "mismatch_title": "Firmenkontext stimmt nicht überein",
+      "mismatch_desc": "Die URL-Firmen-ID ist {{routeOrgId}}, aber der Server gab {{ctxOrgId}} zurück. Dies ist ein unerwarteter Backend-Zustand.",
+      "mismatch_retry": "Erneut versuchen"
+    }
   }
 }

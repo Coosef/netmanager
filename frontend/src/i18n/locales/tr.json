@@ -3134,6 +3134,13 @@
     "org_badge_readonly": "Sabit",
     "org_badge_action_switch_org": "Firma değiştir",
     "org_badge_action_platform_admin": "Platform Yönetimi",
-    "org_badge_action_org_detail": "Bu firmanın detayları"
+    "org_badge_action_org_detail": "Bu firmanın detayları",
+    "gate": {
+      "transitioning": "{{orgId}} numaralı firma bağlamı sıfırlanıyor…",
+      "validating": "Firma bağlamı doğrulanıyor…",
+      "mismatch_title": "Firma bağlamı uyuşmadı",
+      "mismatch_desc": "URL firma kimliği {{routeOrgId}} fakat sunucu {{ctxOrgId}} döndü. Bu beklenmedik bir backend durumudur.",
+      "mismatch_retry": "Tekrar Dene"
+    }
   }
 }

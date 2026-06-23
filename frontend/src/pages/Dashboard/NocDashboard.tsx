@@ -2,7 +2,7 @@
 // Real data on the design's nm-card / nm-grid widget system. The previous
 // TV-style dashboard lives in git history (replaced by this).
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useOperationsNavigate } from '@/hooks/useOperationsNavigate'
 import { useQuery } from '@tanstack/react-query'
 import { CloseOutlined, HolderOutlined } from '@ant-design/icons'
 import {
@@ -146,7 +146,12 @@ const WIDGET_SPAN: Record<string, string> = {
 }
 
 export default function NocDashboard() {
-  const navigate = useNavigate()
+  // PR-A2 — navigate per operations panel: inside /app/org/:id/* every
+  // operations card jump (topology, monitor, services, intelligence,
+  // approvals, agents, sla, config-drift, synthetic-probes, devices)
+  // is re-anchored under the same /app/org/:routeOrgId prefix so the
+  // URL-authoritative cache bridge in OrgRouteShell is not escaped.
+  const opsNavigate = useOperationsNavigate()
   const qc = useQueryClient()
   const { t } = useTranslation()
   const { activeSite } = useSite()
@@ -218,11 +223,11 @@ export default function NocDashboard() {
   // duvarı 3-col), editorial (günlük brief 3-col). Aynı queries kullanılır;
   // sadece görsel düzen farklı.
   if (viewVariant === 'mission') {
-    return <MissionVariant ctx={{ navigate, online, offline, total, events24h, liveEvents,
+    return <MissionVariant ctx={{ opsNavigate, online, offline, total, events24h, liveEvents,
       impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now, t }} />
   }
   if (viewVariant === 'editorial') {
-    return <EditorialVariant ctx={{ navigate, online, offline, total, events24h, liveEvents,
+    return <EditorialVariant ctx={{ opsNavigate, online, offline, total, events24h, liveEvents,
       impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, tasks, now, t }} />
   }
 
@@ -286,7 +291,7 @@ export default function NocDashboard() {
         setOrder={setWidgetOrder}
         toggleWidget={toggleWidget}
         render={(id) => renderWidget(id, {
-          navigate, online, offline, total, events24h, liveEvents,
+          opsNavigate, online, offline, total, events24h, liveEvents,
           impact, risk, agents, sla, anom, approvalCount, driftReport,
           devicesData, tasks, now, t,
         })}
@@ -297,7 +302,7 @@ export default function NocDashboard() {
 
 // ── Sortable widget grid ─────────────────────────────────────────────────
 interface WidgetRenderCtx {
-  navigate: (path: string) => void
+  opsNavigate: (path: string, options?: { replace?: boolean; intentionalGlobal?: boolean }) => void
   online: number; offline: number; total: number; events24h: number
   liveEvents: NetworkEvent[]
   impact: any; risk: any; agents: any[]; sla: any; anom: any
@@ -435,27 +440,27 @@ function SortableWidget({ id, span, editMode, onRemove, children }: {
 
 // Widget id → JSX render. Tüm queries parent'tan ctx ile geçiyor.
 function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
-  const { navigate, online, offline, total, events24h, liveEvents,
+  const { opsNavigate, online, offline, total, events24h, liveEvents,
     impact, risk, agents, sla, anom, approvalCount, driftReport, devicesData, t } = ctx
 
   switch (id) {
     case 'topo':
       return (
-        <Card title={t('dashboard.card.topo_title')} pill={{ label: t('dashboard.card.topo_pill_down', { count: offline }), kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => navigate('/topology-next')}>
+        <Card title={t('dashboard.card.topo_title')} pill={{ label: t('dashboard.card.topo_pill_down', { count: offline }), kind: offline ? 'crit' : 'ok' }} span="span-12" onTitle={() => opsNavigate('/topology-next')}>
           <TopoMini online={online} offline={offline} total={total} devices={devicesData?.items}
-            onSelectDevice={(did) => navigate(`/devices/${did}`)} />
+            onSelectDevice={(did) => opsNavigate(`/devices/${did}`)} />
         </Card>
       )
     case 'activity':
       // T8.4 — 24h saat-bazında event yoğunluğu (heatmap strip)
       return (
-        <Card title={t('dashboard.card.activity_title')} pill={{ label: t('dashboard.card.activity_pill') }} span="span-12" onTitle={() => navigate('/monitor')}>
+        <Card title={t('dashboard.card.activity_title')} pill={{ label: t('dashboard.card.activity_pill') }} span="span-12" onTitle={() => opsNavigate('/monitor')}>
           <ActivityHeatStrip liveEvents={liveEvents} events24h={events24h} />
         </Card>
       )
     case 'events':
       return (
-        <Card title={t('dashboard.card.events_title')} pill={{ label: t('dashboard.card.events_pill', { count: events24h }), kind: 'accent' }} span="span-12" onTitle={() => navigate('/monitor')}>
+        <Card title={t('dashboard.card.events_title')} pill={{ label: t('dashboard.card.events_pill', { count: events24h }), kind: 'accent' }} span="span-12" onTitle={() => opsNavigate('/monitor')}>
           {liveEvents.length === 0 ? <Empty>{t('dashboard.ticker.empty')}</Empty> :
             liveEvents.slice(0, 7).map((e, i) => (
               // nm-fadein → yeni olay geldikçe yumuşak fade-in
@@ -474,7 +479,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'services':
       return (
-        <Card title={t('dashboard.card.services_title')} pill={impact?.critical_count ? { label: t('dashboard.card.services_pill_critical', { count: impact.critical_count }), kind: 'crit' } : undefined} span="span-12" onTitle={() => navigate('/services')}>
+        <Card title={t('dashboard.card.services_title')} pill={impact?.critical_count ? { label: t('dashboard.card.services_pill_critical', { count: impact.critical_count }), kind: 'crit' } : undefined} span="span-12" onTitle={() => opsNavigate('/services')}>
           {!impact?.affected_services?.length ? <Empty>{t('dashboard.card.services_empty')}</Empty> :
             impact.affected_services.slice(0, 6).map((svc: any) => {
               const st = svc.impact_level === 'critical' ? 'crit' : svc.impact_level === 'high' ? 'warn' : svc.impact_level === 'medium' ? 'warn' : 'ok'
@@ -495,7 +500,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'worst':
       return (
-        <Card title={t('dashboard.card.worst_title')} pill={{ label: t('dashboard.card.worst_pill') }} span="span-12" onTitle={() => navigate('/intelligence')}>
+        <Card title={t('dashboard.card.worst_title')} pill={{ label: t('dashboard.card.worst_pill') }} span="span-12" onTitle={() => opsNavigate('/intelligence')}>
           {!risk?.top_risky?.length ? <Empty>{t('dashboard.card.worst_empty')}</Empty> :
             risk.top_risky.slice(0, 5).map((d: any) => {
               const sc = Math.round(d.risk_score ?? 0)
@@ -515,19 +520,19 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'approvals':
       return (
-        <Card title={t('dashboard.card.approvals_title')} pill={(approvalCount?.count ?? 0) > 0 ? { label: String(approvalCount?.count), kind: 'warn' } : undefined} span="span-12" onTitle={() => navigate('/approvals')}>
+        <Card title={t('dashboard.card.approvals_title')} pill={(approvalCount?.count ?? 0) > 0 ? { label: String(approvalCount?.count), kind: 'warn' } : undefined} span="span-12" onTitle={() => opsNavigate('/approvals')}>
           {(approvalCount?.count ?? 0) === 0 ? <Empty>{t('dashboard.card.approvals_empty')}</Empty> : (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '14px 0' }}>
               <div className="mono" style={{ fontSize: 40, color: 'var(--warn)' }}>{approvalCount?.count}</div>
               <div style={{ color: 'var(--fg-2)', fontSize: 12 }}>{t('dashboard.card.approvals_caption')}</div>
-              <button className="nm-pill warn" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/approvals')}>{t('dashboard.card.approvals_button')}</button>
+              <button className="nm-pill warn" style={{ cursor: 'pointer', border: 'none' }} onClick={() => opsNavigate('/approvals')}>{t('dashboard.card.approvals_button')}</button>
             </div>
           )}
         </Card>
       )
     case 'agents':
       return (
-        <Card title={t('dashboard.card.agents_title')} pill={{ label: t('dashboard.card.agents_pill', { count: agents.filter((a: any) => a.status === 'online').length }), kind: 'ok' }} span="span-12" onTitle={() => navigate('/agents')}>
+        <Card title={t('dashboard.card.agents_title')} pill={{ label: t('dashboard.card.agents_pill', { count: agents.filter((a: any) => a.status === 'online').length }), kind: 'ok' }} span="span-12" onTitle={() => opsNavigate('/agents')}>
           {!agents.length ? <Empty>{t('dashboard.card.agents_empty')}</Empty> :
             agents.slice(0, 5).map((a: any) => (
               <div key={a.name || a.id} className="nm-row" style={{ gridTemplateColumns: 'auto 1fr auto' }}>
@@ -550,7 +555,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       )
     case 'sla':
       return (
-        <Card title={t('dashboard.card.sla_title')} pill={sla?.avg_uptime_pct >= 99 ? { label: t('dashboard.card.sla_pill_good'), kind: 'ok' } : undefined} span="span-12" onTitle={() => navigate('/sla')}>
+        <Card title={t('dashboard.card.sla_title')} pill={sla?.avg_uptime_pct >= 99 ? { label: t('dashboard.card.sla_pill_good'), kind: 'ok' } : undefined} span="span-12" onTitle={() => opsNavigate('/sla')}>
           <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: 14, alignItems: 'center' }}>
             <Donut value={sla?.avg_uptime_pct ?? 0} label={t('dashboard.card.sla_donut_label')} color={(sla?.avg_uptime_pct ?? 0) >= 99 ? 'var(--ok)' : (sla?.avg_uptime_pct ?? 0) >= 95 ? 'var(--warn)' : 'var(--crit)'} />
             <div style={{ fontSize: 11, color: 'var(--fg-2)', lineHeight: 2 }}>
@@ -591,13 +596,13 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
         <Card title={t('dashboard.card.anomalies_title')}
           pill={totalLabel ? { label: `${totalLabel} ${fromAnom.length > 0 ? t('dashboard.card.anomalies_pill_anom') : t('dashboard.card.anomalies_pill_risk')}`, kind: 'warn' } : undefined}
           span="span-12"
-          onTitle={() => navigate('/intelligence')}>
+          onTitle={() => opsNavigate('/intelligence')}>
           {items.length === 0 ? <Empty>{t('dashboard.card.anomalies_empty')}</Empty> :
             items.slice(0, 5).map((it: any, i: number) => {
               const cls = it.score >= 80 ? 'crit' : it.score >= 60 ? 'warn' : it.score >= 40 ? 'info' : 'ok'
               return (
                 <div key={i} className="nm-row" style={{ gridTemplateColumns: '1fr auto auto', cursor: it.device_id ? 'pointer' : 'default' }}
-                  onClick={() => it.device_id && navigate(`/devices/${it.device_id}`)}>
+                  onClick={() => it.device_id && opsNavigate(`/devices/${it.device_id}`)}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                       <span className={`nm-pill ${cls}`} style={{ fontSize: 9.5 }}>{it.label}</span>
@@ -621,7 +626,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     }
     case 'drift':
       return (
-        <Card title={t('dashboard.card.drift_title')} pill={driftReport?.drift_count ? { label: t('dashboard.card.drift_pill_warn', { count: driftReport.drift_count }), kind: 'warn' } : { label: t('dashboard.card.drift_pill_ok'), kind: 'ok' }} span="span-12" onTitle={() => navigate('/config-drift')}>
+        <Card title={t('dashboard.card.drift_title')} pill={driftReport?.drift_count ? { label: t('dashboard.card.drift_pill_warn', { count: driftReport.drift_count }), kind: 'warn' } : { label: t('dashboard.card.drift_pill_ok'), kind: 'ok' }} span="span-12" onTitle={() => opsNavigate('/config-drift')}>
           {!driftReport?.items?.length ? <Empty>{t('dashboard.card.drift_empty')}</Empty> :
             driftReport.items.slice(0, 5).map((r: any) => (
               <div key={r.device_id} className="nm-row" style={{ gridTemplateColumns: '1fr auto' }}>
@@ -639,12 +644,12 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
     case 'probes':
       // Probes endpoint yok; placeholder + sayfaya yönlendir
       return (
-        <Card title={t('dashboard.card.probes_title')} pill={{ label: t('dashboard.card.probes_pill') }} span="span-12" onTitle={() => navigate('/synthetic-probes')}>
+        <Card title={t('dashboard.card.probes_title')} pill={{ label: t('dashboard.card.probes_pill') }} span="span-12" onTitle={() => opsNavigate('/synthetic-probes')}>
           <div style={{ padding: '14px 0', textAlign: 'center' }}>
             <div style={{ fontSize: 12, color: 'var(--fg-2)', marginBottom: 8 }}>
               {t('dashboard.card.probes_caption')}
             </div>
-            <button className="nm-pill accent" style={{ cursor: 'pointer', border: 'none' }} onClick={() => navigate('/synthetic-probes')}>
+            <button className="nm-pill accent" style={{ cursor: 'pointer', border: 'none' }} onClick={() => opsNavigate('/synthetic-probes')}>
               {t('dashboard.card.probes_button')}
             </button>
           </div>
@@ -660,7 +665,7 @@ function renderWidget(id: string, ctx: WidgetRenderCtx): React.ReactNode {
       const sorted = Object.entries(vendors).sort((a, b) => b[1] - a[1]).slice(0, 6)
       const totalCount = items.length || 1
       return (
-        <Card title={t('dashboard.card.vendors_title')} pill={{ label: t('dashboard.card.vendors_pill', { count: items.length }) }} span="span-12" onTitle={() => navigate('/devices')}>
+        <Card title={t('dashboard.card.vendors_title')} pill={{ label: t('dashboard.card.vendors_pill', { count: items.length }) }} span="span-12" onTitle={() => opsNavigate('/devices')}>
           {sorted.length === 0 ? <Empty>{t('dashboard.card.vendors_empty')}</Empty> :
             sorted.map(([vendor, count]) => {
               const pct = Math.round((count / totalCount) * 100)

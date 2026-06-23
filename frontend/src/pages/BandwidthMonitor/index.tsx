@@ -15,7 +15,7 @@ import {
 } from 'recharts'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
-import { useNavigate } from 'react-router-dom'
+import { useOperationsNavigate } from '@/hooks/useOperationsNavigate'
 import { snmpApi, type TrafficRate, type ErrorInterface, type UtilizationPoint } from '@/api/snmp'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
@@ -218,7 +218,9 @@ function TopTrafficChart({ data, isDark }: { data: ChartItem[]; isDark: boolean 
 function TrafficTab() {
   const { isDark } = useTheme()
   const { activeSite } = useSite()
-  const navigate = useNavigate()
+  // PR-A2 — /settings is global (super_admin only) — kept as legacy
+  // navigate with intentionalGlobal flag through opsNavigate helper.
+  const opsNavigate = useOperationsNavigate()
   const [search, setSearch] = useState('')
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [minMbps, setMinMbps] = useState(0)
@@ -262,7 +264,7 @@ function TrafficTab() {
           <Button
             type="link" size="small"
             style={{ padding: 0, fontWeight: 600, fontSize: 12, height: 'auto' }}
-            onClick={() => navigate(`/devices?search=${r.ip_address}`)}
+            onClick={() => opsNavigate(`/devices?search=${r.ip_address}`)}
           >
             {r.hostname}
           </Button>
@@ -746,7 +748,8 @@ export default function BandwidthMonitorPage() {
   // nm-* tokens; the inner TrafficTab / ErrorInterfacesTab still derive
   // their own C from useTheme.
   void _isDark
-  const navigate = useNavigate()
+  // PR-A2 — /settings global navigation marked intentional
+  const opsNavigate = useOperationsNavigate()
   const queryClient = useQueryClient()
 
   const { data: snmpStatus } = useQuery({
@@ -813,7 +816,7 @@ export default function BandwidthMonitorPage() {
           </Button>
           <Button
             icon={<SettingOutlined />}
-            onClick={() => navigate('/settings?tab=snmp')}
+            onClick={() => opsNavigate('/settings?tab=snmp', { intentionalGlobal: true })}
           >
             SNMP Ayarları
           </Button>
@@ -860,7 +863,7 @@ export default function BandwidthMonitorPage() {
           description={
             <span>
               Hiçbir cihazda SNMP aktif değil. Veri toplamak için{' '}
-              <Button type="link" size="small" style={{ padding: 0 }} onClick={() => navigate('/settings?tab=snmp')}>
+              <Button type="link" size="small" style={{ padding: 0 }} onClick={() => opsNavigate('/settings?tab=snmp', { intentionalGlobal: true })}>
                 SNMP Ayarları
               </Button>
               {' '}sayfasında community string girerek cihazları etkinleştirin, ardından "Şimdi Poll Et" butonuna basın.

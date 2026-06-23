@@ -15,6 +15,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
 import { useSite } from '@/contexts/SiteContext'
+import { useRouteOrgId } from '@/hooks/useRouteOrgId'
 import { monitorApi } from '@/api/monitor'
 import { approvalsApi } from '@/api/approvals'
 import {
@@ -22,6 +23,7 @@ import {
   getFirstVisibleTab,
   getVisibleGroups,
   getVisibleTabs,
+  prefixRouteForOperations,
   type GroupKey,
   type VisibilityContext,
 } from '@/utils/menuGroups'
@@ -92,6 +94,12 @@ export interface NavGroupItem {
 export function useNavGroups(): NavGroupItem[] {
   const { t } = useTranslation()
   const ctx = useVisibilityContext()
+  // PR-A2 — operations panel routeOrgId-aware tab prefixing. When the
+  // user is inside /app/org/:organizationId/*, every group's
+  // `targetRoute` AND every tab's `route` is re-anchored under that
+  // org URL prefix via `prefixRouteForOperations`. Outside (legacy /
+  // platform shells), routeOrgId === null and the helper is a no-op.
+  const routeOrgId = useRouteOrgId()
 
   // Badge query'leri (mevcut davranış korunur). Yetki yoksa 401 döner;
   // sessizce ignore edilir.
@@ -113,11 +121,12 @@ export function useNavGroups(): NavGroupItem[] {
   return visibleGroups.map((g): NavGroupItem => {
     const visibleTabs = getVisibleTabs(g, ctx).map((tab) => ({
       key: tab.key,
-      route: tab.route,
+      route: prefixRouteForOperations(tab.route, routeOrgId),
       label: t(tab.i18nKey),
     }))
     const firstTab = getFirstVisibleTab(g, ctx)
-    const targetRoute = g.route ?? firstTab?.route ?? '/'
+    const rawTargetRoute = g.route ?? firstTab?.route ?? '/'
+    const targetRoute = prefixRouteForOperations(rawTargetRoute, routeOrgId)
 
     // Badge eşlemesi — mevcut iki badge (monitor + approvals) yeni gruplarda
     // korunur. Monitor → İzleme & Analitik grubu; Approvals → Otomasyon &
