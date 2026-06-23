@@ -98,6 +98,33 @@ def _agent_to_dict(agent: Agent, online_ids: set) -> dict:
         "last_connected_at": agent.last_connected_at,
         "last_disconnected_at": agent.last_disconnected_at,
         "total_connections": agent.total_connections,
+        # P1 HOTFIX (2026-06-23) — DEVICE-AGENT-SCOPE-SERIALIZATION.
+        # PR #104 widened the AgentResponse pydantic schema to expose
+        # `organization_id` + `location_id` so the DeviceForm "primary
+        # agent" + "fallback agent" dropdowns can filter candidates down
+        # to the operator's active org/location BEFORE the request leaves
+        # the browser. The schema fix landed for the create-endpoint
+        # `response_model=AgentCreateResponse` path; this LIST endpoint
+        # was missed because it returns `response_model=list[dict]` and
+        # the manual serializer here drives the wire payload — pydantic
+        # never runs.
+        #
+        # Effect of the omission observed in production (device id=95
+        # "Omurga", org=6, loc=12, target agent=movempic org=6/loc=12):
+        #   - GET /api/v1/agents/ → dict objects WITHOUT organization_id
+        #   - Frontend filter at DeviceForm.tsx:184
+        #     `if (a.organization_id !== activeOrgId) return false`
+        #     evaluates `undefined !== 6` → true → EVERY agent excluded
+        #   - DeviceForm dropdown shows only "None"; operator cannot
+        #     assign the matching agent even though it exists in the
+        #     correct org+location scope.
+        #
+        # Backend RLS continues to be the authoritative cross-tenant gate
+        # — this additive expose lets the frontend client-side filter
+        # surface a friendlier UX without changing the security boundary.
+        # No secret/auth/key fields are exposed.
+        "organization_id": agent.organization_id,
+        "location_id": agent.location_id,
     }
 
 
