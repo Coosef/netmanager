@@ -47,12 +47,17 @@ describe('OrgRouteShell — URL-authoritative contract', () => {
     expect(SRC).toMatch(/setOrganization\(routeOrgId\)/)
   })
 
-  it('PR-A2: lastCommittedOrgRef short-circuits same-org navigation', () => {
-    // PR-A2 replaces the PR-A `if (activeOrgId === routeOrgId) return`
-    // pattern with a ref-based commit-on-validation check so cache wipe
-    // only fires when the org actually changes from the previously-
-    // validated value.
-    expect(SRC).toMatch(/lastCommittedOrgRef\.current === routeOrgId/)
+  it('P0 HOTFIX: transitionStartedOrgRef short-circuits same-org navigation', () => {
+    // PR-A2 introduced ref-based short-circuit. P0 hotfix (2026-06-23)
+    // renamed the ref to `transitionStartedOrgRef` and moved the
+    // assignment from validation-success to transition-start so the
+    // dependency-cycle loop (isPlatformSuperAdmin / activeOrgId
+    // flicker) cannot re-enter the transition body. The old name
+    // `lastCommittedOrgRef` is removed from the identifier surface;
+    // it may remain in historical comments.
+    expect(SRC).toMatch(/transitionStartedOrgRef\.current === routeOrgId/)
+    const codeOnly = SRC.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
+    expect(codeOnly).not.toMatch(/lastCommittedOrgRef/)
   })
 
   it('redirects mismatched non-super-admin to their home org (no scope escalation)', () => {

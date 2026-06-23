@@ -34,6 +34,17 @@ import type { QueryClient, QueryKey } from '@tanstack/react-query'
  *                            by DeviceForm / others; not org-bound at the
  *                            cache layer (backend RLS still enforces per-
  *                            request scope via X-Org-Id).
+ *   - 'context'            — P0 HOTFIX (2026-06-23). The /context/current
+ *                            query is keyed by `routeOrgId` already
+ *                            (`['context','current',routeOrgId,activeLocId]`),
+ *                            so different orgs partition into different
+ *                            cache entries naturally — cross-tenant
+ *                            cache leak is impossible. Removing the
+ *                            entry during the OrgRouteShell transition
+ *                            was the load-bearing source of a tight
+ *                            dependency-cycle loop that hammered the
+ *                            endpoint at ~6 req/sec and kept the UI
+ *                            stuck on "Lokasyon bağlamı çözümleniyor…".
  *
  * Pure for unit testing — `OrgRouteShell` calls
  * `clearOperationalQueryCache(queryClient)` and the implementation can be
@@ -46,6 +57,9 @@ const PRESERVED_QUERY_KEY_PREFIXES: ReadonlyArray<string> = [
   'feature-flags',
   'platform',
   'credential-profiles',
+  // P0 HOTFIX (2026-06-23) — context query is routeOrgId-partitioned;
+  // removing it during the transition caused the production loop.
+  'context',
 ]
 
 /**

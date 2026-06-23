@@ -93,31 +93,56 @@ export default function OrgRouteShell() {
   } = useSite()
   const queryClient = useQueryClient()
 
-  const lastCommittedOrgRef = useRef<number | null>(null)
+  // P0 HOTFIX (2026-06-23) — `transitionStartedOrgRef` (renamed from
+  // `lastCommittedOrgRef`). The previous ref was only set in the
+  // VALIDATION-SUCCESS branch, which left the transition effect free
+  // to re-fire indefinitely whenever a dependency flickered during the
+  // cache-wipe → ctx-refetch cycle (isPlatformSuperAdmin flipped
+  // false↔true with each ctx wipe; activeOrgId flipped null↔routeOrgId
+  // when setOrganization fired). The result was a tight loop that hit
+  // /api/v1/context/current ~6 times/sec in production, with the UI
+  // stuck in "Lokasyon bağlamı çözümleniyor…" spinner forever.
+  //
+  // The ref now marks "transition STARTED for this routeOrgId" at the
+  // top of the effect (before any cache mutation or state set), so
+  // dependency changes within the same routeOrgId short-circuit. The
+  // ref is reset to `null` ONLY in the error/retry path so a backend
+  // mismatch can still be retried for the same URL.
+  const transitionStartedOrgRef = useRef<number | null>(null)
   const [gateState, setGateState] = useState<GateState>('transitioning')
 
   // ── Transition trigger ──────────────────────────────────────────────
   // PR-A2 cache bridge: whenever routeOrgId differs from the previously-
-  // committed org, run the operational-cache wipe before letting the
+  // transitioned org, run the operational-cache wipe before letting the
   // child Outlet mount under the new scope.
   useEffect(() => {
     if (!Number.isFinite(routeOrgId) || routeOrgId <= 0) return
 
-    // Non-super-admin scope guard is enforced below at render time —
-    // for them, routeOrgId is always === userOrgId (mismatch redirects).
-    // We still run the transition on FIRST mount so the very first paint
-    // also clears any stale cache from a prior session or login.
-    if (lastCommittedOrgRef.current === routeOrgId) {
-      // Same org as last commit; no transition needed.
+    // GUARD: same routeOrgId transition already started → return.
+    // P0 HOTFIX: this short-circuit closes the dependency-cycle loop
+    // by relying on a ref that's set at the START of the transition
+    // (not at validation success). Re-entries due to
+    // isPlatformSuperAdmin / activeOrgId flicker now exit immediately.
+    if (transitionStartedOrgRef.current === routeOrgId) {
       return
     }
+
+    // OPTIMISTIC LOCK: mark the transition as started for this
+    // routeOrgId BEFORE any cache mutation or state update. Subsequent
+    // dependency-change re-entries will hit the guard above and return.
+    // The ref is reset only by the error/retry path or a real
+    // routeOrgId change.
+    transitionStartedOrgRef.current = routeOrgId
 
     // ORG CHANGED — full operational cache reset.
     setGateState('transitioning')
 
     // 1. Scoped cancel + remove. AUTH / PROFILE / PERMISSIONS / FEATURE
-    //    FLAGS / PLATFORM queries survive per the allowlist in
-    //    operationalCacheScope.ts.
+    //    FLAGS / PLATFORM / CONTEXT (P0 HOTFIX) queries survive per the
+    //    allowlist in operationalCacheScope.ts. Context is preserved
+    //    because its queryKey already carries `routeOrgId` — different
+    //    orgs naturally partition into different cache entries; removing
+    //    the entry was a load-bearing source of the P0 loop.
     clearOperationalQueryCache(queryClient)
 
     // 2. Clear the active location (previous tenant's id is almost
@@ -156,7 +181,10 @@ export default function OrgRouteShell() {
     if (!ctxResolved) return
 
     if (organization?.id === routeOrgId) {
-      lastCommittedOrgRef.current = routeOrgId
+      // Validation success: the optimistic lock set at transition start
+      // is now confirmed by the backend. Gate transitions to 'ready'.
+      // (The ref was already set to routeOrgId at effect entry; no
+      // re-assignment needed here.)
       setGateState('ready')
     } else if (organization == null) {
       // ctxResolved is true but organization is null — possible for a
@@ -211,15 +239,21 @@ export default function OrgRouteShell() {
         routeOrgId={routeOrgId}
         ctxOrgId={organization?.id ?? null}
         onRetry={() => {
-          // Re-trigger the transition. Reset lastCommittedOrgRef so the
-          // useEffect predicate re-fires.
-          lastCommittedOrgRef.current = null
+          // Re-trigger the transition. P0 HOTFIX: reset
+          // transitionStartedOrgRef so the transition effect's guard
+          // releases and the optimistic lock is re-acquired on the
+          // very next render. Without this reset the retry button
+          // would be inert.
+          transitionStartedOrgRef.current = null
           setGateState('transitioning')
           clearOperationalQueryCache(queryClient)
           setLocation(null)
           if (isPlatformSuperAdmin) {
             setOrganization(routeOrgId)
           }
+          // Re-set the optimistic lock immediately after the cache
+          // wipe so the imminent dep-change re-fire short-circuits.
+          transitionStartedOrgRef.current = routeOrgId
           setGateState('validating')
         }}
       />
