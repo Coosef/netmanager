@@ -1253,7 +1253,7 @@
         }
       },
       "actions_tab": {
-        "readonly_alert": "Только чтение. Действия (тест/получение инфо/lifecycle/удаление) требуют роль org_admin+.",
+        "readonly_alert": "У вас нет необходимых прав для действий с устройствами.",
         "exec_title": "Выполнение",
         "tooltip_test": "Быстрый ping/тест подключения по SSH/SNMP.",
         "tooltip_info": "Обновить hostname/вендор/ОС/модель/serial с устройства.",

@@ -1256,7 +1256,7 @@
         }
       },
       "actions_tab": {
-        "readonly_alert": "Salt-okunur. Aksiyon (test/bilgi-çek/lifecycle/sil) için org_admin+ rolü gerekir.",
+        "readonly_alert": "Bu cihazda aksiyon almak için gerekli yetkiniz bulunmuyor.",
         "exec_title": "Çalıştırma",
         "tooltip_test": "SSH/SNMP üzerinden hızlı ping/bağlantı testi.",
         "tooltip_info": "Cihazdan hostname/vendor/os/model/serial gibi temel bilgileri yenile.",

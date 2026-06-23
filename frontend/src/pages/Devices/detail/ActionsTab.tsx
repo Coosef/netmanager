@@ -5,7 +5,34 @@
  * taşı, arşive al, sil. W3.3 hotfix (2026-06-01): disabled "Port Shutdown /
  * Quarantine" placeholder kaldırıldı — gerçek aksiyonlar W3.4 ActionsTab
  * restructure ile gelecek.
- * Viewer: read-only — bilgi banner. org_admin+ aksiyon yapabilir.
+ *
+ * P2-F1 REVISED (2026-06-23) — Effective-permission gates.
+ *
+ * Every action is gated on `useAuthStore.can(module, action)` so the
+ * UI mirrors the effective permission a user holds — including
+ * grants delivered via a location-scoped PermissionSet (e.g. emre +
+ * Tam Yetki perm_set 3 on location 12 → devices.delete=true via the
+ * backend permission_engine). The earlier "role-bound destructive
+ * actions" plan was reverted: artificially restricting a user who
+ * was granted the verb via an explicit PermissionSet is a contract
+ * violation, not a safety net. PermissionSet contents are the source
+ * of truth for what the user can do; role is only used as a fallback
+ * grant when no per-location row matches.
+ *
+ *   Bilgi Çek       → can('devices', 'connect')   (POST /devices/{id}/fetch-info; backend gate device:connect)
+ *   Lifecycle Apply → can('devices', 'edit')      (PATCH /devices/{id}/lifecycle; backend gate device:edit)
+ *   Lokasyon Taşı   → can('devices', 'move')      (POST /devices/{id}/move-location; backend gate device:move)
+ *   Sil             → can('devices', 'delete')    (DELETE /devices/{id}; backend gate device:delete)
+ *   Arşivle         → can('devices', 'edit')      (lifecycle = 'archived' is a lifecycle edit; backend gate device:edit)
+ *
+ * Backend permission/RLS enforcement remains the source of truth —
+ * a UI button that the backend rejects will still 403 through the
+ * existing mutation error flow.
+ *
+ * Banner: shown ONLY when the user holds NONE of the five gated
+ * verbs. Wording is permission-focused (no "org_admin+ required"
+ * language), since a location_admin without grants is the typical
+ * "no permission" case, not a missing-role case.
  */
 import { useMemo, useState } from 'react'
 import { Card, Button, Space, Tag, Popconfirm, message, Tooltip, Alert, Select } from 'antd'
@@ -31,8 +58,16 @@ export default function ActionsTab({ device }: { device: Device }) {
   const opsNavigate = useOperationsNavigate()
   const navigate = useNavigate()
   const { t } = useTranslation()
-  const { isOrgAdmin } = useAuthStore()
-  const canWrite = isOrgAdmin()
+  // P2-F1 REVISED (2026-06-23) — Effective-permission gates, see header.
+  // Archive shares the lifecycle 'edit' gate because lifecycle =
+  // 'archived' is a regular lifecycle write on the backend
+  // (PATCH /devices/{id}/lifecycle → device:edit), not a soft-delete.
+  const canFetchInfo = useAuthStore((s) => s.can('devices', 'connect'))
+  const canEdit      = useAuthStore((s) => s.can('devices', 'edit'))
+  const canMove      = useAuthStore((s) => s.can('devices', 'move'))
+  const canDelete    = useAuthStore((s) => s.can('devices', 'delete'))
+  // Read-only banner: NONE of the gated verbs are granted to this user.
+  const isReadOnly = !canFetchInfo && !canEdit && !canMove && !canDelete
 
   const LIFECYCLE_OPTIONS = useMemo(() => [
     { value: 'production', label: t('devices.detail.actions_tab.lifecycle.production') },
@@ -83,7 +118,7 @@ export default function ActionsTab({ device }: { device: Device }) {
 
   return (
     <div style={{ padding: '8px 0 16px', maxWidth: 880 }}>
-      {!canWrite && (
+      {isReadOnly && (
         <Alert
           type="info" showIcon style={{ marginBottom: 16, fontSize: 12 }}
           message={t('devices.detail.actions_tab.readonly_alert')}
@@ -98,7 +133,7 @@ export default function ActionsTab({ device }: { device: Device }) {
             </Button>
           </Tooltip>
           <Tooltip title={t('devices.detail.actions_tab.tooltip_info')}>
-            <Button icon={<SyncOutlined />} disabled={!canWrite} loading={infoMut.isPending} onClick={() => infoMut.mutate()}>
+            <Button icon={<SyncOutlined />} disabled={!canFetchInfo} loading={infoMut.isPending} onClick={() => infoMut.mutate()}>
               {t('devices.detail.actions_tab.btn_fetch_info')}
             </Button>
           </Tooltip>
@@ -117,14 +152,14 @@ export default function ActionsTab({ device }: { device: Device }) {
             onChange={(v) => setNextLifecycle(v)}
             options={LIFECYCLE_OPTIONS}
             style={{ width: 280 }}
-            disabled={!canWrite}
+            disabled={!canEdit}
           />
           <Popconfirm
             title={<span>{ident} → <strong>{nextLifecycle}</strong> {t('devices.detail.actions_tab.lifecycle_confirm_suffix')}</span>}
             okText={t('devices.detail.actions_tab.update_ok')} onConfirm={() => lifecycleMut.mutate(nextLifecycle)}
-            disabled={!canWrite || nextLifecycle === (device as any).lifecycle_status}
+            disabled={!canEdit || nextLifecycle === (device as any).lifecycle_status}
           >
-            <Button type="primary" disabled={!canWrite || nextLifecycle === (device as any).lifecycle_status} loading={lifecycleMut.isPending}>
+            <Button type="primary" disabled={!canEdit || nextLifecycle === (device as any).lifecycle_status} loading={lifecycleMut.isPending}>
               {t('common.apply')}
             </Button>
           </Popconfirm>
@@ -134,7 +169,7 @@ export default function ActionsTab({ device }: { device: Device }) {
       <Card size="small" title={t('devices.detail.actions_tab.place_archive_title')} style={{ marginBottom: 16 }}>
         <Space wrap>
           <Tooltip title={t('devices.detail.actions_tab.tooltip_move_location')}>
-            <Button icon={<EnvironmentOutlined />} disabled={!canWrite}
+            <Button icon={<EnvironmentOutlined />} disabled={!canMove}
               onClick={() => message.info(t('devices.detail.actions_tab.move_info'))}>
               {t('devices.row.move_location')}
             </Button>
@@ -142,9 +177,9 @@ export default function ActionsTab({ device }: { device: Device }) {
           <Popconfirm
             title={<span>{ident} {t('devices.detail.actions_tab.archive_confirm_suffix')}</span>}
             okText={t('devices.card.archive_ok')} onConfirm={() => lifecycleMut.mutate('archived')}
-            disabled={!canWrite}
+            disabled={!canEdit}
           >
-            <Button icon={<InboxOutlined />} disabled={!canWrite}>{t('devices.card.archive_ok')}</Button>
+            <Button icon={<InboxOutlined />} disabled={!canEdit}>{t('devices.card.archive_ok')}</Button>
           </Popconfirm>
         </Space>
       </Card>
@@ -156,9 +191,9 @@ export default function ActionsTab({ device }: { device: Device }) {
             title={<span>{ident} <strong>{t('devices.detail.actions_tab.delete_strong')}</strong> {t('devices.detail.actions_tab.delete_confirm_suffix')}</span>}
             okText={t('common.delete')} okButtonProps={{ danger: true }}
             onConfirm={() => deleteMut.mutate()}
-            disabled={!canWrite}
+            disabled={!canDelete}
           >
-            <Button icon={<DeleteOutlined />} danger disabled={!canWrite} loading={deleteMut.isPending}>
+            <Button icon={<DeleteOutlined />} danger disabled={!canDelete} loading={deleteMut.isPending}>
               {t('devices.detail.actions_tab.btn_delete_device')}
             </Button>
           </Popconfirm>

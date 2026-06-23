@@ -15,6 +15,21 @@
  *  - devicesApi.getConfigDrift(id) · getBackupContent · getConfigDiff
  *
  * Viewer: tablo + indirme; takeBackup/setGolden gizli.
+ *
+ * P2-F1 HOTFIX (2026-06-23) — Per-action permission gates.
+ * Yedek Al + Golden işaretleme önceden `isOrgAdmin()` ile toplu kilitliydi.
+ * `location_admin` (örn. emre + Tam Yetki permission_set) backend tarafı
+ * `config:backup` granted olduğu halde butonu kullanamıyordu. Artık
+ * `useAuthStore.can(module, action)` ile granular kontrol:
+ *
+ *   Yedek Al           → can('config_backups', 'backup')   (POST /devices/{id}/backups/take; backend gate config:backup)
+ *   Geri Yükle         → can('config_backups', 'restore')  (POST /devices/{id}/backups/{bid}/restore; backend gate config:push)
+ *   Golden işaretle    → can('config_backups', 'edit')     (PATCH backup metadata)
+ *
+ * Restore UI surface bu sekmede halen yok (devicesApi.restoreBackup
+ * mevcut ama tıklanan buton değil); `canRestore` bilinçli olarak
+ * hesaplanır ki ileride buton eklendiğinde gate hazır olsun.
+ * Read-only banner: yazma aksiyonlarının HİÇBİRİ kullanılabilir değilse.
  */
 import { useState, lazy, Suspense } from 'react'
 import {
@@ -50,8 +65,12 @@ export default function BackupTab({ device }: { device: Device }) {
   const qc = useQueryClient()
   const { message } = App.useApp()
   const { t } = useTranslation()
-  const { isOrgAdmin } = useAuthStore()
-  const canWrite = isOrgAdmin()
+  // P2-F1 HOTFIX (2026-06-23) — granular gates, see file header.
+  const canBackup  = useAuthStore((s) => s.can('config_backups', 'backup'))
+  const canRestore = useAuthStore((s) => s.can('config_backups', 'restore'))
+  const canEditBackup = useAuthStore((s) => s.can('config_backups', 'edit'))
+  // Read-only hint: hiçbir yazma aksiyonu kullanılabilir değil.
+  const isReadOnly = !canBackup && !canRestore && !canEditBackup
   const [activeMode, setActiveMode] = useState<'live' | 'backups'>('backups')
   const [selectedKeys, setSelectedKeys] = useState<number[]>([])
   const [previewBackup, setPreviewBackup] = useState<ConfigBackup | null>(null)
@@ -154,7 +173,7 @@ export default function BackupTab({ device }: { device: Device }) {
           <Button size="small" icon={<DownloadOutlined />} onClick={() => devicesApi.downloadBackup(device.id, r.id)}>
             {t('common.download')}
           </Button>
-          {canWrite && !r.is_golden && (
+          {canEditBackup && !r.is_golden && (
             <Button size="small" icon={<StarOutlined />} loading={goldenMut.isPending}
               onClick={() => goldenMut.mutate(r.id)}>
               {t('devices.detail.backup.action_make_golden')}
@@ -223,7 +242,7 @@ export default function BackupTab({ device }: { device: Device }) {
                         {t('devices.detail.backup.diff_pick_two')}
                       </Text>
                     )}
-                    {canWrite && (
+                    {canBackup && (
                       <Popconfirm
                         title={t('devices.detail.backup.take_confirm_title')}
                         description={<span><Tag>{device.hostname}</Tag> {t('devices.detail.backup.take_confirm_desc')}</span>}
@@ -258,7 +277,7 @@ export default function BackupTab({ device }: { device: Device }) {
                   })}
                 />
 
-                {!canWrite && (
+                {isReadOnly && (
                   <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
                     {t('devices.detail.backup.readonly_hint')}
                   </Text>

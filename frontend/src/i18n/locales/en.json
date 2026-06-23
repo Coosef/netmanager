@@ -1256,7 +1256,7 @@
         }
       },
       "actions_tab": {
-        "readonly_alert": "Read-only. Actions (test/fetch-info/lifecycle/delete) require org_admin+ role.",
+        "readonly_alert": "You do not have the required device permissions for any action.",
         "exec_title": "Execution",
         "tooltip_test": "Quick ping/connectivity test over SSH/SNMP.",
         "tooltip_info": "Refresh hostname/vendor/os/model/serial from device.",
