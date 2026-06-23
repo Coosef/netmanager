@@ -34,10 +34,47 @@ from app.core.database import SharedBase
 # PermissionEngine (engine.py: AGENT_PERMISSION_ALIASES) so existing
 # permission_set rows that toggle `agents.edit=true` keep granting
 # `agents.update` until the migration backfill runs.
+#
+# P2-CATALOG-A (2026-06-23) — canonical key alignment.
+#
+# Five new keys were added so the stored payload covers every verb
+# that the backend has_permission() catalogue AND the frontend can()
+# call sites already reference. Without these keys a call like
+# `can('devices', 'connect')` could not find an explicit entry on the
+# row and would silently fall back to the role-default map — which
+# meant an explicit `devices.ssh = false` operator toggle had no effect
+# on the Bilgi Çek button. The new keys close that gap.
+#
+# devices.create   — POST /devices (admin device add); covered by
+#                    backend SYSTEM_ROLE_PERMISSIONS verb device:create.
+# devices.connect  — SSH session open / "Bilgi Çek" / test_connection /
+#                    run-command; backend verb device:connect.
+#                    Semantically distinct from devices.ssh (terminal
+#                    SSH allowance) but in practice the two travel
+#                    together — the backfill seeds connect = ssh on
+#                    every existing row so no operator who previously
+#                    enabled SSH loses Bilgi Çek.
+# devices.move     — POST /devices/{id}/move-location; backend verb
+#                    device:move. Backfill defaults to FALSE for
+#                    every existing row except the "Tam Yetki" and
+#                    "Org Admin" templates — destructive ownership
+#                    transfer that the operator must opt into.
+# config_backups.backup  — backend verb config:backup (take a backup).
+# config_backups.restore — backend verb config:push when invoked from
+#                    the restore endpoint. Backfill seeds backup =
+#                    restore = config_backups.edit (operators who
+#                    could already edit a backup row could already
+#                    trigger both flows; no silent revocation).
+#
+# The Alembic migration f9ag_canonical_permission_keys.py applies the
+# same backfill to every existing permission_set row.
 DEFAULT_PERMISSIONS: dict = {
     "modules": {
-        "devices":         {"view": False, "edit": False, "delete": False, "ssh": False},
-        "config_backups":  {"view": False, "edit": False, "delete": False},
+        "devices":         {"view": False, "create": False, "edit": False,
+                            "delete": False, "ssh": False, "connect": False,
+                            "move": False},
+        "config_backups":  {"view": False, "edit": False, "delete": False,
+                            "backup": False, "restore": False},
         "tasks":           {"view": False, "create": False, "cancel": False},
         "playbooks":       {"view": False, "run": False, "edit": False, "delete": False},
         "topology":        {"view": False},
