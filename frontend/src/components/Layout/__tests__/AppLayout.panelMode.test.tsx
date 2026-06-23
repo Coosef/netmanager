@@ -1,10 +1,15 @@
 /**
- * PR-A — AppLayout panelMode switching contract.
+ * PR-A2 — AppLayout panelMode-aware sidebar contract.
  *
- * Source-level regression guard on the AppLayout sidebar / Header /
- * MenuGroupNav / LocationGate conditionals: a regression that wires the
- * legacy Sidebar into /platform/* (or vice versa) would silently break
- * the entire PR-A surface.
+ * Source-level regression guard. PR-A2 removed OperationsSidebar in
+ * favor of the legacy 12-group Sidebar in BOTH operations + legacy
+ * panels (with routeOrgId-prefixed navigation via useNavGroups).
+ *
+ *   panelMode = 'platform'   → PlatformSidebar
+ *   panelMode = 'operations' → legacy Sidebar (with routeOrgId prefix)
+ *   panelMode = 'legacy'     → legacy Sidebar (root paths)
+ *
+ * MenuGroupNav renders in both operations + legacy (NOT platform).
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
@@ -20,33 +25,32 @@ const HEADER_SRC = readFileSync(
   'utf-8',
 )
 
-describe('AppLayout — panelMode-aware sidebar', () => {
+describe('AppLayout — panelMode-aware sidebar (PR-A2)', () => {
   it('imports detectPanelMode from utils/panelMode', () => {
     expect(LAYOUT_SRC).toContain("from '@/utils/panelMode'")
     expect(LAYOUT_SRC).toContain('detectPanelMode')
   })
 
-  it('imports PlatformSidebar + OperationsSidebar + legacy Sidebar', () => {
+  it('imports PlatformSidebar + legacy Sidebar (OperationsSidebar removed)', () => {
     expect(LAYOUT_SRC).toContain("from './PlatformSidebar'")
-    expect(LAYOUT_SRC).toContain("from './OperationsSidebar'")
     expect(LAYOUT_SRC).toContain("from './Sidebar'")
+    expect(LAYOUT_SRC).not.toContain("from './OperationsSidebar'")
   })
 
   it('platform mode → PlatformSidebar', () => {
-    expect(LAYOUT_SRC).toMatch(/panelMode\s*===\s*'platform'[\s\S]*?<PlatformSidebar/)
+    expect(LAYOUT_SRC).toMatch(/panelMode\s*===\s*'platform'[\s\S]{0,40}\?[\s\S]{0,80}<PlatformSidebar/)
   })
 
-  it('operations mode → OperationsSidebar', () => {
-    expect(LAYOUT_SRC).toMatch(/panelMode\s*===\s*'operations'[\s\S]*?<OperationsSidebar/)
+  it('operations + legacy modes → legacy Sidebar (no OperationsSidebar branch)', () => {
+    expect(LAYOUT_SRC).toMatch(/:\s*\(\s*<Sidebar/)
+    expect(LAYOUT_SRC).not.toMatch(/<OperationsSidebar/)
   })
 
-  it('MenuGroupNav is rendered only in legacy mode', () => {
-    expect(LAYOUT_SRC).toMatch(/panelMode\s*===\s*'legacy'\s*&&\s*<MenuGroupNav/)
+  it('MenuGroupNav is rendered in operations + legacy (NOT platform)', () => {
+    expect(LAYOUT_SRC).toMatch(/panelMode\s*!==\s*'platform'\s*&&\s*<MenuGroupNav/)
   })
 
   it('LocationGate is skipped in platform mode (super-admin operates above tenants)', () => {
-    // The platform branch renders a bare <Outlet />; the legacy/operations
-    // branch wraps in <LocationGate>. Both must appear in the conditional.
     expect(LAYOUT_SRC).toMatch(
       /panelMode\s*===\s*'platform'\s*\?\s*\(\s*<Outlet\s*\/>\s*\)\s*:\s*\(\s*<LocationGate/,
     )

@@ -14,6 +14,7 @@ import {
   DeleteOutlined, SyncOutlined, HeartOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
+import { useOperationsNavigate } from '@/hooks/useOperationsNavigate'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { Device } from '@/types'
@@ -24,6 +25,10 @@ import { useAuthStore } from '@/store/auth'
 // Backend enum (production/passive/stock/archived) sabit kalır.
 export default function ActionsTab({ device }: { device: Device }) {
   const qc = useQueryClient()
+  // PR-A2 — operations-aware navigate; sil sonrası listeye dönüş
+  // /app/org/:id/devices'e işaret eder, legacy /devices'e değil.
+  // navigate (intra-page query string change for ?tab=...) korunur.
+  const opsNavigate = useOperationsNavigate()
   const navigate = useNavigate()
   const { t } = useTranslation()
   const { isOrgAdmin } = useAuthStore()
@@ -64,7 +69,7 @@ export default function ActionsTab({ device }: { device: Device }) {
     onSuccess: () => {
       message.success(t('devices.deleted'))
       qc.invalidateQueries({ queryKey: ['devices'] })
-      navigate('/devices')
+      opsNavigate('/devices')
     },
     onError: (e: any) => message.error(e?.response?.data?.detail || t('common.delete_failed')),
   })

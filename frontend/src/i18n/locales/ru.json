@@ -3055,6 +3055,13 @@
     "org_badge_readonly": "Фиксированный",
     "org_badge_action_switch_org": "Сменить организацию",
     "org_badge_action_platform_admin": "Управление платформой",
-    "org_badge_action_org_detail": "Детали организации"
+    "org_badge_action_org_detail": "Детали организации",
+    "gate": {
+      "transitioning": "Сброс контекста для организации {{orgId}}…",
+      "validating": "Проверка контекста организации…",
+      "mismatch_title": "Контекст организации не совпадает",
+      "mismatch_desc": "ID организации в URL — {{routeOrgId}}, но сервер вернул {{ctxOrgId}}. Это непредвиденное состояние бэкенда.",
+      "mismatch_retry": "Повторить"
+    }
   }
 }

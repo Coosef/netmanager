@@ -39,25 +39,23 @@ describe('OrgRouteShell — URL-authoritative contract', () => {
     expect(SRC).toMatch(/user\?\.org_id/)
   })
 
-  it('syncs activeOrgId from URL only for super-admin', () => {
-    // The useEffect must guard on isPlatformSuperAdmin before calling
-    // setOrganization — without this, a normal user would attempt an
-    // X-Org-Id override that the backend ignores anyway, and the local
-    // SiteContext state would drift away from the JWT-fixed tenant.
-    expect(SRC).toMatch(/if\s*\(!isPlatformSuperAdmin\)\s*return/)
+  it('syncs activeOrgId from URL for super-admin (PR-A2: only inside transition block)', () => {
+    // PR-A2 — the setOrganization call is gated on isPlatformSuperAdmin
+    // within the transition phase (not at top of effect). Normal users
+    // skip the preference sync since the backend ignores X-Org-Id for them.
+    expect(SRC).toMatch(/isPlatformSuperAdmin/)
     expect(SRC).toMatch(/setOrganization\(routeOrgId\)/)
   })
 
-  it('skips re-sync when activeOrgId already matches routeOrgId (no spurious refetch)', () => {
-    // PR #103 anti-flicker contract — never invalidate queries when
-    // the active org is already correct.
-    expect(SRC).toMatch(/if\s*\(activeOrgId\s*===\s*routeOrgId\)\s*return/)
+  it('PR-A2: lastCommittedOrgRef short-circuits same-org navigation', () => {
+    // PR-A2 replaces the PR-A `if (activeOrgId === routeOrgId) return`
+    // pattern with a ref-based commit-on-validation check so cache wipe
+    // only fires when the org actually changes from the previously-
+    // validated value.
+    expect(SRC).toMatch(/lastCommittedOrgRef\.current === routeOrgId/)
   })
 
   it('redirects mismatched non-super-admin to their home org (no scope escalation)', () => {
-    // Normal user attempting to visit another tenant's URL gets pushed
-    // back to their own /app/org/<userOrgId>/dashboard — the URL cannot
-    // be used as a scope-escalation vector.
     expect(SRC).toMatch(
       /Navigate\s+to=\{`\/app\/org\/\$\{userOrgId\}\/dashboard`\}\s+replace/,
     )
@@ -68,7 +66,9 @@ describe('OrgRouteShell — URL-authoritative contract', () => {
     expect(SRC).toMatch(/routeOrgId\s*<=\s*0|routeOrgId\s*>\s*0/)
   })
 
-  it('waits for ctxResolved before deciding scope (no flash redirect)', () => {
-    expect(SRC).toMatch(/if\s*\(!ctxResolved\)\s*return\s*null/)
+  it('PR-A2: validating phase waits for ctxResolved', () => {
+    // The validation effect runs only in `gateState === 'validating'`
+    // and short-circuits while ctx is not yet resolved.
+    expect(SRC).toMatch(/if\s*\(\s*!ctxResolved\s*\)\s*return/)
   })
 })

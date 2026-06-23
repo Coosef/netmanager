@@ -14,7 +14,7 @@ import remarkGfm from 'remark-gfm'
 import { aiAssistantApi, type ChatMessage } from '@/api/aiAssistant'
 import { monitorApi } from '@/api/monitor'
 import { useTheme } from '@/contexts/ThemeContext'
-import { useNavigate } from 'react-router-dom'
+import { useOperationsNavigate } from '@/hooks/useOperationsNavigate'
 
 /* ─── theme ─────────────────────────────────────────────────────────────── */
 function mkC(isDark: boolean) {
@@ -232,7 +232,9 @@ const SEV_LABEL: Record<string, string> = {
 export default function AIAssistantPage() {
   const { isDark } = useTheme()
   const C = mkC(isDark)
-  const navigate = useNavigate()
+  // PR-A2 — settings is global (intentionalGlobal), approvals + action paths
+  // are operations-scoped (auto-prefix to /app/org/:id/...).
+  const opsNavigate = useOperationsNavigate()
   const isMobile = useIsMobile()
 
   const [input, setInput]       = useState('')
@@ -623,7 +625,7 @@ export default function AIAssistantPage() {
             )}
             <Tooltip title="AI Ayarları">
               <Button type="text" size="small" icon={<ThunderboltOutlined style={{ fontSize: 11 }} />}
-                onClick={() => navigate('/settings?tab=ai')} style={{ color: C.muted, padding: '0 4px' }} />
+                onClick={() => opsNavigate('/settings?tab=ai', { intentionalGlobal: true })} style={{ color: C.muted, padding: '0 4px' }} />
             </Tooltip>
           </div>
         </div>
@@ -639,7 +641,7 @@ export default function AIAssistantPage() {
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               description={<span style={{ color: C.muted }}>AI asistanı kullanmak için önce bir sağlayıcı yapılandırın.</span>}
             />
-            <Button type="primary" onClick={() => navigate('/settings?tab=ai')}>Sağlayıcı Ayarla</Button>
+            <Button type="primary" onClick={() => opsNavigate('/settings?tab=ai', { intentionalGlobal: true })}>Sağlayıcı Ayarla</Button>
           </div>
         ) : (
           <>
@@ -815,7 +817,7 @@ export default function AIAssistantPage() {
               {QUICK_ACTIONS.map(a => (
                 <button
                   key={a.path}
-                  onClick={() => navigate(a.path)}
+                  onClick={() => opsNavigate(a.path)}
                   style={{
                     background: C.card, border: `1px solid ${C.border}`,
                     borderRadius: 8, padding: '7px 10px', cursor: 'pointer',
@@ -883,7 +885,7 @@ export default function AIAssistantPage() {
               <div style={{ fontWeight: 600, marginBottom: 3 }}>⚠️ Kritik Aksiyonlar</div>
               <div style={{ lineHeight: 1.5 }}>Playbook çalıştırma ve config değişiklikleri onay gerektirir.</div>
               <button
-                onClick={() => navigate('/approvals')}
+                onClick={() => opsNavigate('/approvals')}
                 style={{
                   marginTop: 6, width: '100%', background: '#f59e0b', border: 'none',
                   borderRadius: 6, padding: '5px 0', cursor: 'pointer',

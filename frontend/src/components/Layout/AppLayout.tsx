@@ -3,7 +3,6 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import Sidebar from './Sidebar'
 import PlatformSidebar from './PlatformSidebar'
-import OperationsSidebar from './OperationsSidebar'
 import TopNav from './TopNav'
 import AppHeader from './Header'
 import LocationGate from './LocationGate'
@@ -141,14 +140,14 @@ function AppLayoutInner() {
     >
       <style>{LAYOUT_CSS}</style>
       <div className={`nm-root menu-${menuPosition}`}>
-        {/* PR-A — panelMode-aware sidebar switching. Platform and
-            Operations get their own flat sidebars with the comingSoon
-            contract; every other (legacy) route keeps the 12-group
-            Sidebar untouched so PR-A is a purely additive foundation. */}
+        {/* PR-A2 — sidebar restoration:
+              · platform   → PlatformSidebar (2 active + 7 Yakında)
+              · operations → legacy 12-group Sidebar (mevcut çalışan
+                              modüller aktif kalır; routeOrgId-aware
+                              prefix navigation via useNavGroups)
+              · legacy     → aynı 12-group Sidebar (geriye dönük) */}
         {panelMode === 'platform' ? (
           <PlatformSidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
-        ) : panelMode === 'operations' ? (
-          <OperationsSidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
         ) : (
           <Sidebar mobileOpen={mobileNavOpen} onMobileClose={() => setMobileNavOpen(false)} />
         )}
@@ -162,10 +161,11 @@ function AppLayoutInner() {
           />
           <div className="nm-workspace">
             {/* Faz 3 menu restructure: yatay tab strip — aktif grup tab'ları.
-                Dashboard veya bilinmeyen route'ta render edilmez (null döner).
-                PR-A: platform + operations panels have their own sidebar item
-                model; MenuGroupNav stays legacy-only. */}
-            {panelMode === 'legacy' && <MenuGroupNav />}
+                PR-A2: MenuGroupNav artık operations panelinde de render
+                edilir (tab tıklamaları routeOrgId prefix'i korur — bkz.
+                MenuGroupNav.tsx). Platform panelinde gizli kalır çünkü
+                PlatformSidebar kendi tab'sız flat list yapısını kullanır. */}
+            {panelMode !== 'platform' && <MenuGroupNav />}
             <div key={location.pathname} style={{ animation: 'pageEnterFade 0.28s ease both', minHeight: '100%' }}>
               {/* PR-A — platform panel is org-context-agnostic by design
                   (the super-admin operates ABOVE every tenant). Skip the

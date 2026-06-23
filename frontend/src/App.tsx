@@ -354,9 +354,69 @@ function ThemedApp() {
                   OPERATIONS LEGACY ESCAPE SAFETY ADDENDUM. */}
               <Route path="app/org/:organizationId" element={<OrgRouteShell />}>
                 <Route index element={<Navigate to="dashboard" replace />} />
+                {/* PR-A foundation routes (migrated) */}
                 <Route path="dashboard" element={<DashboardPage />} />
                 <Route path="devices" element={<DevicesPage />} />
+                <Route path="devices/:deviceId" element={<RoleRoute minRole="viewer"><DeviceDetailPage /></RoleRoute>} />
+                <Route path="devices/:deviceId/ports" element={<RedirectToPortsTab />} />
                 <Route path="agents" element={<AgentsPage />} />
+                {/* PR-A2 — 40 alias route: mevcut çalışan operations
+                    modüllerini /app/org/:id/<segment> altına bağlar.
+                    Eski page component'leri aynen reuse edilir;
+                    mevcut RBAC wrapper'ları korunur. */}
+                {/* Inventory */}
+                <Route path="topology" element={featureFlags.topologyV2Canonical ? <TopologyV2Page /> : <TopologyPage />} />
+                <Route path="topology-classic" element={<TopologyPage />} />
+                <Route path="topology-next" element={<TopologyV2Page />} />
+                <Route path="discovery" element={<RoleRoute minRole="org_admin"><LldpInventoryPage /></RoleRoute>} />
+                <Route path="ipam" element={<PermRoute module="ipam" action="view"><IpamPage /></PermRoute>} />
+                <Route path="vlan" element={<RoleRoute minRole="org_admin"><VlanManagementPage /></RoleRoute>} />
+                <Route path="racks" element={<RoleRoute minRole="org_admin"><RacksPage /></RoleRoute>} />
+                <Route path="floor-plan" element={<RoleRoute minRole="org_admin"><FloorPlanPage /></RoleRoute>} />
+                {/* Monitoring */}
+                <Route path="monitor" element={<MonitorPage />} />
+                <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
+                <Route path="intelligence" element={<RoleRoute minRole="org_admin"><IntelligencePage /></RoleRoute>} />
+                <Route path="bandwidth" element={<PermRoute module="monitoring" action="view"><BandwidthMonitorPage /></PermRoute>} />
+                <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
+                <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
+                {/* Alerts */}
+                <Route path="alert-rules" element={<RoleRoute minRole="org_admin"><AlertRulesPage /></RoleRoute>} />
+                <Route path="escalation-rules" element={<RoleRoute minRole="org_admin"><EscalationRulesPage /></RoleRoute>} />
+                <Route path="incidents" element={<PermRoute module="monitoring" action="view"><IncidentsPage /></PermRoute>} />
+                <Route path="services" element={<RoleRoute minRole="org_admin"><ServicesPage /></RoleRoute>} />
+                {/* Config */}
+                <Route path="config-drift" element={<RoleRoute minRole="org_admin"><ConfigDriftPage /></RoleRoute>} />
+                <Route path="config-templates" element={<PermRoute module="driver_templates" action="view"><ConfigTemplatesPage /></PermRoute>} />
+                <Route path="config-builder" element={<PermRoute module="config_backups" action="view"><ConfigBuilderPage /></PermRoute>} />
+                <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
+                <Route path="firmware" element={<RoleRoute minRole="org_admin"><FirmwarePage /></RoleRoute>} />
+                <Route path="driver-templates" element={<PermRoute module="driver_templates" action="view"><DriverTemplatesPage /></PermRoute>} />
+                {/* Automation */}
+                <Route path="tasks" element={<TasksPage />} />
+                <Route path="playbooks" element={<PermRoute module="playbooks" action="view"><PlaybooksPage /></PermRoute>} />
+                <Route path="change-management" element={<RoleRoute minRole="location_admin"><ChangeManagementPage /></RoleRoute>} />
+                <Route path="approvals" element={<RoleRoute minRole="location_admin"><ApprovalsPage /></RoleRoute>} />
+                {/* Security */}
+                <Route path="security-audit" element={<PermRoute module="monitoring" action="view"><SecurityAuditPage /></PermRoute>} />
+                <Route path="security-policies" element={<RoleRoute minRole="viewer"><SecurityPoliciesPage /></RoleRoute>} />
+                <Route path="compliance" element={<RoleRoute minRole="location_admin"><ComplianceCheckPage /></RoleRoute>} />
+                <Route path="asset-lifecycle" element={<PermRoute module="monitoring" action="view"><AssetLifecyclePage /></PermRoute>} />
+                {/* Reports */}
+                <Route path="sla" element={<RoleRoute minRole="org_admin"><SlaReportPage /></RoleRoute>} />
+                <Route path="poe" element={<RoleRoute minRole="org_admin"><PoeDashboardPage /></RoleRoute>} />
+                <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
+                <Route path="topology-twin" element={<RoleRoute minRole="location_admin"><TopologyTwinPage /></RoleRoute>} />
+                {/* Tools */}
+                <Route path="diagnostics" element={<RoleRoute minRole="viewer"><DiagnosticsPage /></RoleRoute>} />
+                <Route path="ai-assistant" element={<RoleRoute minRole="org_admin"><AIAssistantPage /></RoleRoute>} />
+                {/* admin_users */}
+                <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
+                <Route path="permissions" element={<RoleRoute minRole="org_admin"><PermissionsPage /></RoleRoute>} />
+                <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
+                {/* admin_audit */}
+                <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
+                <Route path="terminal-sessions" element={<PermRoute module="audit_logs" action="view"><TerminalSessionsPage /></PermRoute>} />
               </Route>
 
               {/* PR-A — legacy bookmark / external-link compatibility.

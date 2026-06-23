@@ -10,7 +10,8 @@
  * AntD Tabs (Wave 1) korunur.
  */
 import { useMemo } from 'react'
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { useOperationsNavigate } from '@/hooks/useOperationsNavigate'
 import { Spin, Result, Tabs, App } from 'antd'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
@@ -46,7 +47,9 @@ function riskFromScore(score: number | null): { cls: 'ok' | 'warn' | 'crit'; lab
 
 export default function DeviceDetailPage() {
   const { deviceId } = useParams<{ deviceId: string }>()
-  const navigate = useNavigate()
+  // PR-A2 — operations-aware navigation. Inside /app/org/:id/devices/:deviceId,
+  // "back to list" must return to /app/org/:id/devices (not legacy /devices).
+  const opsNavigate = useOperationsNavigate()
   const qc = useQueryClient()
   const { message } = App.useApp()
   const { t } = useTranslation()
@@ -131,7 +134,7 @@ export default function DeviceDetailPage() {
     return (
       <div style={{ padding: 24 }}>
         <Result status="404" title={t('devices.detail.invalid_id')} extra={
-          <button className="nm-btn" onClick={() => navigate('/devices')}>{t('devices.detail.back_to_list')}</button>
+          <button className="nm-btn" onClick={() => opsNavigate('/devices')}>{t('devices.detail.back_to_list')}</button>
         } />
       </div>
     )
@@ -142,7 +145,7 @@ export default function DeviceDetailPage() {
       <div style={{ padding: 24 }}>
         <Result status="404" title={t('devices.detail.not_found_title')}
           subTitle={t('devices.detail.not_found_desc')}
-          extra={<button className="nm-btn" onClick={() => navigate('/devices')}>{t('devices.detail.back_to_list')}</button>} />
+          extra={<button className="nm-btn" onClick={() => opsNavigate('/devices')}>{t('devices.detail.back_to_list')}</button>} />
       </div>
     )
   }
@@ -178,7 +181,7 @@ export default function DeviceDetailPage() {
         <div className="title-block">
           <div className="nm-crumbs">
             <span
-              onClick={() => navigate('/devices')}
+              onClick={() => opsNavigate('/devices')}
               style={{ cursor: 'pointer' }}
             >{t('devices.crumb_devices')}</span>
             {' › '}

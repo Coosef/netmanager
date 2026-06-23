@@ -3091,6 +3091,13 @@
     "org_badge_readonly": "Fixed",
     "org_badge_action_switch_org": "Switch organization",
     "org_badge_action_platform_admin": "Platform Management",
-    "org_badge_action_org_detail": "Organization details"
+    "org_badge_action_org_detail": "Organization details",
+    "gate": {
+      "transitioning": "Resetting context for organization {{orgId}}…",
+      "validating": "Validating organization context…",
+      "mismatch_title": "Organization context mismatch",
+      "mismatch_desc": "URL org id is {{routeOrgId}} but the server returned {{ctxOrgId}}. This is an unexpected backend state.",
+      "mismatch_retry": "Retry"
+    }
   }
 }

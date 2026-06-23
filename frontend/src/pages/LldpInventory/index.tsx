@@ -9,7 +9,7 @@ import {
 import { useQuery } from '@tanstack/react-query'
 import { useTheme } from '@/contexts/ThemeContext'
 import { useSite } from '@/contexts/SiteContext'
-import { useNavigate } from 'react-router-dom'
+import { useOperationsNavigate } from '@/hooks/useOperationsNavigate'
 import dayjs from 'dayjs'
 import { topologyApi, type LldpInventoryItem } from '@/api/topology'
 
@@ -117,7 +117,9 @@ export default function LldpInventoryPage() {
   const { t } = useTranslation()
   const { isDark } = useTheme()
   const { activeSite } = useSite()
-  const navigate = useNavigate()
+  // PR-A2 — keşif sonuçlarından topology'ye geçiş, /app/org/:id/topology
+  // altında kalır (legacy /topology'ye değil).
+  const opsNavigate = useOperationsNavigate()
   const C = mkC(isDark)
 
   function handleImport() {
@@ -126,7 +128,7 @@ export default function LldpInventoryPage() {
     const result = importLldpToMap(items, importLat, importLng)
     setImportOpen(false)
     message.success(`${result.addedNodes} cihaz ve ${result.addedEdges} bağlantı haritaya eklendi`)
-    navigate('/topology')
+    opsNavigate('/topology')
   }
 
   const { data, isLoading, refetch } = useQuery({

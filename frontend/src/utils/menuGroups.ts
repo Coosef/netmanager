@@ -323,3 +323,31 @@ export function getFirstVisibleTab(group: GroupDef, ctx: VisibilityContext): Tab
 export function getVisibleGroups(ctx: VisibilityContext): GroupDef[] {
   return GROUP_DEFINITIONS.filter((group) => canSeeGroup(group, ctx))
 }
+
+/**
+ * PR-A2 — operations panel route prefix helper.
+ *
+ * When the user is inside `/app/org/:organizationId/*`, every legacy
+ * single-segment tab route MUST be re-anchored under the same org URL
+ * prefix so the URL-authoritative cache bridge in OrgRouteShell remains
+ * unbroken. A bare `navigate('/topology')` from inside the operations
+ * panel would escape to the legacy panel and drop org context.
+ *
+ * Rules:
+ *   - `routeOrgId == null`         → no prefix (legacy / platform shell)
+ *   - route already begins with `/app/org/` → return as-is
+ *   - route is `/` (dashboard sentinel) → `/app/org/<orgId>/dashboard`
+ *   - other absolute route `/segment[?...]` → `/app/org/<orgId>/segment[?...]`
+ *
+ * Pure for unit testing — Sidebar / MenuGroupNav delegate every prefix
+ * decision to this helper so a regression that drifts the two is
+ * impossible.
+ */
+export function prefixRouteForOperations(route: string, routeOrgId: number | null): string {
+  if (routeOrgId == null) return route
+  if (route.startsWith(`/app/org/${routeOrgId}/`)) return route
+  if (route.startsWith('/app/org/')) return route
+  if (route === '/') return `/app/org/${routeOrgId}/dashboard`
+  if (route.startsWith('/')) return `/app/org/${routeOrgId}${route}`
+  return `/app/org/${routeOrgId}/${route}`
+}
