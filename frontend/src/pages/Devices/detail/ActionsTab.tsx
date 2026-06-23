@@ -6,24 +6,35 @@
  * Quarantine" placeholder kaldırıldı — gerçek aksiyonlar W3.4 ActionsTab
  * restructure ile gelecek.
  *
- * P2-F1 HOTFIX (2026-06-23) — Per-action permission gates.
- * Previously every write button was gated on `isOrgAdmin()`, which forced
- * a `location_admin` user (e.g. one assigned `permission_set 3 / Tam Yetki`
- * on their location) into a read-only state even when the backend grants
- * them `device:connect`, `device:edit`, `device:move`. The gate now reads
- * from `useAuthStore.can(module, action)` per backend
- * SYSTEM_ROLE_PERMISSIONS so the UI matches what the API would actually
- * accept. Backend permission enforcement is still the source of truth —
- * a button that the UI shows enabled but the backend rejects 403s
- * through normal error handling.
+ * P2-F1 REVISED (2026-06-23) — Two action classes.
  *
- *   Bilgi Çek          → can('devices', 'connect')   (POST /devices/{id}/fetch-info; backend gate device:connect)
- *   Lifecycle apply    → can('devices', 'edit')      (PATCH /devices/{id}/lifecycle; backend gate device:edit)
- *   Lokasyon taşı      → can('devices', 'move')      (POST /devices/{id}/move-location; backend gate device:move)
- *   Sil / Arşivle      → can('devices', 'delete')    (DELETE /devices/{id}; backend gate device:delete)
+ *   1. Permission-driven OPERATIONAL actions — gated on
+ *      `useAuthStore.can(module, action)` so a backend-granted
+ *      `location_admin` (e.g. emre + Tam Yetki perm_set 3) can use them
+ *      without the previous over-restrictive `isOrgAdmin()` blanket
+ *      lock. Backend permission enforcement remains the source of
+ *      truth; UI just stops disabling buttons the backend would accept.
  *
- * Viewer + a location_admin without the matching grants stays read-only;
- * the read-only banner is shown when ALL four write actions are denied.
+ *      Bilgi Çek      → can('devices', 'connect')   (POST /devices/{id}/fetch-info; backend gate device:connect)
+ *
+ *   2. Role-bound DESTRUCTIVE / OWNERSHIP actions — gated on
+ *      `isOrgAdmin()` REGARDLESS of permission_set grants. Even when
+ *      a permission_set grants `devices.delete=true` to a
+ *      `location_admin`, the UI must NOT surface these actions: tenant
+ *      policy restricts destructive lifecycle ownership to org_admin
+ *      and super_admin. A perm_set that grants `devices.delete=true`
+ *      to a location_admin will still let the backend accept the
+ *      DELETE call from a direct API caller — that is intentional and
+ *      out of this UI's scope — but the device-detail buttons stay
+ *      locked behind role.
+ *
+ *      Lifecycle Apply → isOrgAdmin()
+ *      Lokasyon Taşı   → isOrgAdmin()
+ *      Sil             → isOrgAdmin()
+ *      Arşivle         → isOrgAdmin()
+ *
+ * The read-only banner is shown when ALL write actions are denied —
+ * the permission-driven gate AND the role-bound gate are both false.
  */
 import { useMemo, useState } from 'react'
 import { Card, Button, Space, Tag, Popconfirm, message, Tooltip, Alert, Select } from 'antd'
@@ -49,13 +60,19 @@ export default function ActionsTab({ device }: { device: Device }) {
   const opsNavigate = useOperationsNavigate()
   const navigate = useNavigate()
   const { t } = useTranslation()
-  // P2-F1 HOTFIX (2026-06-23) — granular permission gates, see file header.
+  // P2-F1 REVISED (2026-06-23) — see file header.
+  //   Class 1 (permission-driven, location_admin can earn): Bilgi Çek.
+  //   Class 2 (role-bound, org_admin+ only):                Lifecycle / Move / Sil / Arşivle.
+  // Lifecycle + Move + Sil + Arşivle share a SINGLE role-bound gate
+  // because they are all destructive / ownership-class actions:
+  // archive is a lifecycle write that is logically equivalent to a
+  // soft delete (lifecycle = 'archived'), and lokasyon move re-parents
+  // the device under another location's audit / RBAC envelope.
   const canFetchInfo = useAuthStore((s) => s.can('devices', 'connect'))
-  const canLifecycle = useAuthStore((s) => s.can('devices', 'edit'))
-  const canMove      = useAuthStore((s) => s.can('devices', 'move'))
-  const canDelete    = useAuthStore((s) => s.can('devices', 'delete'))
-  // Read-only banner: ALL four write actions denied (typical viewer).
-  const isReadOnly = !canFetchInfo && !canLifecycle && !canMove && !canDelete
+  const isOrgAdmin   = useAuthStore((s) => s.isOrgAdmin())
+  const canDestructive = isOrgAdmin
+  // Read-only banner: every write action denied.
+  const isReadOnly = !canFetchInfo && !canDestructive
 
   const LIFECYCLE_OPTIONS = useMemo(() => [
     { value: 'production', label: t('devices.detail.actions_tab.lifecycle.production') },
@@ -140,14 +157,14 @@ export default function ActionsTab({ device }: { device: Device }) {
             onChange={(v) => setNextLifecycle(v)}
             options={LIFECYCLE_OPTIONS}
             style={{ width: 280 }}
-            disabled={!canLifecycle}
+            disabled={!canDestructive}
           />
           <Popconfirm
             title={<span>{ident} → <strong>{nextLifecycle}</strong> {t('devices.detail.actions_tab.lifecycle_confirm_suffix')}</span>}
             okText={t('devices.detail.actions_tab.update_ok')} onConfirm={() => lifecycleMut.mutate(nextLifecycle)}
-            disabled={!canLifecycle || nextLifecycle === (device as any).lifecycle_status}
+            disabled={!canDestructive || nextLifecycle === (device as any).lifecycle_status}
           >
-            <Button type="primary" disabled={!canLifecycle || nextLifecycle === (device as any).lifecycle_status} loading={lifecycleMut.isPending}>
+            <Button type="primary" disabled={!canDestructive || nextLifecycle === (device as any).lifecycle_status} loading={lifecycleMut.isPending}>
               {t('common.apply')}
             </Button>
           </Popconfirm>
@@ -157,7 +174,7 @@ export default function ActionsTab({ device }: { device: Device }) {
       <Card size="small" title={t('devices.detail.actions_tab.place_archive_title')} style={{ marginBottom: 16 }}>
         <Space wrap>
           <Tooltip title={t('devices.detail.actions_tab.tooltip_move_location')}>
-            <Button icon={<EnvironmentOutlined />} disabled={!canMove}
+            <Button icon={<EnvironmentOutlined />} disabled={!canDestructive}
               onClick={() => message.info(t('devices.detail.actions_tab.move_info'))}>
               {t('devices.row.move_location')}
             </Button>
@@ -165,9 +182,9 @@ export default function ActionsTab({ device }: { device: Device }) {
           <Popconfirm
             title={<span>{ident} {t('devices.detail.actions_tab.archive_confirm_suffix')}</span>}
             okText={t('devices.card.archive_ok')} onConfirm={() => lifecycleMut.mutate('archived')}
-            disabled={!canDelete}
+            disabled={!canDestructive}
           >
-            <Button icon={<InboxOutlined />} disabled={!canDelete}>{t('devices.card.archive_ok')}</Button>
+            <Button icon={<InboxOutlined />} disabled={!canDestructive}>{t('devices.card.archive_ok')}</Button>
           </Popconfirm>
         </Space>
       </Card>
@@ -179,9 +196,9 @@ export default function ActionsTab({ device }: { device: Device }) {
             title={<span>{ident} <strong>{t('devices.detail.actions_tab.delete_strong')}</strong> {t('devices.detail.actions_tab.delete_confirm_suffix')}</span>}
             okText={t('common.delete')} okButtonProps={{ danger: true }}
             onConfirm={() => deleteMut.mutate()}
-            disabled={!canDelete}
+            disabled={!canDestructive}
           >
-            <Button icon={<DeleteOutlined />} danger disabled={!canDelete} loading={deleteMut.isPending}>
+            <Button icon={<DeleteOutlined />} danger disabled={!canDestructive} loading={deleteMut.isPending}>
               {t('devices.detail.actions_tab.btn_delete_device')}
             </Button>
           </Popconfirm>
