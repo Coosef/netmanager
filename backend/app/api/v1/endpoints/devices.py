@@ -3,7 +3,7 @@ import re
 
 import csv
 import io
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Response, UploadFile
 from pydantic import BaseModel
@@ -12,7 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser, RequestContext
+from app.core.deps import CurrentUser, RequestContext, require_permission
 from app.core.request_context import is_super_admin, require_active_location
 from app.core.security import encrypt_credential
 # M6-B4 — UserRole no longer imported; system_role + RLS handle scoping.
@@ -22,6 +22,7 @@ from app.models.credential_profile import CredentialProfile
 from app.models.device import Device, DeviceGroup, DeviceStatus
 from app.models.location import Location
 from app.models.shared.organization import Organization
+from app.models.user import User
 from app.models.topology import TopologyLink
 from app.schemas.device import (
     BulkUpdateAgent, BulkUpdateCredentials, DeviceCreate, DeviceGroupCreate, DeviceGroupResponse,
@@ -1969,11 +1970,19 @@ async def delete_device(
     device_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+    # P2-CATALOG-B1 (2026-06-23) — canonical engine gate. The previous
+    # `current_user.has_permission("device:delete")` consulted the
+    # role-default SYSTEM_ROLE_PERMISSIONS table, which intentionally
+    # withholds device:delete from location_admin — but a
+    # location_admin whose PermissionSet grants `devices.delete=true`
+    # (Tam Yetki after the P2-CATALOG-A backfill) was 403'd by the
+    # role check even though the explicit grant covered the action.
+    # `require_permission("devices", "delete")` routes the decision
+    # through `permission_engine.resolve(module, action, location_id)`
+    # so the PermissionSet toggle is authoritative. RLS continues to
+    # scope the row reach as a separate defense-in-depth layer.
+    current_user: Annotated[User, Depends(require_permission("devices", "delete"))] = None,
 ):
-    if not current_user.has_permission("device:delete"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
     from datetime import datetime, timezone
     from app.core.org_context import archived_visible
     from app.core.rls import apply_rls_context

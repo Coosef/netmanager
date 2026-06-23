@@ -8,7 +8,7 @@ import string
 import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Annotated, Optional
 
 import redis as _redis_lib
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
@@ -19,7 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, require_permission
+from app.models.user import User
 from app.core.security import hash_password, verify_password
 from app.models.agent import Agent
 from app.models.agent_command_log import AgentCommandLog
@@ -1479,11 +1480,16 @@ async def snmp_get_via_agent(
     agent_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+    # P2-CATALOG-B1 (2026-06-23) — canonical engine gate. The previous
+    # `device:read` verb was a typo (SYSTEM_ROLE_PERMISSIONS uses
+    # `device:view`); the role-default fast-path always returned False
+    # for it, so a location_admin with a Tam Yetki PermissionSet was
+    # still 403'd here. Switching to `require_permission("devices",
+    # "view")` routes the decision through permission_engine.resolve
+    # so the PermissionSet toggle is the source of truth.
+    current_user: Annotated[User, Depends(require_permission("devices", "view"))] = None,
 ):
     """Run SNMP GET for specific OIDs via agent. body: {device_id, oids: [str]}"""
-    if not current_user.has_permission("device:read"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
 
@@ -1539,12 +1545,12 @@ async def trigger_discovery(
     agent_id: str,
     body: dict,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+    # P2-CATALOG-B1 (2026-06-23) — see snmp_get_via_agent header for
+    # the rationale. `device:read` → `require_permission("devices",
+    # "view")` so the PermissionSet drives discovery authorization.
+    current_user: Annotated[User, Depends(require_permission("devices", "view"))] = None,
 ):
     """Trigger network discovery on the agent's local subnet."""
-    if not current_user.has_permission("device:read"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
     agent = await _get_agent_scoped(agent_id, db)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
@@ -1698,12 +1704,16 @@ async def start_stream_command(
 async def refresh_credential_vault(
     agent_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: CurrentUser = None,
+    # P2-CATALOG-B1 (2026-06-23) — canonical engine gate. The previous
+    # `device:update` verb was a typo (SYSTEM_ROLE_PERMISSIONS uses
+    # `device:edit`); the role-default fast-path always returned False
+    # for it. `require_permission("devices", "edit")` routes through
+    # permission_engine.resolve so a PermissionSet that grants
+    # devices.edit (Tam Yetki) actually opens this endpoint for the
+    # granted location_admin.
+    current_user: Annotated[User, Depends(require_permission("devices", "edit"))] = None,
 ):
     """Regenerate agent AES key and push fresh credential bundle to agent."""
-    if not current_user.has_permission("device:update"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
     await _get_agent_scoped(agent_id, db)
     if not agent_manager.is_online(agent_id):
         raise HTTPException(status_code=409, detail="Agent is offline")
