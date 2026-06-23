@@ -1,18 +1,20 @@
 // @vitest-environment jsdom
 /**
- * P2-F1 REVISED (2026-06-23) — ActionsTab two-class action policy.
+ * P2-F1 REVISED (2026-06-23) — ActionsTab effective-permission gates.
  *
- *   Class 1 (permission-driven, can(module, action)):
- *     Bilgi Çek      → can('devices', 'connect')
+ * Every action is gated on `useAuthStore.can(module, action)`. A
+ * location_admin whose PermissionSet grants the verb (e.g. emre with
+ * Tam Yetki perm_set 3 → devices.delete=true) sees the button active;
+ * a user without the grant sees it disabled. Role is NOT used as an
+ * artificial ceiling — PermissionSet is the source of truth.
  *
- *   Class 2 (role-bound, isOrgAdmin() ONLY — perm_set overrides NOT honored):
- *     Lifecycle Apply / Lokasyon Taşı / Sil / Arşivle
+ *   Bilgi Çek       → can('devices', 'connect')
+ *   Lifecycle Apply → can('devices', 'edit')
+ *   Lokasyon Taşı   → can('devices', 'move')
+ *   Sil             → can('devices', 'delete')
+ *   Arşivle         → can('devices', 'edit')   (lifecycle = 'archived' is a lifecycle write)
  *
- * The policy: a location_admin with Tam Yetki perm_set (devices.delete
- * granted by backend) MUST NOT be able to trigger destructive /
- * ownership-class actions from the device-detail UI. Backend
- * enforcement is independent and intentionally unchanged — this gate
- * only restricts what the UI exposes.
+ * Banner: shown only when NONE of the five gated verbs is granted.
  */
 import { render, cleanup, screen } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
@@ -39,16 +41,14 @@ vi.mock('@/api/devices', () => ({
   },
 }))
 
-// Mock store state: `permState` controls `can()`, `roleState` controls `isOrgAdmin()`.
 const permState: Record<string, boolean> = {}
-let roleState: {
-  systemRole: 'super_admin' | 'org_admin' | 'location_admin' | 'viewer'
-  isOrgAdminResult: boolean
-} = { systemRole: 'location_admin', isOrgAdminResult: false }
+let roleState: { systemRole: 'super_admin' | 'org_admin' | 'location_admin' | 'viewer' } = {
+  systemRole: 'location_admin',
+}
 
 function resetState() {
   for (const k of Object.keys(permState)) delete permState[k]
-  roleState = { systemRole: 'location_admin', isOrgAdminResult: false }
+  roleState = { systemRole: 'location_admin' }
 }
 
 function setPerm(module: string, action: string, val: boolean) {
@@ -57,17 +57,24 @@ function setPerm(module: string, action: string, val: boolean) {
 
 function setRole(sr: typeof roleState.systemRole) {
   roleState.systemRole = sr
-  roleState.isOrgAdminResult = sr === 'super_admin' || sr === 'org_admin'
 }
 
 vi.mock('@/store/auth', () => ({
   useAuthStore: (selector?: (s: any) => unknown) => {
+    const sr = roleState.systemRole
     const fake = {
-      user: { id: 10, username: 'mock', system_role: roleState.systemRole },
-      can: (m: string, a: string) => permState[`${m}:${a}`] ?? false,
-      isOrgAdmin: () => roleState.isOrgAdminResult,
-      isSuperAdmin: () => roleState.systemRole === 'super_admin',
-      isLocationAdmin: () => roleState.isOrgAdminResult || roleState.systemRole === 'location_admin',
+      user: { id: 10, username: 'mock', system_role: sr },
+      // can() honors the explicit permState, otherwise emulates the
+      // production org/super-admin short-circuit (always true) so the
+      // org_admin / super_admin test cases mirror real behavior even
+      // when the per-verb permState is left empty by the test.
+      can: (m: string, a: string) => {
+        if (sr === 'super_admin' || sr === 'org_admin') return true
+        return permState[`${m}:${a}`] ?? false
+      },
+      isOrgAdmin: () => sr === 'super_admin' || sr === 'org_admin',
+      isSuperAdmin: () => sr === 'super_admin',
+      isLocationAdmin: () => sr === 'super_admin' || sr === 'org_admin' || sr === 'location_admin',
     }
     return selector ? selector(fake) : fake
   },
@@ -75,18 +82,21 @@ vi.mock('@/store/auth', () => ({
 
 import ActionsTab from '../ActionsTab'
 
-function makeDevice() {
+function makeDevice(overrides: Partial<{ lifecycle_status: string }> = {}) {
   return {
     id: 95,
     hostname: 'Omurga',
     ip_address: '10.255.0.1',
     organization_id: 6,
     location_id: 12,
-    lifecycle_status: 'production',
+    // Default 'passive' so the lifecycle Apply button is not auto-disabled
+    // by the "nextLifecycle === device.lifecycle_status" condition.
+    lifecycle_status: 'passive',
+    ...overrides,
   } as any
 }
 
-function renderTab() {
+function renderTab(deviceOverrides?: Partial<{ lifecycle_status: string }>) {
   const qc = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
@@ -94,7 +104,7 @@ function renderTab() {
     <MemoryRouter>
       <QueryClientProvider client={qc}>
         <AntApp>
-          <ActionsTab device={makeDevice()} />
+          <ActionsTab device={makeDevice(deviceOverrides)} />
         </AntApp>
       </QueryClientProvider>
     </MemoryRouter>,
@@ -114,85 +124,94 @@ afterEach(() => {
   cleanup()
 })
 
-// ─── Behavioral matrix per operator brief ─────────────────────────────────
+// ─── Operator's required test matrix (5 scenarios) ────────────────────────
 
-describe('ActionsTab — P2-F1 REVISED (destructive role gate)', () => {
-  it('Case 1: emre / location_admin + Tam Yetki perm_set (devices.delete=true) — Bilgi Çek aktif, destructive PASIF', () => {
+describe('ActionsTab — P2-F1 REVISED behavioral matrix', () => {
+  it('Case 1: emre / location_admin + Tam Yetki perm_set (all four verbs granted) — every action ACTIVE', () => {
     setRole('location_admin')
-    // Backend perm_set 3 ("Tam Yetki") grants devices.* fully. UI must
-    // still NOT surface destructive actions; only the operational one.
     setPerm('devices', 'connect', true)
     setPerm('devices', 'edit', true)
     setPerm('devices', 'move', true)
     setPerm('devices', 'delete', true)
     renderTab()
     expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(false)
-    // Lifecycle Apply hâlâ disabled olmalı çünkü destructive gate role-bound.
-    // (default lifecycle === device.lifecycle_status, ama bunun ÖTESINDE
-    //  isOrgAdmin=false olduğu için button zaten disabled olmalı.)
-    expect(findButtonByText('devices.row.move_location')!.disabled).toBe(true)
-    expect(findButtonByText('devices.card.archive_ok')!.disabled).toBe(true)
-    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(true)
-    // Lifecycle Select disabled (no .ant-select-disabled because of role gate).
-    expect(document.querySelector('.ant-select-disabled')).toBeTruthy()
-  })
-
-  it('Case 2: org_admin + devices.delete=true — tüm aksiyonlar aktif', () => {
-    setRole('org_admin')
-    setPerm('devices', 'connect', true) // org_admin için can() doğrudan true zaten
-    renderTab()
-    expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(false)
     expect(findButtonByText('devices.row.move_location')!.disabled).toBe(false)
     expect(findButtonByText('devices.card.archive_ok')!.disabled).toBe(false)
     expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(false)
-    // Lifecycle Select etkin
+    // Lifecycle Select etkin (canEdit=true)
     expect(document.querySelector('.ant-select-disabled')).toBeNull()
     // Banner görünmüyor
-    expect(document.querySelector('.ant-alert-info')).toBeNull()
+    expect(screen.queryByText('devices.detail.actions_tab.readonly_alert')).toBeNull()
   })
 
-  it('Case 3: super_admin — tüm aksiyonlar aktif', () => {
-    setRole('super_admin')
+  it('Case 2: location_admin + limited perm_set (connect+edit only) — Bilgi Çek + Lifecycle + Arşivle aktif, Move + Sil pasif', () => {
+    setRole('location_admin')
     setPerm('devices', 'connect', true)
+    setPerm('devices', 'edit', true)
+    setPerm('devices', 'move', false)
+    setPerm('devices', 'delete', false)
     renderTab()
     expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(false)
-    expect(findButtonByText('devices.row.move_location')!.disabled).toBe(false)
+    expect(findButtonByText('devices.row.move_location')!.disabled).toBe(true)
+    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(true)
+    // Arşivle paylaşılan canEdit gate'ine bağlı — aktif
     expect(findButtonByText('devices.card.archive_ok')!.disabled).toBe(false)
-    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(false)
+    // Lifecycle Select etkin (canEdit=true)
+    expect(document.querySelector('.ant-select-disabled')).toBeNull()
+    // Banner görünmüyor (en az bir aksiyon var)
+    expect(screen.queryByText('devices.detail.actions_tab.readonly_alert')).toBeNull()
   })
 
-  it('Case 4: viewer — Bilgi Çek dahil tüm yazma/aksiyon butonları pasif + read-only banner', () => {
+  it('Case 3: viewer (no grants) — tüm aksiyonlar pasif + permission banner görünür', () => {
     setRole('viewer')
-    // viewer için can('devices', 'connect') => false (DEFAULT_ROLE_GRANTS.viewer)
     renderTab()
     expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(true)
     expect(findButtonByText('devices.row.move_location')!.disabled).toBe(true)
     expect(findButtonByText('devices.card.archive_ok')!.disabled).toBe(true)
     expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(true)
+    // Lifecycle Select pasif
+    expect(document.querySelector('.ant-select-disabled')).toBeTruthy()
+    // Permission banner görünür (i18n key resolved to literal key by mock)
     expect(screen.getByText('devices.detail.actions_tab.readonly_alert')).toBeTruthy()
   })
 
-  it('location_admin without perm_set + can connect=false — banner görünür', () => {
-    setRole('location_admin')
-    // can('devices', 'connect') false (no perm_set match, no DEFAULT_ROLE_GRANTS).
-    // In production location_admin gets connect via DEFAULT_ROLE_GRANTS but
-    // here our mock returns false for any key not explicitly set — that's
-    // the "pre-permissions loaded" case.
+  it('Case 4a: org_admin — Tam Yetki davranışı korunur (her şey aktif)', () => {
+    setRole('org_admin')
+    // org_admin için can() short-circuit'i her zaman true (auth store mevcut davranış).
     renderTab()
-    expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(true)
-    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(true)
-    expect(screen.getByText('devices.detail.actions_tab.readonly_alert')).toBeTruthy()
+    expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(false)
+    expect(findButtonByText('devices.row.move_location')!.disabled).toBe(false)
+    expect(findButtonByText('devices.card.archive_ok')!.disabled).toBe(false)
+    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(false)
+    expect(document.querySelector('.ant-select-disabled')).toBeNull()
+    expect(screen.queryByText('devices.detail.actions_tab.readonly_alert')).toBeNull()
   })
 
-  it('location_admin can(connect)=true ama isOrgAdmin=false — Bilgi Çek aktif, banner görünMEz', () => {
+  it('Case 4b: super_admin — Tam Yetki davranışı korunur (her şey aktif)', () => {
+    setRole('super_admin')
+    renderTab()
+    expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(false)
+    expect(findButtonByText('devices.row.move_location')!.disabled).toBe(false)
+    expect(findButtonByText('devices.card.archive_ok')!.disabled).toBe(false)
+    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(false)
+    expect(document.querySelector('.ant-select-disabled')).toBeNull()
+    expect(screen.queryByText('devices.detail.actions_tab.readonly_alert')).toBeNull()
+  })
+
+  it('Banner şartı: yalnız Bilgi Çek granted ise banner görünMEz', () => {
     setRole('location_admin')
     setPerm('devices', 'connect', true)
     renderTab()
     expect(findButtonByText('devices.detail.actions_tab.btn_fetch_info')!.disabled).toBe(false)
-    // En az bir yazma aktif olduğu için banner görünmez.
-    expect(document.querySelector('.ant-alert-info')).toBeNull()
-    // Destructive hâlâ pasif.
-    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(true)
+    expect(screen.queryByText('devices.detail.actions_tab.readonly_alert')).toBeNull()
+  })
+
+  it('Banner şartı: yalnız delete granted bile olsa (edge) banner görünMEz', () => {
+    setRole('location_admin')
+    setPerm('devices', 'delete', true)
+    renderTab()
+    expect(findButtonByText('devices.detail.actions_tab.btn_delete_device')!.disabled).toBe(false)
+    expect(screen.queryByText('devices.detail.actions_tab.readonly_alert')).toBeNull()
   })
 })
 
@@ -205,52 +224,87 @@ describe('ActionsTab — P2-F1 REVISED source contract', () => {
   )
   const codeOnly = SRC.replace(/\/\/[^\n]*\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '')
 
-  it('Eski isOrgAdmin destructure paterni YOK (eski blanket lock)', () => {
+  it('No `isOrgAdmin()` selector and no `canDestructive` variable — role-bound gate removed', () => {
+    expect(codeOnly).not.toMatch(/useAuthStore\(\(s\)\s*=>\s*s\.isOrgAdmin\(\)\)/)
+    expect(codeOnly).not.toMatch(/canDestructive/)
     expect(codeOnly).not.toMatch(/const\s*\{\s*isOrgAdmin\s*\}\s*=\s*useAuthStore\(\)/)
     expect(codeOnly).not.toMatch(/const\s+canWrite\s*=\s*isOrgAdmin\(\)/)
   })
 
-  it('Operational gate: canFetchInfo = can(devices, connect)', () => {
+  it('Four can() gate hooks defined', () => {
     expect(SRC).toMatch(/canFetchInfo\s*=\s*useAuthStore\(\(s\)\s*=>\s*s\.can\('devices',\s*'connect'\)\)/)
+    expect(SRC).toMatch(/canEdit\s*=\s*useAuthStore\(\(s\)\s*=>\s*s\.can\('devices',\s*'edit'\)\)/)
+    expect(SRC).toMatch(/canMove\s*=\s*useAuthStore\(\(s\)\s*=>\s*s\.can\('devices',\s*'move'\)\)/)
+    expect(SRC).toMatch(/canDelete\s*=\s*useAuthStore\(\(s\)\s*=>\s*s\.can\('devices',\s*'delete'\)\)/)
   })
 
-  it('Role-bound gate: isOrgAdmin selector-bağlı + canDestructive türevi', () => {
-    expect(SRC).toMatch(/isOrgAdmin\s*=\s*useAuthStore\(\(s\)\s*=>\s*s\.isOrgAdmin\(\)\)/)
-    expect(SRC).toMatch(/canDestructive\s*=\s*isOrgAdmin/)
-  })
-
-  it('Lifecycle gate: !canDestructive (NOT can(devices,edit))', () => {
-    // Code-only check (strip comments) — comments may reference can('devices','edit').
-    expect(codeOnly).not.toMatch(/disabled=\{!canLifecycle\b/)
-    expect(codeOnly).not.toMatch(/s\.can\('devices',\s*'edit'\)/)
-    expect(SRC).toMatch(/disabled=\{!canDestructive\s*\|\|/)
-  })
-
-  it('Lokasyon Taşı gate: canDestructive (NOT can(devices,move))', () => {
-    expect(codeOnly).not.toMatch(/s\.can\('devices',\s*'move'\)/)
-    const moveSection = codeOnly.indexOf('tooltip_move_location')
-    expect(moveSection).toBeGreaterThan(0)
-    const slice = codeOnly.slice(moveSection, moveSection + 400)
-    expect(slice).toMatch(/!canDestructive/)
-  })
-
-  it('Sil + Arşivle gate: canDestructive (NOT can(devices,delete))', () => {
-    expect(codeOnly).not.toMatch(/s\.can\('devices',\s*'delete'\)/)
-    // Delete button
-    expect(SRC).toMatch(/disabled=\{!canDestructive\}[^>]*loading=\{deleteMut\.isPending\}/)
-    // Archive Popconfirm
-    const archiveIdx = codeOnly.indexOf('archive_confirm_suffix')
-    expect(archiveIdx).toBeGreaterThan(0)
-    const archiveSlice = codeOnly.slice(archiveIdx, archiveIdx + 600)
-    expect(archiveSlice).toMatch(/!canDestructive/)
-  })
-
-  it('Bilgi Çek hâlâ canFetchInfo ile gate (operational gate korundu)', () => {
+  it('Bilgi Çek gated on canFetchInfo', () => {
     expect(SRC).toMatch(/disabled=\{!canFetchInfo\}[^>]*loading=\{infoMut\.isPending\}/)
   })
 
-  it('Read-only banner: !canFetchInfo && !canDestructive', () => {
-    expect(SRC).toMatch(/isReadOnly\s*=\s*!canFetchInfo\s*&&\s*!canDestructive/)
+  it('Lifecycle gated on canEdit (no canDestructive/canLifecycle)', () => {
+    expect(SRC).toMatch(/disabled=\{!canEdit\s*\|\|/)
+  })
+
+  it('Lokasyon Taşı gated on canMove', () => {
+    const moveIdx = codeOnly.indexOf('tooltip_move_location')
+    expect(moveIdx).toBeGreaterThan(0)
+    const slice = codeOnly.slice(moveIdx, moveIdx + 400)
+    expect(slice).toMatch(/!canMove/)
+  })
+
+  it('Sil gated on canDelete', () => {
+    expect(SRC).toMatch(/disabled=\{!canDelete\}[^>]*loading=\{deleteMut\.isPending\}/)
+  })
+
+  it('Arşivle gated on canEdit (lifecycle write, NOT canDelete)', () => {
+    const archiveIdx = codeOnly.indexOf('archive_confirm_suffix')
+    expect(archiveIdx).toBeGreaterThan(0)
+    const slice = codeOnly.slice(archiveIdx, archiveIdx + 400)
+    expect(slice).toMatch(/!canEdit/)
+    expect(slice).not.toMatch(/!canDelete/)
+  })
+
+  it('isReadOnly formula: !canFetchInfo && !canEdit && !canMove && !canDelete', () => {
+    expect(SRC).toMatch(
+      /isReadOnly\s*=\s*!canFetchInfo\s*&&\s*!canEdit\s*&&\s*!canMove\s*&&\s*!canDelete/,
+    )
     expect(SRC).toMatch(/\{isReadOnly\s*&&[\s\S]{0,200}readonly_alert/)
+  })
+})
+
+// ─── Banner i18n string contract ───────────────────────────────────────────
+
+describe('ActionsTab — banner i18n permission-focused text', () => {
+  it('TR locale: org_admin+ ifadesi YOK, permission odaklı metin var', () => {
+    const tr = readFileSync(resolve(__dirname, '../../../../i18n/locales/tr.json'), 'utf-8')
+    const trObj = JSON.parse(tr)
+    const msg = trObj.devices.detail.actions_tab.readonly_alert as string
+    expect(msg).not.toMatch(/org_admin/i)
+    expect(msg).toMatch(/yetki/i)
+  })
+
+  it('EN locale: org_admin+ ifadesi YOK', () => {
+    const en = readFileSync(resolve(__dirname, '../../../../i18n/locales/en.json'), 'utf-8')
+    const enObj = JSON.parse(en)
+    const msg = enObj.devices.detail.actions_tab.readonly_alert as string
+    expect(msg).not.toMatch(/org_admin/i)
+    expect(msg).toMatch(/permission/i)
+  })
+
+  it('DE locale: org_admin+ ifadesi YOK', () => {
+    const de = readFileSync(resolve(__dirname, '../../../../i18n/locales/de.json'), 'utf-8')
+    const deObj = JSON.parse(de)
+    const msg = deObj.devices.detail.actions_tab.readonly_alert as string
+    expect(msg).not.toMatch(/org_admin/i)
+    expect(msg).toMatch(/Berechtigung/i)
+  })
+
+  it('RU locale: org_admin+ ifadesi YOK', () => {
+    const ru = readFileSync(resolve(__dirname, '../../../../i18n/locales/ru.json'), 'utf-8')
+    const ruObj = JSON.parse(ru)
+    const msg = ruObj.devices.detail.actions_tab.readonly_alert as string
+    expect(msg).not.toMatch(/org_admin/i)
+    expect(msg).toMatch(/прав/i)
   })
 })

@@ -1253,7 +1253,7 @@
         }
       },
       "actions_tab": {
-        "readonly_alert": "Nur-Lesen. Aktion (Test/Info-Abruf/Lifecycle/Löschen) erfordert org_admin+.",
+        "readonly_alert": "Sie verfügen nicht über die erforderlichen Geräte-Berechtigungen für eine Aktion.",
         "exec_title": "Ausführung",
         "tooltip_test": "Schneller Ping/Verbindungstest über SSH/SNMP.",
         "tooltip_info": "Hostname/Hersteller/OS/Modell/Serial vom Gerät aktualisieren.",
