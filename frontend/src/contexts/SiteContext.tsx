@@ -229,7 +229,7 @@ export function SiteProvider({ children }: { children: ReactNode }) {
   // resolves on every render to the live route's :organizationId, or
   // null for legacy / platform routes.
   const routeOrgId = useRouteOrgId()
-  const { token } = useAuthStore()
+  const { token, sessionEpoch } = useAuthStore()
   // DASHBOARD-INIT-ROUTER-FIX (2026-06-10) — Zustand persist hidrasyon
   // tamamlanmadan `token` selector eski/null değer dönebiliyor. Hidrasyon
   // pencerisinde useQuery fire ederse interceptor `getState().token` null
@@ -291,7 +291,29 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     // operations panel the URL is authoritative; outside it (routeOrgId
     // === null), the interceptor falls back to localStorage[ACTIVE_ORG_KEY]
     // and the backend receives a consistent X-Org-Id either way.
-    queryKey: ['context', 'current', routeOrgId, activeLocationId],
+    //
+    // P0.2.1 SITECONTEXT SESSION EPOCH REFETCH (2026-06-24) — `sessionEpoch`
+    // sits FIRST after `'current'` so the queryKey shape changes on every
+    // new authenticated session. SiteProvider is mounted ABOVE
+    // ProtectedRoute (in App.tsx between BrowserRouter and Routes) so the
+    // underlying useQuery observer persists across logout/login. With
+    // React Query 5, flipping `enabled` from false → true while leaving
+    // the queryKey untouched can fail to re-trigger queryFn — the prior
+    // session's cache entry was removed (auth.ts logout calls
+    // queryClient.removeQueries({queryKey:['context']})) but the
+    // observer's cached identity is unchanged so it stays idle. Bumping
+    // sessionEpoch in auth.ts setAuth() forces a fresh queryKey identity
+    // per session, which causes React Query to allocate a new internal
+    // observer entry, see `enabled === true`, and fetch fresh. The
+    // routeOrgId / activeLocationId tail is preserved so per-tenant and
+    // per-location cache partitioning from PR-A REVISED still holds
+    // WITHIN a single session.
+    //
+    // Security pin: sessionEpoch is an opaque monotonic integer — the
+    // raw bearer token is intentionally NEVER part of the queryKey. The
+    // value never reaches React Query DevTools, telemetry, error
+    // reports, or browser memory dumps as anything other than "1, 2, 3".
+    queryKey: ['context', 'current', sessionEpoch, routeOrgId, activeLocationId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
     enabled: !!token && hydrated,

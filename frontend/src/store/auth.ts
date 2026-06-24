@@ -26,6 +26,24 @@ interface AuthState {
   token: string | null
   user: AuthUser | null
   permissions: Permissions | null
+  // P0.2.1 SITECONTEXT SESSION EPOCH REFETCH (2026-06-24) —
+  // monotonically-increasing counter that bumps on every successful
+  // setAuth() call. Consumers (notably SiteContext) include it in
+  // their React Query queryKey so the queryKey changes shape on each
+  // new authenticated session — even when nothing else in the key
+  // changed (same routeOrgId, same activeLocationId, same user
+  // logging back in). The token value itself is NEVER in the
+  // queryKey; only this opaque integer is. Trace surfaces (DevTools,
+  // telemetry, error reports) thus never see the bearer.
+  //
+  // The counter is transient runtime state (NOT persisted). On
+  // hydration it resets to its initial value. Two reasons:
+  //   1. After a page reload there is no "previous session" to
+  //      distinguish from — the query observer is fresh either way.
+  //   2. Persisting the value would risk a stale cache from an
+  //      earlier tab/window participating in a queryKey lookup that
+  //      should not be honored.
+  sessionEpoch: number
   // AUTH-PERSIST-HYDRATION-HOTFIX (2026-06-09) — eski `_hasHydrated` state
   // alanı ve setHasHydrated action KALDIRILDI. Zustand v5'te
   // onRehydrateStorage callback içinde set çağrısı zincirlemesi antipattern;
@@ -132,9 +150,20 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       user: null,
       permissions: null,
+      // P0.2.1 (2026-06-24) — see AuthState.sessionEpoch comment.
+      // Initial value 0; first successful setAuth bumps to 1.
+      sessionEpoch: 0,
 
       setAuth: (token, user, permissions = null) =>
-        set({ token, user: normalizeUser(user), permissions }),
+        // P0.2.1 (2026-06-24) — bump sessionEpoch on every authenticated
+        // session change. Read the CURRENT epoch from `get()` so we are
+        // not capturing a stale closure value.
+        set({
+          token,
+          user: normalizeUser(user),
+          permissions,
+          sessionEpoch: get().sessionEpoch + 1,
+        }),
 
       logout: () => {
         // T8.4 — best-effort server-side session revoke. Network hatası
