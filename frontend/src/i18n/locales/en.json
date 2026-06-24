@@ -3013,6 +3013,12 @@
   },
   "platform": {
     "brand_sublabel": "platform control",
+    "shell": {
+      "loading": "Loading platform panel…",
+      "error_title": "Platform panel could not load",
+      "error_desc": "Context could not be fetched. Please try again.",
+      "retry": "Retry"
+    },
     "nav": {
       "overview": "Platform Overview",
       "organizations": "Organizations",
