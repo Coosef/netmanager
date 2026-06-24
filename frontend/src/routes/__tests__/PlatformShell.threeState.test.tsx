@@ -186,6 +186,39 @@ describe('PlatformShell — P0.2 source contract', () => {
     // hasContextFailure branch contains <Result
     expect(codeOnly).toMatch(/if\s*\(hasContextFailure\)[\s\S]{0,400}<Result/)
   })
+
+  it('P0.2 STRICT — no `if (!ctxResolved) return null` fallback anywhere in the file', () => {
+    // Operator's verbatim contract: the previous defensive fallback
+    // must be GONE from PlatformShell entirely. The three-state UI
+    // (loading / error / ready) is the only acceptable shape for the
+    // platform panel; any future regression that re-introduces the
+    // null fallback would resurrect the production blank-page risk.
+    expect(codeOnly).not.toMatch(/if\s*\(!ctxResolved\)\s*return\s+null/)
+    // Defense-in-depth: `ctxResolved` should no longer be destructured
+    // from useSite() in the runtime code path either — keeping it
+    // around invites a future reintroduction.
+    const destructureMatch = codeOnly.match(/const\s*\{\s*([^}]+)\}\s*=\s*useSite\(\)/)
+    expect(destructureMatch).toBeTruthy()
+    expect(destructureMatch![1]).not.toContain('ctxResolved')
+  })
+
+  it('P0.2 STRICT — only three reachable return paths plus user==null pre-token guard', () => {
+    // Pin the return-paths inventory so a future contributor cannot
+    // silently re-add a hidden `return null` for ctx-undefined.
+    // Exhaustive list of acceptable `return` statements in this file:
+    //   1. `if (user == null) return null` — pre-token guard
+    //      (ProtectedRoute upstream is the canonical owner of this
+    //      window; PlatformShell yielding null here is allowed)
+    //   2. sitesLoading → return <div…><Spin…/></div>
+    //   3. hasContextFailure → return <div…><Result…/></div>
+    //   4. non-super → return <Navigate to="/" replace />
+    //   5. default → return <Outlet />
+    const returnNullMatches = (codeOnly.match(/return\s+null/g) ?? []).length
+    // Exactly ONE `return null` — the user==null pre-token guard.
+    expect(returnNullMatches).toBe(1)
+    // The single null path must be gated on user==null, not ctx.
+    expect(codeOnly).toMatch(/if\s*\(user\s*==\s*null\)\s*return\s+null/)
+  })
 })
 
 // ─── i18n key parity (4 locales) ───────────────────────────────────────

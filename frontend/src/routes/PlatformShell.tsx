@@ -50,7 +50,11 @@ import { useSite } from '@/contexts/SiteContext'
  */
 export default function PlatformShell() {
   const user = useAuthStore((s) => s.user)
-  const { ctxResolved, isPlatformSuperAdmin, sitesLoading,
+  // P0.2 STRICT (2026-06-24) — `ctxResolved` intentionally dropped from
+  // this destructure. The three-state UI (sitesLoading / hasContextFailure
+  // / ready) covers every reachable ctx state without needing a fourth
+  // "ctx undefined fallback" path. See header rationale.
+  const { isPlatformSuperAdmin, sitesLoading,
           hasContextFailure, refetchSite } = useSite()
   const { t } = useTranslation()
 
@@ -114,11 +118,14 @@ export default function PlatformShell() {
     )
   }
 
-  // ctxResolved is the redundant "ctx is non-undefined" guard kept
-  // for defense-in-depth. With the loading + error branches above,
-  // this branch is reached only when ctx is present.
-  if (!ctxResolved) return null
-
+  // P0.2 STRICT (2026-06-24) — defensive `if (!ctxResolved) return null`
+  // fallback REMOVED. The two branches above (sitesLoading + hasContext
+  // Failure) provably cover every reachable ctx-undefined state, so the
+  // fallback was dead code. Keeping it left a verbatim text-match
+  // against the operator's "no blank-page paths" contract — strict
+  // removal guarantees `/platform/*` cannot render an empty DOM under
+  // any combination of state, even if a future SiteContext refactor
+  // changes the hasContextFailure formula. Reachable role gate ↓.
   if (user.system_role !== 'super_admin' && !isPlatformSuperAdmin) {
     return <Navigate to="/" replace />
   }
