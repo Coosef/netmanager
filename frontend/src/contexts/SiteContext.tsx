@@ -316,7 +316,46 @@ export function SiteProvider({ children }: { children: ReactNode }) {
     queryKey: ['context', 'current', sessionEpoch, routeOrgId, activeLocationId],
     queryFn: () => contextApi.current(),
     staleTime: 60_000,
-    enabled: !!token && hydrated,
+    // P0.2.2 CONTEXT QUERY TOKEN-ONLY GATE (2026-06-24) — drop the
+    // per-instance `hydrated` flag from this query's enable condition.
+    //
+    // Production audit (P0.2.2 ROOT CAUSE AUDIT): live browser proof
+    // showed /api/v1/context/current never reaching the network even
+    // though the SiteProvider was mounted and the queryKey carried the
+    // P0.2.1 sessionEpoch correctly. Sibling unconditional queries
+    // (monitor-stats, header-recent-events, approval-pending-count)
+    // fired normally, isolating the failure to this one gate.
+    //
+    // The pre-P0.2.2 gate `!!token && hydrated` referenced the local
+    // `hydrated` snapshot from useHasHydrated(). That hook keeps its
+    // state in a per-component useState, and SiteProvider's instance is
+    // distinct from ThemedApp's / ProtectedRoute's. Under some runtime
+    // conditions — cross-tab `onHydrate` callback firing without an
+    // `onFinishHydration` follow-up, persist subscribe-after-fire on the
+    // hook's own listeners, or a Zustand v5 selectorless re-subscription
+    // race — SiteProvider's `hydrated` stayed pinned at false even after
+    // ProtectedRoute's token-first matrix had already admitted the
+    // user. enabled stayed false forever, the observer never refetched,
+    // and the screen showed all three spinners ("Firma bağlamı
+    // yükleniyor / Lokasyonlar yükleniyor / Lokasyon bağlamı
+    // çözümleniyor") in lockstep with ctx=undefined.
+    //
+    // Token is the right gate. Persist always restores `token` AFTER
+    // its hydration completes — so a non-null token IS the proof that
+    // rehydration finished. The DASHBOARD-INIT-ROUTER-FIX hydration
+    // guard (2026-06-10) was a defensive belt-and-braces against an
+    // axios interceptor reading `getState().token` mid-rehydrate; that
+    // race is now closed by the persist v5 synchronous-write contract
+    // and by ProtectedRoute's token-first matrix — every authenticated
+    // render has a fully-hydrated store under it.
+    //
+    // The `hydrated` value is STILL consumed below in `sitesLoading`,
+    // `hasContextFailure`, and the diagnostic console log (and remains
+    // load-bearing for the UI loading copy that LocationGate /
+    // LocationSelector branch on). Removing it from this one place
+    // ONLY decouples the API-fetch trigger from the UI loading flag —
+    // exactly the contract operator specified.
+    enabled: !!token,
     retry: 1,
     retryDelay: 500,
     // PR #101 — drop `placeholderData: (prev) => prev`. React Query 5
