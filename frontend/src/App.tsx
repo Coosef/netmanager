@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { BrowserRouter, Navigate, Route, Routes, useParams } from 'react-router-dom'
 import { App as AntApp, ConfigProvider, theme } from 'antd'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { QueryClientProvider } from '@tanstack/react-query'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 // LANG-INFRA: dayjs locale paketleri + AntD locale registry + dayjs.locale()
@@ -94,11 +94,11 @@ dayjs.extend(relativeTime)
 // LANG-INFRA: dayjs.locale() artık i18n modülünün içindeki languageChanged
 // listener'ı tarafından yönetiliyor (init + dil değişimi otomatik).
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { retry: 1, staleTime: 30000 },
-  },
-})
+// P0.2 (2026-06-24) — single QueryClient instance moved to
+// `@/lib/queryClient` so the auth store's `logout` action can invalidate
+// cached context queries without crossing the React/non-React boundary
+// the inline declaration created. Same defaults, same provider wiring.
+import { queryClient } from '@/lib/queryClient'
 
 // T8.4 — dark theme retuned to the NOC design palette (canvas #070b18,
 // panels #0e1729, borders #1c2538, teal accent #22d3c5) + IBM Plex Sans.

@@ -142,6 +142,26 @@ export const useAuthStore = create<AuthState>()(
         try {
           import('@/api/auth').then(m => m.authApi.logout()).catch(() => {})
         } catch { /* noop */ }
+        // P0.2 (2026-06-24) — SiteContext / `/context/current` cache
+        // temizliği. Önceki implementasyon yalnız local auth state'i
+        // sıfırlıyordu; React Query cache'ine dokunmuyordu. Re-login
+        // pencerede sıralama:
+        //   1. setState({token, user, permissions})  (login flow)
+        //   2. useQuery `enabled: !!token && hydrated` true'ya geçer
+        //   3. React Query queryKey için stale cache ENTRY'sini bulur
+        //      (önceki session'dan kalmış) ve refetch tetiklemeden
+        //      cached `ctx`'i serve eder
+        //   4. Frontend eski organizasyon / lokasyon datasıyla render
+        //      olur → cross-session ctx leak
+        // `queryClient.removeQueries({ queryKey: ['context'] })` cache
+        // entry'sini siler ki bir sonraki enable=true geçişi taze fetch
+        // tetiklesin. invalidateQueries DEĞIL — stale data'yı silmek
+        // istiyoruz, yenilemek değil.
+        try {
+          import('@/lib/queryClient').then(m => {
+            m.queryClient.removeQueries({ queryKey: ['context'] })
+          }).catch(() => {})
+        } catch { /* noop */ }
         set({ token: null, user: null, permissions: null })
       },
 

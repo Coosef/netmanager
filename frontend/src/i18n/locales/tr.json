@@ -3056,6 +3056,12 @@
   },
   "platform": {
     "brand_sublabel": "platform kontrol",
+    "shell": {
+      "loading": "Platform paneli yükleniyor…",
+      "error_title": "Platform paneli yüklenemedi",
+      "error_desc": "Bağlam alınamadı. Lütfen yeniden deneyin.",
+      "retry": "Yenile"
+    },
     "nav": {
       "overview": "Platform Genel Bakış",
       "organizations": "Firmalar",

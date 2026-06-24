@@ -2977,6 +2977,12 @@
   },
   "platform": {
     "brand_sublabel": "Plattform-Steuerung",
+    "shell": {
+      "loading": "Plattform-Panel wird geladen…",
+      "error_title": "Plattform-Panel konnte nicht geladen werden",
+      "error_desc": "Kontext konnte nicht abgerufen werden. Bitte erneut versuchen.",
+      "retry": "Erneut versuchen"
+    },
     "nav": {
       "overview": "Plattform-Übersicht",
       "organizations": "Firmen",

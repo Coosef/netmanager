@@ -1,4 +1,7 @@
 import { Navigate, Outlet } from 'react-router-dom'
+import { Result, Button, Spin } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
+import { useTranslation } from 'react-i18next'
 import { useAuthStore } from '@/store/auth'
 import { useSite } from '@/contexts/SiteContext'
 
@@ -17,17 +20,112 @@ import { useSite } from '@/contexts/SiteContext'
  * identity) rather than `useSite().isSuperAdmin` (the bypass-active
  * flag) — a scoped super-admin who has X-Org-Id active still has the
  * role and must be able to walk back to the platform panel.
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * P0.2 SITECONTEXT HYDRATION RACE + PLATFORM RECOVERY (2026-06-24)
+ *
+ * Production incident: hard refresh on `/platform/organizations` or
+ * `/platform/overview` rendered a FULLY BLANK page. AppLayout skips
+ * LocationGate for platform routes (panelMode==='platform') by
+ * design — the platform panel operates above tenant scope. But the
+ * previous PlatformShell did `if (!ctxResolved) return null` which
+ * produced a totally empty DOM during the hydration window. When the
+ * sibling hydration race (`useHasHydrated.ts`) left `hydrated` stuck
+ * at false, `ctxResolved` stayed false forever, and the operator saw
+ * an indefinite blank screen with no spinner, no error, no retry.
+ *
+ * Replaced with a three-state UI mirroring the LocationGate contract
+ * used on the operations side:
+ *
+ *   1. context loading        → centered Spin with "yükleniyor" tip
+ *   2. context error / stuck  → Result(warning) + "Yenile" button
+ *                               wired to refetchSite()
+ *   3. context ready          → role gate → Outlet
+ *
+ * Loading/error branches use the same i18n keys the operations
+ * LocationGate uses (`location_gate.resolving` / `location_gate.
+ * error_title` / `location_gate.retry`) — operator-facing copy is
+ * already correct ("Bağlamı çözümleniyor / Bağlantı sorunu / Yenile").
+ * No new translations needed.
  */
 export default function PlatformShell() {
   const user = useAuthStore((s) => s.user)
-  const { ctxResolved, isPlatformSuperAdmin } = useSite()
+  // P0.2 STRICT (2026-06-24) — `ctxResolved` intentionally dropped from
+  // this destructure. The three-state UI (sitesLoading / hasContextFailure
+  // / ready) covers every reachable ctx state without needing a fourth
+  // "ctx undefined fallback" path. See header rationale.
+  const { isPlatformSuperAdmin, sitesLoading,
+          hasContextFailure, refetchSite } = useSite()
+  const { t } = useTranslation()
 
-  // Wait for context resolution to avoid a flash redirect during
-  // hydration. user.system_role is locally persisted so it's available
-  // immediately; isPlatformSuperAdmin is the backend-confirmed echo.
+  // Pre-token guard: no auth state yet → render nothing (the auth
+  // store rehydrates synchronously enough that this window is
+  // effectively zero, and ProtectedRoute upstream is the canonical
+  // pre-token spinner owner).
   if (user == null) return null
-  if (!ctxResolved) return null
 
+  // P0.2 (2026-06-24) — context loading: show a visible spinner
+  // instead of the previous `return null` blank screen. Operators
+  // never see a totally empty DOM on /platform/* anymore.
+  if (sitesLoading) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '60vh',
+        }}
+        data-testid="platform-shell-loading"
+      >
+        <Spin size="large" tip={t('platform.shell.loading')}>
+          <div style={{ padding: 48 }} />
+        </Spin>
+      </div>
+    )
+  }
+
+  // P0.2 (2026-06-24) — context error: visible Result + Yenile.
+  // Triggers when sitesLoading went false but ctx is still undefined
+  // (idle + empty + hydrated + token == "stuck" state) OR the
+  // /context/current fetch genuinely failed. Mirrors LocationGate.
+  if (hasContextFailure) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '60vh',
+        }}
+        data-testid="platform-shell-error"
+      >
+        <Result
+          status="warning"
+          title={t('platform.shell.error_title')}
+          subTitle={t('platform.shell.error_desc')}
+          extra={
+            <Button
+              type="primary"
+              icon={<ReloadOutlined />}
+              onClick={() => refetchSite()}
+            >
+              {t('platform.shell.retry')}
+            </Button>
+          }
+        />
+      </div>
+    )
+  }
+
+  // P0.2 STRICT (2026-06-24) — defensive `if (!ctxResolved) return null`
+  // fallback REMOVED. The two branches above (sitesLoading + hasContext
+  // Failure) provably cover every reachable ctx-undefined state, so the
+  // fallback was dead code. Keeping it left a verbatim text-match
+  // against the operator's "no blank-page paths" contract — strict
+  // removal guarantees `/platform/*` cannot render an empty DOM under
+  // any combination of state, even if a future SiteContext refactor
+  // changes the hasContextFailure formula. Reachable role gate ↓.
   if (user.system_role !== 'super_admin' && !isPlatformSuperAdmin) {
     return <Navigate to="/" replace />
   }
