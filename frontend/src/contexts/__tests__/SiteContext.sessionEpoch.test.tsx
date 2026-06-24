@@ -237,13 +237,18 @@ describe('SiteContext — sessionEpoch wired into queryKey', () => {
     expect(keyBody).not.toMatch(/\baccessToken\b/i)
   })
 
-  it('enabled condition preserved exactly: !!token && hydrated (P0.2 regression guard)', () => {
-    // P0.2 fix #1 (3-stage hydration recheck in useHasHydrated) is
-    // useless if the consumer drops the `hydrated` gate. Pin both
-    // the condition AND the absence of the pre-P0.2 single-token
-    // shape.
-    expect(codeOnlySite).toMatch(/enabled:\s*!!token\s*&&\s*hydrated/)
-    expect(codeOnlySite).not.toMatch(/enabled:\s*!!token\s*,/)
+  it('enabled condition is !!token only (P0.2.2 contract)', () => {
+    // P0.2.2 CONTEXT QUERY TOKEN-ONLY GATE (2026-06-24) supersedes the
+    // P0.2 `!!token && hydrated` shape. Live production audit proved
+    // that SiteProvider's per-instance `useHasHydrated()` snapshot
+    // could stay pinned at false even after ProtectedRoute's token-
+    // first matrix had admitted the user, leaving the gate stuck at
+    // false forever. Token is the right gate — see SiteContext.tsx
+    // comment block above the useQuery for the full rationale. The
+    // P0.2.1 sessionEpoch queryKey shape (next test) is preserved
+    // unchanged.
+    expect(codeOnlySite).toMatch(/enabled:\s*!!token\s*,/)
+    expect(codeOnlySite).not.toMatch(/enabled:\s*!!token\s*&&\s*hydrated/)
   })
 })
 

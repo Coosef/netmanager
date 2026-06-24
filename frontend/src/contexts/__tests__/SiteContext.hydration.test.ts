@@ -37,10 +37,24 @@ describe('SiteContext — hidrasyon guard + retry sözleşmesi', () => {
     expect(SRC).toMatch(/const hydrated = useHasHydrated\(\)/)
   })
 
-  it('useQuery enabled: !!token && hydrated (race guard)', () => {
-    expect(SRC).toMatch(/enabled:\s*!!token\s*&&\s*hydrated/)
-    // Eski tek-token enabled REGRESYON guard
-    expect(SRC).not.toMatch(/enabled:\s*!!token\s*,/)
+  it('useQuery enabled: !!token (P0.2.2 token-only gate)', () => {
+    // P0.2.2 CONTEXT QUERY TOKEN-ONLY GATE (2026-06-24) — the
+    // `hydrated` clause was removed from this query's enable
+    // condition after a live audit proved the per-instance
+    // `useHasHydrated()` snapshot inside SiteProvider could stay
+    // pinned at false even when the user was already authenticated
+    // (sibling unconditional queries fired; only this gated query
+    // never reached the network). Token is the right gate: persist
+    // restores `token` ONLY after rehydration completes, so a non-
+    // null token IS the proof that the store is hydrated. See the
+    // SiteContext.tsx comment block above the useQuery for the full
+    // rationale.
+    expect(SRC).toMatch(/enabled:\s*!!token\s*,/)
+    // Defense-in-depth: the pre-P0.2.2 `&& hydrated` clause MUST NOT
+    // come back to this gate. (`hydrated` is still legitimately used
+    // BELOW for `sitesLoading` / `hasContextFailure` / diagnostic
+    // log — those uses are NOT the API-fetch trigger.)
+    expect(SRC).not.toMatch(/enabled:\s*!!token\s*&&\s*hydrated/)
   })
 
   it('retry: 1 + retryDelay: 500 (transient 401 recovery)', () => {
