@@ -48,15 +48,22 @@ describe('SiteContext — hidrasyon guard + retry sözleşmesi', () => {
     expect(SRC).toMatch(/retryDelay:\s*500/)
   })
 
-  it('queryKey routeOrgId + activeLocationId taşıyor (PR-A REVISED URL-authoritative)', () => {
-    // PR-A REVISED (2026-06-22) — queryKey now carries `routeOrgId`
-    // (URL-authoritative) FIRST then `activeLocationId`. The pre-
-    // revision shape `[..., activeLocationId, activeOrgId]` is removed:
-    // the URL is the authority inside /app/org/:id/*, the legacy
-    // activeOrgId localStorage preference falls back via the
-    // interceptor for routes outside the operations panel only.
+  it('queryKey sessionEpoch + routeOrgId + activeLocationId taşıyor (P0.2.1 SESSION EPOCH REFETCH)', () => {
+    // PR-A REVISED (2026-06-22) — queryKey carries `routeOrgId`
+    // (URL-authoritative) and `activeLocationId` for per-tenant +
+    // per-location cache partitioning. The pre-revision shape
+    // `[..., activeLocationId, activeOrgId]` is gone.
+    //
+    // P0.2.1 SITECONTEXT SESSION EPOCH REFETCH (2026-06-24) — `sessionEpoch`
+    // is now inserted between `'current'` and `routeOrgId` so the
+    // queryKey shape changes per login session. Required because the
+    // SiteProvider observer persists across logout/login (mounted above
+    // ProtectedRoute) and React Query 5 will not re-trigger queryFn on
+    // `enabled` false→true when the queryKey is unchanged. See the
+    // SiteContext.tsx comment block above the useQuery call for the
+    // full rationale.
     expect(SRC).toMatch(
-      /queryKey:\s*\['context',\s*'current',\s*routeOrgId,\s*activeLocationId\]/,
+      /queryKey:\s*\['context',\s*'current',\s*sessionEpoch,\s*routeOrgId,\s*activeLocationId\]/,
     )
   })
 

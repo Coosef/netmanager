@@ -97,13 +97,21 @@ describe('SiteContext — PHASE1A setOrganization callback contract', () => {
 
 
 describe('SiteContext — PR-A REVISED queryKey carries routeOrgId (URL-authoritative)', () => {
-  it('queryKey is [context, current, routeOrgId, activeLocationId]', () => {
+  it('queryKey is [context, current, sessionEpoch, routeOrgId, activeLocationId]', () => {
     // PR-A REVISED: queryKey carries `routeOrgId` (URL-authoritative)
-    // first then `activeLocationId`. Replaces the PHASE1A shape
-    // `[..., activeLocationId, activeOrgId]` per the operator
-    // addendum that closed the cache-leak window in PR #108 review.
+    // and `activeLocationId` for per-tenant + per-location cache
+    // partitioning. Replaces the PHASE1A shape `[..., activeLocationId,
+    // activeOrgId]` per the operator addendum that closed the cache-
+    // leak window in PR #108 review.
+    //
+    // P0.2.1 SESSION EPOCH REFETCH (2026-06-24) inserts `sessionEpoch`
+    // between `'current'` and `routeOrgId` so the queryKey identity
+    // changes per authenticated session — needed because SiteProvider
+    // is mounted above ProtectedRoute and its useQuery observer
+    // survives logout/login. The routeOrgId / activeLocationId tail
+    // is preserved verbatim.
     expect(SRC).toMatch(
-      /queryKey:\s*\['context',\s*'current',\s*routeOrgId,\s*activeLocationId\]/,
+      /queryKey:\s*\['context',\s*'current',\s*sessionEpoch,\s*routeOrgId,\s*activeLocationId\]/,
     )
   })
 

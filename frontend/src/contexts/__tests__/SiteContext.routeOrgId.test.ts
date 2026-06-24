@@ -30,11 +30,16 @@ describe('SiteContext — routeOrgId URL-authoritative integration', () => {
     expect(SRC).toMatch(/const routeOrgId = useRouteOrgId\(\)/)
   })
 
-  it('ctx queryKey is [context, current, routeOrgId, activeLocationId]', () => {
-    // PR-A REVISED queryKey shape — routeOrgId FIRST after the namespace,
-    // activeLocationId after. The operator-specified shape exactly.
+  it('ctx queryKey is [context, current, sessionEpoch, routeOrgId, activeLocationId]', () => {
+    // PR-A REVISED queryKey shape — routeOrgId after the namespace,
+    // activeLocationId after. P0.2.1 SESSION EPOCH REFETCH (2026-06-24)
+    // inserts `sessionEpoch` between `'current'` and `routeOrgId` so the
+    // queryKey shape changes per authenticated session. The
+    // routeOrgId / activeLocationId tail is preserved verbatim — per-
+    // tenant + per-location cache partitioning is unchanged WITHIN a
+    // single session.
     expect(SRC).toMatch(
-      /queryKey:\s*\[\s*'context'\s*,\s*'current'\s*,\s*routeOrgId\s*,\s*activeLocationId\s*\]/,
+      /queryKey:\s*\[\s*'context'\s*,\s*'current'\s*,\s*sessionEpoch\s*,\s*routeOrgId\s*,\s*activeLocationId\s*\]/,
     )
   })
 
