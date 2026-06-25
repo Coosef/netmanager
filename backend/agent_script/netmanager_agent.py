@@ -44,6 +44,14 @@ except ImportError:
 try:
     from netmiko import ConnectHandler
     from netmiko.exceptions import NetmikoAuthenticationException, NetmikoTimeoutException
+    # SSH Error Classification v1 (2026-06-25) — ReadTimeout signals
+    # netmiko's prompt detection failure (e.g. command did not return to
+    # base prompt). Surfaced as PROMPT_OR_COMMAND_FAILED so operators can
+    # tell it apart from auth / TCP / enable-mode failures.
+    try:
+        from netmiko.exceptions import ReadTimeout as NetmikoReadTimeout
+    except Exception:  # pragma: no cover — older netmiko before ReadTimeout
+        NetmikoReadTimeout = None  # type: ignore[assignment]
 except ImportError:
     print("Eksik paket: pip install netmiko", file=sys.stderr)
     sys.exit(1)
@@ -736,8 +744,166 @@ def _ssh_test(msg):
         return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
 
 
+# SSH Error Classification v1 (2026-06-25) — canonical layer codes.
+# Backend currently surfaces _ssh_command errors as opaque `str(e)` strings
+# inside a 502 detail. Operators cannot tell auth-fail apart from enable-
+# mode-fail apart from connection-reset, and the Device 96 audit (fetch-
+# info 502 + 27/27 ssh_command fails across 3 latency buckets: 120ms /
+# 450ms / 1700ms) made this gap actionable. This module-level constant
+# is the canonical layer enumeration; tests pin the exact set.
+_SSH_LAYER_CODES = (
+    "AUTH_FAILED",
+    "CONNECTION_TIMEOUT",
+    "CONNECTION_RESET",
+    "ENABLE_MODE_FAILED",
+    "PROMPT_OR_COMMAND_FAILED",
+    "UNKNOWN",
+)
+
+# Substrings that, when found in an exception message, indicate the
+# netmiko/Ruijie driver's enable() call failed mid session_preparation.
+# Netmiko itself raises a generic ValueError / driver-internal exception
+# for enable-mode failures rather than a dedicated class, so a substring
+# match is the most reliable signal that does not depend on netmiko
+# internals we cannot import. The list deliberately covers both the
+# canonical "Failed to enter enable mode" wording and the localized /
+# truncated variants we have observed in agent_command_logs.
+_ENABLE_FAIL_SIGNS = (
+    "Failed to enter enable mode",
+    "failed to enter enable",
+    "enable mode failed",
+    "enable secret",
+    "% Bad secrets",
+    "% Access denied",
+    "Access denied",
+)
+
+# Substrings that signal a prompt / command-timeout / pager-readback
+# failure — netmiko's ReadTimeout class is also caught explicitly above,
+# but older netmiko releases (and certain Ruijie firmware oddities)
+# surface the same condition as a plain Exception with one of these
+# phrases. Keep the list narrow so we never mis-attribute an auth or
+# connection-reset failure to PROMPT_OR_COMMAND_FAILED.
+_PROMPT_FAIL_SIGNS = (
+    "Pattern not detected",
+    "Search pattern never detected",
+    "Unable to enter configuration mode",
+    "Unable to find prompt",
+    "send_command_timing",
+    "Timed-out reading channel",
+)
+
+
+def _redact_secrets(text, msg=None):
+    """Strip any secret-like substrings from an exception message.
+
+    Defense-in-depth: netmiko itself does not embed the password in its
+    error messages, but third-party transports (paramiko, sshtunnel,
+    socket exceptions) can sometimes echo the offending packet bytes.
+    We never want a raw password / enable_secret / token to ride a 502
+    detail back to the operator's browser. Whatever the source of the
+    exception text, scrub any token that matches a value we just sent
+    on the wire.
+
+    The redaction targets:
+      - msg["ssh_password"]      — plaintext password (non-vault path)
+      - msg["enable_secret"]     — plaintext enable secret (non-vault path)
+      - msg["credential_id"]     — vault credential id (numeric — replaced with "<credential_id>")
+
+    Both ssh_username (operator-supplied login name, not secret) and
+    device_ip (already in the request) are left intact for diagnostic
+    value. Returns the redacted string; if `msg` is None or no secret
+    values are present, returns the input unchanged.
+    """
+    if text is None:
+        return ""
+    redacted = str(text)
+    if msg is None:
+        return redacted
+    # Order matters: replace the longest secret first so a partial match
+    # never escapes. We compare lengths defensively.
+    secret_values = []
+    for key in ("ssh_password", "enable_secret"):
+        v = msg.get(key)
+        if isinstance(v, str) and len(v) >= 1:
+            secret_values.append(v)
+    # Replace longest first → a 12-char password whose first 8 chars
+    # happen to match the enable_secret will still be fully scrubbed.
+    for v in sorted(secret_values, key=len, reverse=True):
+        redacted = redacted.replace(v, "***REDACTED***")
+    return redacted
+
+
+def _classify_ssh_exception(exc, msg=None):
+    """Map a netmiko / socket / generic exception to (layer_code, detail).
+
+    layer_code is one of `_SSH_LAYER_CODES`.
+    detail is a safe diagnostic string with secrets redacted via
+    `_redact_secrets`. Callers concatenate as `f"{layer_code}: {detail}"`
+    so the resulting `result["error"]` is the operator-facing surface:
+
+        "AUTH_FAILED: Authentication failure on the device"
+        "CONNECTION_TIMEOUT: Connection timed out after 30s"
+        "CONNECTION_RESET: Connection reset by peer"
+        "ENABLE_MODE_FAILED: Failed to enter enable mode"
+        "PROMPT_OR_COMMAND_FAILED: Pattern not detected: ..."
+        "UNKNOWN: <safe-redacted-fallback>"
+
+    Backward compatibility: backend
+    `fetch-info → ssh_manager.execute_command → _ssh_command` chain
+    already concatenates the agent's `error` string into the HTTP 502
+    detail as `f"SSH error: {result.error}"`. So the operator-visible
+    detail becomes `"SSH error: AUTH_FAILED: ..."`. Existing UI string
+    handling continues to work; the new layer prefix is additive.
+
+    Pure / side-effect-free so tests can exercise it with cheap
+    exception fixtures (no network, no agent, no netmiko handshake).
+    """
+    detail = _redact_secrets(exc, msg=msg)
+    # Explicit class-based detection first — most reliable.
+    if isinstance(exc, NetmikoAuthenticationException):
+        return "AUTH_FAILED", detail
+    if isinstance(exc, NetmikoTimeoutException):
+        return "CONNECTION_TIMEOUT", detail
+    if NetmikoReadTimeout is not None and isinstance(exc, NetmikoReadTimeout):
+        return "PROMPT_OR_COMMAND_FAILED", detail
+    # Python built-in socket / connection signals.
+    if isinstance(exc, ConnectionResetError):
+        return "CONNECTION_RESET", detail
+    if isinstance(exc, ConnectionRefusedError):
+        # Refused is operationally a reset-class signal for the operator
+        # (TCP rejected the connect); group with CONNECTION_RESET so the
+        # operator-facing semantic is "the device side terminated the
+        # attempt", not "the TCP path is broken".
+        return "CONNECTION_RESET", detail
+    if isinstance(exc, TimeoutError):
+        # Python 3.10+ unified TimeoutError (used to be socket.timeout).
+        return "CONNECTION_TIMEOUT", detail
+    # Substring-based detection for exceptions whose class is generic
+    # (Netmiko's enable() failure typically raises ValueError; some
+    # Ruijie-specific responses arrive as a plain Exception).
+    exc_text_for_match = str(exc) or ""
+    for sign in _ENABLE_FAIL_SIGNS:
+        if sign.lower() in exc_text_for_match.lower():
+            return "ENABLE_MODE_FAILED", detail
+    for sign in _PROMPT_FAIL_SIGNS:
+        if sign in exc_text_for_match:
+            return "PROMPT_OR_COMMAND_FAILED", detail
+    # Generic OSError covers a wide range of socket-level failures we
+    # have not specialised above. Falls back to UNKNOWN rather than a
+    # speculative class assignment.
+    return "UNKNOWN", detail
+
+
 def _ssh_command(msg):
-    """Uses pooled connection. QF-5 — per-entry lock serializes same-device commands."""
+    """Uses pooled connection. QF-5 — per-entry lock serializes same-device commands.
+
+    SSH Error Classification v1 (2026-06-25) — on failure, the returned
+    `error` string carries a canonical layer prefix from
+    `_classify_ssh_exception`. Pool eviction behavior is preserved
+    (same line ordering as the pre-v1 catch-all). The success path is
+    untouched.
+    """
     t0 = time.time()
     try:
         entry = _pool_acquire(msg)
@@ -750,7 +916,12 @@ def _ssh_command(msg):
         key = (params["host"], params["port"], params["username"])
         with _pool_lock:
             _ssh_pool.pop(key, None)
-        return {"success": False, "error": str(e), "duration_ms": round((time.time() - t0) * 1000)}
+        layer, detail = _classify_ssh_exception(e, msg=msg)
+        return {
+            "success": False,
+            "error": "{}: {}".format(layer, detail),
+            "duration_ms": round((time.time() - t0) * 1000),
+        }
 
 
 def _ssh_config(msg):
