@@ -1505,6 +1505,19 @@ class AgentManager:
         # under an unscoped session). We resolve the agent's org/location
         # ourselves (in-memory meta first, then a super-admin DB lookup for
         # cold-start cases) and stamp the row explicitly.
+        #
+        # TD-22 follow-up (PR `fix/agent-write-rls-context`) — stamping the
+        # row columns alone is NOT enough: the agent_command_logs RLS policy
+        # carries a strict `WITH CHECK = _ORG` clause, and the SQLAlchemy ORM
+        # session.add(...) path emits `INSERT … RETURNING agent_command_logs.id`,
+        # which forces Postgres to re-read the row through `USING`. With an
+        # empty `app.current_org_id` GUC, that read evaluates `organization_id
+        # = NULLIF('','')::int` as NULL and Postgres raises 42501. The fix is
+        # to push the resolved org/loc onto the same transaction's GUCs
+        # *before* the INSERT runs, so both WITH CHECK and the RETURNING
+        # re-read pass. The org/loc are taken from the trusted resolver
+        # (cached _meta or super-admin DB lookup), never from an agent
+        # payload.
         try:
             from app.core.database import make_worker_session
             from app.models.agent_command_log import AgentCommandLog
@@ -1517,6 +1530,7 @@ class AgentManager:
                 return
 
             async with make_worker_session()() as db:
+                await self._apply_worker_rls_context(db, org_id, loc_id)
                 entry = AgentCommandLog(
                     agent_id=agent_id,
                     device_id=device_id,
@@ -1535,6 +1549,51 @@ class AgentManager:
                 await db.commit()
         except Exception as e:
             log.debug(f"Command log persist error: {e}")
+
+    async def _apply_worker_rls_context(
+        self, db, org_id: int, loc_id: Optional[int],
+    ) -> None:
+        """Push the agent's org/loc onto the active worker transaction's
+        RLS GUCs (TD-22 fix).
+
+        The standard ``app.core.rls.apply_rls_context`` reads from
+        ``org_context`` ContextVars, which is the right behaviour for
+        request handlers but useless for worker / agent-relay sessions:
+        the WS handler that triggers these writes is not a FastAPI
+        request and never enters the org_context middleware. The T8.4
+        hotfix worked around the FAIL-CLOSED scoping check by stamping
+        the row columns directly, but Postgres still re-reads the new
+        row through ``USING`` whenever an ``INSERT … RETURNING`` is
+        emitted (and SQLAlchemy ORM ``session.add`` always adds
+        RETURNING for the serial id). The GUCs are therefore required
+        as well.
+
+        Arguments are the trusted (org_id, loc_id) tuple from
+        ``_resolve_agent_scope`` — caller payloads are never accepted
+        as a source.
+
+        SQLite path: ``set_config`` does not exist there; we no-op.
+        """
+        try:
+            bind = db.get_bind()
+            if bind is not None and bind.dialect.name != "postgresql":
+                return
+            from sqlalchemy import text as _sql_text
+            await db.execute(
+                _sql_text(
+                    "SELECT set_config('app.current_org_id',      :oid, true), "
+                    "       set_config('app.current_location_id', :lid, true)"
+                ),
+                {
+                    "oid": str(org_id),
+                    "lid": str(loc_id) if loc_id is not None else "",
+                },
+            )
+        except Exception as e:
+            # Don't let GUC plumbing kill the parent — the parent ORM
+            # write will surface its own RLS error if the GUC isn't
+            # actually in place.
+            log.debug(f"worker RLS context apply failed: {e}")
 
     async def _resolve_agent_scope(self, agent_id: str) -> tuple[Optional[int], Optional[int]]:
         """Return (organization_id, location_id) for an agent.
@@ -1589,6 +1648,16 @@ class AgentManager:
         # location_id. The worker session has no RLS context; stamp the
         # agent's scope explicitly (cached in _meta from WS connect, with a
         # super-admin DB fallback).
+        #
+        # TD-22 follow-up (PR `fix/agent-write-rls-context`) — same RLS
+        # GUC plumbing the command-log path now does: the Core
+        # `insert(...).on_conflict_do_update(...)` statement emits an
+        # `INSERT … RETURNING agent_device_latencies.id`, which
+        # Postgres rejects through the strict `USING = _ORG` clause
+        # whenever the worker session's `app.current_org_id` GUC is
+        # empty. Pushing the resolved org/loc onto the transaction
+        # *before* the INSERT runs makes both WITH CHECK and the
+        # RETURNING re-read pass.
         try:
             from sqlalchemy.dialects.postgresql import insert
             from app.core.database import make_worker_session
@@ -1600,6 +1669,7 @@ class AgentManager:
                 return
 
             async with make_worker_session()() as db:
+                await self._apply_worker_rls_context(db, org_id, loc_id)
                 stmt = (
                     insert(AgentDeviceLatency)
                     .values(
