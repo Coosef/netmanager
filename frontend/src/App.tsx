@@ -13,6 +13,8 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { ThemeProvider, useTheme } from '@/contexts/ThemeContext'
 import { CustomizeProvider } from '@/contexts/CustomizeContext'
 import { SiteProvider } from '@/contexts/SiteContext'
+import { AIAssistantProvider } from '@/contexts/AIAssistantContext'
+import AIAssistantDrawer from '@/components/AIAssistantDrawer'
 import { useAuthStore } from '@/store/auth'
 import { useHasHydrated } from '@/hooks/useHasHydrated'
 import type { SystemRole } from '@/types'
@@ -307,6 +309,14 @@ function ThemedApp() {
             dependency. */}
         <BrowserRouter>
           <SiteProvider>
+          <AIAssistantProvider>
+          {/* Global AI assistant drawer — mounts once at app level, stays
+              open across route changes. The entry point is in <Header />
+              and is itself permission-gated. Mounting the drawer here
+              (vs. inside individual routes) is what makes "open from
+              any page, keep open across navigation" work without
+              re-mount churn. */}
+          <AIAssistantDrawer />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/invite" element={<InviteAcceptPage />} />
@@ -506,6 +516,7 @@ function ThemedApp() {
               <Route path="escalation-rules" element={<RoleRoute minRole="org_admin"><EscalationRulesPage /></RoleRoute>} />
             </Route>
           </Routes>
+          </AIAssistantProvider>
           </SiteProvider>
         </BrowserRouter>
       </AntApp>

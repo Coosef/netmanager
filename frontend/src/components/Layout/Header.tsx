@@ -20,6 +20,7 @@ import { useCustomize } from '@/contexts/CustomizeContext'
 import LocationSelector from './LocationSelector'
 import OrganizationSelector from './OrganizationSelector'
 import OrgBadge from './OrgBadge'
+import AIAssistantButton from './AIAssistantButton'
 import { detectPanelMode } from '@/utils/panelMode'
 import { useTranslation } from 'react-i18next'
 import dayjs from 'dayjs'
@@ -395,6 +396,11 @@ export default function AppHeader({ onOpenSearch, onOpenMobileNav }: { onOpenSea
             </span>
           </Tooltip>
         )}
+
+        {/* Global AI Assistant entry — permission-gated to org_admin+.
+            Sits next to Notifications so the icon density matches the
+            existing nm-iconbtn rhythm in mobile + desktop layouts. */}
+        <AIAssistantButton />
 
         <Popover
           content={notifContent}
