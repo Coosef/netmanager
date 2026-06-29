@@ -496,14 +496,67 @@ class AgentManager:
                     is_flapping = r.get("flapping", False)
                     ip = r.get("ip", "")
 
-                    # Update device status in DB
-                    new_status = DeviceStatus.ONLINE if reachable else DeviceStatus.OFFLINE
+                    # Telemetry-aware status resolution. The agent's own
+                    # device_status_report is the primary signal — when
+                    # reachable=true we still go straight to ONLINE — but
+                    # when reachable=false we now consult the resolver
+                    # so a recent SSH/PoE/MAC success can VETO the
+                    # OFFLINE write. Without this, a single failed ICMP
+                    # probe inside the agent (transient WS blip or
+                    # midway-through credential rotate) would mark a
+                    # healthy device OFFLINE for the next 5+ minutes.
+                    from app.services.device_status_resolver import (
+                        get_latest_device_signal_async,
+                        resolve_device_status,
+                        REASON_AGENT_REPORT,
+                    )
+                    # Pull the current Device row so the resolver sees
+                    # the freshest last_seen + current status.
+                    device_row = (await db.execute(
+                        select(Device).where(Device.id == device_id)
+                    )).scalar_one_or_none()
+                    if device_row is None:
+                        continue
+                    signal = await get_latest_device_signal_async(db, device_id, now=now_utc)
+                    resolved = resolve_device_status(
+                        device_row, signal,
+                        agent_online=True,
+                        agent_reachable_report=bool(reachable),
+                        icmp_reachable=None,
+                        now=now_utc,
+                    )
+                    new_status = resolved.status
                     values: dict = {"status": new_status}
-                    if reachable:
+                    # Only stamp last_seen forward when we are actually
+                    # claiming ONLINE. Going to OFFLINE preserves the
+                    # last successful timestamp (same as the previous
+                    # behaviour).
+                    if new_status == DeviceStatus.ONLINE.value:
                         values["last_seen"] = datetime.now(timezone.utc)
                     await db.execute(
                         update(Device).where(Device.id == device_id).values(**values)
                     )
+                    # Surface the resolver reason via Redis (no schema
+                    # migration). UI / debug can read this side key.
+                    try:
+                        _redis.setex(
+                            f"device:{device_id}:status:reason", 600,
+                            resolved.reason,
+                        )
+                    except Exception:
+                        pass
+                    # If the resolver overruled the agent's reachable=false
+                    # because of fresh telemetry, the row stays ONLINE and
+                    # we skip the rest of the event-firing block.
+                    if not reachable and new_status == DeviceStatus.ONLINE.value:
+                        log.debug(
+                            "device %s OFFLINE report vetoed by fresh telemetry (reason=%s)",
+                            device_id, resolved.reason,
+                        )
+                        continue
+                    # Convert the resolver's status string back to the
+                    # boolean the legacy event-firing block below expects.
+                    reachable = new_status == DeviceStatus.ONLINE.value
 
                     # Skip event creation if device is in an active maintenance window
                     if _in_maintenance(device_id):

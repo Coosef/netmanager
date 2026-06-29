@@ -17,6 +17,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { devicesApi } from '@/api/devices'
 import { useSite } from '@/contexts/SiteContext'
+import { useEventStream } from '@/hooks/useEventStream'
 import { DETAIL_TABS, normalizeTab, type TabKey } from './detail/_tabs'
 import OverviewTab from './detail/OverviewTab'
 import SecurityPoliciesTab from './detail/SecurityPoliciesTab'
@@ -82,6 +83,26 @@ export default function DeviceDetailPage() {
     [healthData, id],
   )
   const risk = riskFromScore(healthScore)
+
+  // fix/device-status-telemetry-aware-recovery — invalidate the cached
+  // device row + fleet health-scores the moment the backend publishes a
+  // status change for THIS device. Without this the React Query 5-min
+  // staleTime would keep showing a stale OFFLINE pill after the resolver
+  // has already lifted the row back to ONLINE. We only invalidate on the
+  // three status-affecting event types so unrelated NetworkEvent frames
+  // don't trigger needless refetches.
+  useEventStream({
+    enabled: Number.isFinite(id) && id > 0,
+    onEvent: (frame: any) => {
+      if (!frame || typeof frame !== 'object') return
+      if (frame.device_id !== id) return
+      const t = frame.event_type
+      if (t === 'device_offline' || t === 'device_online' || t === 'device_flapping') {
+        qc.invalidateQueries({ queryKey: ['device', id] })
+        qc.invalidateQueries({ queryKey: ['device-health-scores-fleet'] })
+      }
+    },
+  })
 
   // Wave 2 #2 F1 — Quick Action: Yedek Al
   const takeBackupMut = useMutation({

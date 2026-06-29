@@ -302,11 +302,38 @@ Kaynak: MFA J1+J10 forensic doğrulama — historical internal context, VERIFY B
 
 ---
 
+## TD-21 — Device status telemetry-aware fallback
+
+| Alan | Değer |
+|---|---|
+| Status | **IN IMPLEMENTATION** — branch `fix/device-status-telemetry-aware-recovery`; not yet merged |
+| Etki | `_check_device_reachable` self-locked agent-online devices to whatever was in DB (`return device.status == ONLINE`). Once a device was ever written OFFLINE the poller kept reporting it OFFLINE regardless of how much fresh SSH / PoE / MAC telemetry had arrived since. Operators saw "panel-fresh data but UI shows Offline" |
+| Risk | Operator distrust: "the data is here but the badge is wrong" → wasted incident triage, ungrounded restart attempts |
+| Geçici çözüm | None — branch ships the actual fix |
+| Kalıcı öneri | New service `backend/app/services/device_status_resolver.py` exposes a pure `resolve_device_status(...)` resolver consulting agent_command_logs success, fresh PoE / MAC snapshot and Device.last_seen as recovery signals, with a failure-newer-than-success veto. Plugged into both call sites (`monitor_tasks._check_device_reachable` and `agent_manager._handle_device_status_report`). Two new config knobs `STATUS_TELEMETRY_FRESH_WINDOW_SECONDS=600` and `STATUS_AGENT_REPORT_FRESH_WINDOW_SECONDS=180` |
+| Öncelik | **P1** |
+| Blast radius | Medium — touches the hottest poll path. The resolver is pure and well-tested; behaviour change is additive (no device that was correctly OFFLINE under the old rules will incorrectly flip to ONLINE under the new ones because of the failure veto) |
+
+Kaynak: Read-only diagnosis report on Device 10.255.0.49 (S0_0.49) — current internal context.
+
+### Status semantics — quick reference
+
+For future readers debugging the status pill / risk pill confusion:
+
+| UI element | Backend signal | Resolution |
+|---|---|---|
+| **Status badge** (online / offline / unknown / unreachable) | `Device.status` (DeviceStatus enum) | Reachability — telemetry-aware (TD-21) |
+| **Risk pill** (HEALTHY / WATCH / CRITICAL) | `GET /api/v1/devices/health-scores → score` | Score band (≥80 HEALTHY, 50–79 WATCH, <50 CRITICAL) computed in devices.py from current status + critical events + drift + backup freshness |
+
+Device **status ≠ risk pill**. **WATCH** is a health score band (50–79), not a reachability state — a device that goes OFFLINE is penalised −40 in the score, which mathematically lands at 60 → WATCH; that is the formula working as designed, not a separate failure mode.
+
+---
+
 ## Genel öncelik sıralaması
 
 | Öncelik | Maddeler |
 |---|---|
-| **P1** | TD-5 (privilege-denied parser), TD-12 (worker RLS regression), TD-15 (VPS drift) |
+| **P1** | TD-5 (privilege-denied parser), TD-12 (worker RLS regression), TD-15 (VPS drift), TD-21 (status telemetry-aware fallback — **IN IMPLEMENTATION**) |
 | **P2** | TD-1 (VLAN collector), TD-2+TD-3 (pool/cache stale), TD-4 (error classification UI), TD-6 (collection observability), TD-9 (audit source device), TD-10 (UI empty state), TD-13 (agent terminal perf), TD-16 (CF cache), TD-20 (frontend permission catalog) |
 | **P3** | TD-7 (event_consumer scale), TD-8 (runbook polish), TD-11 (metadata), TD-14 (backend creds defense), TD-17 (blank screen koruma), TD-18 (topology stacking), TD-19 (MFA hardening) |
 
