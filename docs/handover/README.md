@@ -19,6 +19,17 @@ Devir alacak ekip için önerilen okuma sırası:
 7. Mühendislik kuyruğu: **03 → 04 → 12**
 8. **[15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md](15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md)** — İmza/teslim
 
+### Teslim günü ve canlı ortam tamamlama (16–19)
+
+01–15 dosyaları **mimari + kalıcı bilgi** taşır. 16–19 dosyaları ise **teslim gününün operasyonel iskeletidir** — VERIFY BEFORE HANDOVER alanlarının canlı ortamdan doldurulduğu noktadır:
+
+9. **[19-HANDOVER-DAY-RUNBOOK.md](19-HANDOVER-DAY-RUNBOOK.md)** — Teslim gününün T-7 → T+30 zaman çizelgesi (önce bunu oku)
+10. **[16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md](16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md)** — VERIFY alanlarının canlı doldurulduğu şablon
+11. **[17-ACCESS-AND-OWNERSHIP-MATRIX.md](17-ACCESS-AND-OWNERSHIP-MATRIX.md)** — Sahiplik / erişim devri matrisi (Primary + Backup Owner, MFA, son doğrulama)
+12. **[18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md](18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md)** — Production'da read-only kanıt toplama şablonu
+
+> **Acceptance kuralı:** [15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md](15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md) §M imzaları, **16'nın doldurulmuş**, **17'nin sahipli**, **18'in PASS** olduğu durumda açılır.
+
 ## Komut etiketleri — risk sınıflandırması
 
 Tüm doküman içindeki shell komutları aşağıdaki etiketlerden biriyle başlar:

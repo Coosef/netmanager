@@ -25,6 +25,10 @@
 | [13-OPERATIONS-CHECKLISTS.md](docs/handover/13-OPERATIONS-CHECKLISTS.md) | Günlük/haftalık/event-driven checklistler | NOC / DevOps |
 | [14-SECRETS-ACCESS-HANDOVER-TEMPLATE.md](docs/handover/14-SECRETS-ACCESS-HANDOVER-TEMPLATE.md) | Erişim sahipliği şablonu (boş, doldurulacak) | Tüm taraflar |
 | [15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md](docs/handover/15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md) | İmza/teslim checklisti | Devir alan + devir veren |
+| [16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md](docs/handover/16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md) | Teslim günü VERIFY alanlarını canlı doldurma şablonu | Her iki ekip |
+| [17-ACCESS-AND-OWNERSHIP-MATRIX.md](docs/handover/17-ACCESS-AND-OWNERSHIP-MATRIX.md) | Sahiplik / erişim devri matrisi (gerçek değer yok) | Her iki ekip |
+| [18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md](docs/handover/18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md) | Production'da read-only kanıt toplama şablonu | Devir alan SRE |
+| [19-HANDOVER-DAY-RUNBOOK.md](docs/handover/19-HANDOVER-DAY-RUNBOOK.md) | Teslim günü zaman çizelgesi ve aşama checklisti | Her iki ekibin proje sahipleri |
 
 ## Risk sınıflandırması
 

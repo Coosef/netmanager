@@ -4,6 +4,23 @@ Bu doküman **devir alan** ve **devir veren** ekiplerin birlikte doldurup imzala
 
 > Tüm satırlar **iki tarafça** işaretlenir. Bir kalem **belirsiz** kaldıysa o kalem **doldurulup imzalanmadan** devir tamamlanmış sayılmaz.
 
+## Bağlantılı dokümanlar (16–19)
+
+Bu checklist'in **her bölümünün arkasında** aşağıdaki canlı şablonlar durur:
+
+- [19-HANDOVER-DAY-RUNBOOK.md](19-HANDOVER-DAY-RUNBOOK.md) — Teslim gününün T-7 → T+30 zaman çizelgesi.
+- [16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md](16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md) — VERIFY alanlarının canlı doldurulduğu şablon.
+- [17-ACCESS-AND-OWNERSHIP-MATRIX.md](17-ACCESS-AND-OWNERSHIP-MATRIX.md) — Sahiplik / erişim devri matrisi.
+- [18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md](18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md) — Read-only kanıt toplama şablonu.
+
+## Üç bloklayıcı şart (handover gating)
+
+**Aşağıdaki üç şartın hiçbiri esnetilemez:**
+
+1. **Access owner belirlenmeden handover complete kabul edilmez.** [17-ACCESS-AND-OWNERSHIP-MATRIX.md](17-ACCESS-AND-OWNERSHIP-MATRIX.md)'in her satırı Primary + Backup Owner sütunları **dolu** olmalı. Tek kişiye bağlı erişim handover'ı bloklar.
+2. **Backup restore kanıtı olmadan acceptance imzalanmaz.** [18 §12](18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md) PASS olarak işaretli + RTO ölçümü + kanıt eki bulunmalı.
+3. **VERIFY BEFORE HANDOVER alanlarının her biri CONFIRMED / PENDING / RISK ACCEPTED durumuna bağlanmadan handover kapanmaz.** [16 §17](16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md) genel gating tablosunun dört sorusu yanıtlanmış olmalı.
+
 ---
 
 ## A — Repository erişimi

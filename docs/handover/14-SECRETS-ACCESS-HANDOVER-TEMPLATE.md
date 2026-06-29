@@ -7,6 +7,26 @@
 
 Devir alan ekip her satırı doldurulmuş + sahibi onaylanmış olarak alır, sonra burayı **boş** olarak commit eder (tarihsel kayıt için).
 
+## Bağlantılı dokümanlar (16–19)
+
+Bu şablon **kim hangi credential'ı vault'tan alacak** sorusunu cevaplar.
+**Erişim sahipliği** matrisi ayrı bir dokümandır:
+
+- [17-ACCESS-AND-OWNERSHIP-MATRIX.md](17-ACCESS-AND-OWNERSHIP-MATRIX.md) — Her sistemin Primary + Backup Owner'ı, erişim yöntemi, MFA gerekliliği, son doğrulama tarihi.
+- [16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md](16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md) — VERIFY BEFORE HANDOVER alanlarının teslim günü doldurulduğu çalışma sayfası.
+- [18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md](18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md) — Read-only kanıt toplama şablonu.
+- [19-HANDOVER-DAY-RUNBOOK.md](19-HANDOVER-DAY-RUNBOOK.md) — Teslim gününün zaman çizelgesi.
+
+## Handover gating — bu dosyayla bağlı kurallar
+
+Aşağıdaki **üç şart sağlanmadan handover kapanmaz** ([15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md](15-ACCEPTANCE-AND-HANDOVER-CHECKLIST.md) ile bağlanır):
+
+1. **Access owner belirlenmeden handover complete kabul edilmez.** Bu dosyanın her satırı ve [17-ACCESS-AND-OWNERSHIP-MATRIX.md](17-ACCESS-AND-OWNERSHIP-MATRIX.md) Primary + Backup Owner sütunları **dolu** olmalı. Tek kişiye bağlı erişim **handover'ı bloklar**.
+2. **Backup restore kanıtı olmadan acceptance imzalanmaz.** [10-MONITORING-BACKUP-RECOVERY-RUNBOOK.md §5](10-MONITORING-BACKUP-RECOVERY-RUNBOOK.md) prosedürüyle **staging** env'da yapılmış bir başarılı restore tatbikatı + ölçülmüş RTO + kanıt eki ([18 §12](18-PRODUCTION-VALIDATION-EVIDENCE-TEMPLATE.md)) zorunludur.
+3. **VERIFY BEFORE HANDOVER alanlarının her biri CONFIRMED / PENDING / RISK ACCEPTED durumuna bağlanmadan handover kapanmaz.** [16 §17 genel handover gating](16-LIVE-ENVIRONMENT-COMPLETION-WORKSHEET.md) tablosundaki dört sorunun tamamı yanıtlanmış olmalı; PENDING durumda kalan kritik satırlar varsa handover ya **ertelenir** ya da satır RISK ACCEPTED olarak kabul edilen + sahibi + tahmini kalıcı çözüm tarihiyle imzalanır.
+
+---
+
 ---
 
 ## 1. VPS erişim sahibi
