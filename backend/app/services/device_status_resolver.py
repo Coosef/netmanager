@@ -372,17 +372,36 @@ def resolve_device_status(
 
     Decision order (first match wins):
       1. agent_online + agent reports reachable=true       → ONLINE  (agent_report)
-      2. agent_online + telemetry fresh                    → ONLINE  (fresh_*)
-      3. agent_online + telemetry stale + reachable=false  → OFFLINE (agent_report)
+      2. agent_online + agent reports reachable=false      → OFFLINE (agent_report)
+      3. agent_online + no agent report + telemetry fresh  → ONLINE  (fresh_*)
       4. agent offline / no agent + icmp_reachable=true    → ONLINE  (backend_icmp)
       5. agent offline / no agent + icmp_reachable=false   → OFFLINE (backend_icmp)
       6. nothing actionable                                → preserve device.status
                                                               (stale_or_unknown)
+
+    Signal precedence (QA fix for PR #121 — preserve verbatim):
+
+      An explicit agent reachability report ALWAYS wins over telemetry
+      freshness when the agent is online. The agent's report is, by
+      construction, the newest available reachability measurement
+      (timestamp = the moment the agent's status loop sampled it,
+      anchored at `now` when _handle_device_status_report runs). A
+      telemetry success from N seconds ago cannot overrule a "right now,
+      I just probed it and it isn't reachable" — that produced a real
+      false-positive ONLINE in the first revision of this resolver.
+
+      Telemetry freshness therefore acts ONLY as a recovery signal when
+      the caller did NOT supply an explicit boolean — i.e. the Celery
+      poller path (`_check_device_reachable`) which never has an
+      in-flight device_status_report. The condition is written
+      `agent_reachable_report is None` (not `not agent_reachable_report`)
+      so a deliberate False can never accidentally fall through to the
+      telemetry block.
     """
     now = now or datetime.now(timezone.utc)
     freshness = get_device_telemetry_freshness(device, signal, now=now)
 
-    # 1.
+    # 1. Agent positively confirms reachability (newest reachability signal).
     if agent_online and agent_reachable_report is True:
         return ResolvedStatus(
             status=DeviceStatus.ONLINE.value,
@@ -390,8 +409,29 @@ def resolve_device_status(
             detail={"agent_reachable": True},
         )
 
-    # 2.
-    if agent_online and freshness["fresh"]:
+    # 2. Agent explicitly reports unreachability (newest reachability signal).
+    #    Telemetry freshness CANNOT overrule this — see the precedence note
+    #    above. The newest_success / blocking_failure timestamps still go
+    #    into the detail blob for debug visibility.
+    if agent_online and agent_reachable_report is False:
+        block_ts = freshness.get("blocking_failure_ts")
+        newest_ts = freshness.get("newest_success_ts")
+        return ResolvedStatus(
+            status=DeviceStatus.OFFLINE.value,
+            reason=REASON_AGENT_REPORT,
+            detail={
+                "agent_reachable": False,
+                "blocking_failure_ts": block_ts.isoformat() if block_ts else None,
+                # Telemetry-aware recovery is suppressed here on purpose;
+                # surface the suppressed signal for debug/audit.
+                "suppressed_fresh_success_ts": newest_ts.isoformat() if newest_ts else None,
+            },
+        )
+
+    # 3. No agent report this turn — telemetry can recover a stuck
+    #    OFFLINE. Explicit `is None` (not falsy) so a False can never
+    #    accidentally fall through.
+    if agent_online and agent_reachable_report is None and freshness["fresh"]:
         reason = (
             REASON_FRESH_SSH
             if freshness["newest_success_kind"] == "fresh_ssh_telemetry"
@@ -404,18 +444,6 @@ def resolve_device_status(
             detail={
                 "newest_success_ts": ts.isoformat() if ts else None,
                 "newest_success_kind": freshness["newest_success_kind"],
-            },
-        )
-
-    # 3.
-    if agent_online and agent_reachable_report is False:
-        block_ts = freshness.get("blocking_failure_ts")
-        return ResolvedStatus(
-            status=DeviceStatus.OFFLINE.value,
-            reason=REASON_AGENT_REPORT,
-            detail={
-                "agent_reachable": False,
-                "blocking_failure_ts": block_ts.isoformat() if block_ts else None,
             },
         )
 

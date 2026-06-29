@@ -260,6 +260,83 @@ def test_agent_report_reachable_true_dominates_freshness():
     assert resolved.reason == REASON_AGENT_REPORT
 
 
+# ── QA precedence fix (PR #121 signal precedence review) ──────────────────
+#
+# The first revision of the resolver placed the "fresh telemetry" rule
+# BEFORE the "agent reports reachable=false" rule. That meant a fresh
+# successful SSH command from 60 s ago could overrule the agent's
+# right-now reachable=false probe — producing a false-positive ONLINE on
+# cable pulls, reboots and WS blips. The fix is a single-block reorder
+# in resolve_device_status; these tests pin the new precedence so a
+# future refactor cannot silently bring the bug back.
+
+def test_unreachable_report_overrules_fresh_telemetry():
+    """Signal precedence regression: an explicit reachable=false MUST win
+    over fresh telemetry, because the agent report is — by construction —
+    the newest reachability measurement available.
+
+    Setup mirrors the operator's worst-case timeline: a successful SSH
+    command ~60 s ago AND a fresh PoE snapshot, with the agent now
+    reporting the device unreachable. The previous (buggy) rule order
+    returned ONLINE here; the fix returns OFFLINE / agent_report."""
+    device = make_device(status=DeviceStatus.ONLINE.value)
+    success_ts = NOW - timedelta(seconds=60)
+    poe_ts = NOW - timedelta(seconds=45)
+    signal = DeviceSignal(
+        last_command_success_ts=success_ts,
+        last_command_failure_ts=None,
+        last_command_failure_kind=None,
+        last_poe_snapshot_ts=poe_ts,
+        last_mac_snapshot_ts=None,
+    )
+    resolved = resolve_device_status(
+        device, signal,
+        agent_online=True,
+        agent_reachable_report=False,
+        icmp_reachable=None,
+        now=NOW,
+    )
+    assert resolved.status == DeviceStatus.OFFLINE.value
+    assert resolved.reason == REASON_AGENT_REPORT
+    # The suppressed-but-real fresh success is exposed via detail for
+    # debug; that contract is part of the precedence fix.
+    assert resolved.detail.get("agent_reachable") is False
+    assert resolved.detail.get("suppressed_fresh_success_ts") is not None
+
+
+def test_newer_success_after_older_connectivity_failure_is_online():
+    """Symmetric guard for the precedence fix: when no agent report is
+    in flight (poll path → agent_reachable_report=None), a successful
+    telemetry result that is NEWER than the most recent connectivity
+    failure must lift the device back to ONLINE. The failure-newer-than-
+    success veto only fires when the failure is the latest event."""
+    device = make_device(status=DeviceStatus.OFFLINE.value)
+    old_failure_ts = NOW - timedelta(seconds=300)   # 5 min ago — older
+    new_success_ts = NOW - timedelta(seconds=60)    # 1 min ago — newer
+    signal = DeviceSignal(
+        last_command_success_ts=new_success_ts,
+        last_command_failure_ts=old_failure_ts,
+        last_command_failure_kind="connectivity",
+        last_poe_snapshot_ts=None,
+        last_mac_snapshot_ts=None,
+    )
+    # Sanity check the freshness helper first.
+    freshness = get_device_telemetry_freshness(device, signal, now=NOW)
+    assert freshness["fresh"] is True
+    assert freshness["blocking_failure_ts"] is None
+
+    # And the resolver, with no agent report this turn.
+    resolved = resolve_device_status(
+        device, signal,
+        agent_online=True,
+        agent_reachable_report=None,
+        icmp_reachable=None,
+        now=NOW,
+    )
+    assert resolved.status == DeviceStatus.ONLINE.value
+    assert resolved.reason == REASON_FRESH_SSH
+
+
 # ── Extra: stale_or_unknown preserves last status ─────────────────────────
 
 def test_stale_or_unknown_preserves_status():
