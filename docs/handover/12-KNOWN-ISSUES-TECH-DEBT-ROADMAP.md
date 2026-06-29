@@ -272,6 +272,22 @@ Kaynak: Topology page CSS stacking gözlemi — historical internal context, VER
 
 ---
 
+## TD-22 — Agent-write RLS reject (agent_command_logs, agent_device_latencies)
+
+| Alan | Değer |
+|---|---|
+| Status | OPEN — separate follow-up to `fix/audit-orm-returning-rls` |
+| Etki | Production postgres log shows continuous `ERROR: new row violates row-level security policy` for `agent_command_logs` and `agent_device_latencies` starting at 2026-06-29 04:18 UTC. Every failing statement is an ORM-emitted `INSERT … RETURNING <table>.id`. Audit-trail gaps + `device_status_resolver` telemetry-aware-recovery loses its newest-success signal (the inserts that would prove an agent command succeeded are themselves rolled back) |
+| Risk | Higher than the audit_logs fix this PR ships, because these two tables have **strict** `WITH CHECK = _ORG`, not `WITH CHECK = true`. Dropping RETURNING alone is **not** sufficient — the write half also needs the GUC populated, or `_ORG` will reject the INSERT directly. PR `fix/audit-orm-returning-rls` deliberately stops at audit_logs because the operator scoped it that way |
+| Geçici çözüm | None in production yet. Operator can disable affected agent collection cycles to reduce log spam |
+| Kalıcı öneri | Two-layer fix in a separate PR: (1) audit the worker/agent-relay session lifecycle so `apply_rls_context` runs after the org/loc context is set on every task; (2) only after (1) is verified, drop `RETURNING` from the ORM-emitted agent INSERTs (via `insert(...).returning(None)` or raw `text()`). Skipping step (1) and only doing step (2) would still leave the WITH CHECK side rejecting |
+| Öncelik | **P1** |
+| Blast radius | Medium — touches worker session plumbing + agent-relay INSERT paths |
+
+Kaynak: Production live evidence collection 2026-06-29 (postgres log shows agent_command_logs / agent_device_latencies cascade starts 04:18 UTC, every failure carrying `RETURNING <table>.id`).
+
+---
+
 ## TD-20 — Frontend permission catalog / source consolidation
 
 | Alan | Değer |
@@ -333,7 +349,7 @@ Device **status ≠ risk pill**. **WATCH** is a health score band (50–79), not
 
 | Öncelik | Maddeler |
 |---|---|
-| **P1** | TD-5 (privilege-denied parser), TD-12 (worker RLS regression), TD-15 (VPS drift), TD-21 (status telemetry-aware fallback — **IN IMPLEMENTATION**) |
+| **P1** | TD-5 (privilege-denied parser), TD-12 (worker RLS regression), TD-15 (VPS drift), TD-21 (status telemetry-aware fallback — **IN IMPLEMENTATION**), TD-22 (agent-write RLS reject — separate from audit_logs fix) |
 | **P2** | TD-1 (VLAN collector), TD-2+TD-3 (pool/cache stale), TD-4 (error classification UI), TD-6 (collection observability), TD-9 (audit source device), TD-10 (UI empty state), TD-13 (agent terminal perf), TD-16 (CF cache), TD-20 (frontend permission catalog) |
 | **P3** | TD-7 (event_consumer scale), TD-8 (runbook polish), TD-11 (metadata), TD-14 (backend creds defense), TD-17 (blank screen koruma), TD-18 (topology stacking), TD-19 (MFA hardening) |
 
