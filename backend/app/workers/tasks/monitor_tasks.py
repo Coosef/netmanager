@@ -71,18 +71,66 @@ def _agent_is_online(agent_id: str) -> bool:
 
 
 async def _check_device_reachable(device) -> bool:
-    """
-    Reachability check used by the Celery poller.
+    """Reachability check used by the Celery poller.
 
-    • Agent-proxied devices whose agent is online → skip (the agent's own
-      device_status_report loop already keeps DB/Redis up to date).
-      Return current DB status so the poller doesn't create a spurious change.
-    • Everything else → ICMP ping directly from the backend host.
+    Previously this function self-locked any agent-online device with:
+
+        return device.status == DeviceStatus.ONLINE
+
+    which made OFFLINE absorbing — once a device was ever written OFFLINE
+    the poller kept reporting it OFFLINE no matter how much fresh SSH /
+    PoE / MAC telemetry had arrived since. The resolver in
+    `app.services.device_status_resolver` now consults agent_command_logs
+    success, fresh snapshots, and Device.last_seen as a recovery signal,
+    so a single successful command can lift a stuck device back to ONLINE.
+
+    Behaviour:
+      • agent_id set AND agent online → telemetry-aware resolver.
+        Returns True (ONLINE) iff there is fresh telemetry within
+        STATUS_TELEMETRY_FRESH_WINDOW_SECONDS AND no newer
+        connectivity/auth failure veto. Otherwise preserves the device's
+        last-known status.
+      • agent_id unset OR agent offline → backend host ICMP ping,
+        unchanged.
+
+    The structured `ResolvedStatus.reason` is stamped into a Redis side
+    key (`device:{id}:status:reason`, TTL 600 s) so the API + frontend
+    can surface WHY a device is whatever it is without a schema migration.
     """
+    from app.services.device_status_resolver import (
+        get_latest_device_signal,
+        resolve_device_status,
+        REASON_STALE_OR_UNKNOWN,
+    )
     agent_id = getattr(device, "agent_id", None)
     if agent_id and _agent_is_online(agent_id):
-        from app.models.device import DeviceStatus
-        return device.status == DeviceStatus.ONLINE
+        db = _get_db()
+        try:
+            signal = get_latest_device_signal(db, device.id)
+        finally:
+            db.close()
+        resolved = resolve_device_status(
+            device, signal,
+            agent_online=True,
+            # The poller does not have an in-flight device_status_report
+            # at this point (that path is handled by
+            # agent_manager._handle_device_status_report); the resolver
+            # therefore decides on telemetry alone.
+            agent_reachable_report=None,
+            icmp_reachable=None,
+        )
+        if resolved.reason != REASON_STALE_OR_UNKNOWN:
+            logger.debug(
+                "device_status_resolved device=%s status=%s reason=%s detail=%s",
+                device.id, resolved.status, resolved.reason, resolved.detail,
+            )
+        try:
+            _redis.setex(
+                f"device:{device.id}:status:reason", 600, resolved.reason,
+            )
+        except Exception:
+            pass
+        return resolved.status == DeviceStatus.ONLINE.value
 
     return await _icmp_ping(device.ip_address)
 

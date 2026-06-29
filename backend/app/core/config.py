@@ -75,6 +75,32 @@ class Settings(BaseSettings):
     # Wave 3 W3.3 — PoE Restart akışı (disable → wait → enable) default bekleme
     POE_RESTART_WAIT_SEC: int = 10
 
+    # Device status resolution — telemetry-aware recovery (fix/device-status-…).
+    #
+    # The previous reachability path treated a one-shot OFFLINE write as
+    # absorbing: once a device was written OFFLINE, every later poll
+    # short-circuited with `return device.status == ONLINE` and the row
+    # stayed OFFLINE even when SSH/PoE/MAC telemetry kept flowing. The
+    # resolver in app.services.device_status_resolver now consults fresh
+    # successful telemetry (agent_command_logs / poe_port_snapshots /
+    # mac_address_entries / Device.last_seen) as a recovery signal.
+    #
+    # STATUS_TELEMETRY_FRESH_WINDOW_SECONDS — how recent a successful
+    #     signal must be to count as proof of life. Telemetry inside this
+    #     window lifts a device back to ONLINE; outside it the resolver
+    #     falls through. Default 600 (10 min) gives the 15-minute MAC/PoE
+    #     collection cycles room to land one fresh row before the next
+    #     5-minute poll, while staying short enough for a truly dead
+    #     device to drop within one cycle.
+    #
+    # STATUS_AGENT_REPORT_FRESH_WINDOW_SECONDS — informational; the
+    #     agent's own device_status_report path always uses the most
+    #     recent message available, but this value documents how long an
+    #     in-flight report is considered current. Default 180 (3 min) is
+    #     1.5× the agent online heartbeat TTL (120 s).
+    STATUS_TELEMETRY_FRESH_WINDOW_SECONDS: int = 600
+    STATUS_AGENT_REPORT_FRESH_WINDOW_SECONDS: int = 180
+
     # WIN-INTEGRATE — Windows Agent v2 (Go service host) gate.
     # Default explicitly false. When false:
     #   - /api/v1/agents/{id}/download/host/windows-amd64 returns 404
