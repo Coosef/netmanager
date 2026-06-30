@@ -86,6 +86,30 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
   ] },
   { key: 'settings',         label: 'Ayarlar',            actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }] },
   { key: 'driver_templates', label: 'Sürücü Şablonları',  actions: [{ key: 'view', label: 'Görüntüle' }, { key: 'edit', label: 'Düzenle' }] },
+  // RBAC-PHASE-1 (2026-06-30) — four feature modules that drive
+  // Discovery / VLAN / Racks / Map route visibility. Before this PR
+  // these routes were gated by RoleRoute(minRole="org_admin") which
+  // ignored the Yetki Setini Düzenle grid entirely — toggling them
+  // here had no UI effect for a location_admin. Backend migration
+  // f9ah_feature_module_catalog.py backfills these rows on every
+  // existing permission_set.
+  { key: 'discovery',        label: 'Keşif Envanteri',    actions: [
+    { key: 'view', label: 'Görüntüle' },
+    { key: 'run',  label: 'Tarama Başlat' },
+  ] },
+  { key: 'vlan',             label: 'VLAN Yönetimi',      actions: [
+    { key: 'view', label: 'Görüntüle' },
+    { key: 'edit', label: 'Düzenle' },
+    { key: 'push', label: 'Cihaza Gönder' },
+  ] },
+  { key: 'racks',            label: 'Kabinler',           actions: [
+    { key: 'view',   label: 'Görüntüle' },
+    { key: 'edit',   label: 'Düzenle' },
+    { key: 'delete', label: 'Sil' },
+  ] },
+  { key: 'maps',             label: 'Harita / Kat Planı', actions: [
+    { key: 'view', label: 'Görüntüle' },
+  ] },
 ]
 
 const ALL_ACTIONS = [
@@ -95,6 +119,10 @@ const ALL_ACTIONS = [
   // P2-CATALOG-A (2026-06-23) — devices.{connect,move} +
   // config_backups.{backup,restore} canonical-key catalogue.
   'connect', 'move', 'backup', 'restore',
+  // RBAC-PHASE-1 (2026-06-30) — vlan.push verb (cihaza config gönder).
+  // The other new verbs (discovery.run / racks.delete / maps.view)
+  // reuse existing column headers above so they need no separate entry.
+  'push',
 ]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
@@ -148,7 +176,8 @@ function PermMatrix({
                   a === 'create' ? 'Oluştur' : a === 'ssh' ? 'SSH' : a === 'run' ? 'Çalıştır' :
                   a === 'cancel' ? 'İptal' : a === 'invite' ? 'Davet' :
                   a === 'connect' ? 'Bilgi Çek' : a === 'move' ? 'Taşı' :
-                  a === 'backup' ? 'Yedek Al' : a === 'restore' ? 'Geri Yükle' : a}
+                  a === 'backup' ? 'Yedek Al' : a === 'restore' ? 'Geri Yükle' :
+                  a === 'push' ? 'Cihaza Gönder' : a}
               </th>
             ))}
             {!readOnly && (

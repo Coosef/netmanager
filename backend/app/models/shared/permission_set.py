@@ -68,6 +68,34 @@ from app.core.database import SharedBase
 #
 # The Alembic migration f9ag_canonical_permission_keys.py applies the
 # same backfill to every existing permission_set row.
+#
+# RBAC-PHASE-1 (2026-06-30) — four feature modules registered so the
+# permission grid can drive route visibility for Discovery, VLAN, Racks,
+# and Floor Plan (Map). Before this change those four pages were gated
+# by RoleRoute(minRole="org_admin"), which is orthogonal to the
+# PermissionSet payload and therefore made the "Tam Yetki" toggle a
+# no-op for location_admin users. The new module rows let the same
+# operator who controls the existing toggles also grant location-scoped
+# access to these four pages without elevating the user's system role.
+#
+# The Alembic migration f9ah_feature_module_catalog.py installs these
+# four module blocks on every existing permission_set row using the
+# same idempotent / additive policy as f9ag: present keys win; missing
+# keys default to FALSE for safety, with explicit TRUE only for the
+# two opt-in templates ("Tam Yetki", "Org Admin") that already
+# represent "everything on".
+#
+# Action verbs chosen to mirror operator brief:
+#   discovery.view   — read the LLDP / discovery inventory page
+#   discovery.run    — trigger a discovery scan (task:create-grade verb)
+#   vlan.view        — read the VLAN management page
+#   vlan.edit        — edit VLAN definitions (db / model edits)
+#   vlan.push        — push VLAN config to a switch (device:edit-grade)
+#   racks.view       — read the racks page (rack inventory + diagrams)
+#   racks.edit       — modify rack metadata + device placement
+#   racks.delete     — delete a rack + its items
+#   maps.view        — read the floor plan / map page (frontend-only
+#                      render; backend endpoint via /devices + /locations)
 DEFAULT_PERMISSIONS: dict = {
     "modules": {
         "devices":         {"view": False, "create": False, "edit": False,
@@ -93,6 +121,11 @@ DEFAULT_PERMISSIONS: dict = {
             "remove":             False,
         },
         "driver_templates":{"view": False, "edit": False},
+        # RBAC-PHASE-1 — feature modules for Discovery / VLAN / Racks / Map.
+        "discovery":       {"view": False, "run": False},
+        "vlan":            {"view": False, "edit": False, "push": False},
+        "racks":           {"view": False, "edit": False, "delete": False},
+        "maps":            {"view": False},
     }
 }
 

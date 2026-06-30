@@ -458,15 +458,21 @@ describe('Karar guardrail\'ları', () => {
     expect(mapTab!.route).toBe('/floor-plan')
   })
 
-  it('HOTFIX 2026-06-08: Keşif Envanteri tek tab — lldp sil, discovery korunur', () => {
+  it('HOTFIX 2026-06-08 + RBAC-PHASE-1: Keşif Envanteri tek tab — lldp sil, discovery permission-gated', () => {
     // Mevcut /discovery route'u LldpInventoryPage render ediyor. Helper'da
     // çift kayıt (discovery + lldp) yanlıştı; tek 'discovery' tab kaldı.
+    //
+    // RBAC-PHASE-1 (2026-06-30): minRole='org_admin' guardrail kaldırıldı.
+    // Discovery artık module=['discovery','view'] ile gated; location_admin
+    // "Tam Yetki" set'ine sahipse kendi lokasyon kapsamında görebiliyor.
+    // İkili kayıt (lldp + discovery) yasağı korunur, gate kuralı değişir.
     const lldpTab = GROUP_BY_KEY.inventory.tabs.find((t) => t.key === 'lldp')
     expect(lldpTab).toBeUndefined() // silindi
     const discoveryTab = GROUP_BY_KEY.inventory.tabs.find((t) => t.key === 'discovery')
     expect(discoveryTab).toBeDefined()
     expect(discoveryTab!.route).toBe('/discovery')
-    expect(discoveryTab!.minRole).toBe('org_admin')
+    expect(discoveryTab!.module).toEqual(['discovery', 'view'])
+    expect(discoveryTab!.minRole).toBeUndefined()
   })
 
   it('Sprint 1A-fix2: Karar 5 GERİ ALINDI — Organizasyon Paneli admin_platform\'dan çıkarıldı', () => {

@@ -378,11 +378,18 @@ function ThemedApp() {
                 <Route path="topology" element={featureFlags.topologyV2Canonical ? <TopologyV2Page /> : <TopologyPage />} />
                 <Route path="topology-classic" element={<TopologyPage />} />
                 <Route path="topology-next" element={<TopologyV2Page />} />
-                <Route path="discovery" element={<RoleRoute minRole="org_admin"><LldpInventoryPage /></RoleRoute>} />
+                {/* RBAC-PHASE-1 (2026-06-30) — Discovery / VLAN / Racks /
+                    Floor Plan now drive their gate from the permission
+                    set grid, NOT system_role. A location_admin with
+                    "Tam Yetki" can reach all four pages within their
+                    assigned location scope; org_admin and super_admin
+                    keep their previous reach (PermissionEngine
+                    short-circuits to True for those roles). */}
+                <Route path="discovery" element={<PermRoute module="discovery" action="view"><LldpInventoryPage /></PermRoute>} />
                 <Route path="ipam" element={<PermRoute module="ipam" action="view"><IpamPage /></PermRoute>} />
-                <Route path="vlan" element={<RoleRoute minRole="org_admin"><VlanManagementPage /></RoleRoute>} />
-                <Route path="racks" element={<RoleRoute minRole="org_admin"><RacksPage /></RoleRoute>} />
-                <Route path="floor-plan" element={<RoleRoute minRole="org_admin"><FloorPlanPage /></RoleRoute>} />
+                <Route path="vlan" element={<PermRoute module="vlan" action="view"><VlanManagementPage /></PermRoute>} />
+                <Route path="racks" element={<PermRoute module="racks" action="view"><RacksPage /></PermRoute>} />
+                <Route path="floor-plan" element={<PermRoute module="maps" action="view"><FloorPlanPage /></PermRoute>} />
                 {/* Monitoring */}
                 <Route path="monitor" element={<MonitorPage />} />
                 <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
@@ -453,7 +460,7 @@ function ThemedApp() {
                 element={featureFlags.topologyV2Canonical ? <TopologyV2Page /> : <TopologyPage />} />
               <Route path="topology-classic" element={<TopologyPage />} />
               <Route path="topology-next" element={<TopologyV2Page />} />
-              <Route path="discovery" element={<RoleRoute minRole="org_admin"><LldpInventoryPage /></RoleRoute>} />
+              <Route path="discovery" element={<PermRoute module="discovery" action="view"><LldpInventoryPage /></PermRoute>} />
               <Route path="monitor" element={<MonitorPage />} />
               <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
@@ -488,15 +495,15 @@ function ThemedApp() {
               <Route path="firmware" element={<RoleRoute minRole="org_admin"><FirmwarePage /></RoleRoute>} />
               <Route path="change-management" element={<RoleRoute minRole="location_admin"><ChangeManagementPage /></RoleRoute>} />
               <Route path="sla" element={<RoleRoute minRole="org_admin"><SlaReportPage /></RoleRoute>} />
-              <Route path="vlan" element={<RoleRoute minRole="org_admin"><VlanManagementPage /></RoleRoute>} />
+              <Route path="vlan" element={<PermRoute module="vlan" action="view"><VlanManagementPage /></PermRoute>} />
               <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
               <Route path="config-drift" element={<RoleRoute minRole="org_admin"><ConfigDriftPage /></RoleRoute>} />
               <Route path="intelligence" element={<RoleRoute minRole="org_admin"><IntelligencePage /></RoleRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_admin"><ComplianceCheckPage /></RoleRoute>} />
-              <Route path="racks" element={<RoleRoute minRole="org_admin"><RacksPage /></RoleRoute>} />
+              <Route path="racks" element={<PermRoute module="racks" action="view"><RacksPage /></PermRoute>} />
               {/* M6 final drop — the standalone `/tenants` page is gone. */}
               <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
-              <Route path="floor-plan" element={<RoleRoute minRole="org_admin"><FloorPlanPage /></RoleRoute>} />
+              <Route path="floor-plan" element={<PermRoute module="maps" action="view"><FloorPlanPage /></PermRoute>} />
               <Route path="alert-rules" element={<RoleRoute minRole="org_admin"><AlertRulesPage /></RoleRoute>} />
               <Route path="security-policies" element={<RoleRoute minRole="viewer"><SecurityPoliciesPage /></RoleRoute>} />
               <Route path="driver-templates" element={<PermRoute module="driver_templates" action="view"><DriverTemplatesPage /></PermRoute>} />
