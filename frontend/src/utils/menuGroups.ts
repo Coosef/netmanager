@@ -109,11 +109,17 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
       // tek tab olarak Keşif/LLDP envanterini temsil eder.
       { key: 'switch',    route: '/devices',     i18nKey: 'nav.tab.inventory.switch',    module: ['devices', 'view'] },
       { key: 'topology',  route: '/topology',    i18nKey: 'nav.tab.inventory.topology',  feature: 'topology' },
-      { key: 'discovery', route: '/discovery',   i18nKey: 'nav.tab.inventory.discovery', minRole: 'org_admin' },
+      // RBAC-PHASE-1 (2026-06-30) — Discovery / VLAN / Racks / Map
+      // gated by the permission grid, NOT system_role. A location_admin
+      // with "Tam Yetki" can see all four tabs within their assigned
+      // location scope. Existing `feature` flags on racks (and ipam)
+      // are preserved so a feature-flag-closed org still hides the tab
+      // even when the permission is granted.
+      { key: 'discovery', route: '/discovery',   i18nKey: 'nav.tab.inventory.discovery', module: ['discovery', 'view'] },
       { key: 'ipam',      route: '/ipam',        i18nKey: 'nav.tab.inventory.ipam',      module: ['ipam', 'view'], feature: 'ipam' },
-      { key: 'vlan',      route: '/vlan',        i18nKey: 'nav.tab.inventory.vlan',      minRole: 'org_admin' },
-      { key: 'racks',     route: '/racks',       i18nKey: 'nav.tab.inventory.racks',     minRole: 'org_admin', feature: 'racks' },
-      { key: 'map',       route: '/floor-plan',  i18nKey: 'nav.tab.inventory.map',       minRole: 'org_admin' },
+      { key: 'vlan',      route: '/vlan',        i18nKey: 'nav.tab.inventory.vlan',      module: ['vlan', 'view'] },
+      { key: 'racks',     route: '/racks',       i18nKey: 'nav.tab.inventory.racks',     module: ['racks', 'view'], feature: 'racks' },
+      { key: 'map',       route: '/floor-plan',  i18nKey: 'nav.tab.inventory.map',       module: ['maps', 'view'] },
     ],
   },
   {

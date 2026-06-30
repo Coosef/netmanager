@@ -63,9 +63,10 @@ describe('Permissions UI — canonical catalog source pins', () => {
 })
 
 
-// Behavioral check: MODULES.actions.length sums to 42 with the new keys.
+// Behavioral check: MODULES.actions.length sums to 51 after Phase 1.
+//   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1) = 51
 describe('Permissions UI — total grant count', () => {
-  it('total actions across all modules = 42 (37 prior + 5 P2-CATALOG-A)', async () => {
+  it('total actions across all modules = 51 (37 prior + 5 P2-CATALOG-A + 9 RBAC-Phase-1)', async () => {
     // Re-evaluate the literal by parsing the file: we count the
     // `{ key:` markers inside the actions arrays.
     // Easier path: read the runtime-loaded module via dynamic import.
@@ -79,9 +80,10 @@ describe('Permissions UI — total grant count', () => {
     const declared = moduleBlock![0]
     // Count occurrences of `{ key: '...'` inside the actions arrays —
     // the outer `key: 'devices'` style markers also match but appear
-    // exactly once per module declaration (14 modules), so we
-    // separately count those and subtract.
-    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates)/g) ?? []).length
-    expect(innerActionCount).toBe(42)
+    // exactly once per module declaration (14 + 4 = 18 modules), so
+    // we exclude them from the inner-action count via the negative
+    // look-ahead.
+    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps)/g) ?? []).length
+    expect(innerActionCount).toBe(51)
   })
 })

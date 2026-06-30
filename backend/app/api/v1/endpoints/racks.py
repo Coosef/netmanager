@@ -7,11 +7,23 @@ from sqlalchemy import select, delete as sa_delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.deps import CurrentUser
+from app.core.deps import CurrentUser, require_permission
 from app.models.device import Device
 from app.models.rack import Rack, RackItem
 
 router = APIRouter()
+
+# RBAC-PHASE-1 (2026-06-30) — racks.py was previously auth-only ("any
+# authenticated user can read or mutate any rack"). The four verb-bound
+# guards below align the endpoints with the new `racks` permission
+# module (view/edit/delete). The `view` guard fires before the
+# CurrentUser dependency on read endpoints; mutation endpoints use
+# `edit` or `delete`. Org / location isolation is still enforced by the
+# Faz 7 RLS layer — these guards add the missing module-level gate the
+# permission grid now drives, NOT a replacement for tenant isolation.
+_RACK_VIEW   = Depends(require_permission("racks", "view"))
+_RACK_EDIT   = Depends(require_permission("racks", "edit"))
+_RACK_DELETE = Depends(require_permission("racks", "delete"))
 
 ITEM_TYPES = ["pdu", "ups", "patch_panel", "cable_tray", "blank", "fan", "shelf", "kvm", "other"]
 
@@ -89,7 +101,7 @@ class RackCreateRequest(BaseModel):
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 
-@router.post("", response_model=RackSummary, status_code=201)
+@router.post("", response_model=RackSummary, status_code=201, dependencies=[_RACK_EDIT])
 async def create_rack(
     payload: RackCreateRequest,
     user: CurrentUser,
@@ -118,7 +130,7 @@ async def create_rack(
     )
 
 
-@router.get("", response_model=list[RackSummary])
+@router.get("", response_model=list[RackSummary], dependencies=[_RACK_VIEW])
 async def list_racks(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
@@ -165,7 +177,7 @@ async def list_racks(
     return result
 
 
-@router.get("/unassigned/devices", response_model=list[RackDeviceSummary])
+@router.get("/unassigned/devices", response_model=list[RackDeviceSummary], dependencies=[_RACK_VIEW])
 async def list_unassigned_devices(
     user: CurrentUser,
     db: AsyncSession = Depends(get_db),
@@ -192,7 +204,7 @@ async def list_unassigned_devices(
     ]
 
 
-@router.get("/{rack_name}", response_model=RackDetail)
+@router.get("/{rack_name}", response_model=RackDetail, dependencies=[_RACK_VIEW])
 async def get_rack(rack_name: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     rack = (await db.execute(
         select(Rack).where(Rack.rack_name == rack_name)
@@ -229,7 +241,7 @@ async def get_rack(rack_name: str, user: CurrentUser, db: AsyncSession = Depends
     )
 
 
-@router.delete("/{rack_name}", status_code=204)
+@router.delete("/{rack_name}", status_code=204, dependencies=[_RACK_DELETE])
 async def delete_rack(rack_name: str, user: CurrentUser, db: AsyncSession = Depends(get_db)):
     rack = (await db.execute(
         select(Rack).where(Rack.rack_name == rack_name)
@@ -250,7 +262,7 @@ async def delete_rack(rack_name: str, user: CurrentUser, db: AsyncSession = Depe
     await db.commit()
 
 
-@router.put("/devices/{device_id}/placement", status_code=200)
+@router.put("/devices/{device_id}/placement", status_code=200, dependencies=[_RACK_EDIT])
 async def set_device_placement(
     device_id: int,
     payload: RackPlacementRequest,
@@ -271,7 +283,7 @@ async def set_device_placement(
     return {"ok": True}
 
 
-@router.delete("/devices/{device_id}/placement", status_code=204)
+@router.delete("/devices/{device_id}/placement", status_code=204, dependencies=[_RACK_EDIT])
 async def remove_device_placement(
     device_id: int,
     user: CurrentUser,
@@ -290,7 +302,7 @@ async def remove_device_placement(
     await db.commit()
 
 
-@router.post("/{rack_name}/items", response_model=RackItemResponse, status_code=201)
+@router.post("/{rack_name}/items", response_model=RackItemResponse, status_code=201, dependencies=[_RACK_EDIT])
 async def create_rack_item(
     rack_name: str,
     payload: RackItemCreate,
@@ -311,7 +323,7 @@ async def create_rack_item(
     return RackItemResponse.model_validate(item)
 
 
-@router.put("/{rack_name}/items/{item_id}", response_model=RackItemResponse)
+@router.put("/{rack_name}/items/{item_id}", response_model=RackItemResponse, dependencies=[_RACK_EDIT])
 async def update_rack_item(
     rack_name: str,
     item_id: int,
@@ -341,7 +353,7 @@ async def update_rack_item(
     return RackItemResponse.model_validate(item)
 
 
-@router.delete("/{rack_name}/items/{item_id}", status_code=204)
+@router.delete("/{rack_name}/items/{item_id}", status_code=204, dependencies=[_RACK_DELETE])
 async def delete_rack_item(
     rack_name: str,
     item_id: int,
