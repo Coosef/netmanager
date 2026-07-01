@@ -183,6 +183,23 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
     { key: 'view',   label: 'Görüntüle' },
     { key: 'manage', label: 'Yönet' },
   ] },
+  // RBAC-SPRINT-2.2C-A (2026-07-01) — Firmware module. Sprint 2.2C-A is
+  // READ-ONLY hardening. Only the two READ verbs (view + rollout_status)
+  // are wired at the backend layer in this PR; the four mutating verbs
+  // (upload, assign, install, approve_reload) are declared in
+  // DEFAULT_PERMISSIONS + f9am migration so operators can see the full
+  // column set in the matrix, but their toggles have NO backend effect
+  // until the deferred high-risk PR (Sprint 2.2C-B / 2.2C-C) migrates
+  // the mutating endpoints off their recycled device:edit / config:push
+  // gates. Route stays on RoleRoute(minRole="org_admin").
+  { key: 'firmware',           label: 'Firmware',           actions: [
+    { key: 'view',            label: 'Görüntüle' },
+    { key: 'rollout_status',  label: 'Rollout Durumu' },
+    { key: 'upload',          label: 'Yükle' },
+    { key: 'assign',          label: 'Ata/Sil' },
+    { key: 'install',         label: 'Kur' },
+    { key: 'approve_reload',  label: 'Reboot Onayla' },
+  ] },
 ]
 
 const ALL_ACTIONS = [
@@ -210,6 +227,14 @@ const ALL_ACTIONS = [
   //   manage_policies — sla policy CRUD
   //   refresh         — poe snapshot / realtime SSH refresh
   'manage_policies', 'refresh',
+  // RBAC-SPRINT-2.2C-A (2026-07-01) — Firmware new column headers:
+  //   rollout_status  — firmware install job list/detail/log read
+  //   upload          — binary artifact multipart write
+  //   assign          — artifact catalog CRUD (url-source + PATCH + DELETE)
+  //   approve_reload  — operator-gated device reboot (HIGHEST RISK)
+  //   (view + install already exist above — install for Agent Mgmt but
+  //    the column header is generic enough to reuse for firmware install)
+  'rollout_status', 'upload', 'assign', 'approve_reload',
 ]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
@@ -270,7 +295,11 @@ function PermMatrix({
                   a === 'summarize' ? 'AI Özet' :
                   a === 'collect' ? 'Topla' :
                   a === 'manage_policies' ? 'Politika Yönet' :
-                  a === 'refresh' ? 'Yenile' : a}
+                  a === 'refresh' ? 'Yenile' :
+                  a === 'rollout_status' ? 'Rollout Durumu' :
+                  a === 'upload' ? 'Yükle' :
+                  a === 'assign' ? 'Ata/Sil' :
+                  a === 'approve_reload' ? 'Reboot Onayla' : a}
               </th>
             ))}
             {!readOnly && (

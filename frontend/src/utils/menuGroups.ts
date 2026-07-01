@@ -168,7 +168,16 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
       { key: 'templates', route: '/config-templates', i18nKey: 'nav.tab.config.templates', module: ['driver_templates', 'view'] },
       { key: 'builder',   route: '/config-builder',   i18nKey: 'nav.tab.config.builder',   module: ['config_backups', 'view'] },
       { key: 'backups',   route: '/backups',          i18nKey: 'nav.tab.config.backups',   minRole: 'location_admin' },
-      { key: 'firmware',  route: '/firmware',         i18nKey: 'nav.tab.config.firmware',  minRole: 'org_admin' },
+      // RBAC-SPRINT-2.2C-A — Firmware feature-flag alignment.
+      // Backend router.py:62 gates the firmware.router with
+      // `_feat("firmware")`; without a `feature: 'firmware'` field
+      // here the tab was always visible even when the org's plan had
+      // features.firmware=false — direct clicks then hit backend 403.
+      // Adding the feature field closes that asymmetry. The
+      // RoleRoute(minRole="org_admin") route gate is preserved
+      // verbatim by App.tsx; mutating firmware verbs remain
+      // org_admin-only until the deferred high-risk PR.
+      { key: 'firmware',  route: '/firmware',         i18nKey: 'nav.tab.config.firmware',  minRole: 'org_admin', feature: 'firmware' },
       // DriverTemplates: W1-F kuralı 'içeriğe dokunulmaz' — sadece tab grouping
       { key: 'drivers',   route: '/driver-templates', i18nKey: 'nav.tab.config.drivers',   module: ['driver_templates', 'view'] },
     ],

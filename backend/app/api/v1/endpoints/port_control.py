@@ -708,7 +708,17 @@ async def list_rollbacks(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    """Cihaz için son 50 port-change kaydı."""
+    """Cihaz için son 50 port-change kaydı.
+
+    RBAC-SPRINT-2.2C-A — Pre-2.2C-A bu endpoint auth-only'ydı; token'ı
+    olan herhangi bir kullanıcı rollback history'sini (uygulanan port
+    değişiklikleri, PoE toggle akışları, cancel_change_now denemeleri)
+    okuyabiliyordu. GEÇICI olarak `device:edit` gate'ine bağlandı —
+    port_control mutating endpointleri ile aynı verb; kalıcı
+    `port_control:view` verb'ü ayrıca yüksek-risk mutating PR'ında
+    (Sprint 2.2C-B) tanımlanıp buraya bağlanacak.
+    """
+    _require_edit(current_user)
     rows = (await db.execute(
         select(PortChangeRollback)
         .where(PortChangeRollback.device_id == device_id)
