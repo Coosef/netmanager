@@ -160,6 +160,19 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
     { key: 'view',    label: 'Görüntüle' },
     { key: 'collect', label: 'Topla' },
   ] },
+  // RBAC-SPRINT-2.2B1 (2026-07-01) — SLA + PoE modules. Frontend
+  // route/menu still gate on RoleRoute(minRole="org_admin") in this
+  // PR; the new module rows drive backend authorization so a direct
+  // API call with a valid token is blocked when the verb is missing.
+  // Location scope + PermRoute migration deferred to next iteration.
+  { key: 'sla',                label: 'SLA',                actions: [
+    { key: 'view',            label: 'Görüntüle' },
+    { key: 'manage_policies', label: 'Politika Yönet' },
+  ] },
+  { key: 'poe',                label: 'PoE Enerjisi',       actions: [
+    { key: 'view',    label: 'Görüntüle' },
+    { key: 'refresh', label: 'Yenile' },
+  ] },
 ]
 
 const ALL_ACTIONS = [
@@ -183,6 +196,10 @@ const ALL_ACTIONS = [
   //   collect         — mac_arp SSH-driven active refresh
   //   (view + run + manage already exist above)
   'profile_manage', 'summarize', 'collect',
+  // RBAC-SPRINT-2.2B1 (2026-07-01) — SLA + PoE new column headers:
+  //   manage_policies — sla policy CRUD
+  //   refresh         — poe snapshot / realtime SSH refresh
+  'manage_policies', 'refresh',
 ]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
@@ -241,7 +258,9 @@ function PermMatrix({
                   a === 'review' ? 'Onayla/Reddet' : a === 'manage' ? 'Yönet' :
                   a === 'profile_manage' ? 'Profil Yönet' :
                   a === 'summarize' ? 'AI Özet' :
-                  a === 'collect' ? 'Topla' : a}
+                  a === 'collect' ? 'Topla' :
+                  a === 'manage_policies' ? 'Politika Yönet' :
+                  a === 'refresh' ? 'Yenile' : a}
               </th>
             ))}
             {!readOnly && (

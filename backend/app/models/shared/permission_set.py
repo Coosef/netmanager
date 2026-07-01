@@ -228,6 +228,52 @@ DEFAULT_PERMISSIONS: dict = {
         "asset_lifecycle":   {"view": False, "manage": False},
         "terminal_sessions": {"view": False, "summarize": False},
         "mac_arp":           {"view": False, "collect": False},
+        # RBAC-SPRINT-2.2B1 (2026-07-01) — SLA + PoE authorization hardening.
+        #
+        # Pre-2.2B1 both surfaces had ZERO backend permission gates on 12
+        # endpoints total (SLA 8, PoE 4). Frontend RoleRoute(minRole=
+        # org_admin) gated the pages but a direct API caller with a
+        # valid token bypassed the guard. This is the narrowest chunk
+        # of the Sprint 2.2 design report — SLA + PoE only; Services,
+        # Config Drift (already done in 2.2A), Firmware, Change Rollouts,
+        # AI Assistant etc. remain deferred.
+        #
+        # Verb semantics:
+        #   sla.view            — read /policies, /report, /compliance,
+        #                          /device/{id}, /fleet-summary (cached
+        #                          dashboard tile; org-wide read-only
+        #                          analytics)
+        #   sla.manage_policies — POST /policies, PUT /policies/{id},
+        #                          DELETE /policies/{id} (org-wide SLA
+        #                          policy CRUD; contract-level mutation)
+        #
+        #   poe.view            — GET /summary (cached org aggregation)
+        #                          + GET /devices/{id} (cached per-device
+        #                          snapshot read); pure cache reads.
+        #   poe.refresh         — POST /snapshot-now (Celery task;
+        #                          fleet-wide SNMP+SSH sweep) +
+        #                          GET /devices/{id}/realtime — WARNING:
+        #                          despite the GET verb this endpoint
+        #                          executes an SSH command on the target
+        #                          device AND writes the parsed result
+        #                          back to PoEPortSnapshot (db.commit at
+        #                          poe.py:237). The HTTP-method rename to
+        #                          POST is out of scope for this PR; the
+        #                          test suite and migration comment
+        #                          document the discrepancy so a future
+        #                          semantic-fix PR can lift + shift the
+        #                          verb without operator surprise.
+        #
+        # The Alembic migration f9ak_sla_poe_authorization backfills
+        # ONLY via the name-based opt-in rule: Tam Yetki + Org Admin
+        # templates receive every new verb = true. Custom sets stay at
+        # safe FALSE — NO view carry-over from monitoring:view or any
+        # other pre-existing verb (product decision: SLA/PoE routes still
+        # gate on RoleRoute(org_admin) so no location_admin can reach
+        # them today; the org_admin PermissionEngine bypass keeps them
+        # working).
+        "sla":               {"view": False, "manage_policies": False},
+        "poe":               {"view": False, "refresh": False},
     }
 }
 

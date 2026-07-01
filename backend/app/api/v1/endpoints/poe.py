@@ -21,19 +21,71 @@ from app.models.poe_port_snapshot import PoEPortSnapshot
 
 router = APIRouter()
 
+
+# RBAC-SPRINT-2.2B1 (2026-07-01) — inline permission gates.
+#
+# Pre-2.2B1 all 4 endpoints were auth-only; frontend
+# RoleRoute(minRole="org_admin") gated /poe but a direct API caller
+# could POST /snapshot-now (org-wide Celery task) or hit
+# GET /devices/{id}/realtime.
+#
+# The new poe module gives the surface its own verbs:
+#   - view    — GET /summary (cached org-wide aggregation),
+#                GET /devices/{id} (per-device snapshot cache read).
+#                Pure cache reads — no side effects.
+#   - refresh — POST /snapshot-now (queues Celery task
+#                snapshot_poe_status; fleet-wide SNMP+SSH sweep) AND
+#                GET /devices/{id}/realtime.
+#
+#                ⚠ CRITICAL: `GET /devices/{id}/realtime` looks like a
+#                read but is a MUTATING endpoint. Body execution
+#                (poe.py ~ line 185 onward):
+#                  1. ssh_manager.execute_command(device, cmd)
+#                     — opens an SSH session to the target device
+#                  2. _parse_power_inline(result.output)
+#                     — parses vendor-specific PoE power output
+#                  3. Upsert PoEPortSnapshot rows for the device
+#                     (line 209-237)
+#                  4. `await db.commit()` at line 237 — persists the
+#                     new snapshot rows to the database
+#                The HTTP method is a semantic bug (should be POST
+#                /devices/{id}/refresh-now); the rename is DEFERRED
+#                to a future PR so this Sprint 2.2B1 diff stays
+#                focused on authorization. The `refresh` gate ensures
+#                a caller without the poe:refresh verb can neither
+#                trigger the Celery task NOR execute the SSH-mutation
+#                endpoint.
+#
+# The Alembic migration f9ak_sla_poe_authorization backfills only via
+# name-based opt-in: Tam Yetki / Org Admin templates → both verbs TRUE.
+# Custom sets → both verbs FALSE. NO view carry-over — the route still
+# gates on RoleRoute(minRole="org_admin") so no location_admin can
+# reach the page today; the org_admin PermissionEngine bypass keeps
+# existing org_admin operators working.
+def _require_poe_view(user) -> None:
+    if not user.has_permission("poe:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: poe.view")
+
+
+def _require_poe_refresh(user) -> None:
+    if not user.has_permission("poe:refresh"):
+        raise HTTPException(status_code=403, detail="Permission denied: poe.refresh")
+
+
 # A snapshot row is "stale" when it hasn't been refreshed in this long.
 # The beat task runs every 15 min — give it 3× headroom before we warn.
 STALE_AFTER = timedelta(minutes=45)
 
 
 @router.post("/snapshot-now", status_code=202)
-async def trigger_snapshot_now(_: CurrentUser = None):
+async def trigger_snapshot_now(current_user: CurrentUser = None):
     """T9 Tur 6B follow-up — operatörden tetiklenen anlık PoE snapshot.
 
     Beat task 15 dakikada bir çalışır; ilk kurulumda veya credential
     değişiminde 'şimdi çek' butonu için bu endpoint kullanılır. Celery
     task hemen kuyruğa girer; sonuç /poe/summary'de görünür.
     """
+    _require_poe_refresh(current_user)
     from app.workers.tasks.poe_tasks import snapshot_poe_status
     snapshot_poe_status.delay()
     return {"queued": True, "message": "PoE snapshot kuyruğa alındı (SNMP-first, SSH fallback)."}
@@ -43,7 +95,7 @@ async def trigger_snapshot_now(_: CurrentUser = None):
 async def get_poe_summary(
     location_id: Optional[int] = None,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Per-device PoE summary across the current org scope.
 
@@ -55,6 +107,7 @@ async def get_poe_summary(
     whose latest PoE row is older than STALE_AFTER — beat task likely
     couldn't reach them).
     """
+    _require_poe_view(current_user)
     snap_q = (
         select(
             PoEPortSnapshot.device_id.label("device_id"),
@@ -152,7 +205,7 @@ async def get_poe_summary(
 async def get_device_poe_realtime(
     device_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """T9 follow-up — anlık SSH `show power inline` ile GERÇEK mW.
 
@@ -161,7 +214,16 @@ async def get_device_poe_realtime(
     yaptığında tetiklenir: SSH'le canlı çıktı çekilir, vendor parser ile
     gerçek port-level mW + port adı döndürülür. Snapshot tablosu da update
     edilir (kalıcı kayıt).
+
+    RBAC-SPRINT-2.2B1 note: this endpoint uses the HTTP GET verb but
+    IS mutating — it opens an SSH session on the target device AND
+    writes parsed PoE data back to PoEPortSnapshot (db.commit at the
+    end). The `poe:refresh` gate covers both this endpoint AND
+    POST /snapshot-now — a caller without poe:refresh can neither
+    trigger the Celery task NOR execute this SSH-mutation endpoint.
+    HTTP-method rename to POST is deferred to a future semantic-fix PR.
     """
+    _require_poe_refresh(current_user)
     device = (await db.execute(
         select(Device).where(Device.id == device_id)
     )).scalar_one_or_none()
@@ -258,9 +320,10 @@ async def get_device_poe_realtime(
 async def get_device_poe(
     device_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Per-port PoE state for one device — latest snapshot."""
+    _require_poe_view(current_user)
     device = (await db.execute(
         select(Device).where(Device.id == device_id)
     )).scalar_one_or_none()

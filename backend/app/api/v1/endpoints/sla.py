@@ -20,6 +20,38 @@ from app.services.cache import get_aggregation_cache
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.2B1 (2026-07-01) — inline permission gates.
+#
+# Pre-2.2B1 all 8 endpoints were auth-only; frontend
+# RoleRoute(minRole="org_admin") gated /sla but a direct API caller
+# with a valid token bypassed the guard and could POST/PUT/DELETE
+# on /policies (org-wide SLA contract mutation) or read every
+# report / compliance / device / fleet-summary payload.
+#
+# The new sla module gives the surface its own verbs:
+#   - view            — read /policies, /report, /compliance,
+#                        /device/{id}, /fleet-summary (all read-only
+#                        analytics)
+#   - manage_policies — POST /policies, PUT /policies/{id},
+#                        DELETE /policies/{id} (org-wide SLA policy
+#                        CRUD; contract-level mutation)
+#
+# The Alembic migration f9ak_sla_poe_authorization backfills only via
+# name-based opt-in: Tam Yetki / Org Admin templates → both verbs
+# TRUE. Custom sets → both verbs FALSE. NO view carry-over — the
+# route still gates on RoleRoute(minRole="org_admin") so no
+# location_admin can reach the page today; the org_admin
+# PermissionEngine bypass keeps existing org_admin operators working.
+def _require_sla_view(user) -> None:
+    if not user.has_permission("sla:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: sla.view")
+
+
+def _require_sla_manage_policies(user) -> None:
+    if not user.has_permission("sla:manage_policies"):
+        raise HTTPException(status_code=403, detail="Permission denied: sla.manage_policies")
+
+
 _SLA_FLEET_VERSION_KEY = "agg:_version:sla_fleet"
 
 
@@ -214,8 +246,9 @@ async def _calc_uptime_bulk(
 @router.get("/policies")
 async def list_policies(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_sla_view(current_user)
     rows = (await db.execute(select(SlaPolicy).order_by(SlaPolicy.id))).scalars().all()
     return [_serialize_policy(r) for r in rows]
 
@@ -224,8 +257,9 @@ async def list_policies(
 async def create_policy(
     body: SlaPolicyCreate,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_sla_manage_policies(current_user)
     p = SlaPolicy(
         name=body.name,
         target_uptime_pct=body.target_uptime_pct,
@@ -245,8 +279,9 @@ async def update_policy(
     policy_id: int,
     body: SlaPolicyCreate,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_sla_manage_policies(current_user)
     p = (await db.execute(select(SlaPolicy).where(SlaPolicy.id == policy_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "SLA politikası bulunamadı")
@@ -265,8 +300,9 @@ async def update_policy(
 async def delete_policy(
     policy_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_sla_manage_policies(current_user)
     p = (await db.execute(select(SlaPolicy).where(SlaPolicy.id == policy_id))).scalar_one_or_none()
     if not p:
         raise HTTPException(404, "SLA politikası bulunamadı")
@@ -283,9 +319,10 @@ async def uptime_report(
     device_ids: Optional[str] = Query(None, description="Comma-separated device IDs"),
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Return uptime % for every active device (or a subset) over the window."""
+    _require_sla_view(current_user)
     now = datetime.now(timezone.utc)
 
     q = select(Device).where(Device.is_active == True)
@@ -323,9 +360,10 @@ async def uptime_report(
 @router.get("/compliance")
 async def sla_compliance(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Check all SLA policies and return compliance status per policy."""
+    _require_sla_view(current_user)
     now = datetime.now(timezone.utc)
     policies = (await db.execute(select(SlaPolicy))).scalars().all()
 
@@ -386,9 +424,10 @@ async def device_uptime(
     device_id: int,
     window_days: int = Query(30, ge=1, le=90),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Return uptime % for a specific device plus daily breakdown."""
+    _require_sla_view(current_user)
     now = datetime.now(timezone.utc)
     q = select(Device).where(Device.id == device_id)
     device = (await db.execute(q)).scalar_one_or_none()
@@ -519,9 +558,10 @@ async def fleet_summary(
     window_days: int = Query(30, ge=1, le=90),
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Aggregated uptime stats for the whole fleet (cached, Faz 6B)."""
+    _require_sla_view(current_user)
     bypass = request.headers.get("X-Cache-Bypass") == "1"
 
     cache = get_aggregation_cache()
