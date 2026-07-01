@@ -221,13 +221,20 @@ describe('Sidebar grup tıklamasında ilk yetkili tab yönlendirme', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe('MenuGroupNav permission filter', () => {
-  it('viewer config grubunda Firmware/Backups/Drift gizli; templates görünür', () => {
-    // Sprint 1A: drift artık org_admin gerektirir (route guard ile hizalı).
+  it('viewer config grubunda Firmware/Backups gizli; drift + templates permission-gated', () => {
+    // Sprint 1A: drift org_admin gerektirdi (route guard ile hizalı).
+    // RBAC-SPRINT-2.2A (2026-07-01): drift artık config_drift:view
+    // module-gate'i ile korunuyor (backend authorization hardening).
+    // Bu test'in ctxFor(viewer) fixture'ı can(_, 'view')=true döndürür,
+    // yani viewer'ın Permission Matrix'te config_drift:view=true
+    // atanmış rolünü simüle eder → drift GÖRÜNÜR olmalı. Backend
+    // gate'i pre-Sprint-2.2A auth-only'dı; şimdi de dedicated
+    // config_drift:view/manage/run verb'leriyle korumaya alındı.
     const visible = getVisibleTabs(GROUP_BY_KEY.config, ctxFor('viewer'))
     const visibleKeys = visible.map((t) => t.key)
     expect(visibleKeys).not.toContain('firmware')
     expect(visibleKeys).not.toContain('backups')
-    expect(visibleKeys).not.toContain('drift')
+    expect(visibleKeys).toContain('drift')     // module: ['config_drift','view']
     expect(visibleKeys).toContain('templates') // module: ['driver_templates','view']
   })
 

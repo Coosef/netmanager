@@ -137,7 +137,11 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
       // their assigned location scope.
       { key: 'analytics',         route: '/intelligence',      i18nKey: 'nav.tab.monitoring.analytics',         module: ['monitoring', 'view'] },
       { key: 'bandwidth',         route: '/bandwidth',         i18nKey: 'nav.tab.monitoring.bandwidth',         module: ['monitoring', 'view'] },
-      { key: 'port_intelligence', route: '/mac-arp',           i18nKey: 'nav.tab.monitoring.port_intelligence', module: ['monitoring', 'view'] },
+      // RBAC-SPRINT-2.2A (2026-07-01) — MAC/ARP gate migrated from
+      // monitoring:view (recycled) to dedicated mac_arp:view. Semantic-
+      // fix: mac_arp is port intelligence + SSH-driven active refresh,
+      // not general network telemetry.
+      { key: 'port_intelligence', route: '/mac-arp',           i18nKey: 'nav.tab.monitoring.port_intelligence', module: ['mac_arp', 'view'] },
       { key: 'probes',            route: '/synthetic-probes',  i18nKey: 'nav.tab.monitoring.probes' },
     ],
   },
@@ -155,7 +159,12 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     key: 'config',
     i18nKey: 'nav.group.config',
     tabs: [
-      { key: 'drift',     route: '/config-drift',     i18nKey: 'nav.tab.config.drift',     minRole: 'org_admin' },
+      // RBAC-SPRINT-2.2A (2026-07-01) — Config Drift gate migrated
+      // from minRole=org_admin (frontend-only role guard) to
+      // config_drift:view (backend + frontend permission gate).
+      // Every ungated backend endpoint now requires an explicit
+      // config_drift.view / manage / run verb.
+      { key: 'drift',     route: '/config-drift',     i18nKey: 'nav.tab.config.drift',     module: ['config_drift', 'view'] },
       { key: 'templates', route: '/config-templates', i18nKey: 'nav.tab.config.templates', module: ['driver_templates', 'view'] },
       { key: 'builder',   route: '/config-builder',   i18nKey: 'nav.tab.config.builder',   module: ['config_backups', 'view'] },
       { key: 'backups',   route: '/backups',          i18nKey: 'nav.tab.config.backups',   minRole: 'location_admin' },
@@ -178,10 +187,16 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     key: 'security',
     i18nKey: 'nav.group.security',
     tabs: [
-      { key: 'audit',      route: '/security-audit',    i18nKey: 'nav.tab.security.audit' },
+      // RBAC-SPRINT-2.2A (2026-07-01) — Security Audit gate migrated
+      // from monitoring:view (semantic-bug recycle; telemetry ≠
+      // compliance) to dedicated security_audit:view.
+      { key: 'audit',      route: '/security-audit',    i18nKey: 'nav.tab.security.audit', module: ['security_audit', 'view'] },
       { key: 'policies',   route: '/security-policies', i18nKey: 'nav.tab.security.policies' },
       { key: 'compliance', route: '/compliance',        i18nKey: 'nav.tab.security.compliance', minRole: 'location_admin' },
-      { key: 'lifecycle',  route: '/asset-lifecycle',   i18nKey: 'nav.tab.security.lifecycle' },
+      // RBAC-SPRINT-2.2A (2026-07-01) — Asset Lifecycle gate migrated
+      // from monitoring:view (semantic-bug recycle; CMDB ≠ telemetry)
+      // to dedicated asset_lifecycle:view.
+      { key: 'lifecycle',  route: '/asset-lifecycle',   i18nKey: 'nav.tab.security.lifecycle', module: ['asset_lifecycle', 'view'] },
     ],
   },
   {
@@ -219,7 +234,12 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     tabs: [
       { key: 'logs', route: '/audit',              i18nKey: 'nav.tab.admin_audit.logs', module: ['audit_logs', 'view'] },
       // SSH Termination KAPALI (karar 6) — TerminalSessions read-only audit
-      { key: 'ssh',  route: '/terminal-sessions',  i18nKey: 'nav.tab.admin_audit.ssh' },
+      // RBAC-SPRINT-2.2A (2026-07-01) — Terminal Sessions gate migrated
+      // from audit_logs:view (acceptable-but-recycled) to dedicated
+      // terminal_sessions:view. AI summarize gets its own verb
+      // (terminal_sessions:summarize) for cost + sensitive-content
+      // isolation.
+      { key: 'ssh',  route: '/terminal-sessions',  i18nKey: 'nav.tab.admin_audit.ssh', module: ['terminal_sessions', 'view'] },
     ],
   },
   {

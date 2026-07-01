@@ -154,6 +154,80 @@ DEFAULT_PERMISSIONS: dict = {
         # on both verbs; only "Tam Yetki" / "Org Admin" templates get
         # opt-in TRUE, matching the Phase 1 f9ah opt-in policy.
         "notifications":   {"view": False, "manage": False},
+        # RBAC-SPRINT-2.2A (2026-07-01) — backend authorization
+        # hardening. Five new feature modules that gate operational
+        # backend endpoints. Pre-Sprint-2.2A these five surfaces
+        # (config drift, security audit, asset lifecycle, terminal
+        # sessions, MAC/ARP) had zero backend permission gates on
+        # 38 endpoints; frontend RoleRoute/PermRoute did NOT protect
+        # against direct API calls with a valid token. The new
+        # module verbs are wired at every endpoint via inline
+        # has_permission() checks.
+        #
+        # Verb semantics (single-line reference; full rationale in
+        # docs/ and the Alembic migration comment):
+        #
+        #   config_drift.view      — read drift report / drift diff
+        #                             + list backup schedules
+        #   config_drift.manage    — create/update/delete backup
+        #                             schedule
+        #   config_drift.run       — POST /run-now trigger backup
+        #                             on demand
+        #
+        #   security_audit.view          — read rules, profiles,
+        #                                   stats, export.csv, list,
+        #                                   detail, per-device
+        #                                   history, fleet-trend
+        #   security_audit.profile_manage — create/update/delete
+        #                                   ComplianceProfile
+        #   security_audit.run           — POST /run trigger audit
+        #                                   scan
+        #
+        #   asset_lifecycle.view   — read asset stats/list/detail/
+        #                             by-device (CMDB records)
+        #   asset_lifecycle.manage — upsert/update/delete asset +
+        #                             POST /eol-lookup bulk update
+        #                             (financial + procurement data)
+        #
+        #   terminal_sessions.view      — read session list, stats,
+        #                                  detail, command transcripts
+        #   terminal_sessions.summarize — POST /{id}/summarize AI
+        #                                  Claude summarization
+        #                                  (cost + sensitive content
+        #                                  gate)
+        #
+        #   mac_arp.view    — read MAC table, ARP table, search,
+        #                      port-summary, stats, device-inventory
+        #   mac_arp.collect — POST /collect SSH-driven active refresh
+        #                      (was WRONG-gated on config:view
+        #                      pre-2.2A — semantic bug fixed by the
+        #                      f9aj migration + endpoint rewrite)
+        #
+        # The Alembic migration f9aj_rbac_authorization_hardening.py
+        # backfills every existing permission_set row with the new
+        # modules. Carry-over rules (each preserves current access):
+        #   - monitoring.view=true    → security_audit.view=true
+        #                               + asset_lifecycle.view=true
+        #                               + mac_arp.view=true
+        #   - audit_logs.view=true    → terminal_sessions.view=true
+        #   - config.view=true        → mac_arp.collect=true
+        #                               (semantic fix carry-over)
+        #   - config_backups.view=true → config_drift.view=true
+        #   - name ∈ {"Tam Yetki",    → every action of every new
+        #             "Org Admin"}      module = true (matches Phase 1
+        #                               f9ah + Sprint 2.1 f9ai opt-in
+        #                               policy)
+        # Mutating verbs (config_drift.manage/run,
+        # security_audit.profile_manage/run, asset_lifecycle.manage,
+        # terminal_sessions.summarize) get TRUE only via the name-based
+        # opt-in — never via a carry-over rule alone. Custom permission
+        # sets stay at safe FALSE default so operators must explicitly
+        # opt in via the Permission Matrix UI.
+        "config_drift":      {"view": False, "manage": False, "run": False},
+        "security_audit":    {"view": False, "profile_manage": False, "run": False},
+        "asset_lifecycle":   {"view": False, "manage": False},
+        "terminal_sessions": {"view": False, "summarize": False},
+        "mac_arp":           {"view": False, "collect": False},
     }
 }
 

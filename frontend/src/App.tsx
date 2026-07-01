@@ -395,7 +395,7 @@ function ThemedApp() {
                 <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
                 <Route path="intelligence" element={<PermRoute module="monitoring" action="view"><IntelligencePage /></PermRoute>} />
                 <Route path="bandwidth" element={<PermRoute module="monitoring" action="view"><BandwidthMonitorPage /></PermRoute>} />
-                <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
+                <Route path="mac-arp" element={<PermRoute module="mac_arp" action="view"><MacArpPage /></PermRoute>} />
                 <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
                 {/* Alerts */}
                 <Route path="alert-rules" element={<RoleRoute minRole="org_admin"><AlertRulesPage /></RoleRoute>} />
@@ -403,7 +403,7 @@ function ThemedApp() {
                 <Route path="incidents" element={<PermRoute module="monitoring" action="view"><IncidentsPage /></PermRoute>} />
                 <Route path="services" element={<RoleRoute minRole="org_admin"><ServicesPage /></RoleRoute>} />
                 {/* Config */}
-                <Route path="config-drift" element={<RoleRoute minRole="org_admin"><ConfigDriftPage /></RoleRoute>} />
+                <Route path="config-drift" element={<PermRoute module="config_drift" action="view"><ConfigDriftPage /></PermRoute>} />
                 <Route path="config-templates" element={<PermRoute module="driver_templates" action="view"><ConfigTemplatesPage /></PermRoute>} />
                 <Route path="config-builder" element={<PermRoute module="config_backups" action="view"><ConfigBuilderPage /></PermRoute>} />
                 <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
@@ -415,10 +415,10 @@ function ThemedApp() {
                 <Route path="change-management" element={<RoleRoute minRole="location_admin"><ChangeManagementPage /></RoleRoute>} />
                 <Route path="approvals" element={<RoleRoute minRole="location_admin"><ApprovalsPage /></RoleRoute>} />
                 {/* Security */}
-                <Route path="security-audit" element={<PermRoute module="monitoring" action="view"><SecurityAuditPage /></PermRoute>} />
+                <Route path="security-audit" element={<PermRoute module="security_audit" action="view"><SecurityAuditPage /></PermRoute>} />
                 <Route path="security-policies" element={<RoleRoute minRole="viewer"><SecurityPoliciesPage /></RoleRoute>} />
                 <Route path="compliance" element={<RoleRoute minRole="location_admin"><ComplianceCheckPage /></RoleRoute>} />
-                <Route path="asset-lifecycle" element={<PermRoute module="monitoring" action="view"><AssetLifecyclePage /></PermRoute>} />
+                <Route path="asset-lifecycle" element={<PermRoute module="asset_lifecycle" action="view"><AssetLifecyclePage /></PermRoute>} />
                 {/* Reports */}
                 <Route path="sla" element={<RoleRoute minRole="org_admin"><SlaReportPage /></RoleRoute>} />
                 <Route path="poe" element={<RoleRoute minRole="org_admin"><PoeDashboardPage /></RoleRoute>} />
@@ -433,7 +433,7 @@ function ThemedApp() {
                 <Route path="locations" element={<PermRoute module="locations" action="view"><LocationsPage /></PermRoute>} />
                 {/* admin_audit */}
                 <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
-                <Route path="terminal-sessions" element={<PermRoute module="audit_logs" action="view"><TerminalSessionsPage /></PermRoute>} />
+                <Route path="terminal-sessions" element={<PermRoute module="terminal_sessions" action="view"><TerminalSessionsPage /></PermRoute>} />
               </Route>
 
               {/* PR-A — legacy bookmark / external-link compatibility.
@@ -466,7 +466,7 @@ function ThemedApp() {
               <Route path="reports" element={<PermRoute module="reports" action="view"><ReportsPage /></PermRoute>} />
               <Route path="users" element={<PermRoute module="users" action="view"><UsersPage /></PermRoute>} />
               <Route path="audit" element={<PermRoute module="audit_logs" action="view"><AuditLogPage /></PermRoute>} />
-              <Route path="terminal-sessions" element={<PermRoute module="audit_logs" action="view"><TerminalSessionsPage /></PermRoute>} />
+              <Route path="terminal-sessions" element={<PermRoute module="terminal_sessions" action="view"><TerminalSessionsPage /></PermRoute>} />
               {/* T10 C7.B — eski ports route'unu yeni Detail sayfasındaki Ports sekmesine yönlendir
                   (eski bookmark'lar kırılmaz). Gerçek Ports sekmesi içeriği C7.C'de gelecek. */}
               <Route path="devices/:deviceId/ports" element={<RedirectToPortsTab />} />
@@ -483,10 +483,10 @@ function ThemedApp() {
               <Route path="profile" element={<ProfilePage />} />
               <Route path="playbooks" element={<PermRoute module="playbooks" action="view"><PlaybooksPage /></PermRoute>} />
               <Route path="approvals" element={<RoleRoute minRole="location_admin"><ApprovalsPage /></RoleRoute>} />
-              <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
+              <Route path="mac-arp" element={<PermRoute module="mac_arp" action="view"><MacArpPage /></PermRoute>} />
               <Route path="ipam" element={<PermRoute module="ipam" action="view"><IpamPage /></PermRoute>} />
-              <Route path="security-audit" element={<PermRoute module="monitoring" action="view"><SecurityAuditPage /></PermRoute>} />
-              <Route path="asset-lifecycle" element={<PermRoute module="monitoring" action="view"><AssetLifecyclePage /></PermRoute>} />
+              <Route path="security-audit" element={<PermRoute module="security_audit" action="view"><SecurityAuditPage /></PermRoute>} />
+              <Route path="asset-lifecycle" element={<PermRoute module="asset_lifecycle" action="view"><AssetLifecyclePage /></PermRoute>} />
               <Route path="diagnostics" element={<RoleRoute minRole="viewer"><DiagnosticsPage /></RoleRoute>} />
               <Route path="bandwidth" element={<PermRoute module="monitoring" action="view"><BandwidthMonitorPage /></PermRoute>} />
               <Route path="config-templates" element={<PermRoute module="driver_templates" action="view"><ConfigTemplatesPage /></PermRoute>} />
@@ -497,7 +497,7 @@ function ThemedApp() {
               <Route path="sla" element={<RoleRoute minRole="org_admin"><SlaReportPage /></RoleRoute>} />
               <Route path="vlan" element={<PermRoute module="vlan" action="view"><VlanManagementPage /></PermRoute>} />
               <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
-              <Route path="config-drift" element={<RoleRoute minRole="org_admin"><ConfigDriftPage /></RoleRoute>} />
+              <Route path="config-drift" element={<PermRoute module="config_drift" action="view"><ConfigDriftPage /></PermRoute>} />
               <Route path="intelligence" element={<PermRoute module="monitoring" action="view"><IntelligencePage /></PermRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_admin"><ComplianceCheckPage /></RoleRoute>} />
               <Route path="racks" element={<PermRoute module="racks" action="view"><RacksPage /></PermRoute>} />

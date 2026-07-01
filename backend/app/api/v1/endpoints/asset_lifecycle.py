@@ -16,6 +16,39 @@ from app.services.eol_lookup import lookup_eol
 
 router = APIRouter()
 
+
+# RBAC-SPRINT-2.2A (2026-07-01) — inline permission gates.
+#
+# Pre-2.2A all 8 endpoints were auth-only; frontend PermRoute(monitoring,
+# view) gated the /asset-lifecycle page but a direct API call let any
+# authenticated user list/upsert/update/delete asset records (including
+# purchase_cost, PO number, warranty_expiry — financial + procurement
+# data) and trigger the bulk EOL lookup.
+#
+# The new asset_lifecycle module gives the CMDB surface its own verbs:
+#   - view    — GET stats, list, by-device, by-id (READ-ONLY for
+#                location_admin per operator brief; financial data
+#                visible but not editable)
+#   - manage  — POST /, PUT /{id}, DELETE /{id}, POST /eol-lookup
+#                (all mutating CMDB writes; org_admin+ only —
+#                purchase_cost, PO, warranty terms are org-wide
+#                financial + procurement decisions)
+#
+# The Alembic migration f9aj_rbac_authorization_hardening.py backfills
+# every existing permission_set row: monitoring.view=true carries over
+# to asset_lifecycle.view=true so current monitoring viewers keep their
+# read access; asset_lifecycle.manage stays FALSE for custom sets
+# (name-based opt-in only for Tam Yetki / Org Admin).
+def _require_asset_lifecycle_view(user) -> None:
+    if not user.has_permission("asset_lifecycle:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: asset_lifecycle.view")
+
+
+def _require_asset_lifecycle_manage(user) -> None:
+    if not user.has_permission("asset_lifecycle:manage"):
+        raise HTTPException(status_code=403, detail="Permission denied: asset_lifecycle.manage")
+
+
 TODAY = lambda: date.today()  # noqa: E731
 
 
@@ -77,9 +110,10 @@ def _serialize(asset: AssetLifecycle) -> dict:
 @router.get("/stats")
 async def get_asset_stats(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     site: Optional[str] = Query(None),
 ):
+    _require_asset_lifecycle_view(current_user)
     today = date.today()
     in_30 = today + timedelta(days=30)
     in_90 = today + timedelta(days=90)
@@ -146,8 +180,9 @@ async def list_assets(
     page_size: int = Query(50, ge=1, le=200),
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_asset_lifecycle_view(current_user)
     today = date.today()
     in_30 = today + timedelta(days=30)
     in_90 = today + timedelta(days=90)
@@ -184,8 +219,9 @@ async def list_assets(
 async def get_asset_by_device(
     device_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_asset_lifecycle_view(current_user)
     asset = (
         await db.execute(select(AssetLifecycle).where(AssetLifecycle.device_id == device_id))
     ).scalar_one_or_none()
@@ -198,8 +234,9 @@ async def get_asset_by_device(
 async def get_asset(
     asset_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_asset_lifecycle_view(current_user)
     asset = (
         await db.execute(select(AssetLifecycle).where(AssetLifecycle.id == asset_id))
     ).scalar_one_or_none()
@@ -217,6 +254,7 @@ async def upsert_asset(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_asset_lifecycle_manage(current_user)
     device = (
         await db.execute(select(Device).where(Device.id == body.device_id))
     ).scalar_one_or_none()
@@ -263,6 +301,7 @@ async def update_asset(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_asset_lifecycle_manage(current_user)
     asset = (
         await db.execute(select(AssetLifecycle).where(AssetLifecycle.id == asset_id))
     ).scalar_one_or_none()
@@ -299,6 +338,7 @@ async def delete_asset(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_asset_lifecycle_manage(current_user)
     asset = (
         await db.execute(select(AssetLifecycle).where(AssetLifecycle.id == asset_id))
     ).scalar_one_or_none()
@@ -331,6 +371,7 @@ async def eol_lookup(
     Body: { "device_ids": [1, 2, ...] }  — empty list or omit to check all devices.
     Returns per-device results: matched, eol_date, eos_date, or not_found.
     """
+    _require_asset_lifecycle_manage(current_user)
     device_ids: list[int] = payload.get("device_ids") or []
 
     if device_ids:

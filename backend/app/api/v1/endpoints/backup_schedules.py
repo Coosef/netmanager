@@ -20,6 +20,45 @@ from app.workers.tasks.bulk_tasks import _compute_next_run
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.2A (2026-07-01) — inline permission gates for Config
+# Drift + Backup Schedule surface.
+#
+# Pre-2.2A all 7 endpoints were auth-only; frontend RoleRoute
+# (minRole=org_admin) gated the /config-drift page but a direct API
+# caller with a valid token could POST /run-now (trigger a backup
+# on any device) or POST / PUT / DELETE any schedule org-wide. GET
+# /drift-report + /drift-diff exposed the full drift picture with
+# no permission check.
+#
+# The new config_drift module gives the surface its own verbs:
+#   - view   — GET /, GET /drift-report, GET /drift-diff/{device_id}
+#              (read schedule list + drift picture)
+#   - manage — POST /, PUT /{id}, DELETE /{id} (schedule CRUD;
+#              org_admin+ — schedule owns which devices get backed
+#              up on which cron, org-wide operational control)
+#   - run    — POST /{id}/run-now (trigger an ad-hoc backup right
+#              now; org_admin+ — device SSH + fleet load)
+#
+# The Alembic migration f9aj_rbac_authorization_hardening.py backfills
+# every existing permission_set row: config_backups.view=true carries
+# over to config_drift.view=true so anyone who could already see
+# backups keeps drift-report access; manage + run stay FALSE for
+# custom sets (name-based opt-in only for Tam Yetki / Org Admin).
+def _require_config_drift_view(user) -> None:
+    if not user.has_permission("config_drift:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: config_drift.view")
+
+
+def _require_config_drift_manage(user) -> None:
+    if not user.has_permission("config_drift:manage"):
+        raise HTTPException(status_code=403, detail="Permission denied: config_drift.manage")
+
+
+def _require_config_drift_run(user) -> None:
+    if not user.has_permission("config_drift:run"):
+        raise HTTPException(status_code=403, detail="Permission denied: config_drift.run")
+
+
 def _schedule_to_dict(s: BackupSchedule) -> dict:
     dow = [int(x) for x in s.days_of_week.split(",") if x] if s.days_of_week else None
     return {
@@ -48,6 +87,7 @@ async def list_schedules(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_config_drift_view(current_user)
     result = await db.execute(
         select(BackupSchedule).order_by(BackupSchedule.is_default.desc(), BackupSchedule.created_at)
     )
@@ -61,6 +101,7 @@ async def create_schedule(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_config_drift_manage(current_user)
     days_str = ",".join(str(d) for d in payload.days_of_week) if payload.days_of_week else None
     now = datetime.now(timezone.utc)
     next_run = _compute_next_run(
@@ -98,6 +139,7 @@ async def update_schedule(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_config_drift_manage(current_user)
     result = await db.execute(select(BackupSchedule).where(BackupSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -130,6 +172,7 @@ async def delete_schedule(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_config_drift_manage(current_user)
     result = await db.execute(select(BackupSchedule).where(BackupSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -147,6 +190,7 @@ async def run_schedule_now(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_config_drift_run(current_user)
     result = await db.execute(select(BackupSchedule).where(BackupSchedule.id == schedule_id))
     schedule = result.scalar_one_or_none()
     if not schedule:
@@ -189,6 +233,7 @@ async def config_drift_report(
     (hangi cihaz hangi tarihte baseline işaretlendi, son backup ne zaman
     yapıldı, hash kısa) gösterebilir.
     """
+    _require_config_drift_view(current_user)
     tf = tenant_id or (current_user.tenant_id if hasattr(current_user, "tenant_id") else None)
 
     # Golden baselines per device (id + hash + created_at — clean rows want timestamp too).
@@ -306,6 +351,7 @@ async def config_drift_diff(
     current_user: CurrentUser = None,
 ):
     """Return golden config text and latest backup text for client-side diff rendering."""
+    _require_config_drift_view(current_user)
     tf = getattr(current_user, "tenant_id", None)
 
     golden_q = (

@@ -18,6 +18,42 @@ from app.services import oui_service
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.2A (2026-07-01) — inline permission gates + semantic fix.
+#
+# Pre-2.2A the POST /collect endpoint was gated on `config:view`
+# (mac_arp.py:311), a semantically WRONG verb — config:view is intended
+# for config backup / template viewing, not MAC/ARP data collection.
+# The recycled gate happened to be practically org_admin-only, so no
+# active privilege escalation was firing, but the drift was a latent
+# bug: if a future PR ever expanded config:view to location_admin
+# users, MAC/ARP collect (org-wide SSH sweep) would leak silently.
+#
+# The GET endpoints (mac-table, arp-table, search, port-summary,
+# stats, device-inventory) were auth-only — any authenticated user
+# could read raw MAC/ARP forensics org-wide (RLS did filter by org,
+# but no module-level permission gate applied).
+#
+# The new mac_arp module gives the surface its own verbs:
+#   - view    — 6 GET endpoints (read MAC table, ARP table, search,
+#                port summary, stats, device inventory)
+#   - collect — POST /collect (SSH-driven active refresh; org-wide
+#                sweep with real device SSH sessions + DB upserts)
+#
+# The Alembic migration f9aj_rbac_authorization_hardening.py backfills
+# every existing permission_set row: monitoring.view=true carries over
+# to mac_arp.view=true; config.view=true carries over to
+# mac_arp.collect=true (semantic-fix carry-over — preserves the
+# existing operator's collect access under the correct new verb).
+def _require_mac_arp_view(user) -> None:
+    if not user.has_permission("mac_arp:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: mac_arp.view")
+
+
+def _require_mac_arp_collect(user) -> None:
+    if not user.has_permission("mac_arp:collect"):
+        raise HTTPException(status_code=403, detail="Permission denied: mac_arp.collect")
+
+
 # ── MAC normalization ────────────────────────────────────────────────────────
 
 def _normalize_mac(raw: str) -> str:
@@ -308,8 +344,10 @@ async def collect_mac_arp(
     current_user: CurrentUser = None,
 ):
     """Trigger MAC + ARP collection for given device_ids (or all online devices)."""
-    if not current_user.has_permission("config:view"):
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    # RBAC-SPRINT-2.2A — semantic-fix: was gated on the WRONG verb
+    # `config:view`; now gated on the correct dedicated
+    # `mac_arp:collect` verb. See file-top comment block.
+    _require_mac_arp_collect(current_user)
 
     body = await request.json()
     device_ids: list[int] = body.get("device_ids", [])
@@ -347,7 +385,7 @@ async def collect_mac_arp(
 @router.get("/mac-table", response_model=dict)
 async def list_mac_table(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     skip: int = 0,
     limit: int = Query(100, le=500),
     device_id: Optional[int] = Query(None),
@@ -357,6 +395,7 @@ async def list_mac_table(
     entry_type: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
 ):
+    _require_mac_arp_view(current_user)
     query = select(MacAddressEntry)
     # Faz 9 #3 — org / location scope is RLS-enforced; only `site` narrows here.
     if device_id:
@@ -403,7 +442,7 @@ async def list_mac_table(
 @router.get("/arp-table", response_model=dict)
 async def list_arp_table(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     skip: int = 0,
     limit: int = Query(100, le=500),
     device_id: Optional[int] = Query(None),
@@ -411,6 +450,7 @@ async def list_arp_table(
     mac_address: Optional[str] = Query(None),
     site: Optional[str] = Query(None),
 ):
+    _require_mac_arp_view(current_user)
     query = select(ArpEntry)
     # Faz 9 #3 — org / location scope is RLS-enforced; only `site` narrows here.
     if device_id:
@@ -453,9 +493,10 @@ async def list_arp_table(
 async def search_mac_arp(
     q: str = Query(..., min_length=3),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Search by MAC address or IP across both tables."""
+    _require_mac_arp_view(current_user)
     q_lower = q.lower().strip()
 
     mac_q = select(MacAddressEntry).where(
@@ -506,9 +547,10 @@ async def port_summary(
     device_id: Optional[int] = Query(None),
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Return per-device, per-port MAC count summary."""
+    _require_mac_arp_view(current_user)
     query = (
         select(
             MacAddressEntry.device_id,
@@ -552,9 +594,10 @@ async def port_summary(
 @router.get("/stats", response_model=dict)
 async def mac_arp_stats(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Summary statistics for the MAC/ARP tables."""
+    _require_mac_arp_view(current_user)
     # Faz 9 #3 — org scope is RLS-enforced; counts are over the active org.
     mac_total = (await db.execute(select(func.count()).select_from(MacAddressEntry))).scalar()
     arp_total = (await db.execute(select(func.count()).select_from(ArpEntry))).scalar()
@@ -574,7 +617,7 @@ async def mac_arp_stats(
 @router.get("/device-inventory", response_model=dict)
 async def device_inventory(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     skip: int = 0,
     limit: int = Query(200, le=1000),
     device_id: Optional[int] = Query(None),
@@ -587,6 +630,7 @@ async def device_inventory(
     Unified end-device inventory: SQL-level filtering + pagination.
     oui_vendor / device_type stored in mac_address_entries — no Python-side scan.
     """
+    _require_mac_arp_view(current_user)
     # Build WHERE conditions dynamically (asyncpg can't infer type of NULL params)
     conditions: list[str] = []
     params: dict = {}

@@ -130,6 +130,36 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
     { key: 'view',   label: 'Görüntüle' },
     { key: 'manage', label: 'Yönet' },
   ] },
+  // RBAC-SPRINT-2.2A (2026-07-01) — five new operational modules
+  // that gate previously auth-only backend endpoints. Pre-Sprint-2.2A
+  // frontend RoleRoute / PermRoute gated the pages but a direct API
+  // call with a valid token bypassed the guard (38 endpoints exposed).
+  // The Alembic migration f9aj_rbac_authorization_hardening carries
+  // over each existing operator's view access via monitoring:view,
+  // audit_logs:view, config_backups:view and (semantic-fix) config:view
+  // → mac_arp:collect.
+  { key: 'config_drift',       label: 'Konfig Drift',       actions: [
+    { key: 'view',   label: 'Görüntüle' },
+    { key: 'manage', label: 'Yönet' },
+    { key: 'run',    label: 'Şimdi Çalıştır' },
+  ] },
+  { key: 'security_audit',     label: 'Güvenlik Denetimi',  actions: [
+    { key: 'view',           label: 'Görüntüle' },
+    { key: 'profile_manage', label: 'Profil Yönet' },
+    { key: 'run',            label: 'Tarama Başlat' },
+  ] },
+  { key: 'asset_lifecycle',    label: 'Envanter Yaşam Döngüsü', actions: [
+    { key: 'view',   label: 'Görüntüle' },
+    { key: 'manage', label: 'Yönet' },
+  ] },
+  { key: 'terminal_sessions',  label: 'Terminal Kayıtları', actions: [
+    { key: 'view',      label: 'Görüntüle' },
+    { key: 'summarize', label: 'AI Özet' },
+  ] },
+  { key: 'mac_arp',            label: 'MAC/ARP Zekası',     actions: [
+    { key: 'view',    label: 'Görüntüle' },
+    { key: 'collect', label: 'Topla' },
+  ] },
 ]
 
 const ALL_ACTIONS = [
@@ -147,6 +177,12 @@ const ALL_ACTIONS = [
   //   review  — Onay Kuyruğu için (approvals.review)
   //   manage  — Bildirim Kanalları için (notifications.manage)
   'review', 'manage',
+  // RBAC-SPRINT-2.2A (2026-07-01) — new column headers for 5 new modules:
+  //   profile_manage  — security_audit ComplianceProfile CRUD
+  //   summarize       — terminal_sessions AI summary trigger
+  //   collect         — mac_arp SSH-driven active refresh
+  //   (view + run + manage already exist above)
+  'profile_manage', 'summarize', 'collect',
 ]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
@@ -202,7 +238,10 @@ function PermMatrix({
                   a === 'connect' ? 'Bilgi Çek' : a === 'move' ? 'Taşı' :
                   a === 'backup' ? 'Yedek Al' : a === 'restore' ? 'Geri Yükle' :
                   a === 'push' ? 'Cihaza Gönder' :
-                  a === 'review' ? 'Onayla/Reddet' : a === 'manage' ? 'Yönet' : a}
+                  a === 'review' ? 'Onayla/Reddet' : a === 'manage' ? 'Yönet' :
+                  a === 'profile_manage' ? 'Profil Yönet' :
+                  a === 'summarize' ? 'AI Özet' :
+                  a === 'collect' ? 'Topla' : a}
               </th>
             ))}
             {!readOnly && (

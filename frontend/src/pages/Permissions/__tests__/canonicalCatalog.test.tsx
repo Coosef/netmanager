@@ -63,30 +63,67 @@ describe('Permissions UI — canonical catalog source pins', () => {
 })
 
 
-// Behavioral check: MODULES.actions.length sums to 55 after Sprint 2.1.
-//   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1) + 4 (Sprint 2.1) = 55
-// Sprint 2.1 breakdown: approvals(view, review) + notifications(view, manage) = 4
+// Behavioral check: MODULES.actions.length sums to 67 after Sprint 2.2A.
+//   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1)
+//   + 4 (Sprint 2.1) + 12 (Sprint 2.2A) = 67
+// Sprint 2.2A breakdown:
+//   config_drift(view, manage, run) = 3
+//   security_audit(view, profile_manage, run) = 3
+//   asset_lifecycle(view, manage) = 2
+//   terminal_sessions(view, summarize) = 2
+//   mac_arp(view, collect) = 2
+//   total = 12
 describe('Permissions UI — total grant count', () => {
-  it('total actions across all modules = 55 (37 prior + 5 P2-CATALOG-A + 9 RBAC-Phase-1 + 4 Sprint-2.1)', async () => {
-    // Re-evaluate the literal by parsing the file: we count the
-    // `{ key:` markers inside the actions arrays.
-    // Easier path: read the runtime-loaded module via dynamic import.
-    // But the file pulls in AntD + theme hooks at module init, which
-    // requires a heavy jsdom setup. We approximate by counting
-    // top-level `{ key:` markers inside each MODULES action array.
-    // The source-level pin above is the canonical guarantee; this
-    // arithmetic pin double-checks the operator-facing count.
+  it('total actions across all modules = 67 (37 prior + 5 P2-CATALOG-A + 9 RBAC-Phase-1 + 4 Sprint-2.1 + 12 Sprint-2.2A)', async () => {
     const moduleBlock = SRC.match(/const MODULES[\s\S]*?\n\]\n/m)
     expect(moduleBlock).toBeTruthy()
     const declared = moduleBlock![0]
-    // Count occurrences of `{ key: '...'` inside the actions arrays —
-    // the outer `key: 'devices'` style markers also match but appear
-    // exactly once per module declaration (14 + 4 + 2 = 20 modules,
-    // where +2 is Sprint 2.1: approvals + notifications), so we
-    // exclude them from the inner-action count via the negative
-    // look-ahead.
-    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications)/g) ?? []).length
-    expect(innerActionCount).toBe(55)
+    // 14 + 4 (Phase 1) + 2 (Sprint 2.1) + 5 (Sprint 2.2A) = 25 module keys
+    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp)/g) ?? []).length
+    expect(innerActionCount).toBe(67)
+  })
+})
+
+// Sprint 2.2A pins — 5 new module rows.
+describe('Sprint 2.2A — new module rows in Permissions UI', () => {
+  it('MODULES.config_drift declares view + manage + run actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'config_drift'[\s\S]{0,400}'view'[\s\S]{0,200}'manage'[\s\S]{0,200}'run'/,
+    )
+  })
+  it('MODULES.security_audit declares view + profile_manage + run actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'security_audit'[\s\S]{0,400}'view'[\s\S]{0,200}'profile_manage'[\s\S]{0,200}'run'/,
+    )
+  })
+  it('MODULES.asset_lifecycle declares view + manage', () => {
+    expect(SRC).toMatch(
+      /key:\s*'asset_lifecycle'[\s\S]{0,300}'view'[\s\S]{0,200}'manage'/,
+    )
+  })
+  it('MODULES.terminal_sessions declares view + summarize', () => {
+    expect(SRC).toMatch(
+      /key:\s*'terminal_sessions'[\s\S]{0,300}'view'[\s\S]{0,200}'summarize'/,
+    )
+  })
+  it('MODULES.mac_arp declares view + collect', () => {
+    expect(SRC).toMatch(
+      /key:\s*'mac_arp'[\s\S]{0,300}'view'[\s\S]{0,200}'collect'/,
+    )
+  })
+  it('Action labels surface the TR strings for new Sprint 2.2A verbs', () => {
+    expect(SRC).toMatch(/key:\s*'profile_manage',\s*label:\s*'Profil Yönet'/)
+    expect(SRC).toMatch(/key:\s*'summarize',\s*label:\s*'AI Özet'/)
+    expect(SRC).toMatch(/key:\s*'collect',\s*label:\s*'Topla'/)
+    expect(SRC).toMatch(/key:\s*'run',\s*label:\s*'Şimdi Çalıştır'/)
+  })
+  it('ALL_ACTIONS includes profile_manage + summarize + collect column keys', () => {
+    expect(SRC).toMatch(/'profile_manage',\s*'summarize',\s*'collect'/)
+  })
+  it('ALL_ACTIONS column-header switch renders TR labels for new verbs', () => {
+    expect(SRC).toMatch(/a === 'profile_manage'\s*\?\s*'Profil Yönet'/)
+    expect(SRC).toMatch(/a === 'summarize'\s*\?\s*'AI Özet'/)
+    expect(SRC).toMatch(/a === 'collect'\s*\?\s*'Topla'/)
   })
 })
 
