@@ -41,7 +41,12 @@ async def list_channels(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("approval:review"):
+    # RBAC-SPRINT-2.1 — read gate on notifications:view.
+    # Pre-2026-07-01 this was `approval:review`, an unrelated verb from
+    # the approval-workflow module. See f9ai migration for the
+    # `approval:review → notifications:{view,manage}` backfill that
+    # preserves every existing admin's access on deploy.
+    if not current_user.has_permission("notifications:view"):
         raise HTTPException(403, "Admin only")
     result = await db.execute(
         select(NotificationChannel).order_by(NotificationChannel.created_at.asc())
@@ -56,7 +61,8 @@ async def create_channel(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("approval:review"):
+    # RBAC-SPRINT-2.1 — write gate on notifications:manage (was approval:review).
+    if not current_user.has_permission("notifications:manage"):
         raise HTTPException(403, "Admin only")
 
     body = await request.json()
@@ -83,7 +89,8 @@ async def update_channel(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("approval:review"):
+    # RBAC-SPRINT-2.1 — write gate on notifications:manage (was approval:review).
+    if not current_user.has_permission("notifications:manage"):
         raise HTTPException(403, "Admin only")
 
     ch = await _get_or_404(db, channel_id)
@@ -123,7 +130,8 @@ async def delete_channel(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("approval:review"):
+    # RBAC-SPRINT-2.1 — write gate on notifications:manage (was approval:review).
+    if not current_user.has_permission("notifications:manage"):
         raise HTTPException(403, "Admin only")
     ch = await _get_or_404(db, channel_id)
     await db.delete(ch)
@@ -137,7 +145,10 @@ async def test_channel(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("approval:review"):
+    # RBAC-SPRINT-2.1 — write gate on notifications:manage (was approval:review).
+    # Test sends a real message via the channel provider — treated as
+    # a management action, not a read.
+    if not current_user.has_permission("notifications:manage"):
         raise HTTPException(403, "Admin only")
 
     ch = await _get_or_404(db, channel_id)
@@ -154,7 +165,8 @@ async def test_channel(
 async def trigger_weekly_digest(
     current_user: CurrentUser = None,
 ):
-    if not current_user.has_permission("approval:review"):
+    # RBAC-SPRINT-2.1 — write gate on notifications:manage (was approval:review).
+    if not current_user.has_permission("notifications:manage"):
         raise HTTPException(403, "Admin only")
     from app.workers.tasks.notification_tasks import send_weekly_digest
     send_weekly_digest.apply_async(queue="monitor")

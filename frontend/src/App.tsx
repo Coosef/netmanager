@@ -393,7 +393,7 @@ function ThemedApp() {
                 {/* Monitoring */}
                 <Route path="monitor" element={<MonitorPage />} />
                 <Route path="live" element={<PermRoute module="monitoring" action="view"><LiveMonitorPage /></PermRoute>} />
-                <Route path="intelligence" element={<RoleRoute minRole="org_admin"><IntelligencePage /></RoleRoute>} />
+                <Route path="intelligence" element={<PermRoute module="monitoring" action="view"><IntelligencePage /></PermRoute>} />
                 <Route path="bandwidth" element={<PermRoute module="monitoring" action="view"><BandwidthMonitorPage /></PermRoute>} />
                 <Route path="mac-arp" element={<PermRoute module="monitoring" action="view"><MacArpPage /></PermRoute>} />
                 <Route path="synthetic-probes" element={<PermRoute module="monitoring" action="view"><SyntheticProbesPage /></PermRoute>} />
@@ -498,7 +498,7 @@ function ThemedApp() {
               <Route path="vlan" element={<PermRoute module="vlan" action="view"><VlanManagementPage /></PermRoute>} />
               <Route path="backups" element={<PermRoute module="config_backups" action="view"><BackupCenterPage /></PermRoute>} />
               <Route path="config-drift" element={<RoleRoute minRole="org_admin"><ConfigDriftPage /></RoleRoute>} />
-              <Route path="intelligence" element={<RoleRoute minRole="org_admin"><IntelligencePage /></RoleRoute>} />
+              <Route path="intelligence" element={<PermRoute module="monitoring" action="view"><IntelligencePage /></PermRoute>} />
               <Route path="compliance" element={<RoleRoute minRole="location_admin"><ComplianceCheckPage /></RoleRoute>} />
               <Route path="racks" element={<PermRoute module="racks" action="view"><RacksPage /></PermRoute>} />
               {/* M6 final drop — the standalone `/tenants` page is gone. */}

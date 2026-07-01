@@ -128,7 +128,14 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     tabs: [
       { key: 'alerts',            route: '/monitor',           i18nKey: 'nav.tab.monitoring.alerts',            module: ['monitoring', 'view'] },
       { key: 'live',              route: '/live',              i18nKey: 'nav.tab.monitoring.live',              module: ['monitoring', 'view'] },
-      { key: 'analytics',         route: '/intelligence',      i18nKey: 'nav.tab.monitoring.analytics',         minRole: 'org_admin' },
+      // RBAC-SPRINT-2.1 (2026-07-01) — Intelligence gate aligned with
+      // Monitoring surface. Intelligence is read-only analytics on
+      // NetworkEvent + Device rows the Monitoring pages already
+      // expose; reusing `monitoring:view` keeps the permission matrix
+      // cardinality low (matches Phase 1 topology:view pattern).
+      // location_admin with monitoring:view sees Intelligence within
+      // their assigned location scope.
+      { key: 'analytics',         route: '/intelligence',      i18nKey: 'nav.tab.monitoring.analytics',         module: ['monitoring', 'view'] },
       { key: 'bandwidth',         route: '/bandwidth',         i18nKey: 'nav.tab.monitoring.bandwidth',         module: ['monitoring', 'view'] },
       { key: 'port_intelligence', route: '/mac-arp',           i18nKey: 'nav.tab.monitoring.port_intelligence', module: ['monitoring', 'view'] },
       { key: 'probes',            route: '/synthetic-probes',  i18nKey: 'nav.tab.monitoring.probes' },
