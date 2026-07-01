@@ -110,6 +110,26 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
   { key: 'maps',             label: 'Harita / Kat Planı', actions: [
     { key: 'view', label: 'Görüntüle' },
   ] },
+  // RBAC-SPRINT-2.1 (2026-07-01) — approvals matrix-only row (backend
+  // verbs approval:view + approval:review already exist and gate every
+  // endpoint of approvals.py; this row simply surfaces the toggle in
+  // the operator UI so the state that was already writable via API is
+  // now viewable in the Permission Matrix grid too).
+  { key: 'approvals',        label: 'Onay Kuyruğu',       actions: [
+    { key: 'view',   label: 'Görüntüle' },
+    { key: 'review', label: 'Onayla/Reddet' },
+  ] },
+  // RBAC-SPRINT-2.1 — notifications module (new). Replaces the
+  // pre-Sprint-2.1 semantic-bug backend gate `approval:review` on
+  // notifications.py:44+ with the correct `notifications:view` +
+  // `notifications:manage` verbs. The Alembic migration
+  // f9ai_notifications_module backfills every row where
+  // `approval.review=true` with both notifications verbs=true so no
+  // channel admin loses access on deploy.
+  { key: 'notifications',    label: 'Bildirim Kanalları', actions: [
+    { key: 'view',   label: 'Görüntüle' },
+    { key: 'manage', label: 'Yönet' },
+  ] },
 ]
 
 const ALL_ACTIONS = [
@@ -123,6 +143,10 @@ const ALL_ACTIONS = [
   // The other new verbs (discovery.run / racks.delete / maps.view)
   // reuse existing column headers above so they need no separate entry.
   'push',
+  // RBAC-SPRINT-2.1 (2026-07-01) — new column headers:
+  //   review  — Onay Kuyruğu için (approvals.review)
+  //   manage  — Bildirim Kanalları için (notifications.manage)
+  'review', 'manage',
 ]
 
 function getPermValue(perms: Permissions | null | undefined, mod: string, action: string): boolean {
@@ -177,7 +201,8 @@ function PermMatrix({
                   a === 'cancel' ? 'İptal' : a === 'invite' ? 'Davet' :
                   a === 'connect' ? 'Bilgi Çek' : a === 'move' ? 'Taşı' :
                   a === 'backup' ? 'Yedek Al' : a === 'restore' ? 'Geri Yükle' :
-                  a === 'push' ? 'Cihaza Gönder' : a}
+                  a === 'push' ? 'Cihaza Gönder' :
+                  a === 'review' ? 'Onayla/Reddet' : a === 'manage' ? 'Yönet' : a}
               </th>
             ))}
             {!readOnly && (

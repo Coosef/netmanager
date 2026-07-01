@@ -63,10 +63,11 @@ describe('Permissions UI — canonical catalog source pins', () => {
 })
 
 
-// Behavioral check: MODULES.actions.length sums to 51 after Phase 1.
-//   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1) = 51
+// Behavioral check: MODULES.actions.length sums to 55 after Sprint 2.1.
+//   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1) + 4 (Sprint 2.1) = 55
+// Sprint 2.1 breakdown: approvals(view, review) + notifications(view, manage) = 4
 describe('Permissions UI — total grant count', () => {
-  it('total actions across all modules = 51 (37 prior + 5 P2-CATALOG-A + 9 RBAC-Phase-1)', async () => {
+  it('total actions across all modules = 55 (37 prior + 5 P2-CATALOG-A + 9 RBAC-Phase-1 + 4 Sprint-2.1)', async () => {
     // Re-evaluate the literal by parsing the file: we count the
     // `{ key:` markers inside the actions arrays.
     // Easier path: read the runtime-loaded module via dynamic import.
@@ -80,10 +81,36 @@ describe('Permissions UI — total grant count', () => {
     const declared = moduleBlock![0]
     // Count occurrences of `{ key: '...'` inside the actions arrays —
     // the outer `key: 'devices'` style markers also match but appear
-    // exactly once per module declaration (14 + 4 = 18 modules), so
-    // we exclude them from the inner-action count via the negative
+    // exactly once per module declaration (14 + 4 + 2 = 20 modules,
+    // where +2 is Sprint 2.1: approvals + notifications), so we
+    // exclude them from the inner-action count via the negative
     // look-ahead.
-    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps)/g) ?? []).length
-    expect(innerActionCount).toBe(51)
+    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications)/g) ?? []).length
+    expect(innerActionCount).toBe(55)
+  })
+})
+
+// Sprint 2.1 pins — approvals + notifications module rows.
+describe('Sprint 2.1 — new module rows in Permissions UI', () => {
+  it('MODULES.approvals declares view + review actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'approvals'[\s\S]{0,300}'view'[\s\S]{0,200}'review'/,
+    )
+  })
+  it('MODULES.notifications declares view + manage actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'notifications'[\s\S]{0,300}'view'[\s\S]{0,200}'manage'/,
+    )
+  })
+  it('Action labels surface the Turkish strings for new verbs', () => {
+    expect(SRC).toMatch(/key:\s*'review',\s*label:\s*'Onayla\/Reddet'/)
+    expect(SRC).toMatch(/key:\s*'manage',\s*label:\s*'Yönet'/)
+  })
+  it('ALL_ACTIONS includes review + manage column keys', () => {
+    expect(SRC).toMatch(/'review',\s*'manage'/)
+  })
+  it('ALL_ACTIONS column-header switch renders TR labels for new verbs', () => {
+    expect(SRC).toMatch(/a === 'review'\s*\?\s*'Onayla\/Reddet'/)
+    expect(SRC).toMatch(/a === 'manage'\s*\?\s*'Yönet'/)
   })
 })

@@ -36,6 +36,28 @@ from app.services.cache import get_aggregation_cache
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.1 (2026-07-01) — inline monitoring:view gate.
+#
+# Intelligence endpoints were pre-Sprint-2.1 auth-only (`_: CurrentUser`),
+# meaning any authenticated user could read fleet risk scores, MTTR/MTBF
+# analytics, incident root-cause chains, and behavioural anomalies for
+# every device visible to them (with RLS org isolation still applying).
+# Product decision: Intelligence is analytics on top of the same
+# NetworkEvent + Device data the Monitoring surface already exposes;
+# it re-uses the existing `monitoring:view` verb rather than getting its
+# own module. This matches the Phase 1 pattern (topology:view — a
+# single-verb read-only feature) and keeps the permission matrix
+# cardinality low.
+#
+# Behaviour:
+#   - super_admin, org_admin bypass the check (PermissionEngine short-circuit)
+#   - location_admin / viewer / anyone else needs `monitoring.view = true`
+#     on their assigned permission_set to reach the page
+def _require_monitoring_view(user) -> None:
+    if not user.has_permission("monitoring:view"):
+        raise HTTPException(403, "Permission denied: monitoring.view")
+
+
 # ── Cache config (Faz 6B) ─────────────────────────────────────────────────────
 _RISK_DEVICE_TTL_SECS = 300                      # per-device, same as legacy
 _RISK_DEVICE_STALE_SECS = 300                    # SWR window for per-device
@@ -354,10 +376,11 @@ async def _calc_risk_bulk(
 @router.get("/devices/{device_id}/risk-score")
 async def device_risk_score(
     device_id: int,
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """0-100 risk puanı ve breakdown — tek cihaz."""
+    _require_monitoring_view(current_user)
     q = select(Device).where(Device.id == device_id)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
@@ -410,11 +433,12 @@ async def _compute_fleet_risk(
 async def fleet_risk(
     request: Request,
     response: Response,
-    _: CurrentUser,
+    current_user: CurrentUser,
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     """Tüm aktif cihazların risk skorları — cached (Faz 6B)."""
+    _require_monitoring_view(current_user)
     bypass = request.headers.get("X-Cache-Bypass") == "1"
 
     cache = get_aggregation_cache()
@@ -445,7 +469,7 @@ async def fleet_risk(
 @router.get("/devices/{device_id}/mttr-mtbf")
 async def device_mttr_mtbf(
     device_id: int,
-    _: CurrentUser,
+    current_user: CurrentUser,
     window_days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
 ):
@@ -453,6 +477,7 @@ async def device_mttr_mtbf(
     MTTR (Ort. Kurtarma Süresi): her offline→online çiftinin süresi ortalaması.
     MTBF (Ort. Arıza Arası Süre): ardışık offline başlangıçları arasındaki süre ortalaması.
     """
+    _require_monitoring_view(current_user)
     q = select(Device).where(Device.id == device_id)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
@@ -520,7 +545,7 @@ async def device_mttr_mtbf(
 @router.get("/devices/{device_id}/timeline")
 async def device_timeline(
     device_id: int,
-    _: CurrentUser,
+    current_user: CurrentUser,
     days: int = Query(30, ge=1, le=365),
     db: AsyncSession = Depends(get_db),
 ):
@@ -528,6 +553,7 @@ async def device_timeline(
     Network event + config backup + audit log kayıtlarını tek zaman çizelgesinde birleştirir.
     Config değişikliği → ardından gelen olay ilişkisi burada görülür.
     """
+    _require_monitoring_view(current_user)
     q = select(Device).where(Device.id == device_id)
     device = (await db.execute(q)).scalar_one_or_none()
     if not device:
@@ -620,7 +646,7 @@ async def device_timeline(
 
 @router.get("/root-cause-incidents")
 async def root_cause_incidents(
-    _: CurrentUser,
+    current_user: CurrentUser,
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -629,6 +655,7 @@ async def root_cause_incidents(
     Son N saatteki correlation_incident olaylarını döndürür.
     Her olay bir root cause cihazını ve etkilenen cihaz listesini içerir.
     """
+    _require_monitoring_view(current_user)
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     q = (
@@ -684,7 +711,7 @@ _ANOMALY_LABEL = {
 
 @router.get("/anomalies")
 async def get_anomalies(
-    _: CurrentUser,
+    current_user: CurrentUser,
     hours: int = Query(24, ge=1, le=168),
     limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db),
@@ -693,6 +720,7 @@ async def get_anomalies(
     Son N saatteki davranış anomalisi olaylarını döndürür.
     Tip başına sayaç + olay listesi içerir.
     """
+    _require_monitoring_view(current_user)
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     q = (

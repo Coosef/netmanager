@@ -126,6 +126,34 @@ DEFAULT_PERMISSIONS: dict = {
         "vlan":            {"view": False, "edit": False, "push": False},
         "racks":           {"view": False, "edit": False, "delete": False},
         "maps":            {"view": False},
+        # RBAC-SPRINT-2.1 (2026-07-01) — notifications module.
+        #
+        # Notifications channel management (SMTP / Slack / Telegram /
+        # Teams / webhook) was pre-Sprint-2.1 gated by the WRONG verb:
+        # `approval:review` in notifications.py:44+. Approval review has
+        # nothing to do with notification channel configuration; the
+        # recycled verb was a semantic bug that leaked a permission set
+        # tied to the "approve pending device commands" workflow into a
+        # completely unrelated admin surface.
+        #
+        # The new module gives channel management its own verbs:
+        #   view    — read channel list / detail (org admin surface only)
+        #   manage  — create, update, delete, test channel, trigger
+        #             weekly digest (all destructive channel ops)
+        #
+        # The Alembic migration f9ai_notifications_and_intelligence.py
+        # backfills EVERY existing permission_set row: if the row had
+        # `approval.review = true`, then both `notifications.view =
+        # true` AND `notifications.manage = true` land on the row so
+        # the current channel admins never lose access on deploy.
+        # Rows without `approval.review = true` get the notifications
+        # keys defaulted to False.
+        #
+        # Notifications is org-admin-only surface by product decision
+        # (org-wide channel infra, credential storage). Default `False`
+        # on both verbs; only "Tam Yetki" / "Org Admin" templates get
+        # opt-in TRUE, matching the Phase 1 f9ah opt-in policy.
+        "notifications":   {"view": False, "manage": False},
     }
 }
 
