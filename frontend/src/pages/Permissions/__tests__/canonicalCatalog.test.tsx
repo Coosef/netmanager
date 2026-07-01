@@ -63,21 +63,52 @@ describe('Permissions UI — canonical catalog source pins', () => {
 })
 
 
-// Behavioral check: MODULES.actions.length sums to 73 after Sprint 2.2B2.
+// Behavioral check: MODULES.actions.length sums to 79 after Sprint 2.2C-A.
 //   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1)
 //   + 4 (Sprint 2.1) + 12 (Sprint 2.2A) + 4 (Sprint 2.2B1)
-//   + 2 (Sprint 2.2B2) = 73
-// Sprint 2.2B2 breakdown:
-//   services(view, manage) = 2
+//   + 2 (Sprint 2.2B2) + 6 (Sprint 2.2C-A) = 79
+// Sprint 2.2C-A breakdown:
+//   firmware(view, rollout_status, upload, assign, install, approve_reload) = 6
+//   Only view + rollout_status are wired at the backend gate layer in this
+//   PR; the four mutating verbs are declared so the matrix column set is
+//   stable, but the mutating endpoints still gate on device:edit /
+//   config:push until the deferred high-risk PR (Sprint 2.2C-B / 2.2C-C).
 describe('Permissions UI — total grant count', () => {
-  it('total actions across all modules = 73 (71 prior + 2 Sprint-2.2B2)', async () => {
+  it('total actions across all modules = 79 (73 prior + 6 Sprint-2.2C-A)', async () => {
     const moduleBlock = SRC.match(/const MODULES[\s\S]*?\n\]\n/m)
     expect(moduleBlock).toBeTruthy()
     const declared = moduleBlock![0]
     // 14 + 4 (Phase 1) + 2 (Sprint 2.1) + 5 (Sprint 2.2A) + 2 (Sprint 2.2B1)
-    //   + 1 (Sprint 2.2B2) = 28 module keys
-    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp|sla|poe|services)/g) ?? []).length
-    expect(innerActionCount).toBe(73)
+    //   + 1 (Sprint 2.2B2) + 1 (Sprint 2.2C-A) = 29 module keys
+    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp|sla|poe|services|firmware)/g) ?? []).length
+    expect(innerActionCount).toBe(79)
+  })
+})
+
+// Sprint 2.2C-A pin — firmware module row.
+describe('Sprint 2.2C-A — Firmware module row in Permissions UI', () => {
+  it('MODULES.firmware declares all six canonical actions in order', () => {
+    expect(SRC).toMatch(
+      /key:\s*'firmware'[\s\S]{0,600}'view'[\s\S]{0,200}'rollout_status'[\s\S]{0,200}'upload'[\s\S]{0,200}'assign'[\s\S]{0,200}'install'[\s\S]{0,200}'approve_reload'/,
+    )
+  })
+  it('Firmware module carries operator-facing TR label', () => {
+    expect(SRC).toMatch(/key:\s*'firmware'[\s\S]{0,100}label:\s*'Firmware'/)
+  })
+  it('Action labels surface the TR strings for new Sprint 2.2C-A verbs', () => {
+    expect(SRC).toMatch(/key:\s*'rollout_status',\s*label:\s*'Rollout Durumu'/)
+    expect(SRC).toMatch(/key:\s*'upload',\s*label:\s*'Yükle'/)
+    expect(SRC).toMatch(/key:\s*'assign',\s*label:\s*'Ata\/Sil'/)
+    expect(SRC).toMatch(/key:\s*'approve_reload',\s*label:\s*'Reboot Onayla'/)
+  })
+  it('ALL_ACTIONS includes rollout_status + upload + assign + approve_reload keys', () => {
+    expect(SRC).toMatch(/'rollout_status',\s*'upload',\s*'assign',\s*'approve_reload'/)
+  })
+  it('ALL_ACTIONS column-header switch renders TR labels for new verbs', () => {
+    expect(SRC).toMatch(/a === 'rollout_status'\s*\?\s*'Rollout Durumu'/)
+    expect(SRC).toMatch(/a === 'upload'\s*\?\s*'Yükle'/)
+    expect(SRC).toMatch(/a === 'assign'\s*\?\s*'Ata\/Sil'/)
+    expect(SRC).toMatch(/a === 'approve_reload'\s*\?\s*'Reboot Onayla'/)
   })
 })
 

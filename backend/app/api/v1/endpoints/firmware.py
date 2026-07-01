@@ -127,13 +127,34 @@ async def _get_artifact_or_404(db: AsyncSession, artifact_id: int) -> FirmwareAr
     return a
 
 
+# RBAC-SPRINT-2.2C-A — Firmware read authorization gates. Each helper is
+# invoked at the top of the endpoint body BEFORE any DB read, so an
+# operator without the verb cannot enumerate the artifact catalog nor
+# the install job history / SSH logs via a direct API call. The
+# mutating endpoints (POST /artifacts*, POST /install, POST
+# /approve-reload, POST /cancel, PATCH, DELETE) keep their pre-2.2C-A
+# `device:edit` / `config:push` gates for now — a separate high-risk
+# PR (Sprint 2.2C-B / 2.2C-C) will migrate those to firmware.upload /
+# firmware.assign / firmware.install / firmware.approve_reload.
+
+def _require_firmware_view(current_user) -> None:
+    if not current_user.has_permission("firmware:view"):
+        raise HTTPException(status_code=403, detail="firmware.view yetkisi gerekli")
+
+
+def _require_firmware_rollout_status(current_user) -> None:
+    if not current_user.has_permission("firmware:rollout_status"):
+        raise HTTPException(status_code=403, detail="firmware.rollout_status yetkisi gerekli")
+
+
 # ─── Artifact catalog ───────────────────────────────────────────────────────
 
 @router.get("/artifacts")
 async def list_artifacts(
     vendor: Optional[str] = None, os_type: Optional[str] = None,
-    db: AsyncSession = Depends(get_db), _: CurrentUser = None,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
+    _require_firmware_view(current_user)
     q = select(FirmwareArtifact).where(FirmwareArtifact.deleted_at.is_(None))
     if vendor:
         q = q.where(FirmwareArtifact.vendor == vendor)
@@ -344,8 +365,9 @@ async def start_install(
 async def list_jobs(
     status: Optional[str] = None, device_id: Optional[int] = None,
     limit: int = 100,
-    db: AsyncSession = Depends(get_db), _: CurrentUser = None,
+    db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
+    _require_firmware_rollout_status(current_user)
     q = select(FirmwareInstallJob).order_by(FirmwareInstallJob.created_at.desc())
     if status:
         q = q.where(FirmwareInstallJob.status == status)
@@ -357,8 +379,9 @@ async def list_jobs(
 
 @router.get("/jobs/{job_id}")
 async def get_job(
-    job_id: int, db: AsyncSession = Depends(get_db), _: CurrentUser = None,
+    job_id: int, db: AsyncSession = Depends(get_db), current_user: CurrentUser = None,
 ):
+    _require_firmware_rollout_status(current_user)
     j = (await db.execute(
         select(FirmwareInstallJob).where(FirmwareInstallJob.id == job_id)
     )).scalar_one_or_none()

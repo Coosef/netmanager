@@ -132,6 +132,14 @@ def _viewer_permissions() -> dict:
     for mod, actions in p["modules"].items():
         for action in list(actions.keys()):
             p["modules"][mod][action] = (action == "view")
+    # RBAC-SPRINT-2.2C-A — firmware.rollout_status is a READ verb whose
+    # name is not literally "view" (it reads /firmware/jobs + logs, not
+    # the artifact catalog). The viewer preset already grants
+    # monitoring.view = True, and the f9am migration says a monitoring
+    # viewer keeps firmware.view + firmware.rollout_status. Keep freshly
+    # provisioned tenants aligned with post-migration tenants by
+    # explicitly turning rollout_status on for viewer.
+    p["modules"]["firmware"]["rollout_status"] = True
     return p
 
 
@@ -153,6 +161,13 @@ def _operator_permissions() -> dict:
         "ipam":           {"view": True},
         "audit_logs":     {"view": True},
         "reports":        {"view": True},
+        # RBAC-SPRINT-2.2C-A — Operators already have monitoring.view;
+        # keep them aligned with the f9am migration carry-over so a
+        # freshly provisioned operator can also see the firmware
+        # artifact catalog + install job rollout status. Mutating
+        # firmware verbs (upload/assign/install/approve_reload) stay
+        # FALSE on the operator preset — those are org_admin-only.
+        "firmware":       {"view": True, "rollout_status": True},
     }
     for mod, actions in grants.items():
         for action, val in actions.items():

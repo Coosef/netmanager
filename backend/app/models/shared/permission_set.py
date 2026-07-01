@@ -307,6 +307,71 @@ DEFAULT_PERMISSIONS: dict = {
         # needs a location_id column (or equivalent cross-ref) before
         # delegation to location_admin makes sense.
         "services":          {"view": False, "manage": False},
+        # RBAC-SPRINT-2.2C-A (2026-07-01) — Firmware read authorization.
+        #
+        # Pre-2.2C-A the three read endpoints in firmware.py (GET
+        # /artifacts, GET /jobs, GET /jobs/{id}) were auth-only. Frontend
+        # RoleRoute(minRole="org_admin") gated /firmware but a direct
+        # API caller with a valid token bypassed the guard and could
+        # enumerate the ORG-WIDE firmware artifact catalog + every
+        # install job (including SSH logs that contain device IPs and
+        # CLI traces).
+        #
+        # Verb semantics:
+        #   firmware.view              — GET /artifacts (artifact
+        #                                 catalog list, read-only)
+        #   firmware.rollout_status    — GET /jobs (install job list)
+        #                                 GET /jobs/{id} (job detail +
+        #                                 log; may expose device SSH
+        #                                 output)
+        #   firmware.upload            — POST /artifacts/upload
+        #                                 (multipart binary artifact
+        #                                 write to disk; org-wide catalog)
+        #                                 [DECLARED HERE; backend gate
+        #                                  will be wired in the deferred
+        #                                  Firmware mutating PR]
+        #   firmware.assign            — POST /artifacts (URL-sourced),
+        #                                 PATCH /artifacts/{id},
+        #                                 DELETE /artifacts/{id}
+        #                                 (catalog mutation; org-wide)
+        #                                 [DECLARED HERE; backend gate
+        #                                  deferred to mutating PR]
+        #   firmware.install           — POST /install (queue Celery
+        #                                 run_install_job; SSH transfer
+        #                                 + boot set + save; pauses at
+        #                                 awaiting_reload)
+        #                                 [DECLARED HERE; backend gate
+        #                                  deferred to mutating PR]
+        #   firmware.approve_reload    — POST /jobs/{id}/approve-reload
+        #                                 (operator-gated REBOOT;
+        #                                 HIGHEST RISK — device downtime;
+        #                                 IRREVERSIBLE)
+        #                                 [DECLARED HERE; backend gate
+        #                                  deferred to mutating PR]
+        #
+        # The Alembic migration f9am_firmware_read_authorization
+        # backfills via monitoring.view carry-over for firmware.view AND
+        # firmware.rollout_status (read-only surface only), name-based
+        # opt-in ("Tam Yetki" / "Org Admin") for ALL 6 verbs, and safe
+        # FALSE default elsewhere. Mutating verbs (upload, assign,
+        # install, approve_reload) NEVER carry over from any existing
+        # verb — explicit opt-in only. Custom sets stay safe by default.
+        # Route still gates on RoleRoute(minRole="org_admin"); no
+        # location_admin reaches the page today; the org_admin
+        # PermissionEngine bypass at engine.py:75-78 keeps existing
+        # org_admin operators working. Location scope + PermRoute
+        # migration + mutating gates deferred to a separate high-risk
+        # PR that also fixes the query-filter gaps (list_artifacts /
+        # list_jobs / start_install currently return / accept ORG-WIDE
+        # rows without organization_id / location_id filtering).
+        "firmware":          {
+            "view": False,
+            "rollout_status": False,
+            "upload": False,
+            "assign": False,
+            "install": False,
+            "approve_reload": False,
+        },
     }
 }
 
