@@ -203,8 +203,18 @@ export const GROUP_DEFINITIONS: readonly GroupDef[] = [
     key: 'reports',
     i18nKey: 'nav.group.reports',
     tabs: [
-      { key: 'sla',     route: '/sla',           i18nKey: 'nav.tab.reports.sla',     minRole: 'org_admin' },
-      { key: 'poe',     route: '/poe',           i18nKey: 'nav.tab.reports.poe',     minRole: 'org_admin' },
+      // RBAC-SPRINT-2.2B1 (2026-07-01) — feature-flag alignment.
+      // Backend router.py:63 has `_feat("sla")` gate; router.py:61
+      // has `_feat("poe")` gate. Pre-2.2B1 the menuGroups entries
+      // did NOT check the feature flag — a plan-closed org saw the
+      // tab in the sidebar but got a 403 from the backend endpoint.
+      // Adding `feature: 'sla'` and `feature: 'poe'` closes that
+      // asymmetry: canSeeTab() hides the tab when
+      // ctx.features['sla']===false or ctx.features['poe']===false.
+      // minRole is preserved — Sprint 2.2B1 does NOT expand
+      // location_admin visibility on SLA/PoE routes.
+      { key: 'sla',     route: '/sla',           i18nKey: 'nav.tab.reports.sla',     minRole: 'org_admin', feature: 'sla' },
+      { key: 'poe',     route: '/poe',           i18nKey: 'nav.tab.reports.poe',     minRole: 'org_admin', feature: 'poe' },
       { key: 'reports', route: '/reports',       i18nKey: 'nav.tab.reports.reports', module: ['reports', 'view'] },
       { key: 'twin',    route: '/topology-twin', i18nKey: 'nav.tab.reports.twin',    minRole: 'location_admin' },
     ],

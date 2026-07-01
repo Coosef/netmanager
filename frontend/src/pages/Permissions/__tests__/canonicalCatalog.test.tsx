@@ -63,24 +63,46 @@ describe('Permissions UI — canonical catalog source pins', () => {
 })
 
 
-// Behavioral check: MODULES.actions.length sums to 67 after Sprint 2.2A.
+// Behavioral check: MODULES.actions.length sums to 71 after Sprint 2.2B1.
 //   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1)
-//   + 4 (Sprint 2.1) + 12 (Sprint 2.2A) = 67
-// Sprint 2.2A breakdown:
-//   config_drift(view, manage, run) = 3
-//   security_audit(view, profile_manage, run) = 3
-//   asset_lifecycle(view, manage) = 2
-//   terminal_sessions(view, summarize) = 2
-//   mac_arp(view, collect) = 2
-//   total = 12
+//   + 4 (Sprint 2.1) + 12 (Sprint 2.2A) + 4 (Sprint 2.2B1) = 71
+// Sprint 2.2B1 breakdown:
+//   sla(view, manage_policies) = 2
+//   poe(view, refresh) = 2
+//   total = 4
 describe('Permissions UI — total grant count', () => {
-  it('total actions across all modules = 67 (37 prior + 5 P2-CATALOG-A + 9 RBAC-Phase-1 + 4 Sprint-2.1 + 12 Sprint-2.2A)', async () => {
+  it('total actions across all modules = 71 (67 prior + 4 Sprint-2.2B1)', async () => {
     const moduleBlock = SRC.match(/const MODULES[\s\S]*?\n\]\n/m)
     expect(moduleBlock).toBeTruthy()
     const declared = moduleBlock![0]
-    // 14 + 4 (Phase 1) + 2 (Sprint 2.1) + 5 (Sprint 2.2A) = 25 module keys
-    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp)/g) ?? []).length
-    expect(innerActionCount).toBe(67)
+    // 14 + 4 (Phase 1) + 2 (Sprint 2.1) + 5 (Sprint 2.2A) + 2 (Sprint 2.2B1) = 27 module keys
+    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp|sla|poe)/g) ?? []).length
+    expect(innerActionCount).toBe(71)
+  })
+})
+
+// Sprint 2.2B1 pins — sla + poe module rows.
+describe('Sprint 2.2B1 — SLA + PoE module rows in Permissions UI', () => {
+  it('MODULES.sla declares view + manage_policies actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'sla'[\s\S]{0,300}'view'[\s\S]{0,200}'manage_policies'/,
+    )
+  })
+  it('MODULES.poe declares view + refresh actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'poe'[\s\S]{0,300}'view'[\s\S]{0,200}'refresh'/,
+    )
+  })
+  it('Action labels surface the TR strings for new Sprint 2.2B1 verbs', () => {
+    expect(SRC).toMatch(/key:\s*'manage_policies',\s*label:\s*'Politika Yönet'/)
+    expect(SRC).toMatch(/key:\s*'refresh',\s*label:\s*'Yenile'/)
+  })
+  it('ALL_ACTIONS includes manage_policies + refresh column keys', () => {
+    expect(SRC).toMatch(/'manage_policies',\s*'refresh'/)
+  })
+  it('ALL_ACTIONS column-header switch renders TR labels for new verbs', () => {
+    expect(SRC).toMatch(/a === 'manage_policies'\s*\?\s*'Politika Yönet'/)
+    expect(SRC).toMatch(/a === 'refresh'\s*\?\s*'Yenile'/)
   })
 })
 
