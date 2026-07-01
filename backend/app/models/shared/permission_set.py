@@ -274,6 +274,39 @@ DEFAULT_PERMISSIONS: dict = {
         # working).
         "sla":               {"view": False, "manage_policies": False},
         "poe":               {"view": False, "refresh": False},
+        # RBAC-SPRINT-2.2B2 (2026-07-01) — Services authorization hardening.
+        #
+        # Pre-2.2B2 all 7 services.py endpoints (GET fleet/impact-summary,
+        # GET "" list, POST "" create, GET /{id}, PATCH /{id},
+        # DELETE /{id}, GET /{id}/impact) were auth-only. Frontend
+        # RoleRoute(minRole="org_admin") gated /services but a direct
+        # API caller with a valid token bypassed the guard and could
+        # POST / PATCH / DELETE services (org-wide impact analysis
+        # state).
+        #
+        # Verb semantics:
+        #   services.view   — GET /fleet/impact-summary, GET "" (list),
+        #                     GET /{id}, GET /{id}/impact
+        #                     (read-only impact analysis + service
+        #                      inventory)
+        #   services.manage — POST "" (create), PATCH /{id}, DELETE /{id}
+        #                     (all mutating; org-wide impact — Services
+        #                      model has NO location_id, so no
+        #                      location-scoped delegation is possible
+        #                      today; org_admin+ only)
+        #
+        # The Alembic migration f9al_services_authorization backfills
+        # via name-based opt-in ONLY: Tam Yetki / Org Admin templates
+        # get both verbs = true; custom sets get both = false with NO
+        # view carry-over from any pre-existing verb. Route still gates
+        # on RoleRoute(minRole="org_admin") so no location_admin can
+        # reach the page today; the org_admin PermissionEngine bypass
+        # keeps existing org_admin operators working.
+        #
+        # Location scope + PermRoute migration deferred — Services model
+        # needs a location_id column (or equivalent cross-ref) before
+        # delegation to location_admin makes sense.
+        "services":          {"view": False, "manage": False},
     }
 }
 

@@ -18,6 +18,38 @@ from app.models.service import Service
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.2B2 (2026-07-01) — inline permission gates.
+#
+# Pre-2.2B2 all 7 endpoints were auth-only; frontend
+# RoleRoute(minRole="org_admin") gated /services but a direct API
+# caller with a valid token bypassed the guard and could POST /
+# PATCH / DELETE services (org-wide impact analysis mutation).
+#
+# The new services module gives the surface its own verbs:
+#   - view   — GET /fleet/impact-summary, GET "" (list),
+#              GET /{service_id}, GET /{service_id}/impact
+#              (all read-only impact analysis + service inventory)
+#   - manage — POST "" (create), PATCH /{service_id},
+#              DELETE /{service_id} (mutating; Services model has NO
+#              location_id column, so location-scoped delegation is
+#              not possible today — org_admin+ only)
+#
+# The Alembic migration f9al_services_authorization backfills via
+# name-based opt-in ONLY: Tam Yetki / Org Admin templates → both verbs
+# TRUE. Custom sets → both verbs FALSE. NO view carry-over — the
+# route still gates on RoleRoute(minRole="org_admin") so no
+# location_admin can reach the page today; the org_admin
+# PermissionEngine bypass keeps existing org_admin operators working.
+def _require_services_view(user) -> None:
+    if not user.has_permission("services:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: services.view")
+
+
+def _require_services_manage(user) -> None:
+    if not user.has_permission("services:manage"):
+        raise HTTPException(status_code=403, detail="Permission denied: services.manage")
+
+
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 def _svc_out(s: Service) -> dict:
@@ -41,10 +73,11 @@ def _svc_out(s: Service) -> dict:
 
 @router.get("/fleet/impact-summary")
 async def fleet_impact_summary(
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """Tüm aktif servisler için etki özeti — Dashboard widget için."""
+    _require_services_view(current_user)
     services = (await db.execute(
         select(Service).where(Service.is_active == True)
     )).scalars().all()
@@ -107,12 +140,13 @@ async def fleet_impact_summary(
 
 @router.get("")
 async def list_services(
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     search: str = Query(None),
 ):
+    _require_services_view(current_user)
     query = select(Service).order_by(Service.name)
     if search:
         query = query.where(Service.name.ilike(f"%{search}%"))
@@ -124,9 +158,10 @@ async def list_services(
 @router.post("")
 async def create_service(
     body: dict,
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_services_manage(current_user)
     if not body.get("name"):
         raise HTTPException(400, "name is required")
     if body.get("priority", "medium") not in ("critical", "high", "medium", "low"):
@@ -153,9 +188,10 @@ async def create_service(
 @router.get("/{service_id}")
 async def get_service(
     service_id: int,
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_services_view(current_user)
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
         raise HTTPException(404, "Service not found")
@@ -166,9 +202,10 @@ async def get_service(
 async def update_service(
     service_id: int,
     body: dict,
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_services_manage(current_user)
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
         raise HTTPException(404, "Service not found")
@@ -184,9 +221,10 @@ async def update_service(
 @router.delete("/{service_id}")
 async def delete_service(
     service_id: int,
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
+    _require_services_manage(current_user)
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
         raise HTTPException(404, "Service not found")
@@ -200,13 +238,14 @@ async def delete_service(
 @router.get("/{service_id}/impact")
 async def service_impact(
     service_id: int,
-    _: CurrentUser,
+    current_user: CurrentUser,
     db: AsyncSession = Depends(get_db),
 ):
     """
     Hangi cihazlar offline → bu servis etkileniyor mu?
     Sonuç: affected_devices (offline), healthy_devices (online), impact_level
     """
+    _require_services_view(current_user)
     svc = (await db.execute(select(Service).where(Service.id == service_id))).scalar_one_or_none()
     if not svc:
         raise HTTPException(404, "Service not found")

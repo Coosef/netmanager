@@ -173,6 +173,16 @@ const MODULES: { key: string; label: string; actions: { key: string; label: stri
     { key: 'view',    label: 'Görüntüle' },
     { key: 'refresh', label: 'Yenile' },
   ] },
+  // RBAC-SPRINT-2.2B2 (2026-07-01) — Services module. Frontend
+  // route/menu stays on RoleRoute(minRole="org_admin") in this PR;
+  // the new module row drives backend authorization so a direct
+  // API call with a valid token is blocked when the verb is missing.
+  // Location scope deferred — Service model has no location_id
+  // column yet.
+  { key: 'services',           label: 'Servisler',          actions: [
+    { key: 'view',   label: 'Görüntüle' },
+    { key: 'manage', label: 'Yönet' },
+  ] },
 ]
 
 const ALL_ACTIONS = [

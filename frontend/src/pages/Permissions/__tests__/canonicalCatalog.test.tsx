@@ -63,21 +63,33 @@ describe('Permissions UI — canonical catalog source pins', () => {
 })
 
 
-// Behavioral check: MODULES.actions.length sums to 71 after Sprint 2.2B1.
+// Behavioral check: MODULES.actions.length sums to 73 after Sprint 2.2B2.
 //   37 (pre-canonical) + 5 (P2-CATALOG-A) + 9 (RBAC-Phase-1)
-//   + 4 (Sprint 2.1) + 12 (Sprint 2.2A) + 4 (Sprint 2.2B1) = 71
-// Sprint 2.2B1 breakdown:
-//   sla(view, manage_policies) = 2
-//   poe(view, refresh) = 2
-//   total = 4
+//   + 4 (Sprint 2.1) + 12 (Sprint 2.2A) + 4 (Sprint 2.2B1)
+//   + 2 (Sprint 2.2B2) = 73
+// Sprint 2.2B2 breakdown:
+//   services(view, manage) = 2
 describe('Permissions UI — total grant count', () => {
-  it('total actions across all modules = 71 (67 prior + 4 Sprint-2.2B1)', async () => {
+  it('total actions across all modules = 73 (71 prior + 2 Sprint-2.2B2)', async () => {
     const moduleBlock = SRC.match(/const MODULES[\s\S]*?\n\]\n/m)
     expect(moduleBlock).toBeTruthy()
     const declared = moduleBlock![0]
-    // 14 + 4 (Phase 1) + 2 (Sprint 2.1) + 5 (Sprint 2.2A) + 2 (Sprint 2.2B1) = 27 module keys
-    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp|sla|poe)/g) ?? []).length
-    expect(innerActionCount).toBe(71)
+    // 14 + 4 (Phase 1) + 2 (Sprint 2.1) + 5 (Sprint 2.2A) + 2 (Sprint 2.2B1)
+    //   + 1 (Sprint 2.2B2) = 28 module keys
+    const innerActionCount = (declared.match(/\{\s*key:\s*'(?!devices|config_backups|tasks|playbooks|topology|monitoring|ipam|audit_logs|reports|users|locations|agents|settings|driver_templates|discovery|vlan|racks|maps|approvals|notifications|config_drift|security_audit|asset_lifecycle|terminal_sessions|mac_arp|sla|poe|services)/g) ?? []).length
+    expect(innerActionCount).toBe(73)
+  })
+})
+
+// Sprint 2.2B2 pin — services module row.
+describe('Sprint 2.2B2 — Services module row in Permissions UI', () => {
+  it('MODULES.services declares view + manage actions', () => {
+    expect(SRC).toMatch(
+      /key:\s*'services'[\s\S]{0,300}'view'[\s\S]{0,200}'manage'/,
+    )
+  })
+  it('Services module carries operator-facing TR label', () => {
+    expect(SRC).toMatch(/key:\s*'services'[\s\S]{0,100}label:\s*'Servisler'/)
   })
 })
 
