@@ -20,6 +20,48 @@ from app.services.audit_service import log_action
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.2A (2026-07-01) — inline permission gates for the
+# Security Audit surface.
+#
+# Pre-2.2A all 12 endpoints were auth-only; frontend PermRoute
+# (monitoring, view) gated /security-audit page but a direct API caller
+# with monitoring:view could POST /profiles (create org-wide compliance
+# policy), PUT /profiles/{id} (modify policy), DELETE /profiles/{id}
+# (remove policy) and POST /run (trigger audit scan). The recycled
+# monitoring:view gate was semantically wrong — monitoring is network
+# telemetry, security audit is compliance policy + device hardening.
+#
+# The new security_audit module gives the surface its own verbs:
+#   - view           — GET /rules, /profiles, /stats, /export.csv,
+#                       "" (list), /{id}, /device/{id}/history,
+#                       /fleet-trend (all read-only)
+#   - profile_manage — POST /profiles, PUT /profiles/{id},
+#                       DELETE /profiles/{id} (compliance policy CRUD,
+#                       org-wide; org_admin+ only)
+#   - run            — POST /run (trigger audit scan on org devices;
+#                       location_admin CAN opt-in for own location's
+#                       devices per Sprint 2.2 design report Q2)
+#
+# The Alembic migration f9aj_rbac_authorization_hardening.py backfills
+# every existing permission_set row: monitoring.view=true carries over
+# to security_audit.view=true so current monitoring viewers keep read
+# access; profile_manage + run stay FALSE for custom sets (name-based
+# opt-in only for Tam Yetki / Org Admin).
+def _require_security_audit_view(user) -> None:
+    if not user.has_permission("security_audit:view"):
+        raise HTTPException(status_code=403, detail="Permission denied: security_audit.view")
+
+
+def _require_security_audit_profile_manage(user) -> None:
+    if not user.has_permission("security_audit:profile_manage"):
+        raise HTTPException(status_code=403, detail="Permission denied: security_audit.profile_manage")
+
+
+def _require_security_audit_run(user) -> None:
+    if not user.has_permission("security_audit:run"):
+        raise HTTPException(status_code=403, detail="Permission denied: security_audit.run")
+
+
 class RunAuditRequest(BaseModel):
     device_ids: Optional[list[int]] = None  # None = all active devices
     # T8.4 — opsiyonel ComplianceProfile.id; verilirse audit sadece o
@@ -38,9 +80,10 @@ class ProfilePayload(BaseModel):
 
 
 @router.get("/rules")
-async def list_builtin_rules(_: CurrentUser = None):
+async def list_builtin_rules(current_user: CurrentUser = None):
     """Built-in rule kataloğu — kullanıcı bir profile yaratırken bu listeden
     seçer. Hiçbir DB call'u yok; sadece in-process registry'yi expose eder."""
+    _require_security_audit_view(current_user)
     from app.services.security_audit_service import BUILTIN_RULES
     return {"rules": BUILTIN_RULES, "total": len(BUILTIN_RULES)}
 
@@ -50,6 +93,7 @@ async def list_profiles(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_security_audit_view(current_user)
     from app.models.compliance_profile import ComplianceProfile
     rows = (await db.execute(
         select(ComplianceProfile).order_by(ComplianceProfile.is_default.desc(), ComplianceProfile.name)
@@ -71,6 +115,7 @@ async def create_profile(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_security_audit_profile_manage(current_user)
     from app.models.compliance_profile import ComplianceProfile
     from app.services.security_audit_service import BUILTIN_RULE_IDS
 
@@ -110,6 +155,7 @@ async def update_profile(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_security_audit_profile_manage(current_user)
     from app.models.compliance_profile import ComplianceProfile
     from app.services.security_audit_service import BUILTIN_RULE_IDS
 
@@ -146,6 +192,7 @@ async def delete_profile(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_security_audit_profile_manage(current_user)
     from app.models.compliance_profile import ComplianceProfile
     p = (await db.execute(
         select(ComplianceProfile).where(ComplianceProfile.id == profile_id)
@@ -163,9 +210,10 @@ async def delete_profile(
 @router.get("/stats")
 async def get_audit_stats(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     site: Optional[str] = Query(None),
 ):
+    _require_security_audit_view(current_user)
     subq = (
         select(SecurityAudit.device_id, func.max(SecurityAudit.created_at).label("latest"))
         .group_by(SecurityAudit.device_id)
@@ -209,10 +257,11 @@ async def get_audit_stats(
 @router.get("/export.csv")
 async def export_audits_csv(
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
     site: Optional[str] = Query(None),
 ):
     """Stream latest security audit results as CSV."""
+    _require_security_audit_view(current_user)
     try:
         from zoneinfo import ZoneInfo
         tz = ZoneInfo("Europe/Istanbul")
@@ -270,8 +319,9 @@ async def list_audits(
     page_size: int = Query(50, ge=1, le=200),
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_security_audit_view(current_user)
     subq = (
         select(SecurityAudit.device_id, func.max(SecurityAudit.created_at).label("latest"))
         .group_by(SecurityAudit.device_id)
@@ -324,8 +374,9 @@ async def list_audits(
 async def get_audit_detail(
     audit_id: int,
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_security_audit_view(current_user)
     q = select(SecurityAudit).where(SecurityAudit.id == audit_id)
     audit = (await db.execute(q)).scalar_one_or_none()
     if not audit:
@@ -350,8 +401,9 @@ async def get_device_audit_history(
     device_id: int,
     limit: int = Query(10, ge=1, le=50),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
+    _require_security_audit_view(current_user)
     result = await db.execute(
         select(SecurityAudit)
         .where(SecurityAudit.device_id == device_id)
@@ -377,9 +429,10 @@ async def fleet_compliance_trend(
     days: int = Query(30, ge=7, le=90),
     site: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
-    _: CurrentUser = None,
+    current_user: CurrentUser = None,
 ):
     """Daily average compliance score across all successfully audited devices."""
+    _require_security_audit_view(current_user)
     since = datetime.now(timezone.utc) - timedelta(days=days)
 
     trend_q = (
@@ -424,6 +477,7 @@ async def trigger_audit(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_security_audit_run(current_user)
     from app.workers.tasks.security_audit_tasks import run_security_audit
     from app.models.compliance_profile import ComplianceProfile
 

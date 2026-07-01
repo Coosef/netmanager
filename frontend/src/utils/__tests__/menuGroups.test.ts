@@ -421,11 +421,18 @@ describe('getVisibleTabs', () => {
     expect(visible.find((t) => t.key === 'ipam')).toBeUndefined()
   })
 
-  it('viewer config grubunda Firmware ve Config Drift (org_admin) gizli; templates görünür', () => {
-    // Sprint 1A: drift artık org_admin gerektirir (route guard ile hizalı).
+  it('viewer config grubunda Firmware (org_admin) gizli; drift + templates permission-gated', () => {
+    // Sprint 1A: drift org_admin gerektirdi (route guard ile hizalı).
+    // RBAC-SPRINT-2.2A (2026-07-01): drift artık config_drift:view
+    // module-gate'i ile korunuyor (backend authorization hardening).
+    // ctxFor(viewer) fixture'ı can(_, 'view')=true döndürür; yani
+    // Permission Matrix'te config_drift:view=true atanmış bir
+    // viewer'ı simüle eder → drift bu senaryoda GÖRÜNÜR olmalı.
     const visible = getVisibleTabs(GROUP_BY_KEY.config, ctxFor('viewer'))
     expect(visible.find((t) => t.key === 'firmware')).toBeUndefined()
-    expect(visible.find((t) => t.key === 'drift')).toBeUndefined()
+    // drift: module ['config_drift','view'] — viewer can() default
+    // ctx ile view'a izin verir, dolayısıyla görünür kalır.
+    expect(visible.find((t) => t.key === 'drift')).toBeDefined()
     // templates: module ['driver_templates','view'] — viewer can() default
     // ctx ile view'a izin verir, dolayısıyla görünür kalır.
     expect(visible.find((t) => t.key === 'templates')).toBeDefined()

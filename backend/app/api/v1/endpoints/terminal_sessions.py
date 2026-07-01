@@ -29,6 +29,34 @@ from app.models.user import User
 router = APIRouter()
 
 
+# RBAC-SPRINT-2.2A (2026-07-01) — inline permission gates.
+#
+# Pre-2.2A all 4 endpoints were auth-only; frontend PermRoute(audit_logs,
+# view) gated the /terminal-sessions page but a direct API call with a
+# valid token would let any authenticated user list org-wide session
+# transcripts and trigger the Claude summarize endpoint (which incurs
+# LLM cost + exposes sensitive command output).
+#
+# The new terminal_sessions module gives the surface its own verbs:
+#   - view       — GET list, /_stats, GET /{id} (read-only immutable
+#                   audit trail; location_admin YES within org RLS)
+#   - summarize  — POST /{id}/summarize (Claude AI call; cost + exposure
+#                   gate; org_admin+ only per operator brief)
+#
+# The Alembic migration f9aj_rbac_authorization_hardening.py backfills
+# every existing permission_set row: audit_logs.view=true carries over
+# to terminal_sessions.view=true, and Tam Yetki / Org Admin templates
+# gain both verbs = true.
+def _require_terminal_sessions_view(user) -> None:
+    if not user.has_permission("terminal_sessions:view"):
+        raise HTTPException(403, "Permission denied: terminal_sessions.view")
+
+
+def _require_terminal_sessions_summarize(user) -> None:
+    if not user.has_permission("terminal_sessions:summarize"):
+        raise HTTPException(403, "Permission denied: terminal_sessions.summarize")
+
+
 def _serialize_list_item(row: TerminalSessionLog, user: Optional[User], device: Optional[Device]) -> dict[str, Any]:
     return {
         "session_id": row.session_id,
@@ -79,6 +107,7 @@ async def list_sessions(
 
     search: hostname / username içinde ILIKE arama (basic).
     """
+    _require_terminal_sessions_view(current_user)
     q = select(TerminalSessionLog)
     if user_id is not None:
         q = q.where(TerminalSessionLog.user_id == user_id)
@@ -142,6 +171,7 @@ async def session_stats(
     current_user: CurrentUser = None,
 ):
     """Üst KPI bar için: son 24sa içinde N session + N komut + ort süre."""
+    _require_terminal_sessions_view(current_user)
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
     rows = (await db.execute(
         select(TerminalSessionLog).where(TerminalSessionLog.started_at >= cutoff)
@@ -164,6 +194,7 @@ async def get_session(
     db: AsyncSession = Depends(get_db),
     current_user: CurrentUser = None,
 ):
+    _require_terminal_sessions_view(current_user)
     row = (await db.execute(
         select(TerminalSessionLog).where(TerminalSessionLog.session_id == session_id)
     )).scalar_one_or_none()
@@ -195,6 +226,7 @@ async def summarize_session(
       - 'completed' → ai_summary text'i hazır
       - 'failed'    → exception (mesaj ai_summary alanına yazılır)
     """
+    _require_terminal_sessions_summarize(current_user)
     row = (await db.execute(
         select(TerminalSessionLog).where(TerminalSessionLog.session_id == session_id)
     )).scalar_one_or_none()
